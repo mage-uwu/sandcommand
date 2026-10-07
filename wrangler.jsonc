@@ -2,6 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sandcommand",
   "main": "src/server/worker.ts",
+  // The browser client (public/app.js) is a build output, not checked in.
+  // Wrangler runs this before every `deploy` and `dev`, so Cloudflare's Git
+  // integration and a bare `npx wrangler deploy` ship the game, not just the menu.
+  "build": {
+    "command": "npm run build:client",
+    "watch_dir": "src"
+  },
   "compatibility_date": "2026-09-01",
   "assets": {
     "directory": "./public",

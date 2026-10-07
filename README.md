@@ -244,10 +244,20 @@ numbers.
 
 ## Deploying
 
-`wrangler.jsonc` declares the two Durable Object classes (SQLite-backed), and
-the static assets in `public/`. `npm run deploy` builds the client bundle and
-deploys. Rooms are created on demand. A `GameRoom` lives wherever its first
-player connected from, and all of that match's sockets pin to it.
+```
+npm install
+npx wrangler login
+npm run deploy        # same as: npx wrangler deploy
+```
+
+`wrangler.jsonc` declares the two Durable Object classes (SQLite-backed, so
+the Workers Free plan works) and the static assets in `public/`. The browser
+client `public/app.js` is a build output and is not checked in. Wrangler's
+`build.command` builds it before every `deploy` and `dev`, so Cloudflare's Git
+integration (Workers Builds), or any bare `npx wrangler deploy` on a fresh
+clone, ships the game and not just the menu. Rooms are created on demand. A
+`GameRoom` lives wherever its first player connected from, and all of that
+match's sockets pin to it.
 
 ## Not done yet
 
