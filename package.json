@@ -1,0 +1,23 @@
+{
+  "name": "sandcommand",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare-native 64-player destructible-terrain sandbox shooter inspired by Cortex Command",
+  "type": "module",
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "dev": "npm run build:client && wrangler dev",
+    "deploy": "npm run build:client && wrangler deploy",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+    "test": "vitest run",
+    "bench": "node --experimental-transform-types --no-warnings scripts/bench.ts",
+    "loadtest": "node --experimental-transform-types --no-warnings scripts/loadtest.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261007.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.148.0"
+  }
+}

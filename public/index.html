@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SandCommand</title>
+  <meta name="description" content="64-player destructible-terrain sandbox shooter running on Cloudflare Durable Objects." />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <input id="chat" class="hidden" maxlength="120" placeholder="Say something… (Enter to send, Esc to cancel)" autocomplete="off" />
+  <div id="overlay">
+    <div class="panel">
+      <h1>SAND<span>COMMAND</span></h1>
+      <p class="tag">64 clones. One sandbox. Everything breaks.</p>
+      <label>Callsign <input id="name" maxlength="16" autocomplete="off" /></label>
+      <label>Room <input id="room" maxlength="32" placeholder="auto-match" autocomplete="off" /></label>
+      <button id="play">Deploy</button>
+      <div id="status"></div>
+      <div id="rooms"></div>
+      <table class="help">
+        <tr><td>A / D</td><td>run</td><td>W / Space</td><td>jump, hold to jetpack</td></tr>
+        <tr><td>Mouse</td><td>aim / fire</td><td>1-4, Q/E, wheel</td><td>weapon</td></tr>
+        <tr><td>Tab</td><td>scoreboard</td><td>Enter</td><td>chat</td></tr>
+      </table>
+      <p class="hint">Dig gold with the Digger. Bazookas and grenades reshape the map for everyone.</p>
+    </div>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
