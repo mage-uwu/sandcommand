@@ -189,7 +189,7 @@ export class GameRoom extends DurableObject<Env> {
         avgTickMs: +(this.statWorkMs / this.statTicks).toFixed(3),
         maxTickMs: +this.statMaxMs.toFixed(3),
         catchUps: this.statLate,
-        debris: world.debris.n,
+        grains: world.grains.n,
         projectiles: world.projectiles.n,
       }),
     );

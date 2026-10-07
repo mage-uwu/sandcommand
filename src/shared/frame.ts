@@ -1,4 +1,5 @@
 import { Reader, rleDecode } from './codec.ts';
+import { applyCarve } from './particles.ts';
 import { CHUNK, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
 import {
   R_ACTORS,
@@ -61,8 +62,11 @@ export interface FrameHandler {
   self(s: SelfState): void;
   actors(list: RemoteActor[]): void;
   blips(list: { id: number; x: number; y: number }[]): void;
-  /** Called after a carve was applied; `removed` holds x,y,mat triples. */
-  carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[]): void;
+  /**
+   * Called after a carve op was applied (including the collapse it caused);
+   * `removed` and `detached` hold x, y, mat triples.
+   */
+  carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[], detached: number[]): void;
   chunkLoaded(ci: number): void;
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void;
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean): void;
@@ -75,6 +79,7 @@ export interface FrameHandler {
 
 const chunkScratch = new Uint8Array(CHUNK * CHUNK);
 const removedScratch: number[] = [];
+const detachedScratch: number[] = [];
 
 /**
  * Decode the record stream of an S_FRAME body (reader positioned after the
@@ -132,11 +137,8 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const core = r.u8();
         const seed = r.u32();
         const debris = r.u8();
-        removedScratch.length = 0;
-        terrain.carve(x, y, rad, core, (cx, cy, m) => {
-          removedScratch.push(cx, cy, m);
-        });
-        h.carved(x, y, rad, seed, debris, removedScratch);
+        applyCarve(terrain, x, y, rad, core, removedScratch, detachedScratch);
+        h.carved(x, y, rad, seed, debris, removedScratch, detachedScratch);
         break;
       }
       case R_PIXELS: {

@@ -63,7 +63,11 @@ export function generateWorld(t: Terrain, seed: number): void {
       const surf = heights[x];
       if (y >= surf) {
         const depth = y - surf;
-        v = depth < 10 ? Mat.Sand : Mat.Dirt;
+        // Dunes: the sand crust thickens to tens of cells in places.
+        const dune = 10 + Math.max(0, fbm(x, 0, 160, seed ^ 0x77, 2) - 0.45) * 160;
+        v = depth < dune ? Mat.Sand : Mat.Dirt;
+        // Buried sand lenses: loose pockets that cave in when undercut.
+        if (depth > 25 && fbm(x, y, 40, seed ^ 0x5a, 3) > 0.7) v = Mat.Sand;
         if (depth > 6 && fbm(x, y, 48, seed ^ 0xa1, 3) > 0.66) v = Mat.Rock;
         if (depth > 50 && fbm(x, y, 14, seed ^ 0xb7, 2) > 0.8 - Math.min(depth, 500) / 6000) v = Mat.Gold;
         // Caves widen with depth.
@@ -76,4 +80,8 @@ export function generateWorld(t: Terrain, seed: number): void {
     }
   }
   t.rebuildAllPlanes();
+  // Start stable: loose material generated over a cave would collapse the
+  // moment anything touched it, so give it a cohesive dirt crust instead.
+  // Bottom-up, so each crust cell supports the column above it.
+  t.detachUnsupported(0, 0, WORLD_W - 1, WORLD_H - 1, (x, y) => t.set(x, y, Mat.Dirt));
 }

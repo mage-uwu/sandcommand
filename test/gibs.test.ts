@@ -21,7 +21,7 @@ describe('gibbing', () => {
     (world as unknown as { damage: (v: unknown, n: number, by: number, w: number) => void }).damage(b, 500, a.id, 1);
     expect(b.alive).toBe(false);
     expect(b.gold).toBe(20);
-    const serverGold = [...world.debris.mat.subarray(0, world.debris.n)].filter((m) => m === Mat.Gold).length;
+    const serverGold = [...world.grains.mat.subarray(0, world.grains.n)].filter((m) => m === Mat.Gold).length;
     expect(serverGold).toBe(20);
 
     world.step();
@@ -34,7 +34,7 @@ describe('gibbing', () => {
     }
     expect(watcher.gibs.n).toBeGreaterThanOrEqual(8 + 8); // body parts + meat
     expect(watcher.blood.n).toBeGreaterThan(0);
-    const clientGold = [...watcher.debris.mat.subarray(0, watcher.debris.n)].filter((m) => m === Mat.Gold).length;
+    const clientGold = [...watcher.grains.mat.subarray(0, watcher.grains.n)].filter((m) => m === Mat.Gold).length;
     expect(clientGold).toBe(20);
     expect(watcher.feed.at(-1)?.text).toContain('victim');
   });

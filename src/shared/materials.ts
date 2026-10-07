@@ -15,6 +15,13 @@ export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, t
 /** Fixed materials never yield. */
 export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false];
 
+/**
+ * Loose materials have no cohesion: with nothing directly beneath them they
+ * detach into continuous grains and fall (sand, and the rubble explosions
+ * leave behind). Dirt, rock and gold veins hold their shape.
+ */
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true];
+
 /** Base RGB colors; the renderer adds per-cell hashed variation. */
 export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [0, 0, 0],

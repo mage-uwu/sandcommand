@@ -24,7 +24,9 @@ import {
   WORLD_H,
   WORLD_W,
 } from '../shared/constants.ts';
-import { DebrisField, Projectiles, spillGold, throwDebris } from '../shared/kernels.ts';
+import { Collider, DistanceField } from '../shared/field.ts';
+import { Projectiles, segmentBox } from '../shared/kernels.ts';
+import { Grains, applyCarve, carveExtent, dropToSupport, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -51,7 +53,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { generateWorld } from '../shared/worldgen.ts';
 
 export interface ClientLink {
@@ -127,7 +129,9 @@ const SNAPSHOT_SCRATCH = new Uint8Array(CHUNK * CHUNK);
  */
 export class World {
   readonly terrain = new Terrain();
-  readonly debris = new DebrisField(16384);
+  readonly grains = new Grains(32768);
+  readonly field = new DistanceField(this.terrain);
+  readonly collider = new Collider(this.terrain, this.field);
   readonly projectiles = new Projectiles(4096);
   readonly chunkVersion = new Uint32Array(CHUNK_COUNT);
   readonly players: (Player | null)[] = new Array(MAX_PLAYERS).fill(null);
@@ -144,6 +148,7 @@ export class World {
   private readonly actorRecords = new Writer(64 * 16);
   private readonly pendingPixels = new Map<number, number[]>();
   private readonly removedScratch: number[] = [];
+  private readonly detachedScratch: number[] = [];
   private readonly chunkCache = new Map<number, { version: number; bytes: Uint8Array }>();
   private readonly frame = new Writer(64 * 1024);
   private readonly tmp = new Writer(256);
@@ -223,18 +228,19 @@ export class World {
 
   // ---------------------------------------------------------------- terrain
 
-  /** Carve terrain, throw debris, and log the op for replication. */
+  /**
+   * Carve terrain (plus the collapse it causes), release grains, and log the op
+   * for replication. Clients reproduce all of it from the 12-byte record.
+   */
   carve(x: number, y: number, r: number, core: number, debrisMax: number): number {
-    x = Math.round(x);
-    y = Math.round(y);
+    x = Math.max(0, Math.min(WORLD_W - 1, Math.round(x)));
+    y = Math.max(0, Math.min(WORLD_H - 1, Math.round(y)));
     const removed = this.removedScratch;
-    removed.length = 0;
-    const n = this.terrain.carve(x, y, r, core, (cx, cy, m) => {
-      removed.push(cx, cy, m);
-    });
+    const detached = this.detachedScratch;
+    const n = applyCarve(this.terrain, x, y, r, core, removed, detached);
     if (n === 0) return 0;
     const seed = this.rng.nextU32();
-    throwDebris(this.debris, removed, x, y, debrisMax, new Rng(seed));
+    releaseCarve(this.grains, removed, detached, x, y, debrisMax, new Rng(seed), this.overflow);
     const w = this.tmp.reset();
     w.u8(R_CARVE);
     w.u16(x);
@@ -243,7 +249,7 @@ export class World {
     w.u8(core);
     w.u32(seed);
     w.u8(debrisMax);
-    this.logOp(w.finish(), x - r, y - r, x + r, y + r);
+    this.logOp(w.finish(), carveExtent.x0, carveExtent.y0, carveExtent.x1, carveExtent.y1);
     return n;
   }
 
@@ -265,6 +271,11 @@ export class World {
     let list = this.pendingPixels.get(ci);
     if (!list) this.pendingPixels.set(ci, (list = []));
     list.push((x & (CHUNK - 1)) | ((y & (CHUNK - 1)) << 6), m);
+  };
+
+  /** Collapse beyond grain capacity drops straight down instead of vanishing. */
+  private overflow = (x: number, y: number, m: number): void => {
+    dropToSupport(this.terrain, x, y, m, this.deposit);
   };
 
   private flushPixels(): void {
@@ -314,16 +325,27 @@ export class World {
     }
   }
 
-  private hitActor = (x: number, y: number, owner: number): number => {
-    if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return -1;
-    const bucket = this.grid[(Math.floor(y) >> CHUNK_SHIFT) * CHUNKS_X + (Math.floor(x) >> CHUNK_SHIFT)];
-    for (let k = 0; k < bucket.length; k++) {
-      const id = bucket[k];
-      if (id === owner) continue;
-      const b = this.players[id]!.body;
-      if (x >= b.x && x < b.x + ACTOR_W && y >= b.y && y < b.y + ACTOR_H) return id;
-    }
-    return -1;
+  /** First actor box entered by a swept segment, via the actor spatial hash. */
+  private segmentActor = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }): number => {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    let best = -1;
+    let bestT = 2;
+    forChunksInRect(Math.floor(Math.min(x0, x1)), Math.floor(Math.min(y0, y1)), Math.floor(Math.max(x0, x1)), Math.floor(Math.max(y0, y1)), (ci) => {
+      const bucket = this.grid[ci];
+      for (let k = 0; k < bucket.length; k++) {
+        const id = bucket[k];
+        if (id === owner) continue;
+        const b = this.players[id]!.body;
+        const t = segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + ACTOR_H);
+        if (t >= 0 && t < bestT) {
+          bestT = t;
+          best = id;
+        }
+      }
+    });
+    out.t = bestT;
+    return best;
   };
 
   private damage(victim: Player, amount: number, attacker: number, weapon: number): void {
@@ -363,7 +385,7 @@ export class World {
     k.u8(Math.max(0, Math.min(255, Math.round(overkill))));
     k.u32(seed);
     k.u8(gold);
-    spillGold(this.debris, victim.cx, victim.cy, b.vx, b.vy, gold, new Rng(seed));
+    spillGold(this.grains, victim.cx, victim.cy, b.vx, b.vy, gold, new Rng(seed));
   }
 
   private onProjEnd = (i: number, x: number, y: number, actor: number, detonate: boolean): void => {
@@ -377,6 +399,8 @@ export class World {
         this.carve(x, y, def.carveR, def.coreR, def.debris);
       }
       if (def.splashR > 0) {
+        // Blast wave through every grain already in flight nearby.
+        this.grains.impulse(x, y, def.splashR * 1.6, BLAST_IMPULSE);
         for (const p of this.players) {
           if (!p || !p.alive) continue;
           const dx = p.cx - x;
@@ -496,8 +520,12 @@ export class World {
     }
 
     this.rebuildGrid();
-    this.projectiles.step(terrain, DT, this.hitActor, this.onProjEnd);
-    this.debris.step(terrain, DT, this.deposit);
+    // Bring the distance field up to date with this tick's terrain edits (only
+    // the chunks that changed). Removals later in the tick only increase true
+    // clearance, so the field stays conservative for them.
+    this.field.update();
+    this.projectiles.step(this.collider, DT, this.segmentActor, this.onProjEnd);
+    this.grains.step(this.collider, DT, this.deposit);
     this.flushPixels();
 
     const t1 = performance.now();
@@ -683,9 +711,21 @@ export class World {
       }
       if (relevant) {
         w.bytes(op.bytes);
-        for (let k = 0; k < op.chunks.length; k++) {
-          const ci = op.chunks[k];
-          known[ci] = known[ci] === op.pre[k] ? op.pre[k] + 1 : -1;
+        // A collapse makes a cell depend on the cells below it and beside it
+        // (never above), so a chunk only stays in sync if every chunk of this
+        // op in its own chunk row and in the rows below it was in sync too.
+        // op.chunks is row-major top-down: walk it bottom-up, row by row.
+        let belowOk = true;
+        let end = op.chunks.length;
+        while (end > 0) {
+          const rowOf = (op.chunks[end - 1] / CHUNKS_X) | 0;
+          let start = end - 1;
+          while (start > 0 && ((op.chunks[start - 1] / CHUNKS_X) | 0) === rowOf) start--;
+          let ok: boolean = belowOk;
+          for (let k = start; k < end && ok; k++) if (known[op.chunks[k]] !== op.pre[k]) ok = false;
+          for (let k = start; k < end; k++) known[op.chunks[k]] = ok ? op.pre[k] + 1 : -1;
+          belowOk = ok;
+          end = start;
         }
       } else {
         for (const ci of op.chunks) known[ci] = -1;

@@ -1,5 +1,5 @@
 import { GRAVITY, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import type { Terrain } from '../shared/terrain.ts';
+import { type Collider, contact, newHit } from '../shared/field.ts';
 
 // Gib piece ids; the art lives in sprites.ts (kept DOM-free here so the
 // simulation can run in tests).
@@ -11,11 +11,41 @@ export const GIB_PACK = 6;
 export const GIB_MEAT = [7, 8, 9];
 
 const GIB_LIFE = 14; // seconds before a resting gib fades out
+const GIB_E = 0.35; // gibs bounce more than sand
+const GIB_MU = 0.55;
+const hit = newHit();
+const vel = { x: 0.5, y: 0.5 }; // doubles from the start: no boxing
+
+function blastImpulse(
+  x: Float32Array,
+  y: Float32Array,
+  vx: Float32Array,
+  vy: Float32Array,
+  n: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  strength: number,
+): void {
+  const r2 = radius * radius;
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - cx;
+    const dy = y[i] - cy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= r2) continue;
+    const d = Math.sqrt(d2) + 1;
+    const k = (strength * (1 - d / radius)) / d;
+    vx[i] += dx * k;
+    vy[i] += dy * k - strength * 0.2;
+  }
+}
 
 /**
- * Cosmetic body parts. Same SoA style as the shared kernels: rigid pieces that
- * bounce, tumble in 90° steps, trail blood while fast, and come to rest on the
- * terrain. Never networked: every client builds them from the kill record.
+ * Cosmetic body parts. Same SoA style and the same swept collider + contact
+ * model as the shared grain kernels: rigid pieces that bounce and slide with
+ * restitution and Coulomb friction, tumble in 90° steps, trail blood while
+ * fast, and come to rest. Never networked: every client builds them from the
+ * kill record.
  */
 export class Gibs {
   n = 0;
@@ -79,7 +109,21 @@ export class Gibs {
     this.resting[i] = this.resting[l];
   }
 
-  step(t: Terrain, dt: number, blood: Blood): void {
+  /** Radial blast impulse (same falloff as grains). */
+  impulse(cx: number, cy: number, radius: number, strength: number): void {
+    blastImpulse(this.x, this.y, this.vx, this.vy, this.n, cx, cy, radius, strength);
+    for (let i = 0; i < this.n; i++) {
+      const dx = this.x[i] - cx;
+      const dy = this.y[i] - cy;
+      if (dx * dx + dy * dy < radius * radius) {
+        this.resting[i] = 0;
+        this.spinRate[i] = (Math.random() - 0.5) * 0.6;
+      }
+    }
+  }
+
+  step(col: Collider, dt: number, blood: Blood): void {
+    const t = col.terrain;
     const g = GRAVITY * dt;
     let i = 0;
     while (i < this.n) {
@@ -92,51 +136,35 @@ export class Gibs {
       }
       if (this.resting[i]) {
         // Wake up if the ground under it was blown away.
-        if (!t.isSolid(Math.floor(this.x[i]), Math.floor(this.y[i]) + 2)) this.resting[i] = 0;
-        else {
+        if (t.isSolid(Math.floor(this.x[i]), Math.floor(this.y[i]) + 1)) {
           i++;
           continue;
         }
+        this.resting[i] = 0;
       }
       this.vy[i] += g;
-      const dx = this.vx[i] * dt;
-      const dy = this.vy[i] * dt;
-      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
-      const sx = dx / steps;
-      const sy = dy / steps;
-      let x = this.x[i];
-      let y = this.y[i];
-      for (let s = 0; s < steps; s++) {
-        const nx = x + sx;
-        const ny = y + sy;
-        const fx = Math.floor(nx);
-        const fy = Math.floor(ny);
-        if (t.isSolid(fx, fy)) {
-          const blockX = t.isSolid(fx, Math.floor(y));
-          const blockY = t.isSolid(Math.floor(x), fy);
-          const impact = Math.hypot(this.vx[i], this.vy[i]);
-          if (blockX || !blockY) this.vx[i] = -this.vx[i] * 0.35;
-          if (blockY || !blockX) this.vy[i] = -this.vy[i] * 0.3;
-          this.vx[i] *= 0.7;
-          this.spinRate[i] = (Math.random() - 0.5) * Math.min(0.5, impact / 400);
-          if (impact > 90 && this.piece[i] !== GIB_HELMET) blood.splat(x, y, 2, impact * 0.2);
-          if (Math.abs(this.vy[i]) < 25 && Math.abs(this.vx[i]) < 20 && blockY) {
-            this.resting[i] = 1;
-            this.vx[i] = this.vy[i] = 0;
-            // Settle flat on a quarter turn.
-            this.spin[i] = Math.round(this.spin[i]);
-          }
-          break;
+      col.sweep(this.x[i], this.y[i], this.vx[i] * dt, this.vy[i] * dt, hit);
+      if (hit.hit) {
+        vel.x = this.vx[i];
+        vel.y = this.vy[i];
+        const jn = contact(vel, hit.nx, hit.ny, GIB_E, GIB_MU);
+        this.vx[i] = vel.x;
+        this.vy[i] = vel.y;
+        // Tumble in proportion to how hard it struck.
+        this.spinRate[i] = (Math.random() - 0.5) * Math.min(0.5, jn / 400);
+        if (jn > 90 && this.piece[i] !== GIB_HELMET) blood.splat(hit.x, hit.y, 2, jn * 0.2);
+        if (hit.ny < -0.5 && vel.x * vel.x + vel.y * vel.y < 20 * 20) {
+          this.resting[i] = 1;
+          this.vx[i] = this.vy[i] = 0;
+          this.spin[i] = Math.round(this.spin[i]); // settle flat on a quarter turn
         }
-        x = nx;
-        y = ny;
       }
-      this.x[i] = Math.max(0, Math.min(WORLD_W - 1, x));
-      this.y[i] = y;
+      this.x[i] = Math.max(0, Math.min(WORLD_W - 1, hit.x));
+      this.y[i] = hit.y;
       this.spin[i] += this.spinRate[i] * Math.hypot(this.vx[i], this.vy[i]) * dt;
       // Fast meat leaves a blood trail.
       if (!this.resting[i] && this.vx[i] * this.vx[i] + this.vy[i] * this.vy[i] > 120 * 120 && Math.random() < 0.5) {
-        blood.drop(x, y, this.vx[i] * 0.1, this.vy[i] * 0.1);
+        blood.drop(hit.x, hit.y, this.vx[i] * 0.1, this.vy[i] * 0.1);
       }
       i++;
     }
@@ -211,36 +239,27 @@ export class Blood {
     }
   }
 
-  step(t: Terrain, dt: number): void {
+  impulse(cx: number, cy: number, radius: number, strength: number): void {
+    blastImpulse(this.x, this.y, this.vx, this.vy, this.n, cx, cy, radius, strength);
+  }
+
+  step(col: Collider, dt: number): void {
+    const t = col.terrain;
     const g = GRAVITY * dt;
     let i = 0;
     while (i < this.n) {
       this.life[i] -= dt;
       this.vy[i] += g;
-      const dx = this.vx[i] * dt;
-      const dy = this.vy[i] * dt;
-      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
-      let x = this.x[i];
-      let y = this.y[i];
-      let hit = false;
-      for (let s = 0; s < steps; s++) {
-        const nx = x + dx / steps;
-        const ny = y + dy / steps;
-        const fx = Math.floor(nx);
-        const fy = Math.floor(ny);
-        if (t.isSolid(fx, fy)) {
-          if (fx >= 0 && fy >= 0 && fx < WORLD_W && fy < WORLD_H) {
-            const c = fy * WORLD_W + fx;
-            this.stain[c] = Math.min(255, this.stain[c] + 110);
-            t.markDirtyRect(fx, fy, fx, fy);
-          }
-          hit = true;
-          break;
+      col.sweep(this.x[i], this.y[i], this.vx[i] * dt, this.vy[i] * dt, hit);
+      if (hit.hit) {
+        const { cx, cy } = hit;
+        if (cx >= 0 && cy >= 0 && cx < WORLD_W && cy < WORLD_H) {
+          const c = cy * WORLD_W + cx;
+          this.stain[c] = Math.min(255, this.stain[c] + 110);
+          t.markRenderDirty(cx, cy);
         }
-        x = nx;
-        y = ny;
       }
-      if (hit || this.life[i] <= 0 || y > WORLD_H) {
+      if (hit.hit || this.life[i] <= 0 || hit.y > WORLD_H) {
         const l = --this.n;
         this.x[i] = this.x[l];
         this.y[i] = this.y[l];
@@ -249,8 +268,8 @@ export class Blood {
         this.life[i] = this.life[l];
         continue;
       }
-      this.x[i] = x;
-      this.y[i] = y;
+      this.x[i] = hit.x;
+      this.y[i] = hit.y;
       i++;
     }
   }

@@ -13,6 +13,11 @@ export const CHUNKS_X = WORLD_W >> CHUNK_SHIFT; // 32
 export const CHUNKS_Y = WORLD_H >> CHUNK_SHIFT; // 16
 export const CHUNK_COUNT = CHUNKS_X * CHUNKS_Y; // 512
 
+// Distance-field dirty tracking granularity: 16x16-cell tiles.
+export const TILE_SHIFT = 4;
+export const TILES_X = WORLD_W >> TILE_SHIFT; // 128
+export const TILES_Y = WORLD_H >> TILE_SHIFT; // 64
+
 // Simulation clock.
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;

@@ -1,4 +1,5 @@
 import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
+import { applyCarve } from '../shared/particles.ts';
 import { quantizeAim } from '../shared/protocol.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
@@ -74,7 +75,18 @@ async function join(): Promise<void> {
   net?.close();
   net = new Net(url, {
     welcome(w) {
-      if (new URLSearchParams(location.search).has('debug')) (window as unknown as { sc: unknown }).sc = { game: g, renderer };
+      if (new URLSearchParams(location.search).has('debug')) {
+        // Debug only: `carve` runs the client's R_CARVE path locally (the
+        // server never hears about it, so that chunk desyncs until resent).
+        const removed: number[] = [];
+        const detached: number[] = [];
+        const carve = (x: number, y: number, r: number) => {
+          applyCarve(g.terrain, x, y, r, 0, removed, detached);
+          g.carved(x, y, r, 1, 0, removed, detached);
+          return detached.length / 3;
+        };
+        (window as unknown as { sc: unknown }).sc = { game: g, renderer, carve };
+      }
       g.myId = w.id;
       g.room = w.room;
       game = g;

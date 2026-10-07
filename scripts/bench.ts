@@ -34,7 +34,7 @@ for (let t = 0; t < TICKS; t++) {
   world.step();
   step.push(world.lastStepMs);
   repl.push(world.lastReplicateMs);
-  maxDebris = Math.max(maxDebris, world.debris.n);
+  maxDebris = Math.max(maxDebris, world.grains.n);
   maxProj = Math.max(maxProj, world.projectiles.n);
 }
 const wall = performance.now() - t0;

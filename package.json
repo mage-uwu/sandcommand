@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "test": "vitest run",
     "bench": "node --experimental-transform-types --no-warnings scripts/bench.ts",
+    "bench:physics": "node --experimental-transform-types --no-warnings scripts/bench-physics.ts",
     "loadtest": "node --experimental-transform-types --no-warnings scripts/loadtest.ts"
   },
   "devDependencies": {

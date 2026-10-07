@@ -11,6 +11,7 @@ npm install
 npm run dev          # builds the client and runs wrangler dev on :8787
 npm test             # terrain, codec, replication and prediction tests
 npm run bench        # headless 64-player server benchmark
+npm run bench:physics # particle/field scaling, collider probes, big collapse
 npm run loadtest     # 64 real WebSocket bots against a running server
 npm run deploy       # wrangler deploy (needs a Cloudflare account)
 ```
@@ -38,8 +39,8 @@ browser ══/ws?room══▶ Worker ──────▶ GameRoom DO (one pe
 
 ### Terrain: SWAR bitplanes
 
-`Terrain` (`src/shared/terrain.ts`) keeps a material byte per cell, plus three
-**bitplanes** (`solid`, `hard`, `fixed`) packed 32 cells per `Uint32` word.
+`Terrain` (`src/shared/terrain.ts`) keeps a material byte per cell, plus four
+**bitplanes** (`solid`, `hard`, `fixed`, `loose`) packed 32 cells per `Uint32` word.
 Every physics query runs against the bitplanes as SIMD-within-a-register
 operations:
 
@@ -51,20 +52,68 @@ operations:
 - **Removed cells** are enumerated with `clz32` on the removed-bits word, so
   the cost scales with how many cells were destroyed, not with the area of
   the circle.
+- **Collapse detection** evaluates the stability rule for loose material
+  (sand, rubble) 32 cells at a time with shifted words:
+  `loose & (~below | (~belowLeft & ~left) | (~belowRight & ~right))`. A loose
+  face therefore can't stand steeper than 45°. See *Falling sand* below.
 
 The geometry is integer-only (`Math.sqrt` is correctly rounded in IEEE 754), so
 a carve gives bit-identical results on every engine. Rows and words are
 independent, which makes each kernel trivially splittable across lanes or
 workers. The tests check every kernel against a naive per-cell reference.
 
-### Entities: structure-of-arrays kernels
+### Physics: continuous vectors and fields, not cellular automata
 
-Debris and projectiles (`src/shared/kernels.ts`) store their components in
-parallel `Float32Array`s and advance in two passes. The first is a
-branch-free integration pass over contiguous arrays, the shape that JITs
-auto-vectorize and that maps onto 4-wide SIMD or WASM `f32x4`. The second is
-a sweep/resolve pass against the terrain bitplanes. Elements never interact,
-so any index range can be stepped on its own. Removal is swap-with-last.
+Nothing moves through the world as a per-cell automaton. Grains (debris,
+collapsing sand, spilled gold), projectiles, gibs and blood all have float
+positions and velocities. They are stepped with field queries, so a tick
+costs O(N) in the things that are moving plus O(area that changed). It never
+scales with the size of the grid, and it doesn't snowball.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| **Distance field** | `src/shared/field.ts` | Capped 3-4 chamfer distance to terrain at 4×4-cell resolution (512×256). Updated incrementally: a dirty 16×16 tile only triggers work if a 4×4 block's occupancy actually flipped (most bullet chips don't), and then only the masked window within `FIELD_R` is re-swept by the two chamfer passes. About 470 field cells per carve, of 131k. |
+| **Swept collider** | `src/shared/field.ts` | Sphere-traces through the distance field (one lookup per clearance-sized jump) and only drops to exact bitplane tests within about one cell of a surface. 1.6 probes per move against 10.2 for per-cell marching. |
+| **Contact normals** | `Terrain.normalAt` | Gradient of local occupancy (eight masked popcounts over a 5×5 window). Falls back to the reversed motion direction when the gradient doesn't oppose the motion, for example in pits. |
+| **Contact model** | `contact()` | Restitution along the normal and Coulomb friction along the tangent, shared by grains, gibs and grenades. A body rests on a slope while `tan θ ≤ μ(1+e)`, so sliding, piling and an angle of repose come out of one rule. |
+| **Grain fields** | `src/shared/particles.ts` | Grains splat count and momentum into the coarse grid. Crowded grains blend toward the local mean velocity (PIC-style), so a landing sends a deceleration wave up through the falling mass. They're also pushed down the gradient of *excess* density, clamped to about one tick of gravity: pressure with no neighbour search, which can't add energy. |
+| **Blast waves** | `Grains/Gibs/Blood.impulse` | Explosions push everything loose that is already in flight. |
+| **Projectiles** | `src/shared/kernels.ts` | Same swept collider. Hits on clones use a continuous segment-vs-AABB slab test along the swept path, through the actor spatial hash, so a bullet costs a handful of probes at any speed. |
+
+The data layout is still structure-of-arrays (parallel `Float32Array`s). Each
+system runs a branch-free integration pass that maps onto SIMD lanes, then a
+resolve pass. The only discrete step is at the very end of a grain's life. A
+grain that has come to rest is projected onto the cell lattice: a bounded walk
+down open diagonals to the nearest cell where the stability rule holds. It
+runs once per grain when it settles, never as a per-tick grid update. A
+grain that is out of time is dropped onto support, so material is always
+conserved.
+
+### Falling sand
+
+Loose material (sand and rubble) needs support. A carve's full effect,
+`applyCarve`, is to remove cells and then run `Terrain.collapseFrom`. That
+collapse is activity-driven. Each row is examined only around cells that
+changed in it or just below it (the carve's span, then whatever detached),
+widening sideways only when a cell at the edge falls. It stops at the first
+row above the carve where nothing fell, so its cost follows the size of the
+landslide. Detached cells become grains that pour into the hole, slump to the
+repose angle and settle back as terrain. Worldgen ships dunes and buried sand
+lenses, and starts stable: loose cells generated over a cave get a dirt
+crust.
+
+The collapse is deterministic and part of the carve, so **a landslide costs
+the same 12-byte `R_CARVE` as the explosion that caused it**. Every client in
+range reproduces the detachment and the grain shower. Only the cells where
+grains finally come to rest are sent, as `R_PIXELS`. If a collapse exceeds the
+server's grain capacity, the excess drops straight onto support instead of
+vanishing.
+
+Collapse makes a cell depend on the cells below it and beside it. So the
+replication bookkeeping has a rule: a client's copy of a chunk only stays "in
+sync" through an op if every chunk of that op in its own chunk row and below
+was in sync too. Otherwise it is re-sent. The op's chunk list is exactly the
+set of cells the kernel *read*, not just the ones it changed.
 
 ### Replication: chunks, versions and event streaming
 
@@ -78,11 +127,13 @@ re-run them locally:
 | `R_PIXELS` | 5 + 3n B | rubble that settled in one chunk this tick |
 | `R_CHUNK` | RLE | full snapshot, only when needed |
 
-**Debris costs no bandwidth.** The client applies the same carve to the same
-chunk state, gets the same list of removed cells, seeds the same Mulberry32
-RNG, and calls the same `throwDebris`. The flying debris shower is therefore
-identical on every screen. Only the final resting pixels are sent, because
-those are the authoritative changes.
+**Debris and collapses cost no bandwidth.** The client applies the same
+carve to the same chunk state, gets the same removed and detached cells, seeds
+the same Mulberry32 RNG, and calls the same `releaseCarve`. The debris shower
+and landslide start out identical on every screen. Flight is cosmetic on
+clients (grain-grain coupling depends on which grains a client has, so
+trajectories can drift). Only the final resting pixels are authoritative, and
+only those are sent.
 
 **Per-client chunk versions.** The server keeps a version counter for every
 chunk, and for every client the version it believes that client holds (`-1`
@@ -147,13 +198,32 @@ the same seed. Explosive and high-overkill deaths scatter harder.
 ## Measured numbers
 
 `npm run bench` runs Node 22 on a 4-core container, with 64 bots firing all
-weapons (60% trigger duty) and running and jetpacking at random:
+weapons (60% trigger duty) and running and jetpacking at random, over a world
+with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.31 ms  p99 1.5 ms
-replicate avg 1.04 ms  p99 3.8 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 25.6 KB/s; room egress 1.6 MB/s
+sim       avg 0.83 ms  p99 2.3 ms      (grains, collapses, distance field included)
+replicate avg 0.98 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 26.3 KB/s; room egress 1.65 MB/s
 ```
+
+`npm run bench:physics`:
+
+```
+1) grain step cost vs N        N=1k 546 ns, 4k 333 ns, 16k 379 ns, 64k 205 ns per grain-tick
+2) probes per swept move       sphere-traced 1.63 vs per-cell marching 10.18 (6.3x fewer)
+3) distance-field update       ~90-120 us per carve, ~470 of 131,072 field cells recomputed
+4) 400x120 sand slab undercut  46,735 grains released, all 46,735 deposited, worst tick ~25 ms
+```
+
+Per-grain cost is flat as N grows, so stepping scales linearly. The worst
+landslide tick includes the landing. Everyday collapses are a few hundred to
+a few thousand grains, which costs a millisecond or two. The tests in
+`test/fields.test.ts` check the field against a brute-force reference after
+incremental edits. They also check that the collider never tunnels through
+1-cell walls, that the SWAR collapse matches a per-cell reference, that a
+stable world stays stable after any sequence of carves, and that a collapse
+conserves material, including when the grain system is at capacity.
 
 `npm run loadtest` runs 64 real WebSocket bots against `wrangler dev`
 (workerd). Each bot decodes every frame into its own terrain replica. Bots
@@ -163,8 +233,8 @@ and server share the same 4 cores:
 rooms={"room-1":64}  rejected=0  decodeErrors=0
 frames/s per bot: min 30.0 avg 30.1
 frame gap ms: p50 32 p95 46
-downstream per bot: ~27 KB/s
-server tick (from the room's telemetry log): avg ~3 ms
+downstream per bot: ~31 KB/s
+server tick (from the room's telemetry log): avg ~4.2 ms, up to ~2.6k grains live
 ```
 
 With 70 bots, the lobby packs `{"room-2":64,"room-3":6}` and rejects nobody.
@@ -181,10 +251,10 @@ player connected from, and all of that match's sockets pin to it.
 
 ## Not done yet
 
-- Falling-sand cellular automaton for unsupported sand (ops are ready: it would
-  emit `R_PIXELS`).
 - Teams, brains, buying bodies and drop ships, which are the Cortex Command
   meta-game.
 - Delta-compressing actor records against the last acknowledged frame.
 - Running the kernels in a WASM SIMD module. They are already laid out for it.
+- A learned (neural) surrogate for dense granular flow. The field formulation
+  above is the natural place to plug one in, but nothing here uses one today.
 - Sound.

@@ -47,3 +47,6 @@ export const WEAPONS: readonly WeaponDef[] = [
 export const DIGGER_REACH = 13;
 export const DIGGER_R = 5;
 export const DIGGER_CORE = 2;
+
+/** Peak blast-wave speed (cells/s) explosions give to loose things in flight: grains, gibs, blood. */
+export const BLAST_IMPULSE = 260;

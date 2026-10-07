@@ -2,11 +2,13 @@ import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
-import { DebrisField, Projectiles, spillGold, throwDebris } from '../shared/kernels.ts';
+import { Collider, DistanceField } from '../shared/field.ts';
+import { Projectiles } from '../shared/kernels.ts';
+import { Grains, releaseCarve, spillGold } from '../shared/particles.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { Fx } from './fx.ts';
 import { Blood, Gibs } from './gibs.ts';
 
@@ -87,7 +89,9 @@ export class Game implements FrameHandler {
    */
   readonly skyline = new Int16Array(WORLD_W).fill(WORLD_H);
   readonly projectiles = new Projectiles(2048);
-  readonly debris = new DebrisField(8192);
+  readonly grains = new Grains(16384);
+  readonly field = new DistanceField(this.terrain);
+  readonly collider = new Collider(this.terrain, this.field);
   readonly fx = new Fx(6000);
   readonly gibs = new Gibs(1500);
   readonly blood = new Blood(4000);
@@ -155,13 +159,15 @@ export class Game implements FrameHandler {
       }
     }
     this.weapon = weapon;
-    this.projectiles.step(this.terrain, DT, null, (i, x, y, _a, _d) => {
+    // Field first: chunk snapshots and ops applied since the last tick.
+    this.field.update();
+    this.projectiles.step(this.collider, DT, null, (i, x, y, _a, _d) => {
       if (this.projectiles.kind[i] === ProjKind.Bullet) this.fx.burst(x, y, 3, 60, 0.2, 0xffe080, 0.5);
     });
-    this.debris.step(this.terrain, DT);
+    this.grains.step(this.collider, DT);
     this.fx.step(this.terrain, DT);
-    this.gibs.step(this.terrain, DT, this.blood);
-    this.blood.step(this.terrain, DT);
+    this.gibs.step(this.collider, DT, this.blood);
+    this.blood.step(this.collider, DT);
     // Ambient effects for remote jetpacks.
     for (const [, s] of this.snaps) {
       const last = s[s.length - 1];
@@ -293,8 +299,9 @@ export class Game implements FrameHandler {
     this.radar = list;
   }
 
-  carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[]): void {
-    throwDebris(this.debris, removed, x, y, debris, new Rng(seed));
+  carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[], detached: number[]): void {
+    // Same op, same chunk state, same seed as the server: identical shower and collapse.
+    releaseCarve(this.grains, removed, detached, x, y, debris, new Rng(seed));
     // Blasted cells take their blood stains with them.
     for (let i = 0; i < removed.length; i += 3) this.blood.stain[removed[i + 1] * WORLD_W + removed[i]] = 0;
     if (r <= 6) {
@@ -333,6 +340,11 @@ export class Game implements FrameHandler {
     }
     const def = PROJ[kind];
     this.flashes.push({ x, y, r: def.splashR, at: performance.now() });
+    // The blast wave moves everything loose that is already in the air.
+    const R = def.splashR * 1.6;
+    this.grains.impulse(x, y, R, BLAST_IMPULSE);
+    this.gibs.impulse(x, y, R, BLAST_IMPULSE);
+    this.blood.impulse(x, y, R, BLAST_IMPULSE);
     this.fx.burst(x, y, 40, 260, 0.5, 0xffb030, 0.3, 1);
     this.fx.burst(x, y, 20, 120, 0.4, 0xfff2b0, 0.1, 2);
     this.fx.burst(x, y, 30, 50, 1.4, 0x504840, -0.05, 2);
@@ -359,7 +371,7 @@ export class Game implements FrameHandler {
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     this.gibs.burst(k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, this.blood);
     // Same seed as the server, so the gold shower matches what will settle.
-    spillGold(this.debris, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
+    spillGold(this.grains, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
     this.snaps.delete(victim);
   }
 

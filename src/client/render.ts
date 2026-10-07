@@ -226,8 +226,8 @@ export class Renderer {
       }
     }
 
-    // Debris in flight.
-    const d = game.debris;
+    // Grains in flight (debris, collapsing sand, spilled gold).
+    const d = game.grains;
     for (let i = 0; i < d.n; i++) {
       const [r, gg, bb] = MAT_COLOR[d.mat[i]];
       ctx.fillStyle = `rgb(${r},${gg},${bb})`;
@@ -501,7 +501,7 @@ export class Renderer {
       `${game.room}  ${game.players.size}/64 players`,
       `ping ${Math.round(net.rttMs)} ms   in ${net.kbIn.toFixed(1)} KB/s`,
       `tick ${game.lastServerTick}  fps ${Math.round(this.fps)}`,
-      `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  debris ${game.debris.n}  gibs ${game.gibs.n}`,
+      `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  grains ${game.grains.n}  gibs ${game.gibs.n}`,
     ];
     lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (20 + i * 15) * s));
 
