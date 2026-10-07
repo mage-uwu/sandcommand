@@ -135,7 +135,7 @@ distance travelled, so feet don't skate. Weapons and arms are pre-rotated in
 64 steps with nearest-neighbour inverse mapping, so a gun at any angle stays
 on the world's pixel grid.
 
-Every death gibs the clone. The kill record (`R_KILL`, 20 B) carries position,
+Every death gibs the clone. The kill record (`R_KILL`, 18 B) carries position,
 velocity, overkill and a seed. Each client bursts the clone into helmet,
 torso, limbs, jetpack and meat (`src/client/gibs.ts`). The parts tumble,
 bounce and leave blood trails, and blood droplets stain the terrain in a
