@@ -1,6 +1,6 @@
 import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
-import { quantizeAim } from '../shared/protocol.ts';
+import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
 import { Net } from './net.ts';
@@ -75,6 +75,22 @@ async function join(): Promise<void> {
   net?.close();
   net = new Net(url, {
     welcome(w) {
+      if (w.version !== PROTOCOL_VERSION) {
+        // The server was redeployed under this tab: this client can't read its
+        // frames (e.g. rockets it has never heard of). Fetch the new client,
+        // at most once per session so a bad deploy can't reload-loop.
+        let tried = false;
+        try {
+          tried = sessionStorage.getItem('sc-reload') === String(w.version);
+          sessionStorage.setItem('sc-reload', String(w.version));
+        } catch {}
+        if (!tried) {
+          location.reload();
+          return;
+        }
+        showOverlay('The game was updated. Reload the page to play.');
+        return;
+      }
       if (new URLSearchParams(location.search).has('debug')) {
         // Debug only: `carve` runs the client's R_CARVE path locally (the
         // server never hears about it, so that chunk desyncs until resent).
