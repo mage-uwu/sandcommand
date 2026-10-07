@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DT, WORLD_H, WORLD_W, WORDS_PER_ROW } from '../src/shared/constants.ts';
 import { Collider, DistanceField, FH, FIELD_R, FIELD_SHIFT, FW, newHit } from '../src/shared/field.ts';
 import { MAT_LOOSE, Mat } from '../src/shared/materials.ts';
-import { Grains, applyCarve, dropToSupport, releaseCarve } from '../src/shared/particles.ts';
+import { Particles, applyCarve, dropToSupport, releaseCarve } from '../src/shared/particles.ts';
 import { Rng } from '../src/shared/rng.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { generateWorld } from '../src/shared/worldgen.ts';
@@ -172,7 +172,7 @@ describe('falling sand', () => {
     t.rebuildAllPlanes();
     const f = new DistanceField(t);
     const col = new Collider(t, f);
-    const grains = new Grains(cap);
+    const grains = new Particles(cap);
     const sandBefore = countMat(t, Mat.Sand);
 
     // Blow out the shelf under the middle of the mound.
@@ -189,9 +189,11 @@ describe('falling sand', () => {
       f.update();
       const before = grains.n;
       let settled = 0;
-      grains.step(col, DT, (x, y, m) => {
-        t.set(x, y, m);
-        settled++;
+      grains.step(col, DT, {
+        settle: (x, y, m) => {
+          t.set(x, y, m);
+          settled++;
+        },
       });
       lost += before - grains.n - settled;
     }

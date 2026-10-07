@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { Reader } from '../src/shared/codec.ts';
 import { Mat } from '../src/shared/materials.ts';
+import { PK, type Particles } from '../src/shared/particles.ts';
+
+function goldGrains(p: Particles): number {
+  let n = 0;
+  for (let i = 0; i < p.n; i++) if (p.kind[i] === PK.Grain && p.aux[i] === Mat.Gold) n++;
+  return n;
+}
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 
@@ -21,7 +28,7 @@ describe('gibbing', () => {
     (world as unknown as { damage: (v: unknown, n: number, by: number, w: number) => void }).damage(b, 500, a.id, 1);
     expect(b.alive).toBe(false);
     expect(b.gold).toBe(20);
-    const serverGold = [...world.grains.mat.subarray(0, world.grains.n)].filter((m) => m === Mat.Gold).length;
+    const serverGold = goldGrains(world.grains);
     expect(serverGold).toBe(20);
 
     world.step();
@@ -32,9 +39,10 @@ describe('gibbing', () => {
       const ack = r.u16();
       watcher.applyFrame(tick, ack, r);
     }
-    expect(watcher.gibs.n).toBeGreaterThanOrEqual(8 + 8); // body parts + meat
-    expect(watcher.blood.n).toBeGreaterThan(0);
-    const clientGold = [...watcher.grains.mat.subarray(0, watcher.grains.n)].filter((m) => m === Mat.Gold).length;
+    // Body parts and blood are particles of the same field engine as the grains.
+    expect(watcher.particles.count(PK.Gib)).toBeGreaterThanOrEqual(8 + 8); // body parts + meat
+    expect(watcher.particles.count(PK.Blood)).toBeGreaterThan(0);
+    const clientGold = goldGrains(watcher.particles);
     expect(clientGold).toBe(20);
     expect(watcher.feed.at(-1)?.text).toContain('victim');
   });

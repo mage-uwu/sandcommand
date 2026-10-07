@@ -1,39 +1,98 @@
 import { DT, GRAVITY, WORLD_H } from './constants.ts';
-import { type Collider, FH, FIELD_SHIFT, FW, contact, newHit } from './field.ts';
+import { type Collider, FH, FIELD_CELL, FIELD_SHIFT, FW, contact, newHit } from './field.ts';
 import { MAT_LOOSE, Mat } from './materials.ts';
 import type { Rng } from './rng.ts';
 import type { Terrain } from './terrain.ts';
 
 /**
- * Continuous granular material: explosion debris, collapsing sand and spilled
- * gold are all grains with float positions and velocities. Each tick costs
- * O(N) in live grains plus O(cells they occupy), with no per-cell automaton
- * and no pairwise interactions:
+ * The particle engine. Everything that flies is one structure-of-arrays
+ * particle with a kind: terrain grains (debris, collapsing sand, spilled
+ * gold), sparks, flames, smoke, dust, blood and gibs. A tick is O(N) in live
+ * particles plus O(field cells touched), with no per-cell automaton, no
+ * pairwise interaction and no per-explosion scans:
  *
- *   1. integrate     gravity + drag over contiguous Float32Arrays
- *   2. grain fields  grains splat count and momentum into a coarse grid;
- *                    crowded grains blend toward the local mean velocity
- *                    (PIC) and are pushed down the density gradient (pressure
- *                    without neighbour search)
+ *   0. air field     explosions write a radial velocity into a coarse air
+ *                    field that decays over a few ticks
+ *   1. integrate     gravity, buoyancy and drag from per-kind tables over
+ *                    contiguous Float32Arrays
+ *   2. fields        massive particles (grains) splat count and momentum into
+ *                    the coarse grid: crowded grains blend toward the local
+ *                    mean velocity (PIC) and are pushed down the gradient of
+ *                    excess density; light particles (smoke, dust, flame) are
+ *                    advected by that flow; every kind relaxes toward the air
+ *                    field, so one blast moves everything nearby in O(area)
  *   3. sweep         swept collision through the terrain distance field, then
- *                    restitution + Coulomb friction against the surface normal
- *   4. settle        a grain resting on support for a few ticks becomes a
- *                    terrain cell again (server deposits it; clients drop their
- *                    mirrored copy and wait for the authoritative pixel op)
+ *                    restitution + Coulomb friction from per-kind tables
+ *   4. contact       per kind: grains settle back into terrain, blood stains
+ *                    the surface it hits, gibs tumble and come to rest,
+ *                    sparks die once spent
+ *
+ * The server runs the same engine with grains only (they are authoritative
+ * terrain changes); clients run every kind in one instance.
  */
-export const GRAIN_E = 0.12; // restitution
-export const GRAIN_MU = 0.65; // Coulomb friction: repose angle ~ atan(mu * (1 + e)) ~ 36 deg
+export const PK = {
+  Grain: 0,
+  Spark: 1,
+  Flame: 2,
+  Smoke: 3,
+  Dust: 4,
+  Blood: 5,
+  Gib: 6,
+} as const;
+export const KIND_COUNT = 7;
+
+// Contact behaviours.
+const C_SETTLE = 0; // become terrain (grains)
+const C_BOUNCE = 1; // bounce and slide until life ends
+const C_STAIN = 2; // stain the surface and disappear (blood)
+const C_SPENT = 3; // bounce, disappear once slow (sparks)
+const C_RIGID = 4; // tumble, bounce, rest, fade (gibs)
+
+interface KindDef {
+  gravity: number; // multiplier on world gravity; negative = buoyant
+  drag: number; // velocity retained per tick
+  e: number; // restitution
+  mu: number; // Coulomb friction
+  mass: boolean; // contributes to the density/momentum field
+  advect: number; // per-tick blend toward the local mass-flow velocity
+  air: number; // per-tick blend toward the air (blast) field
+  contact: number;
+}
+
+/** Per-kind behaviour. Index with PK.*. */
+export const KINDS: readonly KindDef[] = [
+  /* Grain */ { gravity: 1, drag: 0.998, e: 0.12, mu: 0.65, mass: true, advect: 0, air: 0.07, contact: C_SETTLE },
+  /* Spark */ { gravity: 0.6, drag: 0.985, e: 0.55, mu: 0.25, mass: false, advect: 0, air: 0.1, contact: C_SPENT },
+  /* Flame */ { gravity: -0.3, drag: 0.9, e: 0.1, mu: 0.3, mass: false, advect: 0.3, air: 0.5, contact: C_BOUNCE },
+  /* Smoke */ { gravity: -0.1, drag: 0.93, e: 0.05, mu: 0.2, mass: false, advect: 0.5, air: 0.6, contact: C_BOUNCE },
+  /* Dust  */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE },
+  /* Blood */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN },
+  /* Gib   */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID },
+];
+const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
+const K_DRAG = new Float32Array(KINDS.map((k) => k.drag));
+const K_E = new Float32Array(KINDS.map((k) => k.e));
+const K_MU = new Float32Array(KINDS.map((k) => k.mu));
+const K_MASS = new Uint8Array(KINDS.map((k) => (k.mass ? 1 : 0)));
+const K_ADVECT = new Float32Array(KINDS.map((k) => k.advect));
+const K_AIR = new Float32Array(KINDS.map((k) => k.air));
+const K_CONTACT = new Uint8Array(KINDS.map((k) => k.contact));
+
 const SETTLE_SPEED = 2.2 * GRAVITY * DT; // cells/s, ~2 ticks of gravity
 const SETTLE_TICKS = 2;
 const CROWD_SETTLE = 3;
-const STACK_SCAN = 8;
-const PROJECT_STEPS = 32; // cells to look up for a free spot when the resting cell was just filled
+const STACK_SCAN = 8; // cells to look up for a free spot when the resting cell was just filled
+const PROJECT_STEPS = 32; // max lattice steps per settle walk per tick
 const CROWD = 6; // grains per field cell before pressure kicks in
 const PRESSURE = 14; // velocity per tick per unit density difference
 const MAX_SPEED = 700;
 const PUSH_MAX = GRAVITY * DT * 1.2; // per-tick cap on pressure push
 const PIC_MIN = 3; // grains in a field cell before they share momentum
 const PIC_BLEND = 0.5; // fraction of the way to the cell's mean velocity per tick
+const AIR_DECAY = 0.72; // air field retained per tick
+const AIR_MIN = 20; // cells/s below which an air cell goes quiet (~8 ticks after a blast)
+const AIR_WAKE = 60; // cells/s of wind needed to disturb a resting particle
+const SPARK_DIE = 40; // cells/s: a spark slower than this after a bounce is spent
 
 const density = new Uint16Array(FW * FH);
 const momX = new Float32Array(FW * FH);
@@ -42,6 +101,13 @@ const touched: number[] = [];
 const hit = newHit();
 const vel = { x: 0.5, y: 0.5 }; // doubles from the start: no boxing
 const free = { x: 0, y: 0 };
+
+export interface ParticleHooks {
+  /** A grain came to rest: deposit it as terrain (server). */
+  settle?: (x: number, y: number, mat: number) => void;
+  /** Blood hit solid terrain at cell (x, y) (client stain layer). */
+  stain?: (x: number, y: number) => void;
+}
 
 /**
  * Project a grain that has come to rest at (cx, cy) onto a terrain cell where
@@ -117,119 +183,214 @@ function ring(t: Terrain, cx: number, cy: number, r0: number, r1: number, out: {
   return false;
 }
 
-export class Grains {
+export class Particles {
   n = 0;
   readonly x: Float32Array;
   readonly y: Float32Array;
+  readonly px: Float32Array; // position at the start of the last tick (render interpolation)
+  readonly py: Float32Array;
   readonly vx: Float32Array;
   readonly vy: Float32Array;
-  readonly mat: Uint8Array;
-  readonly life: Uint16Array;
+  readonly kind: Uint8Array;
+  /** Grain: terrain material. Gib: sprite piece. */
+  readonly aux: Uint8Array;
+  /** 0xRRGGBB tint (gib team colour, dust material colour, ...). */
+  readonly color: Uint32Array;
+  readonly life: Uint16Array; // ticks left
+  readonly maxLife: Uint16Array;
   readonly rest: Uint8Array;
+  readonly spin: Float32Array; // gibs: accumulated quarter turns
+  readonly spinRate: Float32Array;
   /** Scratch: grain sat in a crowded field cell this tick. */
   private readonly crowd: Uint8Array;
+
+  // Air (blast) velocity field, sparse: only cells listed in airCells are live.
+  private readonly airX = new Float32Array(FW * FH);
+  private readonly airY = new Float32Array(FW * FH);
+  private readonly airLive = new Uint8Array(FW * FH);
+  private airCells: number[] = [];
+  private airNext: number[] = [];
 
   constructor(readonly cap: number) {
     this.x = new Float32Array(cap);
     this.y = new Float32Array(cap);
+    this.px = new Float32Array(cap);
+    this.py = new Float32Array(cap);
     this.vx = new Float32Array(cap);
     this.vy = new Float32Array(cap);
-    this.mat = new Uint8Array(cap);
+    this.kind = new Uint8Array(cap);
+    this.aux = new Uint8Array(cap);
+    this.color = new Uint32Array(cap);
     this.life = new Uint16Array(cap);
+    this.maxLife = new Uint16Array(cap);
     this.rest = new Uint8Array(cap);
+    this.spin = new Float32Array(cap);
+    this.spinRate = new Float32Array(cap);
     this.crowd = new Uint8Array(cap);
   }
 
-  /** Returns false (and spawns nothing) when at capacity. */
-  spawn(x: number, y: number, vx: number, vy: number, mat: number, life: number): boolean {
+  /** Returns false (and spawns nothing) when at capacity. `life` is in ticks. */
+  spawn(kind: number, x: number, y: number, vx: number, vy: number, life: number, aux = 0, color = 0): boolean {
     if (this.n >= this.cap) return false;
     const i = this.n++;
-    this.x[i] = x;
-    this.y[i] = y;
+    this.x[i] = this.px[i] = x;
+    this.y[i] = this.py[i] = y;
     this.vx[i] = vx;
     this.vy[i] = vy;
-    this.mat[i] = mat;
-    this.life[i] = life;
+    this.kind[i] = kind;
+    this.aux[i] = aux;
+    this.color[i] = color;
+    this.life[i] = this.maxLife[i] = Math.max(1, Math.min(65535, Math.round(life)));
     this.rest[i] = 0;
+    this.spin[i] = 0;
+    this.spinRate[i] = 0;
     return true;
+  }
+
+  spawnGrain(x: number, y: number, vx: number, vy: number, mat: number, life: number): boolean {
+    return this.spawn(PK.Grain, x, y, vx, vy, life, mat);
+  }
+
+  /** Live particles of one kind (tests, HUD). */
+  count(kind: number): number {
+    let c = 0;
+    for (let i = 0; i < this.n; i++) if (this.kind[i] === kind) c++;
+    return c;
   }
 
   private removeAt(i: number): void {
     const l = --this.n;
     this.x[i] = this.x[l];
     this.y[i] = this.y[l];
+    this.px[i] = this.px[l];
+    this.py[i] = this.py[l];
     this.vx[i] = this.vx[l];
     this.vy[i] = this.vy[l];
-    this.mat[i] = this.mat[l];
+    this.kind[i] = this.kind[l];
+    this.aux[i] = this.aux[l];
+    this.color[i] = this.color[l];
     this.life[i] = this.life[l];
+    this.maxLife[i] = this.maxLife[l];
     this.rest[i] = this.rest[l];
+    this.spin[i] = this.spin[l];
+    this.spinRate[i] = this.spinRate[l];
     this.crowd[i] = this.crowd[l];
   }
 
-  /** Radial blast impulse: velocity += strength * falloff along (p - c). */
-  impulse(cx: number, cy: number, radius: number, strength: number): void {
-    const r2 = radius * radius;
-    for (let i = 0; i < this.n; i++) {
-      const dx = this.x[i] - cx;
-      const dy = this.y[i] - cy;
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= r2) continue;
-      const d = Math.sqrt(d2) + 1;
-      const k = (strength * (1 - d / radius)) / d;
-      this.vx[i] += dx * k;
-      this.vy[i] += dy * k - strength * 0.2;
-      this.rest[i] = 0;
+  /**
+   * Explosion: write a radial wind of peak `strength` (cells/s) into the air
+   * field around (cx, cy). Particles pick it up by sampling their own cell, so
+   * the cost is the blast's area, not the particle count, however many
+   * explosions land in one tick.
+   */
+  blast(cx: number, cy: number, radius: number, strength: number): void {
+    const f0x = Math.max(0, Math.floor((cx - radius) / FIELD_CELL));
+    const f1x = Math.min(FW - 1, Math.floor((cx + radius) / FIELD_CELL));
+    const f0y = Math.max(0, Math.floor((cy - radius) / FIELD_CELL));
+    const f1y = Math.min(FH - 1, Math.floor((cy + radius) / FIELD_CELL));
+    for (let fy = f0y; fy <= f1y; fy++) {
+      for (let fx = f0x; fx <= f1x; fx++) {
+        const dx = (fx + 0.5) * FIELD_CELL - cx;
+        const dy = (fy + 0.5) * FIELD_CELL - cy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d >= radius) continue;
+        const c = fy * FW + fx;
+        const k = (strength * (1 - d / radius)) / (d + 1);
+        this.airX[c] += dx * k;
+        this.airY[c] += dy * k - strength * 0.25 * (1 - d / radius); // blasts lift
+        if (!this.airLive[c]) {
+          this.airLive[c] = 1;
+          this.airCells.push(c);
+        }
+      }
     }
   }
 
-  step(col: Collider, dt: number, onSettle?: (x: number, y: number, mat: number) => void): void {
+  /** Decay the air field; cells that fall quiet leave the live list. */
+  private decayAir(): void {
+    const next = this.airNext;
+    next.length = 0;
+    for (const c of this.airCells) {
+      const ax = (this.airX[c] *= AIR_DECAY);
+      const ay = (this.airY[c] *= AIR_DECAY);
+      if (ax * ax + ay * ay < AIR_MIN * AIR_MIN) {
+        this.airX[c] = this.airY[c] = 0;
+        this.airLive[c] = 0;
+      } else next.push(c);
+    }
+    this.airNext = this.airCells;
+    this.airCells = next;
+  }
+
+  step(col: Collider, dt: number, hooks: ParticleHooks = {}): void {
     const n = this.n;
-    const { x, y, vx, vy } = this;
+    const { x, y, vx, vy, kind } = this;
     const t = col.terrain;
 
-    // 1. Integrate.
+    // 1. Integrate (per-kind tables gathered by index).
     const g = GRAVITY * dt;
     for (let i = 0; i < n; i++) {
-      vy[i] = Math.min(MAX_SPEED, vy[i] + g);
-      vx[i] = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, vx[i] * 0.998));
+      const k = kind[i];
+      const d = K_DRAG[k];
+      const ny = (vy[i] + g * K_GRAV[k]) * d;
+      const nx = vx[i] * d;
+      vy[i] = ny > MAX_SPEED ? MAX_SPEED : ny < -MAX_SPEED ? -MAX_SPEED : ny;
+      vx[i] = nx > MAX_SPEED ? MAX_SPEED : nx < -MAX_SPEED ? -MAX_SPEED : nx;
     }
 
-    // 2. Grain fields on the coarse grid: count and momentum. Crowded grains
-    //    blend toward their cell's mean velocity (PIC-style), so a landing
-    //    sends a deceleration wave up through the falling mass instead of
-    //    grains passing through each other; and they are pushed down the
-    //    density gradient (pressure without any neighbour search).
+    // 2. Fields. Massive kinds build count + momentum; everyone samples.
     for (let i = 0; i < n; i++) {
+      if (!K_MASS[kind[i]]) continue;
       const c = fieldIndex(x[i], y[i]);
       if (c < 0) continue;
       if (density[c]++ === 0) touched.push(c);
       momX[c] += vx[i];
       momY[c] += vy[i];
     }
+    const airAny = this.airCells.length > 0;
     for (let i = 0; i < n; i++) {
       const c = fieldIndex(x[i], y[i]);
       if (c < 0) continue;
+      const kd = kind[i];
       const k = density[c];
-      this.crowd[i] = k > CROWD ? 1 : 0;
-      if (k >= PIC_MIN) {
-        vx[i] += (momX[c] / k - vx[i]) * PIC_BLEND;
-        vy[i] += (momY[c] / k - vy[i]) * PIC_BLEND;
+      if (K_MASS[kd]) {
+        this.crowd[i] = k > CROWD ? 1 : 0;
+        if (k >= PIC_MIN) {
+          vx[i] += (momX[c] / k - vx[i]) * PIC_BLEND;
+          vy[i] += (momY[c] / k - vy[i]) * PIC_BLEND;
+        }
+        if (k > CROWD) {
+          // Pressure from the gradient of *excess* density, clamped to about
+          // one tick of gravity: it can separate overlapping grains and hold
+          // a pile up, but can never inject more energy than gravity removes.
+          const fx = c % FW;
+          const ex = (j: number) => (density[j] > CROWD ? density[j] - CROWD : 0);
+          const e = k - CROWD;
+          const l = fx > 0 ? ex(c - 1) : e;
+          const r = fx < FW - 1 ? ex(c + 1) : e;
+          const u = c >= FW ? ex(c - FW) : e;
+          const d = c + FW < density.length ? ex(c + FW) : e;
+          const px = (l - r) * PRESSURE * dt;
+          const py = (u - d) * PRESSURE * dt;
+          vx[i] += px > PUSH_MAX ? PUSH_MAX : px < -PUSH_MAX ? -PUSH_MAX : px;
+          vy[i] += py > PUSH_MAX ? PUSH_MAX : py < -PUSH_MAX ? -PUSH_MAX : py;
+        }
+      } else if (k > 0) {
+        // Light particles ride the local flow of the mass field.
+        const a = K_ADVECT[kd];
+        if (a > 0) {
+          vx[i] += (momX[c] / k - vx[i]) * a;
+          vy[i] += (momY[c] / k - vy[i]) * a;
+        }
       }
-      if (k <= CROWD) continue;
-      // Pressure from the gradient of *excess* density, clamped to about one
-      // tick of gravity: it can separate overlapping grains and hold a pile
-      // up, but can never inject more energy than gravity removes.
-      const fx = c % FW;
-      const ex = (j: number) => (density[j] > CROWD ? density[j] - CROWD : 0);
-      const e = k - CROWD;
-      const l = fx > 0 ? ex(c - 1) : e;
-      const r = fx < FW - 1 ? ex(c + 1) : e;
-      const u = c >= FW ? ex(c - FW) : e;
-      const d = c + FW < density.length ? ex(c + FW) : e;
-      const px = (l - r) * PRESSURE * dt;
-      const py = (u - d) * PRESSURE * dt;
-      vx[i] += px > PUSH_MAX ? PUSH_MAX : px < -PUSH_MAX ? -PUSH_MAX : px;
-      vy[i] += py > PUSH_MAX ? PUSH_MAX : py < -PUSH_MAX ? -PUSH_MAX : py;
+      if (airAny && this.airLive[c]) {
+        const ax = this.airX[c];
+        const ay = this.airY[c];
+        const a = K_AIR[kd];
+        vx[i] += (ax - vx[i]) * a;
+        vy[i] += (ay - vy[i]) * a;
+        if (ax * ax + ay * ay > AIR_WAKE * AIR_WAKE) this.rest[i] = 0;
+      }
     }
     for (const c of touched) {
       density[c] = 0;
@@ -237,13 +398,31 @@ export class Grains {
       momY[c] = 0;
     }
     touched.length = 0;
+    this.decayAir();
 
-    // 3 + 4. Sweep, respond, settle.
+    // 3 + 4. Sweep, respond, per-kind contact behaviour.
     let i = 0;
     while (i < this.n) {
+      const kd = kind[i];
+      const mode = K_CONTACT[kd];
       let px = x[i];
       let py = y[i];
+      this.px[i] = px;
+      this.py[i] = py;
+      if (mode === C_RIGID && this.rest[i]) {
+        // A resting gib costs one support test until something disturbs it.
+        if (t.isSolid(Math.floor(px), Math.floor(py) + 1)) {
+          if (--this.life[i] === 0) this.removeAt(i);
+          else i++;
+          continue;
+        }
+        this.rest[i] = 0;
+      }
       if (t.isSolid(Math.floor(px), Math.floor(py))) {
+        if (mode !== C_SETTLE && mode !== C_RIGID) {
+          this.removeAt(i); // cosmetic and buried: gone
+          continue;
+        }
         // Buried by a deposit (grains landing in a dense block overlap the
         // cells their neighbours just settled into): move to the nearest free
         // cell. Rare and bounded, so a small ring search is fine.
@@ -253,8 +432,6 @@ export class Grains {
         }
         px = free.x + 0.5;
         py = free.y + 0.5;
-        x[i] = px;
-        y[i] = py;
       }
       col.sweep(px, py, vx[i] * dt, vy[i] * dt, hit);
       px = hit.x;
@@ -262,38 +439,67 @@ export class Grains {
       x[i] = px;
       y[i] = py;
       if (hit.hit) {
-        vel.x = vx[i];
-        vel.y = vy[i];
-        contact(vel, hit.nx, hit.ny, GRAIN_E, GRAIN_MU);
-        vx[i] = vel.x;
-        vy[i] = vel.y;
-      }
-      // Resting = supported from below and slower than a couple of ticks of
-      // gravity (a resting body re-gains g*dt every tick, so a stricter
-      // threshold would make resting contact jitter forever).
-      const cx = Math.floor(px);
-      const cy = Math.floor(py);
-      const supported = t.isSolid(cx, cy + 1);
-      // Inside a packed crowd, residual pressure jitter is not motion: such a
-      // grain is part of a static pile and may settle at a looser threshold.
-      const settleV = this.crowd[i] ? SETTLE_SPEED * CROWD_SETTLE : SETTLE_SPEED;
-      const slow = vx[i] * vx[i] + vy[i] * vy[i] < settleV * settleV;
-      this.rest[i] = supported && slow ? this.rest[i] + 1 : 0;
-      if (this.rest[i] >= SETTLE_TICKS) {
-        // Come to rest: project onto the lattice (one bounded walk, at settle
-        // time only) and become terrain.
-        const p = projectRest(t, cx, cy, MAT_LOOSE[this.mat[i]], free);
-        if (p === SETTLED) {
-          onSettle?.(free.x, free.y, this.mat[i]);
+        if (mode === C_STAIN) {
+          hooks.stain?.(hit.cx, hit.cy);
           this.removeAt(i);
           continue;
         }
-        if (p === PARTIAL) {
-          // Long way down to a stable spot: carry on from where the walk got
-          // to next tick, so each tick's work stays bounded.
-          x[i] = free.x + 0.5;
-          y[i] = free.y + 0.5;
-          this.rest[i] = SETTLE_TICKS - 1;
+        vel.x = vx[i];
+        vel.y = vy[i];
+        const jn = contact(vel, hit.nx, hit.ny, K_E[kd], K_MU[kd]);
+        vx[i] = vel.x;
+        vy[i] = vel.y;
+        if (mode === C_SPENT && vel.x * vel.x + vel.y * vel.y < SPARK_DIE * SPARK_DIE) {
+          this.removeAt(i);
+          continue;
+        }
+        if (mode === C_RIGID) {
+          // Tumble in proportion to how hard it struck; hard hits splash blood.
+          this.spinRate[i] = (hash01(i, this.life[i]) - 0.5) * Math.min(0.5, jn / 400);
+          if (jn > 90 && this.aux[i] !== 0) {
+            for (let b = 0; b < 2; b++) this.spawn(PK.Blood, px, py, (hash01(i, b) - 0.5) * jn * 0.4, -jn * 0.15, 48);
+          }
+          if (hit.ny < -0.5 && vel.x * vel.x + vel.y * vel.y < 20 * 20) {
+            this.rest[i] = 1;
+            vx[i] = vy[i] = 0;
+            this.spin[i] = Math.round(this.spin[i]); // settle flat on a quarter turn
+          }
+        }
+      }
+      if (mode === C_RIGID) {
+        const sp = Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]);
+        this.spin[i] += this.spinRate[i] * sp * dt;
+        // Fast meat leaves a blood trail.
+        if (sp > 120 && this.aux[i] !== 0 && (this.life[i] & 1) === 0) this.spawn(PK.Blood, px, py, vx[i] * 0.1, vy[i] * 0.1, 48);
+      }
+      if (mode === C_SETTLE) {
+        // Resting = supported from below and slower than a couple of ticks of
+        // gravity (a resting body re-gains g*dt every tick, so a stricter
+        // threshold would make resting contact jitter forever). Inside a
+        // packed crowd, residual pressure jitter is not motion: such a grain
+        // is part of a static pile and may settle at a looser threshold.
+        const cx = Math.floor(px);
+        const cy = Math.floor(py);
+        const supported = t.isSolid(cx, cy + 1);
+        const settleV = this.crowd[i] ? SETTLE_SPEED * CROWD_SETTLE : SETTLE_SPEED;
+        const slow = vx[i] * vx[i] + vy[i] * vy[i] < settleV * settleV;
+        this.rest[i] = supported && slow ? this.rest[i] + 1 : 0;
+        if (this.rest[i] >= SETTLE_TICKS) {
+          // Come to rest: project onto the lattice (one bounded walk, at
+          // settle time only) and become terrain.
+          const p = projectRest(t, cx, cy, MAT_LOOSE[this.aux[i]], free);
+          if (p === SETTLED) {
+            hooks.settle?.(free.x, free.y, this.aux[i]);
+            this.removeAt(i);
+            continue;
+          }
+          if (p === PARTIAL) {
+            // Long way down to a stable spot: carry on from where the walk
+            // got to next tick, so each tick's work stays bounded.
+            x[i] = free.x + 0.5;
+            y[i] = free.y + 0.5;
+            this.rest[i] = SETTLE_TICKS - 1;
+          }
         }
       }
       if (py >= WORLD_H) {
@@ -301,16 +507,16 @@ export class Grains {
         continue;
       }
       if (--this.life[i] === 0) {
-        // Out of time: always conserve material. Move to a free cell if
-        // buried, then drop onto the support below and deposit there.
-        if (onSettle) {
-          let fx = cx;
-          let fy = cy;
+        if (mode === C_SETTLE && hooks.settle) {
+          // Out of time: always conserve material. Move to a free cell if
+          // buried, then drop onto the support below and deposit there.
+          let fx = Math.floor(px);
+          let fy = Math.floor(py);
           if (t.isSolid(fx, fy) && nearestAir(t, fx, fy, free)) {
             fx = free.x;
             fy = free.y;
           }
-          dropToSupport(t, fx, fy, this.mat[i], onSettle);
+          dropToSupport(t, fx, fy, this.aux[i], hooks.settle);
         }
         this.removeAt(i);
         continue;
@@ -318,6 +524,15 @@ export class Grains {
       i++;
     }
   }
+}
+
+/** Cheap deterministic hash to [0, 1) for cosmetic variation inside the step. */
+function hash01(a: number, b: number): number {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x7f4a7c15, 0xc2b2ae35);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return (h >>> 0) / 4294967296;
 }
 
 function fieldIndex(x: number, y: number): number {
@@ -386,7 +601,7 @@ export function rubbleOf(mat: number): number {
  * state, same seed), so the shower and the collapse cost zero bandwidth.
  */
 export function releaseCarve(
-  grains: Grains,
+  grains: Particles,
   removed: number[],
   detached: number[],
   cx: number,
@@ -406,7 +621,7 @@ export function releaseCarve(
       const dy = y - cy;
       const d = Math.sqrt(dx * dx + dy * dy) + 1;
       const sp = rng.range(70, 260);
-      grains.spawn(x, y, (dx / d) * sp + rng.range(-40, 40), (dy / d) * sp - rng.range(60, 170), rubbleOf(removed[j + 2]), 240);
+      grains.spawnGrain(x, y, (dx / d) * sp + rng.range(-40, 40), (dy / d) * sp - rng.range(60, 170), rubbleOf(removed[j + 2]), 240);
     }
   }
   // Collapsing material starts nearly at rest and just falls.
@@ -415,15 +630,15 @@ export function releaseCarve(
   for (let j = 0; j < detached.length; j += 3) {
     const vx = rng.range(-6, 6);
     const vy = rng.range(0, 12);
-    if (!grains.spawn(detached[j] + 0.5, detached[j + 1] + 0.5, vx, vy, detached[j + 2], 600)) {
+    if (!grains.spawnGrain(detached[j] + 0.5, detached[j + 1] + 0.5, vx, vy, detached[j + 2], 600)) {
       overflow?.(detached[j], detached[j + 1], detached[j + 2]);
     }
   }
 }
 
 /** Gold spilled by a dying clone. Mirrored by clients from the kill record's seed. */
-export function spillGold(grains: Grains, x: number, y: number, vx: number, vy: number, count: number, rng: Rng): void {
+export function spillGold(grains: Particles, x: number, y: number, vx: number, vy: number, count: number, rng: Rng): void {
   for (let i = 0; i < count; i++) {
-    grains.spawn(x, y, vx * 0.5 + rng.range(-110, 110), vy * 0.5 + rng.range(-230, -50), Mat.Gold, 240);
+    grains.spawnGrain(x, y, vx * 0.5 + rng.range(-110, 110), vy * 0.5 + rng.range(-230, -50), Mat.Gold, 240);
   }
 }

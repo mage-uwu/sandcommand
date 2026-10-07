@@ -6,6 +6,7 @@ import { WEAPONS, WeaponId } from '../shared/weapons.ts';
 import type { Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
+import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE, gunMuzzle } from './sprites.ts';
 
 const MINI_SCALE = 8;
@@ -36,10 +37,6 @@ function bloodied(c: number, stain: number): number {
   return (255 << 24) | (nb << 16) | (ng << 8) | nr;
 }
 
-function rgbCss(c: number, a = 1): string {
-  return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
-}
-
 export class Renderer {
   readonly ctx: CanvasRenderingContext2D;
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
@@ -50,6 +47,7 @@ export class Renderer {
   private miniImage: ImageData;
   private miniPixels: Uint32Array;
   readonly sprites = new SpriteCache();
+  private readonly particleLayer = new ParticleLayer();
   zoom = 3;
   camX = WORLD_W / 2;
   camY = WORLD_H / 3;
@@ -99,7 +97,7 @@ export class Renderer {
     const ox = (ci % CHUNKS_X) << CHUNK_SHIFT;
     const oy = Math.floor(ci / CHUNKS_X) << CHUNK_SHIFT;
     const px = this.chunkPixels;
-    const stain = game.blood.stain;
+    const stain = game.stain;
     for (let y = 0; y < CHUNK; y++) {
       const wy = oy + y;
       const row = wy * WORLD_W + ox;
@@ -226,14 +224,6 @@ export class Renderer {
       }
     }
 
-    // Grains in flight (debris, collapsing sand, spilled gold).
-    const d = game.grains;
-    for (let i = 0; i < d.n; i++) {
-      const [r, gg, bb] = MAT_COLOR[d.mat[i]];
-      ctx.fillStyle = `rgb(${r},${gg},${bb})`;
-      ctx.fillRect(Math.floor(d.x[i]), Math.floor(d.y[i]), 1, 1);
-    }
-
     // Remote clones.
     const views = game.remoteViews();
     for (const v of views) {
@@ -250,7 +240,12 @@ export class Renderer {
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now);
     }
 
-    this.drawGibs(game, alpha);
+    // Every particle the field engine owns (grains, sparks, flames, smoke,
+    // dust, blood, gibs): one pixel buffer covering the view, one upload.
+    const lx = Math.floor(camX - halfW) - 1;
+    const ly = Math.floor(camY - halfH) - 1;
+    this.particleLayer.render(game.particles, this.sprites, alpha, lx, ly, Math.ceil(halfW * 2) + 3, Math.ceil(halfH * 2) + 3);
+    ctx.drawImage(this.particleLayer.canvas, lx, ly);
 
     // Projectiles.
     const p = game.projectiles;
@@ -268,22 +263,12 @@ export class Renderer {
       } else if (k === 1) {
         ctx.fillStyle = '#d8d8d8';
         ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
-        game.fx.spawn(x, y, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 0.6, 0x9a9a9a, -0.05, 1);
       } else {
         ctx.fillStyle = '#4a5a32';
         ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
         ctx.fillStyle = (now / 120) % 2 < 1 ? '#ff4040' : '#401010';
         ctx.fillRect(x - 0.5, y - 2.5, 1, 1);
       }
-    }
-
-    // Cosmetic particles.
-    const f = game.fx;
-    for (let i = 0; i < f.n; i++) {
-      const a = Math.max(0, f.life[i] / f.maxLife[i]);
-      ctx.fillStyle = rgbCss(f.color[i], a);
-      const s = f.size[i];
-      ctx.fillRect(f.x[i] - s / 2, f.y[i] - s / 2, s, s);
     }
 
     // Explosion flashes.
@@ -443,23 +428,6 @@ export class Renderer {
     }
   }
 
-  private drawGibs(game: Game, alpha: number): void {
-    const ctx = this.ctx;
-    const g = game.gibs;
-    for (let i = 0; i < g.n; i++) {
-      const x = g.px[i] + (g.x[i] - g.px[i]) * alpha;
-      const y = g.py[i] + (g.y[i] - g.py[i]) * alpha;
-      const rot = ((Math.round(g.spin[i]) % 4) + 4) % 4;
-      const c = this.sprites.gib(g.team[i], g.piece[i], rot);
-      ctx.globalAlpha = Math.min(1, g.life[i]);
-      ctx.drawImage(c, Math.floor(x - c.width / 2), Math.floor(y - c.height / 2));
-    }
-    ctx.globalAlpha = 1;
-    const b = game.blood;
-    ctx.fillStyle = '#8a0c0c';
-    for (let i = 0; i < b.n; i++) ctx.fillRect(Math.floor(b.x[i]), Math.floor(b.y[i]), 1, 1);
-  }
-
   private drawHud(game: Game, input: InputState, net: Net, views: RemoteView[], dpr: number, W: number, H: number): void {
     const ctx = this.ctx;
     const s = dpr;
@@ -501,7 +469,7 @@ export class Renderer {
       `${game.room}  ${game.players.size}/64 players`,
       `ping ${Math.round(net.rttMs)} ms   in ${net.kbIn.toFixed(1)} KB/s`,
       `tick ${game.lastServerTick}  fps ${Math.round(this.fps)}`,
-      `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  grains ${game.grains.n}  gibs ${game.gibs.n}`,
+      `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  particles ${game.particles.n} (drawn ${this.particleLayer.drawn})`,
     ];
     lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (20 + i * 15) * s));
 

@@ -171,7 +171,7 @@ export function gunMuzzle(weapon: number): number {
   return GUNS[weapon]?.muzzle ?? 8;
 }
 
-// Gib pieces (center-anchored), indexed by the GIB_* ids in gibs.ts.
+// Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
 const GIBS: Grid[] = [
   ['.KKK.', 'KLLHK', 'KHVVK', '.KKK.'], // helmet with visor
   ['KTT', 'TTt', 'Ttt'], // torso chunk
@@ -327,6 +327,21 @@ export class SpriteCache {
       this.guns.set(key, g);
     }
     return g;
+  }
+
+  private gibData = new Map<string, { w: number; h: number; data: Uint32Array }>();
+
+  /** Raw ABGR pixels of a gib piece, for blitting into the particle buffer. */
+  gibPixels(team: number, piece: number, rot: number): { w: number; h: number; data: Uint32Array } {
+    const key = `${team}|${piece}|${rot}`;
+    let d = this.gibData.get(key);
+    if (!d) {
+      const c = this.gib(team, piece, rot);
+      const img = c.getContext('2d')!.getImageData(0, 0, c.width, c.height);
+      d = { w: c.width, h: c.height, data: new Uint32Array(img.data.buffer.slice(0)) };
+      this.gibData.set(key, d);
+    }
+    return d;
   }
 
   /** Gib piece in one of four 90° orientations. */

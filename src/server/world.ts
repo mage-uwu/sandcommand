@@ -26,7 +26,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { Grains, applyCarve, carveExtent, dropToSupport, releaseCarve, spillGold } from '../shared/particles.ts';
+import { Particles, applyCarve, carveExtent, dropToSupport, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -129,7 +129,8 @@ const SNAPSHOT_SCRATCH = new Uint8Array(CHUNK * CHUNK);
  */
 export class World {
   readonly terrain = new Terrain();
-  readonly grains = new Grains(32768);
+  /** Server particles are grains only: they are authoritative terrain changes. */
+  readonly grains = new Particles(32768);
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
   readonly projectiles = new Projectiles(4096);
@@ -273,6 +274,8 @@ export class World {
     list.push((x & (CHUNK - 1)) | ((y & (CHUNK - 1)) << 6), m);
   };
 
+  private readonly hooks = { settle: this.deposit };
+
   /** Collapse beyond grain capacity drops straight down instead of vanishing. */
   private overflow = (x: number, y: number, m: number): void => {
     dropToSupport(this.terrain, x, y, m, this.deposit);
@@ -399,8 +402,8 @@ export class World {
         this.carve(x, y, def.carveR, def.coreR, def.debris);
       }
       if (def.splashR > 0) {
-        // Blast wave through every grain already in flight nearby.
-        this.grains.impulse(x, y, def.splashR * 1.6, BLAST_IMPULSE);
+        // Blast wave into the air field: moves every grain already in flight nearby.
+        this.grains.blast(x, y, def.splashR * 1.6, BLAST_IMPULSE);
         for (const p of this.players) {
           if (!p || !p.alive) continue;
           const dx = p.cx - x;
@@ -525,7 +528,7 @@ export class World {
     // clearance, so the field stays conservative for them.
     this.field.update();
     this.projectiles.step(this.collider, DT, this.segmentActor, this.onProjEnd);
-    this.grains.step(this.collider, DT, this.deposit);
+    this.grains.step(this.collider, DT, this.hooks);
     this.flushPixels();
 
     const t1 = performance.now();

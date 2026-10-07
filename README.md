@@ -64,11 +64,19 @@ workers. The tests check every kernel against a naive per-cell reference.
 
 ### Physics: continuous vectors and fields, not cellular automata
 
-Nothing moves through the world as a per-cell automaton. Grains (debris,
-collapsing sand, spilled gold), projectiles, gibs and blood all have float
-positions and velocities. They are stepped with field queries, so a tick
-costs O(N) in the things that are moving plus O(area that changed). It never
-scales with the size of the grid, and it doesn't snowball.
+Nothing moves through the world as a per-cell automaton, and there is no
+separate effects system. **One particle engine** (`src/shared/particles.ts`)
+computes everything that flies: terrain grains (debris, collapsing sand,
+spilled gold), sparks, flames, smoke, dust, blood and gibs. They are all one
+structure-of-arrays particle with a *kind*. A row of per-kind parameters sets
+gravity or buoyancy, drag, restitution, friction, how strongly the kind
+couples to each field, and what happens on contact: grains become terrain,
+blood stains the surface, gibs tumble and rest, sparks die once spent. One
+step advances every kind, so a tick costs O(N) in the things that are moving
+plus O(field cells touched). It never scales with the size of the grid, and
+it doesn't snowball. The server runs the same engine with grains only.
+Clients run every kind in one instance, and draw them all into one pixel
+buffer.
 
 | Piece | File | What it does |
 | --- | --- | --- |
@@ -76,8 +84,10 @@ scales with the size of the grid, and it doesn't snowball.
 | **Swept collider** | `src/shared/field.ts` | Sphere-traces through the distance field (one lookup per clearance-sized jump) and only drops to exact bitplane tests within about one cell of a surface. 1.6 probes per move against 10.2 for per-cell marching. |
 | **Contact normals** | `Terrain.normalAt` | Gradient of local occupancy (eight masked popcounts over a 5×5 window). Falls back to the reversed motion direction when the gradient doesn't oppose the motion, for example in pits. |
 | **Contact model** | `contact()` | Restitution along the normal and Coulomb friction along the tangent, shared by grains, gibs and grenades. A body rests on a slope while `tan θ ≤ μ(1+e)`, so sliding, piling and an angle of repose come out of one rule. |
-| **Grain fields** | `src/shared/particles.ts` | Grains splat count and momentum into the coarse grid. Crowded grains blend toward the local mean velocity (PIC-style), so a landing sends a deceleration wave up through the falling mass. They're also pushed down the gradient of *excess* density, clamped to about one tick of gravity: pressure with no neighbour search, which can't add energy. |
-| **Blast waves** | `Grains/Gibs/Blood.impulse` | Explosions push everything loose that is already in flight. |
+| **Mass field** | `src/shared/particles.ts` | Grains splat count and momentum into the coarse grid. Crowded grains blend toward the local mean velocity (PIC-style), so a landing sends a deceleration wave up through the falling mass. They're also pushed down the gradient of *excess* density, clamped to about one tick of gravity: pressure with no neighbour search, which can't add energy. |
+| **Flow advection** | `Particles.step` | Light kinds (smoke, dust, flame, blood) blend toward that field's mean velocity, so smoke caught in a falling sand stream is dragged down with it. |
+| **Air field** | `Particles.blast` | An explosion writes a radial wind into a sparse coarse field that decays over about 8 ticks. Every particle samples its own cell, with per-kind coupling (smoke billows, heavy grains barely move). Many explosions in one tick cost O(blast area), not O(particles × explosions). |
+| **Pixel buffer** | `src/client/particle-layer.ts` | Every particle, gib sprites included, is written straight into one u32 buffer covering the view, uploaded once per frame, and scaled with the terrain's nearest-neighbour zoom. No per-particle canvas calls. |
 | **Projectiles** | `src/shared/kernels.ts` | Same swept collider. Hits on clones use a continuous segment-vs-AABB slab test along the swept path, through the actor spatial hash, so a bullet costs a handful of probes at any speed. |
 
 The data layout is still structure-of-arrays (parallel `Float32Array`s). Each
@@ -188,7 +198,7 @@ on the world's pixel grid.
 
 Every death gibs the clone. The kill record (`R_KILL`, 18 B) carries position,
 velocity, overkill and a seed. Each client bursts the clone into helmet,
-torso, limbs, jetpack and meat (`src/client/gibs.ts`). The parts tumble,
+torso, limbs, jetpack and meat (`gibBurst` in `src/client/effects.ts`): gib particles in the shared engine. The parts tumble,
 bounce and leave blood trails, and blood droplets stain the terrain in a
 client-only stain layer that the chunk rasterizer blends in. Gibs are
 cosmetic, but the gold a clone spills is real. The server throws it from the
@@ -202,19 +212,26 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.83 ms  p99 2.3 ms      (grains, collapses, distance field included)
+sim       avg 0.86 ms  p99 2.6 ms      (grains, collapses, air field, distance field included; 3000 ticks)
 replicate avg 0.98 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 26.3 KB/s; room egress 1.65 MB/s
+downstream per client: avg 25.9 KB/s; room egress 1.62 MB/s
 ```
 
 `npm run bench:physics`:
 
 ```
-1) grain step cost vs N        N=1k 546 ns, 4k 333 ns, 16k 379 ns, 64k 205 ns per grain-tick
-2) probes per swept move       sphere-traced 1.63 vs per-cell marching 10.18 (6.3x fewer)
-3) distance-field update       ~90-120 us per carve, ~470 of 131,072 field cells recomputed
-4) 400x120 sand slab undercut  46,735 grains released, all 46,735 deposited, worst tick ~25 ms
+1)  grain step cost vs N        N=1k 404 ns, 4k 265 ns, 16k 328 ns, 64k 158 ns per grain-tick
+1b) all 7 kinds mixed           N=1k 483 ns, 4k 391 ns, 16k 172 ns, 64k 148 ns per particle-tick
+1c) E explosions, 32k particles E=1 0.49 vs 0.009 ms, E=8 2.9 vs 0.14 ms, E=32 3.7 vs 0.30 ms
+                                (per-explosion scan vs air-field writes)
+2)  probes per swept move       sphere-traced 1.63 vs per-cell marching 10.18 (6.3x fewer)
+3)  distance-field update       ~90-120 us per carve, ~470 of 131,072 field cells recomputed
+4)  400x120 sand slab undercut  46,735 grains released, all 46,735 deposited, worst tick ~25 ms
 ```
+
+In the browser (headless Chromium, software rendering on a shared 4-core
+box), 40,000 particles of every kind on screen render at a median 16.7 ms
+frame (60 fps), with p95 at 33 ms.
 
 Per-grain cost is flat as N grows, so stepping scales linearly. The worst
 landslide tick includes the landing. Everyday collapses are a few hundred to
