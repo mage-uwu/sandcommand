@@ -24,6 +24,11 @@ describe('client-side prediction', () => {
       const rng = new Rng(9);
       let buttons = 0;
       let reconciles = 0;
+      // Authoritative body changes (respawn, a part torn off) legitimately
+      // correct the prediction once each; count them.
+      let bodyChanges = 0;
+      let lastMask = -1;
+      let wasAlive = false;
 
       for (now = 0; now < 900; now++) {
         if (rng.next() < 0.08) {
@@ -34,6 +39,9 @@ describe('client-side prediction', () => {
         game.localTick(buttons, aim, 0, (seq) => toServer.push({ at: now + latencyTicks, cmd: { seq, buttons, aim, weapon: 0 } }));
         while (toServer.length && toServer[0].at <= now) world.input(p.id, toServer.shift()!.cmd);
         world.step();
+        if (p.alive !== wasAlive || (p.alive && p.parts.mask !== lastMask)) bodyChanges++;
+        wasAlive = p.alive;
+        lastMask = p.parts.mask;
         while (toClient.length && toClient[0].at <= now) {
           const r = new Reader(toClient.shift()!.data);
           r.u8();
@@ -44,8 +52,9 @@ describe('client-side prediction', () => {
         }
       }
       expect(reconciles).toBeGreaterThan(500);
-      // Spawn and the first frames after it may correct; steady state must not.
-      expect(game.corrections).toBeLessThanOrEqual(2);
+      // Steady state must not correct: only the first frames and real body
+      // changes (spawn, death, a part torn off) may.
+      expect(game.corrections).toBeLessThanOrEqual(1 + bodyChanges);
     });
   }
 });

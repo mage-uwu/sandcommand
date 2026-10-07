@@ -131,6 +131,45 @@ embers) and is authoritative for the results.
   `[Debris]`, `[Fire]`, "was buried" and "burned". Self-inflicted particle
   damage is halved.
 
+### Modular bodies: sharpness, mass and wounds
+
+Clones are built from parts, Cortex Command style (`src/shared/body.ts`):
+head, torso, gun arm, off arm, two legs, plus a helmet, a vest and the
+jetpack. Each part has a region of the hitbox, a structural **integrity** and
+a **wound limit**. Armour covers a base part and is struck first.
+
+Every hit (bullet, shrapnel, thrown debris) carries an **energy** = mass ×
+sharpness × relative speed (`pmass`, `sharp` in the particle kind table, and
+`mass`, `sharp` on projectiles). Layer by layer, energy above a layer's
+integrity penetrates: the layer takes the hit's wound points and the rest of
+the energy carries on into the layer beneath. Energy below a layer's
+integrity is stopped there and only bruises. Burns, blast overpressure and
+hard landings don't need to penetrate: they go into the outermost layer
+(blasts hit every part at once, so limbs get blown clean off).
+
+| Hit | Energy | Result |
+| --- | --- | --- |
+| Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |
+| Shrapnel (0.4 × 1.0 × ~400) | ~160 | Stopped by armour; cuts limbs (integrity 30), so four fragments take a leg |
+| Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
+
+A part whose wounds reach its limit is **torn off**. The server broadcasts an
+`R_DETACH` record, and every client throws that part as a gib with a blood
+fountain. Losing the head or torso kills; the kill feed marks headshots.
+Otherwise the clone fights on, crippled, and both server and client
+prediction use the same `mobility()`:
+
+- one leg hobbles (55% speed, weaker jump); no legs crawls and only the
+  jetpack can lift it
+- no jetpack, no flight
+- no gun arm, no shooting or digging; no off arm, three times the spread and
+  slower recovery
+- open stumps bleed out, credited to whoever caused them
+
+The attached-part mask rides in every actor record (2 bytes), so sprites
+draw what's left: a bare head once the helmet is gone, a stripped chest, and
+stumps. Your own record also carries per-part health for the HUD paper doll.
+
 ### Falling sand
 
 Loose material (sand and rubble) needs support. A carve's full effect,
@@ -244,9 +283,9 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.91 ms  p99 3.4 ms      (grains, shrapnel, embers, body coupling, collapses; 3000 ticks)
+sim       avg 0.81 ms  p99 2.7 ms      (grains, shrapnel, embers, body parts, collapses; 3000 ticks)
 replicate avg 0.98 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 25.9 KB/s; room egress 1.62 MB/s
+downstream per client: avg 28.6 KB/s; room egress 1.79 MB/s
 ```
 
 `npm run bench:physics`:

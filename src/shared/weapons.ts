@@ -7,7 +7,9 @@ export const ProjKind = {
 export interface ProjDef {
   gravity: number; // multiplier on world gravity
   life: number; // ticks
-  damage: number; // direct-hit damage
+  damage: number; // wound points dealt to each body layer a direct hit penetrates
+  mass: number; // direct-hit penetration: energy = mass * sharp * relative speed
+  sharp: number;
   carveR: number; // terrain carve radius on detonation
   coreR: number; // radius that also breaks hard material
   splashR: number; // actor splash radius
@@ -17,9 +19,9 @@ export interface ProjDef {
 }
 
 export const PROJ: readonly ProjDef[] = [
-  { gravity: 0.15, life: 40, damage: 16, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0 },
-  { gravity: 0.2, life: 120, damage: 50, carveR: 20, coreR: 9, splashR: 34, splashDamage: 70, debris: 48, bounce: 0 },
-  { gravity: 1, life: 66, damage: 0, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45 },
+  { gravity: 0.15, life: 40, damage: 16, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0 },
+  { gravity: 0.2, life: 120, damage: 30, mass: 2, sharp: 0.6, carveR: 20, coreR: 9, splashR: 34, splashDamage: 70, debris: 48, bounce: 0 },
+  { gravity: 1, life: 66, damage: 0, mass: 0.6, sharp: 0.1, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45 },
 ];
 
 export const WeaponId = {

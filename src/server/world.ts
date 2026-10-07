@@ -1,4 +1,22 @@
 import { type Body, BTN_FIRE, newBody, stepBody } from '../shared/actor.ts';
+import {
+  BLEED_PER_STUMP,
+  type BodyState,
+  type Mobility,
+  PART_COUNT,
+  Part,
+  type StrikeResult,
+  harm,
+  has,
+  mobility,
+  newBodyState,
+  newStrike,
+  partAt,
+  partHealth,
+  resetBody,
+  strike,
+  stumps,
+} from '../shared/body.ts';
 import { Writer, rleEncode } from '../shared/codec.ts';
 import {
   ACTOR_H,
@@ -39,6 +57,7 @@ import {
   R_CARVE,
   R_CHAT,
   R_CHUNK,
+  R_DETACH,
   R_HIT,
   R_KILL,
   R_PIXELS,
@@ -69,6 +88,12 @@ export interface InputCmd {
 
 export class Player {
   readonly body: Body;
+  /** Modular body: which parts are attached and how wounded each is. */
+  readonly parts: BodyState = newBodyState();
+  readonly mob: Mobility = { legs: 2, jet: true, canFire: true, oneHanded: false };
+  /** Last attacker and weapon, so bleeding out credits whoever caused it. */
+  lastHitBy = 255;
+  lastWeapon = 255;
   alive = false;
   hp = ACTOR_MAX_HP;
   aimQ = 0;
@@ -353,18 +378,65 @@ export class World {
     return best;
   };
 
-  private damage(victim: Player, amount: number, attacker: number, weapon: number): void {
-    if (!victim.alive || amount <= 0) return;
-    const overkill = amount - victim.hp;
+  private readonly strikeScratch: StrikeResult = newStrike();
+
+  private facingLeft(p: Player): boolean {
+    return Math.cos(dequantizeAim(p.aimQ)) < 0;
+  }
+
+  /**
+   * Apply a resolved strike: tear off parts (broadcast so every client sees the
+   * limb fly), update what the body can still do, take HP, and kill outright
+   * if a vital part went.
+   */
+  private applyStrike(p: Player, res: StrikeResult, attacker: number, weapon: number, hx: number, hy: number): void {
+    if (res.detached.length) {
+      const b = p.body;
+      for (const part of res.detached) {
+        if (part === Part.Torso && res.vital) continue; // the whole clone gibs instead
+        const w = this.tmp.reset();
+        w.u8(R_DETACH);
+        w.u8(p.id);
+        w.u8(part);
+        w.u16(clampU16(hx));
+        w.u16(clampU16(hy + Y_BIAS));
+        // The part flies off away from the hit, plus the body's own motion.
+        const dx = hx - p.cx;
+        const dy = hy - p.cy;
+        const d = Math.sqrt(dx * dx + dy * dy) + 1;
+        w.i16(clampI16((b.vx - (dx / d) * 90 + this.rng.range(-40, 40)) * VEL_SCALE));
+        w.i16(clampI16((b.vy - (dy / d) * 90 - this.rng.range(60, 140)) * VEL_SCALE));
+        this.hits.push({ bytes: w.finish(), id: 0, x: hx, y: hy });
+      }
+      mobility(p.parts.mask, p.mob);
+      b.legs = p.mob.legs;
+      b.jet = p.mob.jet;
+    }
+    this.damage(p, res.hp, attacker, weapon, false, res.vital);
+  }
+
+  /**
+   * Take `amount` HP. `quiet` skips the hit record (bleeding). `fatal` kills
+   * regardless of HP (a vital part was torn off).
+   */
+  private damage(victim: Player, amount: number, attacker: number, weapon: number, quiet = false, fatal = false): void {
+    if (!victim.alive || (amount <= 0 && !fatal)) return;
+    const overkill = Math.max(0, amount - victim.hp) + (fatal ? 40 : 0);
     victim.hp -= amount;
-    const w = this.tmp.reset();
-    w.u8(R_HIT);
-    w.u8(victim.id);
-    w.u16(Math.max(0, Math.round(victim.cx)));
-    w.u16(Math.max(0, Math.round(victim.cy)) & 0xffff);
-    w.u8(Math.min(255, Math.round(amount)));
-    this.hits.push({ bytes: w.finish(), id: 0, x: victim.cx, y: victim.cy });
-    if (victim.hp > 0) return;
+    if (attacker !== victim.id || victim.lastHitBy === 255) {
+      victim.lastHitBy = attacker;
+      victim.lastWeapon = weapon;
+    }
+    if (!quiet && amount >= 0.5) {
+      const w = this.tmp.reset();
+      w.u8(R_HIT);
+      w.u8(victim.id);
+      w.u16(Math.max(0, Math.round(victim.cx)));
+      w.u16(Math.max(0, Math.round(victim.cy)) & 0xffff);
+      w.u8(Math.min(255, Math.round(amount)));
+      this.hits.push({ bytes: w.finish(), id: 0, x: victim.cx, y: victim.cy });
+    }
+    if (victim.hp > 0 && !fatal) return;
     victim.alive = false;
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
@@ -390,6 +462,7 @@ export class World {
     k.u8(Math.max(0, Math.min(255, Math.round(overkill))));
     k.u32(seed);
     k.u8(gold);
+    k.u16(victim.parts.mask); // what is left of the body to gib
     spillGold(this.grains, victim.cx, victim.cy, b.vx, b.vy, gold, new Rng(seed));
   }
 
@@ -398,7 +471,24 @@ export class World {
     const kind = pr.kind[i];
     const owner = pr.owner[i];
     const def = PROJ[kind];
-    if (actor >= 0) this.damage(this.players[actor]!, def.damage, owner, kind);
+    if (actor >= 0) {
+      // Direct hit: penetrate whichever part the projectile entered.
+      const v = this.players[actor]!;
+      const rvx = pr.vx[i] - v.body.vx;
+      const rvy = pr.vy[i] - v.body.vy;
+      const energy = def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy);
+      // Sample the part a little way in along the path, not on the box edge.
+      const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
+      const part = partAt(v.parts.mask, x - v.body.x + (pr.vx[i] / sp) * 2, y - v.body.y + (pr.vy[i] / sp) * 2, this.facingLeft(v));
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      strike(v.parts, part, energy, def.damage, res);
+      v.body.vx += (rvx * def.mass) / 8;
+      v.body.vy += (rvy * def.mass) / 8;
+      this.applyStrike(v, res, owner, kind, x, y);
+    }
     const seed = this.rng.nextU32();
     if (detonate) {
       if (def.carveR > 0 && (actor < 0 || kind !== ProjKind.Bullet)) {
@@ -417,8 +507,18 @@ export class World {
           const dy = p.cy - y;
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d < def.splashR) {
+            // Overpressure hits every part at once: armour soaks what it
+            // covers, limbs can be blown clean off.
             const selfScale = p.id === owner ? 0.5 : 1;
-            this.damage(p, def.splashDamage * (1 - d / def.splashR) * selfScale, owner, kind);
+            const amt = def.splashDamage * (1 - d / def.splashR) * selfScale;
+            const res = this.strikeScratch;
+            res.hp = 0;
+            res.detached.length = 0;
+            res.vital = false;
+            for (let part = 0; part < PART_COUNT; part++) {
+              if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+            }
+            this.applyStrike(p, res, owner, kind, x + (dx / (d + 1)) * Math.min(d, 6), y + (dy / (d + 1)) * Math.min(d, 6));
           }
         }
       }
@@ -447,7 +547,7 @@ export class World {
       p.gold += this.terrain.removedByMat[Mat.Gold];
       return;
     }
-    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread;
+    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * (p.mob.oneHanded ? 3 : 1);
     const vx = Math.cos(a) * def.speed + p.body.vx * 0.25;
     const vy = Math.sin(a) * def.speed + p.body.vy * 0.25;
     const id = this.nextProjId++;
@@ -481,6 +581,12 @@ export class World {
       b.vx = 0;
       b.vy = 0;
       b.fuel = 100;
+      resetBody(p.parts);
+      mobility(p.parts.mask, p.mob);
+      b.legs = p.mob.legs;
+      b.jet = p.mob.jet;
+      p.lastHitBy = 255;
+      p.lastWeapon = 255;
       p.hp = ACTOR_MAX_HP;
       p.alive = true;
       p.cooldown = 10;
@@ -513,14 +619,32 @@ export class World {
         continue;
       }
       const impact = stepBody(p.body, p.buttons, terrain, DT);
-      if (impact > FALL_DAMAGE_SPEED) this.damage(p, (impact - FALL_DAMAGE_SPEED) * 0.4, p.id, 255);
+      if (impact > FALL_DAMAGE_SPEED) {
+        // A hard landing hurts the legs first, the torso if there are none.
+        const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
+        const res = this.strikeScratch;
+        res.hp = 0;
+        res.detached.length = 0;
+        res.vital = false;
+        if (p.mob.legs > 0) {
+          harm(p.parts, Part.LegB, amt, res);
+          harm(p.parts, Part.LegF, amt, res);
+        } else harm(p.parts, Part.Torso, amt * 1.5, res);
+        this.applyStrike(p, res, p.id, 255, p.cx, p.body.y + 12);
+      }
       if (!p.alive) continue;
       if (p.body.y > WORLD_H) this.damage(p, 999, p.id, 255);
+      // Open stumps bleed; bleeding out credits whoever did it.
+      const n = stumps(p.parts.mask);
+      if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
+      if (!p.alive) continue;
       if (p.cooldown > 0) p.cooldown--;
-      if (p.alive && p.buttons & BTN_FIRE && p.cooldown === 0) {
+      // No gun arm, no shooting (or digging).
+      if (p.alive && p.mob.canFire && p.buttons & BTN_FIRE && p.cooldown === 0) {
         this.fire(p);
         p.firing = true;
-        p.cooldown = WEAPONS[p.weapon].cooldown;
+        // One-handed (off arm gone): slower to recover.
+        p.cooldown = Math.ceil(WEAPONS[p.weapon].cooldown * (p.mob.oneHanded ? 1.6 : 1));
       }
       p.camX = p.cx;
       p.camY = p.cy;
@@ -542,11 +666,21 @@ export class World {
       if (!p || !p.alive) continue;
       p.body.vx += actors.dvx[a];
       p.body.vy += actors.dvy[a];
-      const dmg = actors.dmg[a];
-      if (dmg > 0) {
-        const by = actors.dmgBy[a];
-        this.damage(p, by === p.id ? dmg * 0.5 : dmg, by === NO_OWNER ? p.id : by, actors.dmgWeapon[a]);
-      }
+    }
+    // Resolve every particle impact against the part of the body it struck.
+    for (let h = 0; h < actors.hitN; h++) {
+      const p = this.players[actors.id[actors.hitSlot[h]]];
+      if (!p || !p.alive) continue;
+      const by = actors.hitOwner[h] === NO_OWNER ? p.id : actors.hitOwner[h];
+      const self = by === p.id ? 0.5 : 1; // your own fragments hurt less
+      const part = partAt(p.parts.mask, actors.hitLx[h], actors.hitLy[h], this.facingLeft(p));
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      if (actors.hitBurn[h] > 0) harm(p.parts, part, actors.hitBurn[h] * self, res);
+      if (actors.hitEnergy[h] > 0) strike(p.parts, part, actors.hitEnergy[h] * self, actors.hitWound[h], res);
+      this.applyStrike(p, res, by, actors.hitWeapon[h], p.body.x + actors.hitLx[h], p.body.y + actors.hitLy[h]);
     }
     this.flushPixels();
 
@@ -573,6 +707,7 @@ export class World {
       w.u8(this.flagsOf(p));
       w.u8(Math.max(0, Math.ceil(p.hp)));
       w.u8(p.weapon);
+      w.u16(p.parts.mask);
     }
   }
 
@@ -590,7 +725,7 @@ export class World {
   private replicate(): void {
     this.encodeActors();
     const actorBytes = this.actorRecords.buf;
-    const ACTOR_REC = 14; // bytes per encoded actor, see encodeActors()
+    const ACTOR_REC = 16; // bytes per encoded actor, see encodeActors()
     const broadcast = this.broadcast.finish();
     const sendScores = this.tick % TICKS_PER_SCORE === 0;
     let scores: Uint8Array | null = null;
@@ -630,6 +765,8 @@ export class World {
       w.u8(p.weapon);
       w.u8(p.cooldown);
       w.u16(p.alive ? 0 : p.respawn);
+      w.u16(p.parts.mask);
+      for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
 
       // Entity interest: full-rate inside the view rect, radar blips outside.
       const vx0 = p.camX - VIEW_HALF_W - ENTITY_INTEREST_MARGIN;
@@ -783,6 +920,9 @@ export class World {
 }
 
 const TICKS_PER_SCORE = 30;
+/** Base parts (armour is reached through them) and their share of blast overpressure. */
+const PARTS_BASE = [true, true, true, true, true, true, false, false, true];
+const SPLASH_SHARE = [0.45, 0.55, 0.6, 0.6, 0.6, 0.6, 0, 0, 0.5];
 
 function clampU16(v: number): number {
   return Math.max(0, Math.min(65535, Math.round(v)));

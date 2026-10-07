@@ -10,7 +10,8 @@ import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { BLAST_IMPULSE, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { bloodSplat, bulletImpact, digDust, explosion, gibBurst, jetExhaust, muzzle, rocketTrail } from './effects.ts';
+import { bloodSplat, bulletImpact, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
+import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
 /** Remote actors are rendered this many ticks in the past for smooth interpolation. */
@@ -36,6 +37,7 @@ interface Snap {
   flags: number;
   hp: number;
   weapon: number;
+  parts: number;
 }
 
 export interface RemoteView {
@@ -47,6 +49,7 @@ export interface RemoteView {
   hp: number;
   weapon: number;
   moving: boolean;
+  parts: number; // attached-part mask (body.ts)
 }
 
 export interface FeedItem {
@@ -127,6 +130,10 @@ export class Game implements FrameHandler {
   readonly prevBody: Body = newBody(0, 0);
   alive = false;
   hp = 0;
+  /** Own body: attached-part mask and 0..100 health per part (HUD paper doll). */
+  parts = ALL_PARTS;
+  partHp: number[] = new Array(PART_COUNT).fill(100);
+  private readonly mob: Mobility = { legs: 2, jet: true, canFire: true, oneHanded: false };
   respawnTicks = 0;
   weapon = 0;
   cooldown = 0;
@@ -175,13 +182,14 @@ export class Game implements FrameHandler {
     });
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket) rocketTrail(this.particles, pr.x[i], pr.y[i]);
-    // Remote jetpacks.
+    // Remote jetpacks, and stumps dripping on maimed clones.
     for (const [, s] of this.snaps) {
       const last = s[s.length - 1];
-      if (last && last.flags & F_JET && last.flags & F_ALIVE) {
-        jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
-      }
+      if (!last || !(last.flags & F_ALIVE)) continue;
+      if (last.flags & F_JET) jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
+      if (last.parts !== ALL_PARTS) stumpDrip(this.particles, last.x, last.y, last.parts);
     }
+    if (this.alive && this.parts !== ALL_PARTS) stumpDrip(this.particles, this.body.x, this.body.y, this.parts);
     // Bodies in the engine so shrapnel stops in them and grains bounce off
     // them on screen too; only the server's results (damage, knockback) count.
     const actors = this.bodyField;
@@ -216,6 +224,8 @@ export class Game implements FrameHandler {
     this.alive = (s.flags & F_ALIVE) !== 0;
     this.hp = s.hp;
     this.respawnTicks = s.respawn;
+    this.parts = s.parts;
+    this.partHp = s.partHp;
     this.cooldown = s.cooldown;
     const b = this.body;
     const ack = this.ack;
@@ -231,6 +241,10 @@ export class Game implements FrameHandler {
     b.fuel = s.fuel;
     b.onGround = (s.flags & F_GROUND) !== 0;
     b.jetting = (s.flags & F_JET) !== 0;
+    // Predict with the body we actually have left (legs, jetpack).
+    mobility(s.parts, this.mob);
+    b.legs = this.mob.legs;
+    b.jet = this.mob.jet;
     if (!this.alive) {
       copyBody(this.prevBody, b);
       this.smoothX = this.smoothY = 0;
@@ -286,7 +300,7 @@ export class Game implements FrameHandler {
         x = b.x;
         y = b.y;
       }
-      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5 });
+      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5, parts: b.parts });
     }
     return out;
   }
@@ -303,7 +317,7 @@ export class Game implements FrameHandler {
       seen.add(a.id);
       let s = this.snaps.get(a.id);
       if (!s) this.snaps.set(a.id, (s = []));
-      s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon });
+      s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts });
       if (s.length > 12) s.shift();
       if (a.flags & F_FIRING && a.weapon === WeaponId.Digger) {
         digDust(this.particles, a.x + ACTOR_W / 2, a.y + 5, 0xa08060, 1);
@@ -372,6 +386,8 @@ export class Game implements FrameHandler {
     if (weapon === 255) text = `${vn} cratered`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
+    if (!has(k.parts, Part.Head)) text += ' (headshot)';
+    else if (!has(k.parts, Part.Torso)) text += ' (torn apart)';
     const color = victim === this.myId ? '#ff6060' : killer === this.myId ? '#80ff80' : '#e0e0e0';
     this.feed.push({ text, color, at: performance.now() });
     if (this.feed.length > 6) this.feed.shift();
@@ -382,7 +398,7 @@ export class Game implements FrameHandler {
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
     const explosive = weapon === WeaponId.Bazooka || weapon === WeaponId.Grenade;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
-    gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence);
+    gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts);
     // Same seed as the server, so the gold shower matches what will settle.
     spillGold(this.particles, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
     this.snaps.delete(victim);
@@ -418,6 +434,11 @@ export class Game implements FrameHandler {
     const p = this.players.get(id);
     this.chatLog.push({ text: `${p?.name ?? '?'}: ${text}`, color: p?.color ?? '#ccc', at: performance.now() });
     if (this.chatLog.length > 8) this.chatLog.shift();
+  }
+
+  detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void {
+    limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc);
+    if (id === this.myId) this.hurtFlash = 1;
   }
 
   /** Colour of the terrain around a point (for dust puffs). */

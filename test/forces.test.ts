@@ -23,16 +23,18 @@ function bodyAt(x: number, y: number): ActorField {
 }
 
 describe('particles act on players', () => {
-  it('a fast grain transfers momentum and wounds; a slow one only nudges', () => {
+  it('a fast grain transfers momentum and records a hit; a slow one only nudges', () => {
     const col = flatWorld();
     const fast = new Particles(8);
     const af = bodyAt(500, 700);
     fast.spawnGrain(491, 706, 400, 0, Mat.Rubble, 60, 3); // thrown debris, owner 3, ~13 cells per tick
     fast.step(col, DT, {}, af);
     expect(af.dvx[0]).toBeGreaterThan(5); // shoved in the grain's direction
-    expect(af.dmg[0]).toBeGreaterThan(0);
-    expect(af.dmgBy[0]).toBe(3);
-    expect(af.dmgWeapon[0]).toBe(W_DEBRIS);
+    expect(af.hitN).toBe(1); // one impact recorded for the body model to resolve
+    expect(af.hitEnergy[0]).toBeGreaterThan(10); // mass x sharpness x relative speed
+    expect(af.hitLx[0]).toBeLessThan(3); // struck the left side of the body
+    expect(af.hitOwner[0]).toBe(3);
+    expect(af.hitWeapon[0]).toBe(W_DEBRIS);
     expect(fast.vx[0]).toBeLessThan(0); // rebounded off the body
 
     const slow = new Particles(8);
@@ -40,7 +42,7 @@ describe('particles act on players', () => {
     slow.spawnGrain(498, 706, 80, 0, Mat.Sand, 60);
     slow.step(col, DT, {}, af2);
     expect(af2.dvx[0]).toBeGreaterThan(0);
-    expect(af2.dmg[0]).toBe(0); // below the hurt threshold
+    expect(af2.hitEnergy[0]).toBeLessThan(af.hitEnergy[0] / 3); // far less energy: a nudge
   });
 
   it('shrapnel embeds and cuts; harmless kinds pass through', () => {
@@ -52,9 +54,10 @@ describe('particles act on players', () => {
     p.step(col, DT, {}, af);
     expect(p.count(PK.Shrapnel)).toBe(0); // stopped in the body
     expect(p.count(PK.Smoke)).toBe(1); // smoke does not interact
-    expect(af.dmg[0]).toBeGreaterThan(5);
-    expect(af.dmgBy[0]).toBe(2);
-    expect(af.dmgWeapon[0]).toBe(ProjKind.Grenade);
+    expect(af.hitEnergy[0]).toBeGreaterThan(150); // sharp and fast
+    expect(af.hitWound[0]).toBeGreaterThan(0);
+    expect(af.hitOwner[0]).toBe(2);
+    expect(af.hitWeapon[0]).toBe(ProjKind.Grenade);
   });
 
   it('a dense sand flow drags a body along with it', () => {

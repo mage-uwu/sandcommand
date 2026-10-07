@@ -66,23 +66,23 @@ interface KindDef {
   contact: number;
   // How the kind acts on actors (players). Momentum and damage come from the
   // particle's velocity relative to the actor, like Cortex Command.
-  pmass: number; // momentum weight: impulse = pmass * relative velocity
-  hurtSpeed: number; // relative speed (cells/s) above which a hit wounds
-  hurt: number; // damage per 100 cells/s above hurtSpeed
+  pmass: number; // mass: impulse = pmass * relative velocity
+  sharp: number; // sharpness: penetration energy = pmass * sharp * relative speed
+  wound: number; // wound points dealt to each body layer it penetrates (see body.ts)
   burn: number; // damage per second while touching (flames)
   onActor: number; // A_PASS | A_EMBED | A_BOUNCE
 }
 
 /** Per-kind behaviour. Index with PK.*. */
 export const KINDS: readonly KindDef[] = [
-  /* Grain    */ { gravity: 1, drag: 0.998, e: 0.12, mu: 0.65, mass: true, advect: 0, air: 0.07, contact: C_SETTLE, pmass: 0.25, hurtSpeed: 180, hurt: 1.5, burn: 0, onActor: A_BOUNCE },
-  /* Spark    */ { gravity: 0.6, drag: 0.985, e: 0.55, mu: 0.25, mass: false, advect: 0, air: 0.1, contact: C_SPENT, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
-  /* Flame    */ { gravity: -0.3, drag: 0.9, e: 0.1, mu: 0.3, mass: false, advect: 0.3, air: 0.5, contact: C_BOUNCE, pmass: 0.02, hurtSpeed: 0, hurt: 0, burn: 4, onActor: A_PASS },
-  /* Smoke    */ { gravity: -0.1, drag: 0.93, e: 0.05, mu: 0.2, mass: false, advect: 0.5, air: 0.6, contact: C_BOUNCE, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
-  /* Dust     */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
-  /* Blood    */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
-  /* Gib      */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID, pmass: 0.3, hurtSpeed: 9999, hurt: 0, burn: 0, onActor: A_BOUNCE },
-  /* Shrapnel */ { gravity: 0.35, drag: 0.99, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.05, contact: C_SPENT, pmass: 0.4, hurtSpeed: 100, hurt: 3.2, burn: 0, onActor: A_EMBED },
+  /* Grain    */ { gravity: 1, drag: 0.998, e: 0.12, mu: 0.65, mass: true, advect: 0, air: 0.07, contact: C_SETTLE, pmass: 0.25, sharp: 0.15, wound: 3, burn: 0, onActor: A_BOUNCE },
+  /* Spark    */ { gravity: 0.6, drag: 0.985, e: 0.55, mu: 0.25, mass: false, advect: 0, air: 0.1, contact: C_SPENT, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
+  /* Flame    */ { gravity: -0.3, drag: 0.9, e: 0.1, mu: 0.3, mass: false, advect: 0.3, air: 0.5, contact: C_BOUNCE, pmass: 0.02, sharp: 0, wound: 0, burn: 4, onActor: A_PASS },
+  /* Smoke    */ { gravity: -0.1, drag: 0.93, e: 0.05, mu: 0.2, mass: false, advect: 0.5, air: 0.6, contact: C_BOUNCE, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
+  /* Dust     */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
+  /* Blood    */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
+  /* Gib      */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID, pmass: 0.3, sharp: 0.1, wound: 0, burn: 0, onActor: A_BOUNCE },
+  /* Shrapnel */ { gravity: 0.35, drag: 0.99, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.05, contact: C_SPENT, pmass: 0.4, sharp: 1.0, wound: 7, burn: 0, onActor: A_EMBED },
 ];
 const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
 const K_DRAG = new Float32Array(KINDS.map((k) => k.drag));
@@ -93,8 +93,8 @@ const K_ADVECT = new Float32Array(KINDS.map((k) => k.advect));
 const K_AIR = new Float32Array(KINDS.map((k) => k.air));
 const K_CONTACT = new Uint8Array(KINDS.map((k) => k.contact));
 const K_PMASS = new Float32Array(KINDS.map((k) => k.pmass));
-const K_HURT_SPEED = new Float32Array(KINDS.map((k) => k.hurtSpeed));
-const K_HURT = new Float32Array(KINDS.map((k) => k.hurt));
+const K_SHARP = new Float32Array(KINDS.map((k) => k.sharp));
+const K_WOUND = new Float32Array(KINDS.map((k) => k.wound));
 const K_BURN = new Float32Array(KINDS.map((k) => k.burn));
 const K_ON_ACTOR = new Uint8Array(KINDS.map((k) => k.onActor));
 /** Kinds that can touch actors at all. */
@@ -489,9 +489,10 @@ export class Particles {
           const rvy = vy[i] - actors.vy[a];
           const rs = Math.sqrt(rvx * rvx + rvy * rvy);
           const pm = K_PMASS[kd];
-          let dmg = K_BURN[kd] * dt;
-          if (rs > K_HURT_SPEED[kd]) dmg += (K_HURT[kd] * (rs - K_HURT_SPEED[kd])) / 100;
-          actors.hit(a, pm * rvx, pm * rvy, dmg, this.owner[i], kd === PK.Shrapnel ? this.aux[i] : KIND_WEAPON[kd]);
+          // Where on the body: a little way in along the relative path.
+          const inX = rs > 0 ? (rvx / rs) * 2 : 0;
+          const inY = rs > 0 ? (rvy / rs) * 2 : 0;
+          actors.hit(a, ex + inX, ey + inY, pm * rvx, pm * rvy, pm * K_SHARP[kd] * rs, K_WOUND[kd], K_BURN[kd] * dt, this.owner[i], kd === PK.Shrapnel ? this.aux[i] : KIND_WEAPON[kd]);
           const on = K_ON_ACTOR[kd];
           if (on === A_EMBED) {
             this.removeAt(i);
@@ -732,9 +733,12 @@ export const MAX_ACTORS = 64;
  * particle finds the bodies near its path with a few cell lookups instead of
  * testing every player (cost O(N + bodies), never O(N x bodies)).
  *
- * Results accumulate per body for the world to apply after the step:
- *   dvx/dvy  velocity change from particle impacts and field forces
- *   dmg      damage, with the owner and weapon code of the largest hit
+ * Results for the world to resolve after the step:
+ *   dvx/dvy  per body: velocity change from impacts and field forces
+ *   hits     per impact: where on the body it struck (body-local cell), the
+ *            penetration energy (mass x sharpness x relative speed), wound
+ *            points, burn damage, owner and weapon code. The world turns
+ *            these into wounds on individual parts (body.ts).
  */
 export class ActorField {
   n = 0;
@@ -745,10 +749,16 @@ export class ActorField {
   readonly vy = new Float32Array(MAX_ACTORS);
   readonly dvx = new Float32Array(MAX_ACTORS);
   readonly dvy = new Float32Array(MAX_ACTORS);
-  readonly dmg = new Float32Array(MAX_ACTORS);
-  readonly dmgBy = new Uint8Array(MAX_ACTORS);
-  readonly dmgWeapon = new Uint8Array(MAX_ACTORS);
-  private readonly bestHit = new Float32Array(MAX_ACTORS);
+  // Hit records (struct of arrays, grown as needed).
+  hitN = 0;
+  hitSlot = new Uint8Array(256);
+  hitLx = new Float32Array(256);
+  hitLy = new Float32Array(256);
+  hitEnergy = new Float32Array(256);
+  hitWound = new Float32Array(256);
+  hitBurn = new Float32Array(256);
+  hitOwner = new Uint8Array(256);
+  hitWeapon = new Uint8Array(256);
   // Up to two bodies per field cell (bodies rarely overlap more than that).
   private readonly cellA = new Int8Array(FW * FH).fill(-1);
   private readonly cellB = new Int8Array(FW * FH).fill(-1);
@@ -766,11 +776,9 @@ export class ActorField {
       this.cellB[c] = -1;
     }
     this.used.length = 0;
-    for (let a = 0; a < this.n; a++) {
-      this.dvx[a] = this.dvy[a] = this.dmg[a] = this.bestHit[a] = 0;
-      this.dmgBy[a] = NO_OWNER;
-    }
+    for (let a = 0; a < this.n; a++) this.dvx[a] = this.dvy[a] = 0;
     this.n = 0;
+    this.hitN = 0;
   }
 
   /** Add a body; returns its slot. */
@@ -781,8 +789,7 @@ export class ActorField {
     this.y[a] = y;
     this.vx[a] = vx;
     this.vy[a] = vy;
-    this.dvx[a] = this.dvy[a] = this.dmg[a] = this.bestHit[a] = 0;
-    this.dmgBy[a] = NO_OWNER;
+    this.dvx[a] = this.dvy[a] = 0;
     const f0x = Math.max(0, Math.floor(x) >> FIELD_SHIFT);
     const f1x = Math.min(FW - 1, Math.floor(x + this.bodyW - 1) >> FIELD_SHIFT);
     const f0y = Math.max(0, Math.floor(y) >> FIELD_SHIFT);
@@ -835,17 +842,38 @@ export class ActorField {
     return best;
   }
 
-  /** Record a particle impact on body slot `a`. */
-  hit(a: number, jx: number, jy: number, dmg: number, owner: number, weapon: number): void {
+  /** Record a particle impact on body slot `a` at world point (ex, ey). */
+  hit(a: number, ex: number, ey: number, jx: number, jy: number, energy: number, wound: number, burn: number, owner: number, weapon: number): void {
     this.dvx[a] += jx / ACTOR_MASS;
     this.dvy[a] += jy / ACTOR_MASS;
-    if (dmg <= 0) return;
-    this.dmg[a] += dmg;
-    if (dmg > this.bestHit[a]) {
-      this.bestHit[a] = dmg;
-      this.dmgBy[a] = owner;
-      this.dmgWeapon[a] = weapon;
-    }
+    if (wound <= 0 && burn <= 0 && energy <= 0) return;
+    if (this.hitN === this.hitSlot.length) this.growHits();
+    const h = this.hitN++;
+    this.hitSlot[h] = a;
+    this.hitLx[h] = ex - this.x[a];
+    this.hitLy[h] = ey - this.y[a];
+    this.hitEnergy[h] = energy;
+    this.hitWound[h] = wound;
+    this.hitBurn[h] = burn;
+    this.hitOwner[h] = owner;
+    this.hitWeapon[h] = weapon;
+  }
+
+  private growHits(): void {
+    const n = this.hitSlot.length * 2;
+    const g = <T extends Uint8Array | Float32Array>(a: T, make: (n: number) => T): T => {
+      const b = make(n);
+      b.set(a);
+      return b;
+    };
+    this.hitSlot = g(this.hitSlot, (k) => new Uint8Array(k));
+    this.hitLx = g(this.hitLx, (k) => new Float32Array(k));
+    this.hitLy = g(this.hitLy, (k) => new Float32Array(k));
+    this.hitEnergy = g(this.hitEnergy, (k) => new Float32Array(k));
+    this.hitWound = g(this.hitWound, (k) => new Float32Array(k));
+    this.hitBurn = g(this.hitBurn, (k) => new Float32Array(k));
+    this.hitOwner = g(this.hitOwner, (k) => new Uint8Array(k));
+    this.hitWeapon = g(this.hitWeapon, (k) => new Uint8Array(k));
   }
 
   /**

@@ -31,10 +31,14 @@ export interface Body {
   fuel: number;
   onGround: boolean;
   jetting: boolean;
+  /** Legs still attached (0..2): two run, one hobbles, none crawls. */
+  legs: number;
+  /** Jetpack still attached. */
+  jet: boolean;
 }
 
 export function newBody(x: number, y: number): Body {
-  return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false };
+  return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false, legs: 2, jet: true };
 }
 
 export function copyBody(dst: Body, src: Body): void {
@@ -45,7 +49,13 @@ export function copyBody(dst: Body, src: Body): void {
   dst.fuel = src.fuel;
   dst.onGround = src.onGround;
   dst.jetting = src.jetting;
+  dst.legs = src.legs;
+  dst.jet = src.jet;
 }
+
+/** Run speed and jump strength by legs attached (0, 1, 2). */
+const LEG_SPEED = [0.25, 0.55, 1];
+const LEG_JUMP = [0, 0.7, 1];
 
 function collides(t: Terrain, x: number, y: number): boolean {
   const ix = Math.floor(x);
@@ -73,16 +83,16 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
   const dir = (buttons & BTN_RIGHT ? 1 : 0) - (buttons & BTN_LEFT ? 1 : 0);
   if (dir !== 0 || b.onGround) {
     const accel = (b.onGround ? ACTOR_GROUND_ACCEL : ACTOR_AIR_ACCEL) * dt;
-    const dv = dir * ACTOR_RUN_SPEED - b.vx;
+    const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] - b.vx;
     b.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   }
 
   b.jetting = false;
   if (buttons & BTN_UP) {
-    if (b.onGround) {
-      b.vy = -ACTOR_JUMP_SPEED;
+    if (b.onGround && b.legs > 0) {
+      b.vy = -ACTOR_JUMP_SPEED * LEG_JUMP[b.legs];
       b.onGround = false;
-    } else if (b.fuel > 0) {
+    } else if (b.jet && b.fuel > 0) {
       b.vy -= ACTOR_JET_ACCEL * dt;
       b.fuel = Math.max(0, b.fuel - ACTOR_FUEL_BURN * dt);
       b.jetting = true;
@@ -104,7 +114,7 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
       b.x = nx;
     } else {
       let climbed = false;
-      if (b.onGround) {
+      if (b.onGround && b.legs > 0) {
         for (let s = 1; s <= ACTOR_STEP_UP; s++) {
           if (!collides(t, nx, b.y - s)) {
             b.x = nx;

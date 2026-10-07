@@ -183,6 +183,8 @@ const GIBS: Grid[] = [
   ['.RR', 'RRr', 'Rr.'], // meat
   ['RR', 'Rr'], // meat
   ['Rr'], // meat
+  ['.KK.', 'KSSK', 'KSeK', '.KR.'], // bare head (helmet already gone)
+  ['KOOK', 'OooO', 'OooO', 'KOOK'], // vest plate
 ];
 
 function shade(rgb: number, k: number): number {
@@ -223,9 +225,63 @@ function paletteFor(team: number): Record<string, number> {
     Y: 0xe0b030, // digger body
     y: 0x8a6a1a,
     D: 0x9a9a9a, // digger nozzle
-    R: 0xa01818, // meat
+    R: 0xa01818, // meat / stump
+    S: 0xd2a684, // skin
+    e: 0x1c1c22, // eye
     // r (lowercase) doubles as warhead red / meat shade
   };
+}
+
+// Body-sprite pixel -> part, in unflipped sprite coordinates (10x16 grid,
+// hitbox at columns 1..8, rows 2..15).
+const P_HEAD = 0;
+const P_TORSO = 1;
+const P_LEG_B = 4;
+const P_LEG_F = 5;
+const P_HELMET = 6;
+const P_VEST = 7;
+const P_PACK = 8;
+/** Parts that change how the body sprite looks. */
+export const BODY_RENDER_PARTS = (1 << P_HEAD) | (1 << P_HELMET) | (1 << P_VEST) | (1 << P_PACK) | (1 << P_LEG_B) | (1 << P_LEG_F);
+
+function bodyPartAt(x: number, y: number): number {
+  if (y <= 4) return P_HEAD;
+  if (y <= 9 && x <= 2) return P_PACK;
+  if (y <= 10) return P_TORSO;
+  return x <= 5 ? P_LEG_B : P_LEG_F;
+}
+
+/**
+ * Bake a body frame showing only the attached parts: no helmet shows the bare
+ * head, a worn vest plates the chest, missing legs and jetpack leave bloody
+ * stumps.
+ */
+function bakeBody(grid: Grid, pal: Record<string, number>, flipX: boolean, mask: number): HTMLCanvasElement {
+  const on = (p: number) => (mask & (1 << p)) !== 0;
+  const out: string[] = [];
+  for (let y = 0; y < grid.length; y++) {
+    let row = '';
+    for (let x = 0; x < grid[y].length; x++) {
+      let ch = grid[y][x];
+      const part = bodyPartAt(x, y);
+      if (ch !== '.') {
+        if (part === P_HEAD) {
+          if (!on(P_HEAD)) ch = '.';
+          // Helmet gone: skin where the dome was, an eye where the visor sat.
+          else if (!on(P_HELMET)) ch = ch === 'V' && y === 3 ? 'e' : ch === 'L' || ch === 'H' || ch === 'V' || ch === 'v' ? 'S' : ch;
+        } else if (part === P_PACK && !on(P_PACK)) {
+          ch = y === 9 && x === 2 ? 'R' : '.';
+        } else if ((part === P_LEG_B || part === P_LEG_F) && !on(part)) {
+          ch = y === 11 && ch === 'P' ? 'R' : '.';
+        } else if (part === P_TORSO && on(P_VEST) && y >= 6 && y <= 8 && x >= 5 && x <= 7 && (ch === 'T' || ch === 't' || ch === 'h')) {
+          ch = ch === 't' ? 'o' : 'O';
+        }
+      }
+      row += ch;
+    }
+    out.push(row);
+  }
+  return bake(out, pal, flipX);
 }
 
 function bake(grid: Grid, pal: Record<string, number>, flipX = false): HTMLCanvasElement {
@@ -309,10 +365,11 @@ export class SpriteCache {
     return p;
   }
 
-  body(team: number, frame: BodyFrame, left: boolean): HTMLCanvasElement {
-    const key = `${team}|${frame}|${left ? 1 : 0}`;
+  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff): HTMLCanvasElement {
+    const mask = parts & BODY_RENDER_PARTS;
+    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}`;
     let c = this.bodies.get(key);
-    if (!c) this.bodies.set(key, (c = bake(BODY[frame], this.pal(team), left)));
+    if (!c) this.bodies.set(key, (c = bakeBody(BODY[frame], this.pal(team), left, mask)));
     return c;
   }
 

@@ -6,6 +6,7 @@ import { WEAPONS, WeaponId } from '../shared/weapons.ts';
 import type { Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
+import { PARTS, Part, has } from '../shared/body.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE, gunMuzzle } from './sprites.ts';
 
@@ -229,7 +230,7 @@ export class Renderer {
     for (const v of views) {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
-      this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now);
+      this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts);
     }
     // Own clone.
     if (game.alive) {
@@ -237,7 +238,7 @@ export class Renderer {
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
       const myAim = Math.atan2(wy - (selfY + 5), wx - (selfX + ACTOR_W / 2));
       const flags = F_ALIVE | (b.onGround ? F_GROUND : 0) | (b.jetting ? F_JET : 0) | (input.mouseDown ? F_FIRING : 0);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts);
     }
 
     // Every particle the field engine owns (grains, sparks, flames, smoke,
@@ -383,16 +384,17 @@ export class Renderer {
     weapon: number,
     moving: boolean,
     now: number,
+    parts: number,
   ): void {
     const left = Math.cos(aim) < 0;
     const ix = Math.round(x);
     const iy = Math.round(y);
     // Walk cycle advances with distance travelled, so feet don't skate.
     const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / 3) & 3] : 'idle';
-    ctx.drawImage(this.sprites.body(team, frame, left), ix - 1, iy - 2);
+    ctx.drawImage(this.sprites.body(team, frame, left, parts), ix - 1, iy - 2);
 
     // Jetpack exhaust under the pack (pack is on the clone's back).
-    if (flags & F_JET) {
+    if (flags & F_JET && has(parts, Part.Jetpack)) {
       const fx = left ? ix + 6 : ix - 1;
       const flick = Math.floor(now / 40) % 3;
       ctx.fillStyle = '#fff6c0';
@@ -407,6 +409,12 @@ export class Renderer {
     // Arm + weapon, pre-rotated onto the pixel grid, pivoting at the shoulder.
     const sx = ix + 4;
     const sy = iy + 4;
+    if (!has(parts, Part.GunArm)) {
+      // Arm (and the gun with it) gone: a bloody stump at the shoulder.
+      ctx.fillStyle = '#a01818';
+      ctx.fillRect(left ? sx - 1 : sx, sy, 2, 2);
+      return;
+    }
     const g = this.sprites.gun(weapon, aim);
     ctx.drawImage(g.c, sx - g.r, sy - g.r);
     if (flags & F_FIRING) {
@@ -425,6 +433,35 @@ export class Renderer {
         ctx.fillStyle = '#fffbe0';
         ctx.fillRect(mx, my, 1, 1);
       }
+    }
+  }
+
+  /**
+   * Body status: each part of the clone tinted by its health (green to red),
+   * dark where it has been torn off, outlined where armour is still worn.
+   */
+  private drawPaperDoll(game: Game, s: number): void {
+    const ctx = this.ctx;
+    const ox = 200 * s;
+    const oy = 12 * s;
+    const k = 3 * s; // one hitbox cell
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(ox - 3 * s, oy - 3 * s, 8 * k + 6 * s, 14 * k + 6 * s);
+    const col = (hp: number) => (hp <= 0 ? 'rgba(60,20,20,0.9)' : `hsl(${Math.round((hp / 100) * 120)},70%,45%)`);
+    const rect = (p: number) => {
+      const d = PARTS[p];
+      ctx.fillRect(ox + d.rx0 * k, oy + d.ry0 * k, (d.rx1 - d.rx0 + 1) * k, (d.ry1 - d.ry0 + 1) * k);
+    };
+    for (const p of [Part.Torso, Part.Jetpack, Part.OffArm, Part.LegB, Part.LegF, Part.Head, Part.GunArm]) {
+      ctx.fillStyle = col(game.partHp[p]);
+      rect(p);
+    }
+    ctx.lineWidth = Math.max(1, s);
+    for (const p of [Part.Helmet, Part.Vest]) {
+      if (game.partHp[p] <= 0) continue;
+      ctx.strokeStyle = col(game.partHp[p]);
+      const d = PARTS[p];
+      ctx.strokeRect(ox + d.rx0 * k + 0.5, oy + d.ry0 * k + 0.5, (d.rx1 - d.rx0 + 1) * k - 1, (d.ry1 - d.ry0 + 1) * k - 1);
     }
   }
 
@@ -448,6 +485,7 @@ export class Renderer {
     const me = game.players.get(game.myId);
     ctx.fillStyle = '#ffd34a';
     ctx.fillText(`GOLD ${me?.gold ?? 0}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
+    if (game.alive) this.drawPaperDoll(game, s);
 
     // Weapon slots.
     const slotW = 92 * s;

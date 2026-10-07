@@ -1,4 +1,5 @@
 import { Reader, rleDecode } from './codec.ts';
+import { PART_COUNT } from './body.ts';
 import { applyCarve } from './particles.ts';
 import { CHUNK, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
 import {
@@ -7,6 +8,7 @@ import {
   R_CARVE,
   R_CHAT,
   R_CHUNK,
+  R_DETACH,
   R_HIT,
   R_KILL,
   R_PIXELS,
@@ -30,6 +32,8 @@ export interface SelfState {
   weapon: number;
   cooldown: number;
   respawn: number;
+  parts: number; // attached-part mask (body.ts)
+  partHp: number[]; // 0..100 per part, 0 = gone
 }
 
 export interface RemoteActor {
@@ -42,6 +46,7 @@ export interface RemoteActor {
   flags: number;
   hp: number;
   weapon: number;
+  parts: number;
 }
 
 export interface KillInfo {
@@ -55,6 +60,7 @@ export interface KillInfo {
   overkill: number; // damage beyond lethal, drives how violently it gibs
   seed: number;
   gold: number;
+  parts: number; // what was left of the body when it died
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -76,6 +82,8 @@ export interface FrameHandler {
   scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void;
   hit(victim: number, x: number, y: number, amount: number): void;
   chat(id: number, text: string): void;
+  /** A body part was torn off actor `id` at (x, y), flying with (vx, vy). */
+  detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void;
 }
 
 const chunkScratch = new Uint8Array(CHUNK * CHUNK);
@@ -102,6 +110,8 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           weapon: r.u8(),
           cooldown: r.u8(),
           respawn: r.u16(),
+          parts: r.u16(),
+          partHp: Array.from({ length: PART_COUNT }, () => r.u8()),
         });
         break;
       }
@@ -119,6 +129,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             flags: r.u8(),
             hp: r.u8(),
             weapon: r.u8(),
+            parts: r.u16(),
           });
         }
         h.actors(list);
@@ -185,6 +196,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           overkill: r.u8(),
           seed: r.u32(),
           gold: r.u8(),
+          parts: r.u16(),
         });
         break;
       case R_ROSTER: {
@@ -212,6 +224,14 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.chat(id, r.str());
         break;
       }
+      case R_DETACH: {
+        const id = r.u8();
+        const part = r.u8();
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        h.detach(id, part, x, y, r.i16() / 8, r.i16() / 8);
+        break;
+      }
       default:
         throw new Error(`unknown record ${type}`);
     }
@@ -232,4 +252,5 @@ export const nullHandler: FrameHandler = {
   scores() {},
   hit() {},
   chat() {},
+  detach() {},
 };

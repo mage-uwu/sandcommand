@@ -1,5 +1,6 @@
 import { NO_OWNER, PK, type Particles, explosionFragments } from '../shared/particles.ts';
 import { Rng } from '../shared/rng.ts';
+import { Part, has } from '../shared/body.ts';
 
 /**
  * Client-side effect emitters. There is no separate effects system: every
@@ -18,6 +19,8 @@ export const GIB_ARM = 3;
 export const GIB_LEG = [4, 5];
 export const GIB_PACK = 6;
 export const GIB_MEAT = [7, 8, 9];
+export const GIB_HEAD = 10;
+export const GIB_VEST = 11;
 
 const rnd = (a: number, b: number) => a + (b - a) * Math.random();
 
@@ -89,25 +92,73 @@ export function bloodSplat(p: Particles, x: number, y: number, count: number, sp
  * scatter harder. Part offsets follow the body layout so the helmet starts at
  * the top and boots at the bottom.
  */
-export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: number, team: number, violence: number): void {
+export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: number, team: number, violence: number, parts = 0x1ff): void {
   const v = Math.min(2.6, 1 + violence * 0.6);
+  const on = (part: number) => has(parts, part);
   const fling = (ox: number, oy: number, piece: number, speed: number) => {
     const a = Math.atan2(oy - 2, ox) + (Math.random() - 0.5) * 1.6;
     const s = speed * (0.4 + Math.random() * 0.8) * v;
-    const i = p.n;
-    if (!p.spawn(PK.Gib, cx + ox, cy + oy, vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 50 - Math.random() * 50, rnd(420, 540), piece, team)) return;
-    p.spin[i] = Math.floor(Math.random() * 4);
-    p.spinRate[i] = (Math.random() - 0.5) * 0.08;
+    spawnGib(p, cx + ox, cy + oy, vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 50 - Math.random() * 50, piece, team);
   };
-  fling(0, -6, GIB_HELMET, 70);
+  // Only what is still attached flies apart.
+  if (on(Part.Head)) fling(0, -6, on(Part.Helmet) ? GIB_HELMET : GIB_HEAD, 70);
+  if (on(Part.Vest)) fling(1, -2, GIB_VEST, 60);
   fling(-1, -1, GIB_TORSO[0], 50);
   fling(1, 0, GIB_TORSO[1], 50);
-  fling(-3, -1, GIB_ARM, 80);
-  fling(3, -1, GIB_ARM, 80);
-  fling(-1, 5, GIB_LEG[0], 60);
-  fling(1, 5, GIB_LEG[1], 60);
-  fling(-3, 0, GIB_PACK, 45);
+  if (on(Part.OffArm)) fling(-3, -1, GIB_ARM, 80);
+  if (on(Part.GunArm)) fling(3, -1, GIB_ARM, 80);
+  if (on(Part.LegB)) fling(-1, 5, GIB_LEG[0], 60);
+  if (on(Part.LegF)) fling(1, 5, GIB_LEG[1], 60);
+  if (on(Part.Jetpack)) fling(-3, 0, GIB_PACK, 45);
   const meat = Math.round(8 + 6 * v);
   for (let k = 0; k < meat; k++) fling((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10, GIB_MEAT[k % GIB_MEAT.length], 90);
   bloodSplat(p, cx, cy, Math.round(24 + 14 * v), 70 + 30 * v, vx * 0.3, vy * 0.3);
 }
+
+function spawnGib(p: Particles, x: number, y: number, vx: number, vy: number, piece: number, team: number): void {
+  const i = p.n;
+  if (!p.spawn(PK.Gib, x, y, vx, vy, rnd(420, 540), piece, team)) return;
+  p.spin[i] = Math.floor(Math.random() * 4);
+  p.spinRate[i] = (Math.random() - 0.5) * 0.08;
+}
+
+/** Gib sprite for a body part torn off a living clone. */
+const PART_GIB: Record<number, number> = {
+  [Part.Head]: GIB_HEAD,
+  [Part.GunArm]: GIB_ARM,
+  [Part.OffArm]: GIB_ARM,
+  [Part.LegB]: GIB_LEG[0],
+  [Part.LegF]: GIB_LEG[1],
+  [Part.Helmet]: GIB_HELMET,
+  [Part.Vest]: GIB_VEST,
+  [Part.Jetpack]: GIB_PACK,
+};
+
+/**
+ * A part torn off a living clone: the piece flies off, flesh parts spray a
+ * fountain of blood and a little meat; armour just clatters away with sparks.
+ */
+export function limbOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, team: number): void {
+  const piece = PART_GIB[part];
+  if (piece === undefined) return;
+  spawnGib(p, x, y, vx, vy, piece, team);
+  if (part === Part.Helmet || part === Part.Vest || part === Part.Jetpack) {
+    burst(p, PK.Spark, x, y, 8, 160, 10);
+    return;
+  }
+  bloodSplat(p, x, y, 28, 140, vx * 0.3, vy * 0.3);
+  for (let k = 0; k < 3; k++) spawnGib(p, x, y, vx * 0.6 + rnd(-60, 60), vy * 0.6 + rnd(-90, 0), GIB_MEAT[k % 3], team);
+}
+
+/** Open stumps drip: call once per tick per maimed clone. */
+export function stumpDrip(p: Particles, x: number, y: number, parts: number): void {
+  for (const [part, ox, oy] of STUMPS) {
+    if (!has(parts, part) && Math.random() < 0.6) p.spawn(PK.Blood, x + ox, y + oy, rnd(-25, 25), rnd(-30, 10), 40);
+  }
+}
+const STUMPS: [number, number, number][] = [
+  [Part.GunArm, 6, 4],
+  [Part.OffArm, 2, 5],
+  [Part.LegB, 2, 9],
+  [Part.LegF, 6, 9],
+];
