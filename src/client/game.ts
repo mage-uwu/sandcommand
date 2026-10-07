@@ -1,16 +1,17 @@
 import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
+import { CRAFT_H, CRAFT_W } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { BLAST_IMPULSE, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { bloodSplat, bulletImpact, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -51,6 +52,8 @@ export interface RemoteView {
   moving: boolean;
   parts: number; // attached-part mask (body.ts)
 }
+
+export interface CraftView extends CraftState {}
 
 export interface FeedItem {
   text: string;
@@ -148,6 +151,8 @@ export class Game implements FrameHandler {
 
   // Remote actors.
   private snaps = new Map<number, Snap[]>();
+  // Drop rockets, interpolated like actors.
+  private craftSnaps = new Map<number, (CraftState & { tick: number })[]>();
   private clockOffset = NaN; // serverTick - now/TICK_MS
   lastServerTick = 0;
   /** Tick of the frame currently being applied. */
@@ -182,6 +187,11 @@ export class Game implements FrameHandler {
     });
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+    // Drop-rocket exhaust (latest known state; cosmetic plume + local air jet).
+    for (const [, cs] of this.craftSnaps) {
+      const c = cs[cs.length - 1];
+      if (c && c.thrust > 0.12) craftExhaust(this.particles, c.x + CRAFT_W / 2, c.y + CRAFT_H, c.vx, c.vy, c.thrust);
+    }
     // Remote jetpacks, and stumps dripping on maimed clones.
     for (const [, s] of this.snaps) {
       const last = s[s.length - 1];
@@ -199,6 +209,10 @@ export class Game implements FrameHandler {
       const last = s[s.length - 1];
       if (last && last.flags & F_ALIVE && actors.n < MAX_ACTORS) actors.add(id, last.x, last.y, last.vx, last.vy);
     }
+    for (const [slot, cs] of this.craftSnaps) {
+      const c = cs[cs.length - 1];
+      if (c && actors.n < MAX_ACTORS) actors.add(128 + slot, c.x, c.y, c.vx, c.vy, CRAFT_W, CRAFT_H, 60);
+    }
     this.particles.step(this.collider, DT, this.particleHooks, actors);
     this.shake *= 0.85;
     this.hurtFlash *= 0.9;
@@ -211,6 +225,8 @@ export class Game implements FrameHandler {
     this.frameTick = tick;
     this.lastSelf = null;
     applyFrameRecords(r, this.terrain, this);
+    // No rocket record in this frame means no drop rockets near us.
+    if (this.craftsSeenTick !== tick) this.craftSnaps.clear();
     this.lastServerTick = tick;
     const est = tick - performance.now() / TICK_MS;
     if (Number.isNaN(this.clockOffset) || Math.abs(est - this.clockOffset) > 10) this.clockOffset = est;
@@ -381,7 +397,7 @@ export class Game implements FrameHandler {
     const { killer, victim, weapon } = k;
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
-    const how = weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : (WEAPONS[weapon]?.name ?? '');
+    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : (WEAPONS[weapon]?.name ?? '');
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
@@ -434,6 +450,55 @@ export class Game implements FrameHandler {
     const p = this.players.get(id);
     this.chatLog.push({ text: `${p?.name ?? '?'}: ${text}`, color: p?.color ?? '#ccc', at: performance.now() });
     if (this.chatLog.length > 8) this.chatLog.shift();
+  }
+
+  crafts(list: CraftState[]): void {
+    const seen = new Set<number>();
+    for (const c of list) {
+      seen.add(c.slot);
+      let s = this.craftSnaps.get(c.slot);
+      if (!s) this.craftSnaps.set(c.slot, (s = []));
+      s.push({ ...c, tick: this.frameTick });
+      if (s.length > 12) s.shift();
+    }
+    this.craftsSeenTick = this.frameTick;
+    for (const slot of this.craftSnaps.keys()) if (!seen.has(slot)) this.craftSnaps.delete(slot);
+  }
+  private craftsSeenTick = 0;
+
+  craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    this.craftSnaps.delete(slot);
+    craftDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE);
+    this.flashes.push({ x, y, r: 40, at: performance.now() });
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 500) * 12);
+  }
+
+  /** Drop rockets at the render time, interpolated between snapshots. */
+  craftViews(): CraftView[] {
+    const rt = this.renderTick();
+    const out: CraftView[] = [];
+    for (const [, s] of this.craftSnaps) {
+      let a = s[0];
+      let b = s[0];
+      for (let i = s.length - 1; i >= 0; i--) {
+        if (s[i].tick <= rt) {
+          a = s[i];
+          b = s[Math.min(i + 1, s.length - 1)];
+          break;
+        }
+      }
+      const t = a === b ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (b.tick - a.tick)));
+      out.push({ ...b, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+    return out;
+  }
+
+  /** The drop rocket carrying this player in, if any. */
+  myCraft(): CraftView | null {
+    if (this.alive) return null;
+    for (const c of this.craftViews()) if (c.passenger === this.myId) return c;
+    return null;
   }
 
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void {

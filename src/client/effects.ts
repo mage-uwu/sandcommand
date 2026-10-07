@@ -1,4 +1,4 @@
-import { NO_OWNER, PK, type Particles, explosionFragments } from '../shared/particles.ts';
+import { GIB_INORGANIC, NO_OWNER, PK, type Particles, craftFragments, explosionFragments } from '../shared/particles.ts';
 import { Rng } from '../shared/rng.ts';
 import { Part, has } from '../shared/body.ts';
 
@@ -115,9 +115,11 @@ export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: n
   bloodSplat(p, cx, cy, Math.round(24 + 14 * v), 70 + 30 * v, vx * 0.3, vy * 0.3);
 }
 
+const INORGANIC = new Set([GIB_HELMET, GIB_PACK, GIB_VEST, 12, 13, 14, 15]);
+
 function spawnGib(p: Particles, x: number, y: number, vx: number, vy: number, piece: number, team: number): void {
   const i = p.n;
-  if (!p.spawn(PK.Gib, x, y, vx, vy, rnd(420, 540), piece, team)) return;
+  if (!p.spawn(PK.Gib, x, y, vx, vy, rnd(420, 540), piece | (INORGANIC.has(piece) ? GIB_INORGANIC : 0), team)) return;
   p.spin[i] = Math.floor(Math.random() * 4);
   p.spinRate[i] = (Math.random() - 0.5) * 0.08;
 }
@@ -162,3 +164,43 @@ const STUMPS: [number, number, number][] = [
   [Part.LegB, 2, 9],
   [Part.LegF, 6, 9],
 ];
+
+export const GIB_NOSE = 12;
+export const GIB_PLATE = 13;
+export const GIB_FIN = 14;
+export const GIB_NOZZLE = 15;
+
+/**
+ * Drop-rocket exhaust on this client: the plume (flames and billowing smoke)
+ * plus the same jet into the local air field the server writes, so smoke and
+ * loose particles under a landing rocket blow away on screen too.
+ */
+export function craftExhaust(p: Particles, nx: number, ny: number, vx: number, vy: number, thrust: number): void {
+  const n = Math.ceil(thrust * 4);
+  for (let k = 0; k < n; k++) p.spawn(PK.Flame, nx + rnd(-2, 2), ny + 1, vx * 0.5 + rnd(-40, 40), vy + 180 + 160 * thrust * Math.random(), rnd(8, 16));
+  if (Math.random() < thrust) p.spawn(PK.Smoke, nx + rnd(-3, 3), ny + 4, rnd(-60, 60), rnd(20, 80), rnd(40, 80));
+  p.wind(nx, ny + 16, 26, 0, 320 * thrust);
+}
+
+/**
+ * Drop rocket destroyed: mirror the server's hull fragments, embers and
+ * shrapnel from the seed (those are what actually maim and become scrap),
+ * plus big cosmetic hull pieces, a fireball and a smoke column.
+ */
+export function craftDebris(p: Particles, x: number, y: number, vx: number, vy: number, seed: number, blastStrength: number): void {
+  p.blast(x, y, 70, blastStrength * 1.3);
+  craftFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
+  const pieces = [GIB_NOSE, GIB_PLATE, GIB_PLATE, GIB_PLATE, GIB_FIN, GIB_FIN, GIB_NOZZLE];
+  for (const piece of pieces) {
+    const a = Math.random() * Math.PI * 2;
+    const s = rnd(80, 260);
+    const i = p.n;
+    if (p.spawn(PK.Gib, x + rnd(-4, 4), y + rnd(-10, 10), vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 80, rnd(600, 750), piece | GIB_INORGANIC, 0x8a9096)) {
+      p.spin[i] = Math.floor(Math.random() * 4);
+      p.spinRate[i] = (Math.random() - 0.5) * 0.12;
+    }
+  }
+  burst(p, PK.Flame, x, y, 60, 240, 16);
+  burst(p, PK.Spark, x, y, 40, 300, 22);
+  burst(p, PK.Smoke, x, y, 60, 90, 90);
+}

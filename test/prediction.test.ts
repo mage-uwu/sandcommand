@@ -29,6 +29,7 @@ describe('client-side prediction', () => {
       let bodyChanges = 0;
       let lastMask = -1;
       let wasAlive = false;
+      let measuring = false;
 
       for (now = 0; now < 900; now++) {
         if (rng.next() < 0.08) {
@@ -39,6 +40,13 @@ describe('client-side prediction', () => {
         game.localTick(buttons, aim, 0, (seq) => toServer.push({ at: now + latencyTicks, cmd: { seq, buttons, aim, weapon: 0 } }));
         while (toServer.length && toServer[0].at <= now) world.input(p.id, toServer.shift()!.cmd);
         world.step();
+        // Measure steady state: from when the clone is down and its drop
+        // rocket has left (rocket exhaust wind is an external, unpredicted force).
+        if (!measuring && p.alive && world.crafts.every((c) => c === null)) {
+          measuring = true;
+          game.corrections = 0;
+          bodyChanges = 0;
+        }
         if (p.alive !== wasAlive || (p.alive && p.parts.mask !== lastMask)) bodyChanges++;
         wasAlive = p.alive;
         lastMask = p.parts.mask;
@@ -51,7 +59,8 @@ describe('client-side prediction', () => {
           if (game.alive) reconciles++;
         }
       }
-      expect(reconciles).toBeGreaterThan(500);
+      expect(measuring).toBe(true);
+      expect(reconciles).toBeGreaterThan(300);
       // Steady state must not correct: only the first frames and real body
       // changes (spawn, death, a part torn off) may.
       expect(game.corrections).toBeLessThanOrEqual(1 + bodyChanges);

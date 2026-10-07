@@ -8,6 +8,8 @@ import {
   R_CARVE,
   R_CHAT,
   R_CHUNK,
+  R_CRAFTS,
+  R_CRAFT_BOOM,
   R_DETACH,
   R_HIT,
   R_KILL,
@@ -63,6 +65,18 @@ export interface KillInfo {
   parts: number; // what was left of the body when it died
 }
 
+export interface CraftState {
+  slot: number;
+  x: number; // top-left
+  y: number;
+  vx: number;
+  vy: number;
+  thrust: number; // 0..1
+  hp: number;
+  passenger: number; // player id or 255
+  phase: number;
+}
+
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
 export interface FrameHandler {
   self(s: SelfState): void;
@@ -82,6 +96,10 @@ export interface FrameHandler {
   scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void;
   hit(victim: number, x: number, y: number, amount: number): void;
   chat(id: number, text: string): void;
+  /** Drop rockets near this client's view this tick (absent when none). */
+  crafts(list: CraftState[]): void;
+  /** Drop rocket `slot` blew apart at (x, y); `seed` reproduces its fragments. */
+  craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** A body part was torn off actor `id` at (x, y), flying with (vx, vy). */
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void;
 }
@@ -224,6 +242,34 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.chat(id, r.str());
         break;
       }
+      case R_CRAFTS: {
+        const n = r.u8();
+        const list: CraftState[] = [];
+        for (let i = 0; i < n; i++) {
+          list.push({
+            slot: r.u8(),
+            x: r.u16() / 16,
+            y: r.u16() / 16 - Y_BIAS,
+            vx: r.i16() / 8,
+            vy: r.i16() / 8,
+            thrust: r.u8() / 255,
+            hp: r.u8(),
+            passenger: r.u8(),
+            phase: r.u8(),
+          });
+        }
+        h.crafts(list);
+        break;
+      }
+      case R_CRAFT_BOOM: {
+        const slot = r.u8();
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        const vx = r.i16() / 8;
+        const vy = r.i16() / 8;
+        h.craftBoom(slot, x, y, vx, vy, r.u32());
+        break;
+      }
       case R_DETACH: {
         const id = r.u8();
         const part = r.u8();
@@ -253,4 +299,6 @@ export const nullHandler: FrameHandler = {
   hit() {},
   chat() {},
   detach() {},
+  crafts() {},
+  craftBoom() {},
 };

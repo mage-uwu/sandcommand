@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { deliverAll } from './helpers.ts';
 import { BTN_RIGHT, BTN_UP, newBody, stepBody } from '../src/shared/actor.ts';
 import { Part, has, mobility, newBodyState, newStrike, partAt, strike, harm } from '../src/shared/body.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -99,7 +100,7 @@ describe('modular body', () => {
     const inbox: Uint8Array[] = [];
     const shooter = world.addPlayer('shooter', { send: (d) => inbox.push(d) })!;
     const victim = world.addPlayer('victim', { send() {} })!;
-    for (let i = 0; i < 3; i++) world.step();
+    deliverAll(world, [shooter, victim]);
     const t = world.terrain;
     for (let x = 900; x < 1100; x++) {
       for (let y = 300; y < 310; y++) t.set(x, y, Mat.Bedrock);

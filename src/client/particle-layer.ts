@@ -93,7 +93,7 @@ export class ParticleLayer {
       const fy = py[i] + (y[i] - py[i]) * alpha;
       if (k === PK.Gib) {
         const rot = ((Math.round(p.spin[i]) % 4) + 4) % 4;
-        const s = sprites.gibPixels(color[i], aux[i], rot);
+        const s = sprites.gibPixels(color[i], aux[i] & 0x7f, rot);
         const fade = life[i] < 30 ? life[i] / 30 : 1;
         blit(buf, w, h, s.data, s.w, s.h, Math.floor(fx - s.w / 2) - ox, Math.floor(fy - s.h / 2) - oy, fade);
         drawn++;

@@ -3,10 +3,11 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
 import { WEAPONS, WeaponId } from '../shared/weapons.ts';
-import type { Game, RemoteView } from './game.ts';
+import type { CraftView, Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { PARTS, Part, has } from '../shared/body.ts';
+import { CRAFT_H, CRAFT_W } from '../shared/craft.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE, gunMuzzle } from './sprites.ts';
 
@@ -168,6 +169,13 @@ export class Renderer {
       const ty = selfY + ACTOR_H / 2 + lookY * 0.25;
       this.camX += (tx - this.camX) * 0.25;
       this.camY += (ty - this.camY) * 0.25;
+    } else {
+      // Riding in: follow our own drop rocket down, leading toward the ground.
+      const mine = game.myCraft();
+      if (mine) {
+        this.camX += (mine.x + CRAFT_W / 2 - this.camX) * 0.2;
+        this.camY += (mine.y + CRAFT_H + 40 - this.camY) * 0.2;
+      }
     }
     const halfW = W / z / 2;
     const halfH = H / z / 2;
@@ -224,6 +232,9 @@ export class Renderer {
         }
       }
     }
+
+    // Drop rockets.
+    for (const c of game.craftViews()) this.drawCraft(ctx, c, game, now);
 
     // Remote clones.
     const views = game.remoteViews();
@@ -436,6 +447,31 @@ export class Renderer {
     }
   }
 
+  /** A drop rocket: hull in the passenger's colour, exhaust plume, damage smoke. */
+  private drawCraft(ctx: CanvasRenderingContext2D, c: CraftView, game: Game, now: number): void {
+    const ix = Math.round(c.x);
+    const iy = Math.round(c.y);
+    const team = c.passenger !== 255 ? (game.players.get(c.passenger)?.rgb ?? 0x8a9096) : 0x8a9096;
+    if (c.thrust > 0.05) {
+      // Plume under the nozzle, length by thrust.
+      const nx = ix + CRAFT_W / 2;
+      const ny = iy + CRAFT_H + 1;
+      const len = Math.round(4 + c.thrust * 14 + ((now / 40) % 3));
+      ctx.fillStyle = 'rgba(255,170,60,0.85)';
+      ctx.fillRect(nx - 2, ny, 4, Math.round(len * 0.7));
+      ctx.fillStyle = 'rgba(255,245,200,0.95)';
+      ctx.fillRect(nx - 1, ny, 2, Math.round(len * 0.45));
+      ctx.fillStyle = 'rgba(255,90,30,0.6)';
+      ctx.fillRect(nx - 1, ny + Math.round(len * 0.7), 2, Math.round(len * 0.3));
+    }
+    ctx.drawImage(this.sprites.craft(team), ix - 1, iy - 1);
+    if (c.hp < 70 && (now / 90) % 2 < 1) {
+      // Damaged: sparks off the hull.
+      ctx.fillStyle = '#ffd040';
+      ctx.fillRect(ix + 2 + ((now / 50) % 8), iy + 8 + ((now / 70) % 10), 1, 1);
+    }
+  }
+
   /**
    * Body status: each part of the clone tinted by its health (green to red),
    * dark where it has been torn off, outlined where armour is still worn.
@@ -573,7 +609,7 @@ export class Renderer {
       ctx.fillRect(W / 2 - 220 * s, H / 2 - 40 * s, 440 * s, 60 * s);
       ctx.fillStyle = '#fff';
       const secs = Math.ceil(game.respawnTicks / TICK_RATE);
-      ctx.fillText(secs > 0 ? `New clone in ${secs}…` : 'Deploying clone…', W / 2, H / 2 - 2 * s);
+      ctx.fillText(game.myCraft() ? 'Drop rocket inbound…' : secs > 0 ? `New clone in ${secs}…` : 'Launching drop rocket…', W / 2, H / 2 - 2 * s);
     }
 
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);

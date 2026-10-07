@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { deliverAll } from './helpers.ts';
 import { ACTOR_H, ACTOR_W, DT, WORLD_W } from '../src/shared/constants.ts';
 import { Collider, DistanceField } from '../src/shared/field.ts';
 import { Mat } from '../src/shared/materials.ts';
@@ -86,7 +87,7 @@ describe('particles act on players', () => {
     const world = new World(9);
     const shooter = world.addPlayer('shooter', { send() {} })!;
     const victim = world.addPlayer('victim', { send() {} })!;
-    for (let i = 0; i < 3; i++) world.step();
+    deliverAll(world, [shooter, victim]);
     // Put both on a flat shelf in open air so only particles can connect.
     const t = world.terrain;
     for (let x = 900; x < 1100; x++) for (let y = 300; y < 310; y++) t.set(x, y, Mat.Bedrock);

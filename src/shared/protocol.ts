@@ -33,6 +33,8 @@ export const R_SCORES = 11;
 export const R_HIT = 12;
 export const R_CHAT = 13;
 export const R_DETACH = 14;
+export const R_CRAFTS = 15;
+export const R_CRAFT_BOOM = 16;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;

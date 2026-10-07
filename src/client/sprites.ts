@@ -185,6 +185,42 @@ const GIBS: Grid[] = [
   ['Rr'], // meat
   ['.KK.', 'KSSK', 'KSeK', '.KR.'], // bare head (helmet already gone)
   ['KOOK', 'OooO', 'OooO', 'KOOK'], // vest plate
+  ['.KK.', 'KLHK', 'KHHK'], // rocket nose cone
+  ['KLHK', 'LHHK', 'KTTK', 'KHHK'], // rocket hull plate
+  ['KGK', 'GGK', 'GK.'], // rocket fin
+  ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
+];
+
+// Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin).
+const CRAFT: Grid = [
+  '......KK......',
+  '.....KLLK.....',
+  '.....KLHK.....',
+  '....KLHHHK....',
+  '....KLHHHK....',
+  '...KLHHHHHK...',
+  '...KLHVVHHK...',
+  '...KLHVvHHK...',
+  '...KLHHHHHK...',
+  '...KTTTTTTK...',
+  '...KttttttK...',
+  '...KLHHHHHK...',
+  '...KLHHHHHK...',
+  '...KLHGGHHK...',
+  '...KLHGGHHK...',
+  '...KLHGGHHK...',
+  '...KLHHHHHK...',
+  '...KLHHHHHK...',
+  '...KTTTTTTK...',
+  '..KKLHHHHHKK..',
+  '.KGKLHHHHHKGK.',
+  '.KGKLHHHHHKGK.',
+  'KGGKLHHHHHKGGK',
+  'KGGKKHHHHKKGGK',
+  'KGK.KDDDDK.KGK',
+  'KK..KDMMDK..KK',
+  '....KDDDDK....',
+  '.....KKKK.....',
 ];
 
 function shade(rgb: number, k: number): number {
@@ -388,6 +424,15 @@ export class SpriteCache {
 
   private gibData = new Map<string, { w: number; h: number; data: Uint32Array }>();
 
+  private crafts = new Map<number, HTMLCanvasElement>();
+
+  /** Drop rocket in its passenger's team colour (grey when empty). */
+  craft(team: number): HTMLCanvasElement {
+    let c = this.crafts.get(team);
+    if (!c) this.crafts.set(team, (c = bake(CRAFT, this.pal(team))));
+    return c;
+  }
+
   /** Raw ABGR pixels of a gib piece, for blitting into the particle buffer. */
   gibPixels(team: number, piece: number, rot: number): { w: number; h: number; data: Uint32Array } {
     const key = `${team}|${piece}|${rot}`;
@@ -428,7 +473,7 @@ function rotate90(g: Grid): Grid {
 
 /** Validate grids are rectangular (used by tests). */
 export function spriteGridsAreRectangular(): boolean {
-  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS];
+  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT];
   return all.every((g) => g.every((row) => row.length === g[0].length)) &&
     Object.values(BODY).every((g) => g.length === BODY_H && g[0].length === BODY_W);
 }

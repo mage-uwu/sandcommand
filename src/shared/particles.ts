@@ -40,8 +40,9 @@ export const PK = {
   Blood: 5,
   Gib: 6,
   Shrapnel: 7,
+  Hull: 8, // drop-rocket fragments: heavy, settle as scrap metal
 } as const;
-export const KIND_COUNT = 8;
+export const KIND_COUNT = 9;
 
 // Contact behaviours.
 const C_SETTLE = 0; // become terrain (grains)
@@ -83,6 +84,7 @@ export const KINDS: readonly KindDef[] = [
   /* Blood    */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
   /* Gib      */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID, pmass: 0.3, sharp: 0.1, wound: 0, burn: 0, onActor: A_BOUNCE },
   /* Shrapnel */ { gravity: 0.35, drag: 0.99, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.05, contact: C_SPENT, pmass: 0.4, sharp: 1.0, wound: 7, burn: 0, onActor: A_EMBED },
+  /* Hull     */ { gravity: 1, drag: 0.997, e: 0.25, mu: 0.6, mass: true, advect: 0, air: 0.04, contact: C_SETTLE, pmass: 1.2, sharp: 0.35, wound: 12, burn: 0, onActor: A_BOUNCE },
 ];
 const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
 const K_DRAG = new Float32Array(KINDS.map((k) => k.drag));
@@ -125,9 +127,13 @@ const vel = { x: 0.5, y: 0.5 }; // doubles from the start: no boxing
 const free = { x: 0, y: 0 };
 const aq = { t: 0.5 };
 
+/** Gib `aux` flag: armour, jetpack and hull pieces clatter instead of bleeding. Low 7 bits = sprite piece. */
+export const GIB_INORGANIC = 0x80;
+
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_CRAFT = 252; // drop-rocket crashes, crushes and explosions
 export const W_DEBRIS = 253;
 export const W_BURN = 254;
 const KIND_WEAPON = new Uint8Array(KIND_COUNT).fill(W_DEBRIS);
@@ -342,6 +348,35 @@ export class Particles {
     }
   }
 
+  /**
+   * A steady directional jet (rocket exhaust): blend the air cells in a disc
+   * toward wind (wx, wy) scaled by falloff. Blending rather than adding keeps a
+   * jet that fires every tick at its own strength instead of piling up.
+   */
+  wind(cx: number, cy: number, radius: number, wx: number, wy: number): void {
+    const f0x = Math.max(0, Math.floor((cx - radius) / FIELD_CELL));
+    const f1x = Math.min(FW - 1, Math.floor((cx + radius) / FIELD_CELL));
+    const f0y = Math.max(0, Math.floor((cy - radius) / FIELD_CELL));
+    const f1y = Math.min(FH - 1, Math.floor((cy + radius) / FIELD_CELL));
+    for (let fy = f0y; fy <= f1y; fy++) {
+      for (let fx = f0x; fx <= f1x; fx++) {
+        const dx = (fx + 0.5) * FIELD_CELL - cx;
+        const dy = (fy + 0.5) * FIELD_CELL - cy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d >= radius) continue;
+        const c = fy * FW + fx;
+        const k = 1 - d / radius;
+        // Spread outward a little, like an exhaust plume hitting the ground.
+        this.airX[c] += (wx * k + dx * k * 3 - this.airX[c]) * 0.5;
+        this.airY[c] += (wy * k - this.airY[c]) * 0.5;
+        if (!this.airLive[c]) {
+          this.airLive[c] = 1;
+          this.airCells.push(c);
+        }
+      }
+    }
+  }
+
   /** Decay the air field; cells that fall quiet leave the live list. */
   private decayAir(): void {
     const next = this.airNext;
@@ -532,7 +567,7 @@ export class Particles {
         if (mode === C_RIGID) {
           // Tumble in proportion to how hard it struck; hard hits splash blood.
           this.spinRate[i] = (hash01(i, this.life[i]) - 0.5) * Math.min(0.5, jn / 400);
-          if (jn > 90 && this.aux[i] !== 0) {
+          if (jn > 90 && (this.aux[i] & GIB_INORGANIC) === 0) {
             for (let b = 0; b < 2; b++) this.spawn(PK.Blood, px, py, (hash01(i, b) - 0.5) * jn * 0.4, -jn * 0.15, 48);
           }
           if (hit.ny < -0.5 && vel.x * vel.x + vel.y * vel.y < 20 * 20) {
@@ -546,7 +581,7 @@ export class Particles {
         const sp = Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]);
         this.spin[i] += this.spinRate[i] * sp * dt;
         // Fast meat leaves a blood trail.
-        if (sp > 120 && this.aux[i] !== 0 && (this.life[i] & 1) === 0) this.spawn(PK.Blood, px, py, vx[i] * 0.1, vy[i] * 0.1, 48);
+        if (sp > 120 && (this.aux[i] & GIB_INORGANIC) === 0 && (this.life[i] & 1) === 0) this.spawn(PK.Blood, px, py, vx[i] * 0.1, vy[i] * 0.1, 48);
       }
       if (mode === C_SETTLE) {
         // Resting = supported from below and slower than a couple of ticks of
@@ -667,7 +702,7 @@ export function dropToSupport(t: Terrain, x: number, y: number, mat: number, dep
 
 /** Material a destroyed cell turns into when it lands again. */
 export function rubbleOf(mat: number): number {
-  if (mat === Mat.Sand || mat === Mat.Gold) return mat;
+  if (mat === Mat.Sand || mat === Mat.Gold || mat === Mat.Metal) return mat;
   return Mat.Rubble;
 }
 
@@ -721,11 +756,12 @@ export function spillGold(grains: Particles, x: number, y: number, vx: number, v
 }
 
 const ACTOR_MASS = 8; // impulse units per cell/s of actor velocity change
+const tested = new Int32Array(4); // 128-slot bitmask scratch
 const SAND_MIN = 6; // grains overlapping a body before a flow can drag it
 const SAND_DRAG = 0.012; // per grain, capped by SAND_DRAG_MAX
 const SAND_DRAG_MAX = 0.35;
 const AIR_ACTOR = 0.35; // per-tick blend toward the blast wind
-export const MAX_ACTORS = 64;
+export const MAX_ACTORS = 128; // 64 clones + 64 drop rockets
 
 /**
  * Actors (players) as seen by the particle engine. Each tick the world loads
@@ -742,11 +778,16 @@ export const MAX_ACTORS = 64;
  */
 export class ActorField {
   n = 0;
+  /** Caller's id per slot (the world uses player ids, and CRAFT_ID_BASE + slot for rockets). */
   readonly id = new Uint8Array(MAX_ACTORS);
   readonly x = new Float32Array(MAX_ACTORS); // body top-left
   readonly y = new Float32Array(MAX_ACTORS);
   readonly vx = new Float32Array(MAX_ACTORS);
   readonly vy = new Float32Array(MAX_ACTORS);
+  readonly w = new Float32Array(MAX_ACTORS); // body size per slot
+  readonly h = new Float32Array(MAX_ACTORS);
+  /** Mass per slot (impacts and field forces divide by it). */
+  readonly mass = new Float32Array(MAX_ACTORS);
   readonly dvx = new Float32Array(MAX_ACTORS);
   readonly dvy = new Float32Array(MAX_ACTORS);
   // Hit records (struct of arrays, grown as needed).
@@ -781,9 +822,13 @@ export class ActorField {
     this.hitN = 0;
   }
 
-  /** Add a body; returns its slot. */
-  add(id: number, x: number, y: number, vx: number, vy: number): number {
+  /** Add a body; returns its slot. Size and mass default to a clone's. */
+  add(id: number, x: number, y: number, vx: number, vy: number, w = this.bodyW, h = this.bodyH, mass = ACTOR_MASS): number {
+    if (this.n >= MAX_ACTORS) return -1;
     const a = this.n++;
+    this.w[a] = w;
+    this.h[a] = h;
+    this.mass[a] = mass;
     this.id[a] = id;
     this.x[a] = x;
     this.y[a] = y;
@@ -791,9 +836,9 @@ export class ActorField {
     this.vy[a] = vy;
     this.dvx[a] = this.dvy[a] = 0;
     const f0x = Math.max(0, Math.floor(x) >> FIELD_SHIFT);
-    const f1x = Math.min(FW - 1, Math.floor(x + this.bodyW - 1) >> FIELD_SHIFT);
+    const f1x = Math.min(FW - 1, Math.floor(x + w - 1) >> FIELD_SHIFT);
     const f0y = Math.max(0, Math.floor(y) >> FIELD_SHIFT);
-    const f1y = Math.min(FH - 1, Math.floor(y + this.bodyH - 1) >> FIELD_SHIFT);
+    const f1y = Math.min(FH - 1, Math.floor(y + h - 1) >> FIELD_SHIFT);
     for (let fy = f0y; fy <= f1y; fy++) {
       for (let fx = f0x; fx <= f1x; fx++) {
         const c = fy * FW + fx;
@@ -819,18 +864,16 @@ export class ActorField {
     const steps = Math.max(1, Math.ceil(len / (FIELD_CELL / 2)));
     let best = -1;
     let bestT = 2;
-    let tested0 = 0; // bitmask of slots already slab-tested (64 bodies)
-    let tested1 = 0;
+    tested.fill(0); // bitmask of slots already slab-tested
     for (let s = 0; s <= steps; s++) {
       const c = fieldIndex(x0 + (dx * s) / steps, y0 + (dy * s) / steps);
       if (c < 0) continue;
       for (let k = 0; k < 2; k++) {
         const a = k === 0 ? this.cellA[c] : this.cellB[c];
         if (a < 0) break;
-        if (a < 32 ? tested0 & (1 << a) : tested1 & (1 << (a - 32))) continue;
-        if (a < 32) tested0 |= 1 << a;
-        else tested1 |= 1 << (a - 32);
-        const t = segmentBox(x0, y0, dx, dy, this.x[a], this.y[a], this.x[a] + this.bodyW, this.y[a] + this.bodyH);
+        if (tested[a >> 5] & (1 << (a & 31))) continue;
+        tested[a >> 5] |= 1 << (a & 31);
+        const t = segmentBox(x0, y0, dx, dy, this.x[a], this.y[a], this.x[a] + this.w[a], this.y[a] + this.h[a]);
         if (t >= 0 && t < bestT) {
           bestT = t;
           best = a;
@@ -844,8 +887,8 @@ export class ActorField {
 
   /** Record a particle impact on body slot `a` at world point (ex, ey). */
   hit(a: number, ex: number, ey: number, jx: number, jy: number, energy: number, wound: number, burn: number, owner: number, weapon: number): void {
-    this.dvx[a] += jx / ACTOR_MASS;
-    this.dvy[a] += jy / ACTOR_MASS;
+    this.dvx[a] += jx / this.mass[a];
+    this.dvy[a] += jy / this.mass[a];
     if (wound <= 0 && burn <= 0 && energy <= 0) return;
     if (this.hitN === this.hitSlot.length) this.growHits();
     const h = this.hitN++;
@@ -892,9 +935,10 @@ export class ActorField {
   ): void {
     for (let a = 0; a < this.n; a++) {
       const f0x = Math.max(0, Math.floor(this.x[a]) >> FIELD_SHIFT);
-      const f1x = Math.min(FW - 1, Math.floor(this.x[a] + this.bodyW - 1) >> FIELD_SHIFT);
+      const f1x = Math.min(FW - 1, Math.floor(this.x[a] + this.w[a] - 1) >> FIELD_SHIFT);
       const f0y = Math.max(0, Math.floor(this.y[a]) >> FIELD_SHIFT);
-      const f1y = Math.min(FH - 1, Math.floor(this.y[a] + this.bodyH - 1) >> FIELD_SHIFT);
+      const f1y = Math.min(FH - 1, Math.floor(this.y[a] + this.h[a] - 1) >> FIELD_SHIFT);
+      const heavy = ACTOR_MASS / this.mass[a]; // a rocket is pushed less than a clone
       let d = 0;
       let mx = 0;
       let my = 0;
@@ -915,13 +959,13 @@ export class ActorField {
         }
       }
       if (d >= SAND_MIN) {
-        const k = Math.min(SAND_DRAG_MAX, d * SAND_DRAG);
+        const k = Math.min(SAND_DRAG_MAX, d * SAND_DRAG) * heavy;
         this.dvx[a] += (mx / d - this.vx[a]) * k;
         this.dvy[a] += (my / d - this.vy[a]) * k;
       }
       if (an > 0) {
-        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR;
-        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR;
+        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR * heavy;
+        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR * heavy;
       }
     }
   }
@@ -966,4 +1010,31 @@ export function explosionFragments(p: Particles, x: number, y: number, projKind:
     const s = def.speed * 0.35 * rng.range(0.3, 1);
     p.spawn(PK.Flame, x, y, dx * s, dy * s - 30, rng.range(10, 18), 0, 0, owner);
   }
+}
+
+/**
+ * A destroyed drop rocket: heavy hull fragments (real particles that hurt,
+ * push the sand flow, get blown around and settle as scrap-metal terrain),
+ * burning embers and a little shrapnel. Server spawns them authoritatively;
+ * clients mirror the same shower from the seed in the destruction record.
+ */
+export function craftFragments(p: Particles, x: number, y: number, vx: number, vy: number, owner: number, rng: Rng): void {
+  for (let k = 0; k < 48; k++) {
+    let dx = rng.range(-1, 1);
+    let dy = rng.range(-1, 1);
+    const d = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+    dx /= d;
+    dy /= d;
+    const s = rng.range(90, 330);
+    p.spawn(PK.Hull, x + dx * 4, y + dy * 8, vx * 0.6 + dx * s, vy * 0.6 + dy * s - 60, rng.range(300, 420), Mat.Metal, 0, owner);
+  }
+  for (let k = 0; k < 30; k++) {
+    let dx = rng.range(-1, 1);
+    let dy = rng.range(-1, 1);
+    const d = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+    dx /= d;
+    dy /= d;
+    p.spawn(PK.Flame, x, y, vx * 0.3 + dx * rng.range(40, 160), vy * 0.3 + dy * rng.range(40, 160) - 40, rng.range(12, 22), 0, 0, owner);
+  }
+  explosionFragments(p, x, y, 1, owner, rng); // rocket-grade shrapnel
 }

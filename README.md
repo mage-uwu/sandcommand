@@ -276,6 +276,39 @@ cosmetic, but the gold a clone spills is real. The server throws it from the
 seed and deposits it as terrain, and every client throws the same shower from
 the same seed. Explosive and high-overkill deaths scatter harder.
 
+### Drop rockets
+
+Every clone arrives by drop rocket, including your first spawn and every
+respawn (`src/shared/craft.ts`). The rocket falls in from above the sky line
+at terminal speed. Its autopilot then fires a late retro burn: the target
+descent speed is the speed from which a planned deceleration stops exactly at
+hover height. It hovers a few cells off the ground, drops the clone out of
+the side hatch, and burns back up out of the world. Up to 64 can be in the
+air at once.
+
+Rockets are physical bodies in the same engine as everything else:
+
+- **Thrust.** The exhaust spawns real flame particles, which burn whoever
+  stands under the nozzle, and writes a downward jet into the air field. That
+  jet blows sand, gibs and clones away from the landing spot.
+- **Hits.** Rockets are splatted into the actor field alongside clones (mass
+  60, so particles shove them far less). Bullets, shrapnel, debris and blasts
+  damage the hull. Hits below the hull's integrity only scratch it.
+- **Crushing.** A rocket hitting a clone hard crushes it, credited to the
+  rocket's passenger.
+- **Crashes.** A rocket that is shot up enough, or hits the ground faster than
+  its crash speed, blows apart. That carves a crater, sends a blast wave, and
+  throws heavy `Hull` fragments plus flames into the particle engine. Anyone
+  aboard is blown out of the nose cone into the debris.
+
+Hull fragments are ordinary field-engine particles. They maim like shrapnel,
+push sand, and settle as **scrap metal** terrain (a hard material), so a
+battlefield fills up with wreckage. The destruction travels as one 14-byte
+`R_CRAFT_BOOM` record carrying a seed, and clients reproduce the same
+fragment shower from that seed. Rocket state streams as a per-client
+`R_CRAFTS` record (14 B per rocket in range), and the camera rides your
+rocket down.
+
 ## Measured numbers
 
 `npm run bench` runs Node 22 on a 4-core container, with 64 bots firing all
@@ -283,9 +316,9 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.81 ms  p99 2.7 ms      (grains, shrapnel, embers, body parts, collapses; 3000 ticks)
-replicate avg 0.98 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 28.6 KB/s; room egress 1.79 MB/s
+sim       avg 1.20 ms  p99 6.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
+replicate avg 0.87 ms  p99 3.6 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 36.2 KB/s; room egress 2.26 MB/s
 ```
 
 `npm run bench:physics`:

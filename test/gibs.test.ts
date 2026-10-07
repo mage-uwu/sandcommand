@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { deliverAll } from './helpers.ts';
 import { Reader } from '../src/shared/codec.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { PK, type Particles } from '../src/shared/particles.ts';
@@ -19,7 +20,7 @@ describe('gibbing', () => {
     const a = world.addPlayer('watcher', { send: (d) => inbox.push(d) })!;
     const b = world.addPlayer('victim', { send() {} })!;
     watcher.myId = a.id;
-    for (let i = 0; i < 3; i++) world.step(); // both spawn
+    deliverAll(world, [a, b]); // both spawn
     expect(b.alive).toBe(true);
     b.gold = 40;
     // Park the watcher next to the victim so the death is on screen.
