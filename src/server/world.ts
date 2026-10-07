@@ -24,7 +24,7 @@ import {
   WORLD_H,
   WORLD_W,
 } from '../shared/constants.ts';
-import { DebrisField, Projectiles, throwDebris } from '../shared/kernels.ts';
+import { DebrisField, Projectiles, spillGold, throwDebris } from '../shared/kernels.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -328,6 +328,7 @@ export class World {
 
   private damage(victim: Player, amount: number, attacker: number, weapon: number): void {
     if (!victim.alive || amount <= 0) return;
+    const overkill = amount - victim.hp;
     victim.hp -= amount;
     const w = this.tmp.reset();
     w.u8(R_HIT);
@@ -343,23 +344,26 @@ export class World {
     victim.deaths++;
     const killer = this.players[attacker];
     if (killer && killer !== victim) killer.kills++;
-    this.broadcast.u8(R_KILL);
-    this.broadcast.u8(attacker);
-    this.broadcast.u8(victim.id);
-    this.broadcast.u8(weapon);
-    // A clone bursts into meat-colored rubble; half its gold spills as gold.
-    const drop = Math.floor(victim.gold / 2);
-    victim.gold -= drop;
-    for (let i = 0; i < 10 + Math.min(drop, 40); i++) {
-      this.debris.spawn(
-        victim.cx,
-        victim.cy,
-        this.rng.range(-120, 120),
-        this.rng.range(-220, -40),
-        i < 10 ? Mat.Rubble : Mat.Gold,
-        150,
-      );
-    }
+    // The clone gibs. Gibs are cosmetic and simulated by each client from this
+    // record; the gold it spills is real terrain, thrown from `seed` so clients
+    // can mirror the shower without it being streamed.
+    const gold = Math.min(255, Math.floor(victim.gold / 2));
+    victim.gold -= gold;
+    const seed = this.rng.nextU32();
+    const b = victim.body;
+    const k = this.broadcast;
+    k.u8(R_KILL);
+    k.u8(attacker);
+    k.u8(victim.id);
+    k.u8(weapon);
+    k.u16(clampU16(victim.cx));
+    k.u16(clampU16(victim.cy + Y_BIAS));
+    k.i16(clampI16(b.vx * VEL_SCALE));
+    k.i16(clampI16(b.vy * VEL_SCALE));
+    k.u8(Math.max(0, Math.min(255, Math.round(overkill))));
+    k.u32(seed);
+    k.u8(gold);
+    spillGold(this.debris, victim.cx, victim.cy, b.vx, b.vy, gold, new Rng(seed));
   }
 
   private onProjEnd = (i: number, x: number, y: number, actor: number, detonate: boolean): void => {
@@ -380,10 +384,11 @@ export class World {
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d < def.splashR) {
             const selfScale = p.id === owner ? 0.5 : 1;
-            this.damage(p, def.splashDamage * (1 - d / def.splashR) * selfScale, owner, kind);
+            // Push first so a killing blast flings the gibs.
             const push = (1 - d / def.splashR) * 320;
             p.body.vx += (dx / (d + 1)) * push;
             p.body.vy += (dy / (d + 1)) * push - 60;
+            this.damage(p, def.splashDamage * (1 - d / def.splashR) * selfScale, owner, kind);
           }
         }
       }

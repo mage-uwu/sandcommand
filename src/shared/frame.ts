@@ -43,6 +43,19 @@ export interface RemoteActor {
   weapon: number;
 }
 
+export interface KillInfo {
+  killer: number;
+  victim: number;
+  weapon: number; // 255 = fall / world
+  x: number; // victim center
+  y: number;
+  vx: number;
+  vy: number;
+  overkill: number; // damage beyond lethal, drives how violently it gibs
+  seed: number;
+  gold: number;
+}
+
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
 export interface FrameHandler {
   self(s: SelfState): void;
@@ -53,7 +66,7 @@ export interface FrameHandler {
   chunkLoaded(ci: number): void;
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void;
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean): void;
-  kill(killer: number, victim: number, weapon: number): void;
+  kill(k: KillInfo): void;
   roster(id: number, present: boolean, name: string): void;
   scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void;
   hit(victim: number, x: number, y: number, amount: number): void;
@@ -156,7 +169,18 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         break;
       }
       case R_KILL:
-        h.kill(r.u8(), r.u8(), r.u8());
+        h.kill({
+          killer: r.u8(),
+          victim: r.u8(),
+          weapon: r.u8(),
+          x: r.u16(),
+          y: r.u16() - Y_BIAS,
+          vx: r.i16() / 8,
+          vy: r.i16() / 8,
+          overkill: r.u8(),
+          seed: r.u32(),
+          gold: r.u8(),
+        });
         break;
       case R_ROSTER: {
         const id = r.u8();

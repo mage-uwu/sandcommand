@@ -178,6 +178,21 @@ export function throwDebris(
   }
 }
 
+/** Gold spilled by a dying clone. Mirrored by clients from the kill record's seed. */
+export function spillGold(
+  field: DebrisField,
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  count: number,
+  rng: Rng,
+): void {
+  for (let i = 0; i < count; i++) {
+    field.spawn(x, y, vx * 0.5 + rng.range(-110, 110), vy * 0.5 + rng.range(-230, -50), Mat.Gold, 150);
+  }
+}
+
 export interface ProjEnd {
   (i: number, x: number, y: number, actor: number, detonate: boolean): void;
 }

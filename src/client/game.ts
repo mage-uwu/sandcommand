@@ -1,13 +1,14 @@
 import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type FrameHandler, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
-import { DebrisField, Projectiles, throwDebris } from '../shared/kernels.ts';
+import { type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
+import { DebrisField, Projectiles, spillGold, throwDebris } from '../shared/kernels.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { Fx } from './fx.ts';
+import { Blood, Gibs } from './gibs.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
 /** Remote actors are rendered this many ticks in the past for smooth interpolation. */
@@ -88,6 +89,8 @@ export class Game implements FrameHandler {
   readonly projectiles = new Projectiles(2048);
   readonly debris = new DebrisField(8192);
   readonly fx = new Fx(6000);
+  readonly gibs = new Gibs(1500);
+  readonly blood = new Blood(4000);
   readonly players = new Map<number, PlayerInfo>();
   readonly feed: FeedItem[] = [];
   readonly chatLog: FeedItem[] = [];
@@ -157,6 +160,8 @@ export class Game implements FrameHandler {
     });
     this.debris.step(this.terrain, DT);
     this.fx.step(this.terrain, DT);
+    this.gibs.step(this.terrain, DT, this.blood);
+    this.blood.step(this.terrain, DT);
     // Ambient effects for remote jetpacks.
     for (const [, s] of this.snaps) {
       const last = s[s.length - 1];
@@ -290,6 +295,8 @@ export class Game implements FrameHandler {
 
   carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[]): void {
     throwDebris(this.debris, removed, x, y, debris, new Rng(seed));
+    // Blasted cells take their blood stains with them.
+    for (let i = 0; i < removed.length; i += 3) this.blood.stain[removed[i + 1] * WORLD_W + removed[i]] = 0;
     if (r <= 6) {
       // Digger / bullet chips: a little dust.
       for (let k = 0; k < Math.min(6, removed.length / 3); k++) {
@@ -334,7 +341,8 @@ export class Game implements FrameHandler {
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 400) * 8);
   }
 
-  kill(killer: number, victim: number, weapon: number): void {
+  kill(k: KillInfo): void {
+    const { killer, victim, weapon } = k;
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     const how = weapon === 255 ? 'fell' : WEAPONS[weapon]?.name ?? '';
@@ -342,6 +350,17 @@ export class Game implements FrameHandler {
     const color = victim === this.myId ? '#ff6060' : killer === this.myId ? '#80ff80' : '#e0e0e0';
     this.feed.push({ text, color, at: performance.now() });
     if (this.feed.length > 6) this.feed.shift();
+
+    // Gib it. Skip the work for deaths far off-screen.
+    const camDx = k.x - this.body.x;
+    const camDy = k.y - this.body.y;
+    if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
+    const explosive = weapon === WeaponId.Bazooka || weapon === WeaponId.Grenade;
+    const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
+    this.gibs.burst(k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, this.blood);
+    // Same seed as the server, so the gold shower matches what will settle.
+    spillGold(this.debris, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
+    this.snaps.delete(victim);
   }
 
   roster(id: number, present: boolean, name: string): void {
@@ -366,7 +385,7 @@ export class Game implements FrameHandler {
   }
 
   hit(victim: number, x: number, y: number, amount: number): void {
-    this.fx.burst(x, y, Math.min(20, 3 + amount / 4), 90, 0.6, 0xb01818, 1);
+    this.blood.splat(x, y, Math.min(24, 3 + amount / 3), 60 + amount * 1.5);
     if (victim === this.myId) this.hurtFlash = Math.min(1, this.hurtFlash + amount / 60);
   }
 

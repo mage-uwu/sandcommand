@@ -1,11 +1,12 @@
 import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { F_ALIVE, F_FIRING, F_JET, dequantizeAim } from '../shared/protocol.ts';
+import { F_ALIVE, F_FIRING, F_GROUND, F_JET, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
 import { WEAPONS, WeaponId } from '../shared/weapons.ts';
 import type { Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
+import { type BodyFrame, SpriteCache, WALK_CYCLE, gunMuzzle } from './sprites.ts';
 
 const MINI_SCALE = 8;
 
@@ -23,6 +24,18 @@ for (let m = 0; m < MAT_COLOR.length; m++) {
   }
 }
 
+/** Blend an ABGR terrain pixel toward dried-blood red by stain intensity. */
+function bloodied(c: number, stain: number): number {
+  const k = Math.min(0.8, stain / 300);
+  const r = c & 255;
+  const g = (c >> 8) & 255;
+  const b = (c >> 16) & 255;
+  const nr = Math.round(r + (110 - r) * k);
+  const ng = Math.round(g + (12 - g) * k);
+  const nb = Math.round(b + (14 - b) * k);
+  return (255 << 24) | (nb << 16) | (ng << 8) | nr;
+}
+
 function rgbCss(c: number, a = 1): string {
   return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
 }
@@ -36,6 +49,7 @@ export class Renderer {
   private miniCtx: CanvasRenderingContext2D;
   private miniImage: ImageData;
   private miniPixels: Uint32Array;
+  readonly sprites = new SpriteCache();
   zoom = 3;
   camX = WORLD_W / 2;
   camY = WORLD_H / 3;
@@ -85,6 +99,7 @@ export class Renderer {
     const ox = (ci % CHUNKS_X) << CHUNK_SHIFT;
     const oy = Math.floor(ci / CHUNKS_X) << CHUNK_SHIFT;
     const px = this.chunkPixels;
+    const stain = game.blood.stain;
     for (let y = 0; y < CHUNK; y++) {
       const wy = oy + y;
       const row = wy * WORLD_W + ox;
@@ -97,7 +112,10 @@ export class Renderer {
         const wx = ox + x;
         const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
         const v = (hash2(wx, wy) & 3) + (exposed ? 4 : 0);
-        px[y * CHUNK + x] = PALETTE[m * 8 + v];
+        let c = PALETTE[m * 8 + v];
+        const st = stain[row + x];
+        if (st) c = bloodied(c, st);
+        px[y * CHUNK + x] = c;
       }
     }
     let c = this.chunkCanvas[ci];
@@ -221,16 +239,18 @@ export class Renderer {
     for (const v of views) {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
-      this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.color ?? '#ccc', v.weapon, v.moving, now);
+      this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now);
     }
     // Own clone.
     if (game.alive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
       const myAim = Math.atan2(wy - (selfY + 5), wx - (selfX + ACTOR_W / 2));
-      const flags = F_ALIVE | (b.jetting ? F_JET : 0) | (input.mouseDown ? F_FIRING : 0);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.color ?? '#fff', game.weapon, Math.abs(b.vx) > 5, now);
+      const flags = F_ALIVE | (b.onGround ? F_GROUND : 0) | (b.jetting ? F_JET : 0) | (input.mouseDown ? F_FIRING : 0);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now);
     }
+
+    this.drawGibs(game, alpha);
 
     // Projectiles.
     const p = game.projectiles;
@@ -374,7 +394,7 @@ export class Renderer {
     y: number,
     aim: number,
     flags: number,
-    color: string,
+    team: number,
     weapon: number,
     moving: boolean,
     now: number,
@@ -382,42 +402,62 @@ export class Renderer {
     const left = Math.cos(aim) < 0;
     const ix = Math.round(x);
     const iy = Math.round(y);
-    // Jetpack on the back.
-    ctx.fillStyle = '#555a60';
-    ctx.fillRect(left ? ix + ACTOR_W - 2 : ix - 1, iy + 4, 3, 6);
+    // Walk cycle advances with distance travelled, so feet don't skate.
+    const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / 3) & 3] : 'idle';
+    ctx.drawImage(this.sprites.body(team, frame, left), ix - 1, iy - 2);
+
+    // Jetpack exhaust under the pack (pack is on the clone's back).
     if (flags & F_JET) {
-      ctx.fillStyle = (now / 50) % 2 < 1 ? '#ffd040' : '#ff7020';
-      ctx.fillRect(left ? ix + ACTOR_W - 1 : ix, iy + 10, 1, 3);
+      const fx = left ? ix + 6 : ix - 1;
+      const flick = Math.floor(now / 40) % 3;
+      ctx.fillStyle = '#fff6c0';
+      ctx.fillRect(fx + 1, iy + 8, 1, 1);
+      ctx.fillStyle = '#ffc040';
+      ctx.fillRect(fx, iy + 9, 3, 1);
+      ctx.fillRect(fx + 1, iy + 10, 1, 2 + flick);
+      ctx.fillStyle = '#ff6a20';
+      ctx.fillRect(fx + (flick === 1 ? 0 : 2), iy + 10 + flick, 1, 2);
     }
-    // Legs with a two-frame walk cycle.
-    const phase = moving ? Math.floor(now / 110) % 2 : 0;
-    ctx.fillStyle = '#2b2e33';
-    ctx.fillRect(ix + 1 + phase, iy + 9, 2, 5);
-    ctx.fillRect(ix + 5 - phase, iy + 9, 2, 5);
-    // Torso in team color.
-    ctx.fillStyle = color;
-    ctx.fillRect(ix + 1, iy + 4, 6, 6);
-    // Head + visor.
-    ctx.fillStyle = '#c8b8a0';
-    ctx.fillRect(ix + 2, iy, 4, 4);
-    ctx.fillStyle = '#40c8ff';
-    ctx.fillRect(left ? ix + 2 : ix + 4, iy + 1, 2, 1);
-    // Weapon along the aim vector.
-    const len = weapon === WeaponId.Bazooka ? 10 : weapon === WeaponId.Digger ? 8 : weapon === WeaponId.Grenade ? 4 : 9;
-    const gx = ix + ACTOR_W / 2;
-    const gy = iy + 5;
-    ctx.strokeStyle = weapon === WeaponId.Digger ? '#c0a040' : weapon === WeaponId.Bazooka ? '#556b2f' : '#222';
-    ctx.lineWidth = weapon === WeaponId.Bazooka ? 2 : 1.4;
-    ctx.beginPath();
-    ctx.moveTo(gx, gy);
-    ctx.lineTo(gx + Math.cos(aim) * len, gy + Math.sin(aim) * len);
-    ctx.stroke();
-    if (flags & F_FIRING && weapon === WeaponId.Digger) {
-      ctx.fillStyle = 'rgba(255,230,120,0.5)';
-      ctx.beginPath();
-      ctx.arc(gx + Math.cos(aim) * 13, gy + Math.sin(aim) * 13, 3 + Math.random() * 2, 0, Math.PI * 2);
-      ctx.fill();
+
+    // Arm + weapon, pre-rotated onto the pixel grid, pivoting at the shoulder.
+    const sx = ix + 4;
+    const sy = iy + 4;
+    const g = this.sprites.gun(weapon, aim);
+    ctx.drawImage(g.c, sx - g.r, sy - g.r);
+    if (flags & F_FIRING) {
+      const m = gunMuzzle(weapon) + 1;
+      const mx = Math.round(sx + Math.cos(aim) * m);
+      const my = Math.round(sy + Math.sin(aim) * m);
+      if (weapon === WeaponId.Digger) {
+        ctx.fillStyle = 'rgba(255,230,120,0.45)';
+        ctx.fillRect(mx - 2, my - 2, 5, 5);
+        ctx.fillStyle = 'rgba(255,250,210,0.8)';
+        ctx.fillRect(mx - 1, my - 1, 3, 3);
+      } else if (Math.floor(now / 33) % 2 === 0) {
+        ctx.fillStyle = '#ffd040';
+        ctx.fillRect(mx - 1, my, 3, 1);
+        ctx.fillRect(mx, my - 1, 1, 3);
+        ctx.fillStyle = '#fffbe0';
+        ctx.fillRect(mx, my, 1, 1);
+      }
     }
+  }
+
+  private drawGibs(game: Game, alpha: number): void {
+    const ctx = this.ctx;
+    const g = game.gibs;
+    for (let i = 0; i < g.n; i++) {
+      const x = g.px[i] + (g.x[i] - g.px[i]) * alpha;
+      const y = g.py[i] + (g.y[i] - g.py[i]) * alpha;
+      const rot = ((Math.round(g.spin[i]) % 4) + 4) % 4;
+      const c = this.sprites.gib(g.team[i], g.piece[i], rot);
+      ctx.globalAlpha = Math.min(1, g.life[i]);
+      ctx.drawImage(c, Math.floor(x - c.width / 2), Math.floor(y - c.height / 2));
+    }
+    ctx.globalAlpha = 1;
+    const b = game.blood;
+    ctx.fillStyle = '#8a0c0c';
+    for (let i = 0; i < b.n; i++) ctx.fillRect(Math.floor(b.x[i]), Math.floor(b.y[i]), 1, 1);
   }
 
   private drawHud(game: Game, input: InputState, net: Net, views: RemoteView[], dpr: number, W: number, H: number): void {
@@ -461,7 +501,7 @@ export class Renderer {
       `${game.room}  ${game.players.size}/64 players`,
       `ping ${Math.round(net.rttMs)} ms   in ${net.kbIn.toFixed(1)} KB/s`,
       `tick ${game.lastServerTick}  fps ${Math.round(this.fps)}`,
-      `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  debris ${game.debris.n}`,
+      `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  debris ${game.debris.n}  gibs ${game.gibs.n}`,
     ];
     lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (20 + i * 15) * s));
 

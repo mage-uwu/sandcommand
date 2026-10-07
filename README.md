@@ -17,8 +17,8 @@ npm run deploy       # wrangler deploy (needs a Cloudflare account)
 
 Controls: **A/D** run, **W/Space** jump (hold for jetpack), **mouse** aim and
 fire, **1–4 / Q/E / wheel** switch weapon (Rifle, Bazooka, Grenade, Digger),
-**Tab** scoreboard, **Enter** chat. Dig gold with the Digger. Dying spills
-half your gold as gold rubble that anyone can dig up.
+**Tab** scoreboard, **Enter** chat. Dig gold with the Digger. Clones gib on
+death and spill half their gold as gold rubble that anyone can dig up.
 
 ## Architecture
 
@@ -126,6 +126,23 @@ interested client as a byte copy.
   impacts and explosions.
 - **Input queue:** the server keeps at most 3 queued commands per player, so a
   client whose clock runs fast cannot build up latency.
+
+### Clones and gibs
+
+Clones are palette-indexed pixel sprites (`src/client/sprites.ts`) with walk,
+idle and airborne frames, tinted per player. The walk cycle advances with
+distance travelled, so feet don't skate. Weapons and arms are pre-rotated in
+64 steps with nearest-neighbour inverse mapping, so a gun at any angle stays
+on the world's pixel grid.
+
+Every death gibs the clone. The kill record (`R_KILL`, 20 B) carries position,
+velocity, overkill and a seed. Each client bursts the clone into helmet,
+torso, limbs, jetpack and meat (`src/client/gibs.ts`). The parts tumble,
+bounce and leave blood trails, and blood droplets stain the terrain in a
+client-only stain layer that the chunk rasterizer blends in. Gibs are
+cosmetic, but the gold a clone spills is real. The server throws it from the
+seed and deposits it as terrain, and every client throws the same shower from
+the same seed. Explosive and high-overkill deaths scatter harder.
 
 ## Measured numbers
 

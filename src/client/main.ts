@@ -74,11 +74,14 @@ async function join(): Promise<void> {
   net?.close();
   net = new Net(url, {
     welcome(w) {
+      if (new URLSearchParams(location.search).has('debug')) (window as unknown as { sc: unknown }).sc = { game: g, renderer };
       g.myId = w.id;
       g.room = w.room;
       game = g;
       overlay.classList.add('hidden');
-      history.replaceState(null, '', `?room=${encodeURIComponent(w.room)}`);
+      const q = new URLSearchParams(location.search);
+      q.set('room', w.room);
+      history.replaceState(null, '', `?${q}`);
     },
     frame(tick, ack, r) {
       try {

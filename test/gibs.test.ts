@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import { Reader } from '../src/shared/codec.ts';
+import { Mat } from '../src/shared/materials.ts';
+import { World } from '../src/server/world.ts';
+import { Game } from '../src/client/game.ts';
+
+describe('gibbing', () => {
+  it('a server-side kill gibs the clone on every client and mirrors the gold spill', () => {
+    const world = new World(31);
+    const inbox: Uint8Array[] = [];
+    const watcher = new Game();
+    const a = world.addPlayer('watcher', { send: (d) => inbox.push(d) })!;
+    const b = world.addPlayer('victim', { send() {} })!;
+    watcher.myId = a.id;
+    for (let i = 0; i < 3; i++) world.step(); // both spawn
+    expect(b.alive).toBe(true);
+    b.gold = 40;
+    // Park the watcher next to the victim so the death is on screen.
+    a.body.x = b.body.x + 20;
+    a.body.y = b.body.y;
+    (world as unknown as { damage: (v: unknown, n: number, by: number, w: number) => void }).damage(b, 500, a.id, 1);
+    expect(b.alive).toBe(false);
+    expect(b.gold).toBe(20);
+    const serverGold = [...world.debris.mat.subarray(0, world.debris.n)].filter((m) => m === Mat.Gold).length;
+    expect(serverGold).toBe(20);
+
+    world.step();
+    for (const msg of inbox) {
+      const r = new Reader(msg);
+      r.u8();
+      const tick = r.u32();
+      const ack = r.u16();
+      watcher.applyFrame(tick, ack, r);
+    }
+    expect(watcher.gibs.n).toBeGreaterThanOrEqual(8 + 8); // body parts + meat
+    expect(watcher.blood.n).toBeGreaterThan(0);
+    const clientGold = [...watcher.debris.mat.subarray(0, watcher.debris.n)].filter((m) => m === Mat.Gold).length;
+    expect(clientGold).toBe(20);
+    expect(watcher.feed.at(-1)?.text).toContain('victim');
+  });
+});
