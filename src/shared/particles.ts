@@ -1,4 +1,5 @@
 import { DT, GRAVITY, WORLD_H } from './constants.ts';
+import { segmentBox } from './kernels.ts';
 import { type Collider, FH, FIELD_CELL, FIELD_SHIFT, FW, contact, newHit } from './field.ts';
 import { MAT_LOOSE, Mat } from './materials.ts';
 import type { Rng } from './rng.ts';
@@ -38,8 +39,9 @@ export const PK = {
   Dust: 4,
   Blood: 5,
   Gib: 6,
+  Shrapnel: 7,
 } as const;
-export const KIND_COUNT = 7;
+export const KIND_COUNT = 8;
 
 // Contact behaviours.
 const C_SETTLE = 0; // become terrain (grains)
@@ -47,6 +49,11 @@ const C_BOUNCE = 1; // bounce and slide until life ends
 const C_STAIN = 2; // stain the surface and disappear (blood)
 const C_SPENT = 3; // bounce, disappear once slow (sparks)
 const C_RIGID = 4; // tumble, bounce, rest, fade (gibs)
+
+// What a particle does after striking an actor.
+const A_PASS = 0; // keeps going (flames lick past)
+const A_EMBED = 1; // stops in the body (shrapnel)
+const A_BOUNCE = 2; // rebounds off the body (grains, gibs)
 
 interface KindDef {
   gravity: number; // multiplier on world gravity; negative = buoyant
@@ -57,17 +64,25 @@ interface KindDef {
   advect: number; // per-tick blend toward the local mass-flow velocity
   air: number; // per-tick blend toward the air (blast) field
   contact: number;
+  // How the kind acts on actors (players). Momentum and damage come from the
+  // particle's velocity relative to the actor, like Cortex Command.
+  pmass: number; // momentum weight: impulse = pmass * relative velocity
+  hurtSpeed: number; // relative speed (cells/s) above which a hit wounds
+  hurt: number; // damage per 100 cells/s above hurtSpeed
+  burn: number; // damage per second while touching (flames)
+  onActor: number; // A_PASS | A_EMBED | A_BOUNCE
 }
 
 /** Per-kind behaviour. Index with PK.*. */
 export const KINDS: readonly KindDef[] = [
-  /* Grain */ { gravity: 1, drag: 0.998, e: 0.12, mu: 0.65, mass: true, advect: 0, air: 0.07, contact: C_SETTLE },
-  /* Spark */ { gravity: 0.6, drag: 0.985, e: 0.55, mu: 0.25, mass: false, advect: 0, air: 0.1, contact: C_SPENT },
-  /* Flame */ { gravity: -0.3, drag: 0.9, e: 0.1, mu: 0.3, mass: false, advect: 0.3, air: 0.5, contact: C_BOUNCE },
-  /* Smoke */ { gravity: -0.1, drag: 0.93, e: 0.05, mu: 0.2, mass: false, advect: 0.5, air: 0.6, contact: C_BOUNCE },
-  /* Dust  */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE },
-  /* Blood */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN },
-  /* Gib   */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID },
+  /* Grain    */ { gravity: 1, drag: 0.998, e: 0.12, mu: 0.65, mass: true, advect: 0, air: 0.07, contact: C_SETTLE, pmass: 0.25, hurtSpeed: 180, hurt: 1.5, burn: 0, onActor: A_BOUNCE },
+  /* Spark    */ { gravity: 0.6, drag: 0.985, e: 0.55, mu: 0.25, mass: false, advect: 0, air: 0.1, contact: C_SPENT, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
+  /* Flame    */ { gravity: -0.3, drag: 0.9, e: 0.1, mu: 0.3, mass: false, advect: 0.3, air: 0.5, contact: C_BOUNCE, pmass: 0.02, hurtSpeed: 0, hurt: 0, burn: 4, onActor: A_PASS },
+  /* Smoke    */ { gravity: -0.1, drag: 0.93, e: 0.05, mu: 0.2, mass: false, advect: 0.5, air: 0.6, contact: C_BOUNCE, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
+  /* Dust     */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
+  /* Blood    */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN, pmass: 0, hurtSpeed: 0, hurt: 0, burn: 0, onActor: A_PASS },
+  /* Gib      */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID, pmass: 0.3, hurtSpeed: 9999, hurt: 0, burn: 0, onActor: A_BOUNCE },
+  /* Shrapnel */ { gravity: 0.35, drag: 0.99, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.05, contact: C_SPENT, pmass: 0.4, hurtSpeed: 100, hurt: 3.2, burn: 0, onActor: A_EMBED },
 ];
 const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
 const K_DRAG = new Float32Array(KINDS.map((k) => k.drag));
@@ -77,6 +92,13 @@ const K_MASS = new Uint8Array(KINDS.map((k) => (k.mass ? 1 : 0)));
 const K_ADVECT = new Float32Array(KINDS.map((k) => k.advect));
 const K_AIR = new Float32Array(KINDS.map((k) => k.air));
 const K_CONTACT = new Uint8Array(KINDS.map((k) => k.contact));
+const K_PMASS = new Float32Array(KINDS.map((k) => k.pmass));
+const K_HURT_SPEED = new Float32Array(KINDS.map((k) => k.hurtSpeed));
+const K_HURT = new Float32Array(KINDS.map((k) => k.hurt));
+const K_BURN = new Float32Array(KINDS.map((k) => k.burn));
+const K_ON_ACTOR = new Uint8Array(KINDS.map((k) => k.onActor));
+/** Kinds that can touch actors at all. */
+const K_TOUCHES = new Uint8Array(KINDS.map((k) => (k.pmass > 0 || k.burn > 0 ? 1 : 0)));
 
 const SETTLE_SPEED = 2.2 * GRAVITY * DT; // cells/s, ~2 ticks of gravity
 const SETTLE_TICKS = 2;
@@ -101,6 +123,15 @@ const touched: number[] = [];
 const hit = newHit();
 const vel = { x: 0.5, y: 0.5 }; // doubles from the start: no boxing
 const free = { x: 0, y: 0 };
+const aq = { t: 0.5 };
+
+/** Owner byte for particles nobody in particular caused. */
+export const NO_OWNER = 255;
+/** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_DEBRIS = 253;
+export const W_BURN = 254;
+const KIND_WEAPON = new Uint8Array(KIND_COUNT).fill(W_DEBRIS);
+KIND_WEAPON[PK.Flame] = W_BURN;
 
 export interface ParticleHooks {
   /** A grain came to rest: deposit it as terrain (server). */
@@ -201,6 +232,8 @@ export class Particles {
   readonly rest: Uint8Array;
   readonly spin: Float32Array; // gibs: accumulated quarter turns
   readonly spinRate: Float32Array;
+  /** Player who caused this particle (kill credit), or NO_OWNER. */
+  readonly owner: Uint8Array;
   /** Scratch: grain sat in a crowded field cell this tick. */
   private readonly crowd: Uint8Array;
 
@@ -226,11 +259,12 @@ export class Particles {
     this.rest = new Uint8Array(cap);
     this.spin = new Float32Array(cap);
     this.spinRate = new Float32Array(cap);
+    this.owner = new Uint8Array(cap);
     this.crowd = new Uint8Array(cap);
   }
 
   /** Returns false (and spawns nothing) when at capacity. `life` is in ticks. */
-  spawn(kind: number, x: number, y: number, vx: number, vy: number, life: number, aux = 0, color = 0): boolean {
+  spawn(kind: number, x: number, y: number, vx: number, vy: number, life: number, aux = 0, color = 0, owner = NO_OWNER): boolean {
     if (this.n >= this.cap) return false;
     const i = this.n++;
     this.x[i] = this.px[i] = x;
@@ -244,11 +278,12 @@ export class Particles {
     this.rest[i] = 0;
     this.spin[i] = 0;
     this.spinRate[i] = 0;
+    this.owner[i] = owner;
     return true;
   }
 
-  spawnGrain(x: number, y: number, vx: number, vy: number, mat: number, life: number): boolean {
-    return this.spawn(PK.Grain, x, y, vx, vy, life, mat);
+  spawnGrain(x: number, y: number, vx: number, vy: number, mat: number, life: number, owner = NO_OWNER): boolean {
+    return this.spawn(PK.Grain, x, y, vx, vy, life, mat, 0, owner);
   }
 
   /** Live particles of one kind (tests, HUD). */
@@ -274,6 +309,7 @@ export class Particles {
     this.rest[i] = this.rest[l];
     this.spin[i] = this.spin[l];
     this.spinRate[i] = this.spinRate[l];
+    this.owner[i] = this.owner[l];
     this.crowd[i] = this.crowd[l];
   }
 
@@ -322,7 +358,12 @@ export class Particles {
     this.airCells = next;
   }
 
-  step(col: Collider, dt: number, hooks: ParticleHooks = {}): void {
+  /**
+   * `actors`, when given, makes particles physical to players: hits transfer
+   * momentum and deal damage into the ActorField's per-actor accumulators,
+   * and the mass and air fields push the actors (see ActorField).
+   */
+  step(col: Collider, dt: number, hooks: ParticleHooks = {}, actors?: ActorField): void {
     const n = this.n;
     const { x, y, vx, vy, kind } = this;
     const t = col.terrain;
@@ -392,6 +433,9 @@ export class Particles {
         if (ax * ax + ay * ay > AIR_WAKE * AIR_WAKE) this.rest[i] = 0;
       }
     }
+    // Fields act on actors too: a dense sand flow drags a body along with it,
+    // a blast's air field shoves it. Sampled over the cells the body covers.
+    if (actors && actors.n > 0) actors.sampleFields(density, momX, momY, this.airX, this.airY, this.airLive, dt);
     for (const c of touched) {
       density[c] = 0;
       momX[c] = 0;
@@ -434,6 +478,37 @@ export class Particles {
         py = free.y + 0.5;
       }
       col.sweep(px, py, vx[i] * dt, vy[i] * dt, hit);
+      if (actors && actors.n > 0 && K_TOUCHES[kd]) {
+        // Did the free part of this tick's path cross a body? A handful of
+        // field-cell lookups along the segment find the candidates.
+        const a = actors.segment(px, py, hit.x, hit.y, aq);
+        if (a >= 0) {
+          const ex = px + (hit.x - px) * aq.t;
+          const ey = py + (hit.y - py) * aq.t;
+          const rvx = vx[i] - actors.vx[a];
+          const rvy = vy[i] - actors.vy[a];
+          const rs = Math.sqrt(rvx * rvx + rvy * rvy);
+          const pm = K_PMASS[kd];
+          let dmg = K_BURN[kd] * dt;
+          if (rs > K_HURT_SPEED[kd]) dmg += (K_HURT[kd] * (rs - K_HURT_SPEED[kd])) / 100;
+          actors.hit(a, pm * rvx, pm * rvy, dmg, this.owner[i], kd === PK.Shrapnel ? this.aux[i] : KIND_WEAPON[kd]);
+          const on = K_ON_ACTOR[kd];
+          if (on === A_EMBED) {
+            this.removeAt(i);
+            continue;
+          }
+          if (on === A_BOUNCE) {
+            // Rebound off the body, losing most of the relative velocity.
+            x[i] = ex;
+            y[i] = ey;
+            vx[i] = actors.vx[a] - rvx * 0.25;
+            vy[i] = actors.vy[a] - rvy * 0.25;
+            if (--this.life[i] === 0) this.removeAt(i);
+            else i++;
+            continue;
+          }
+        }
+      }
       px = hit.x;
       py = hit.y;
       x[i] = px;
@@ -609,6 +684,7 @@ export function releaseCarve(
   max: number,
   rng: Rng,
   overflow?: (x: number, y: number, mat: number) => void,
+  owner = NO_OWNER,
 ): void {
   const cells = removed.length / 3;
   if (cells > 0 && max > 0) {
@@ -621,7 +697,7 @@ export function releaseCarve(
       const dy = y - cy;
       const d = Math.sqrt(dx * dx + dy * dy) + 1;
       const sp = rng.range(70, 260);
-      grains.spawnGrain(x, y, (dx / d) * sp + rng.range(-40, 40), (dy / d) * sp - rng.range(60, 170), rubbleOf(removed[j + 2]), 240);
+      grains.spawnGrain(x, y, (dx / d) * sp + rng.range(-40, 40), (dy / d) * sp - rng.range(60, 170), rubbleOf(removed[j + 2]), 240, owner);
     }
   }
   // Collapsing material starts nearly at rest and just falls.
@@ -630,7 +706,7 @@ export function releaseCarve(
   for (let j = 0; j < detached.length; j += 3) {
     const vx = rng.range(-6, 6);
     const vy = rng.range(0, 12);
-    if (!grains.spawnGrain(detached[j] + 0.5, detached[j + 1] + 0.5, vx, vy, detached[j + 2], 600)) {
+    if (!grains.spawnGrain(detached[j] + 0.5, detached[j + 1] + 0.5, vx, vy, detached[j + 2], 600, owner)) {
       overflow?.(detached[j], detached[j + 1], detached[j + 2]);
     }
   }
@@ -640,5 +716,226 @@ export function releaseCarve(
 export function spillGold(grains: Particles, x: number, y: number, vx: number, vy: number, count: number, rng: Rng): void {
   for (let i = 0; i < count; i++) {
     grains.spawnGrain(x, y, vx * 0.5 + rng.range(-110, 110), vy * 0.5 + rng.range(-230, -50), Mat.Gold, 240);
+  }
+}
+
+const ACTOR_MASS = 8; // impulse units per cell/s of actor velocity change
+const SAND_MIN = 6; // grains overlapping a body before a flow can drag it
+const SAND_DRAG = 0.012; // per grain, capped by SAND_DRAG_MAX
+const SAND_DRAG_MAX = 0.35;
+const AIR_ACTOR = 0.35; // per-tick blend toward the blast wind
+export const MAX_ACTORS = 64;
+
+/**
+ * Actors (players) as seen by the particle engine. Each tick the world loads
+ * every live body; the field splats body ids into the coarse grid so a moving
+ * particle finds the bodies near its path with a few cell lookups instead of
+ * testing every player (cost O(N + bodies), never O(N x bodies)).
+ *
+ * Results accumulate per body for the world to apply after the step:
+ *   dvx/dvy  velocity change from particle impacts and field forces
+ *   dmg      damage, with the owner and weapon code of the largest hit
+ */
+export class ActorField {
+  n = 0;
+  readonly id = new Uint8Array(MAX_ACTORS);
+  readonly x = new Float32Array(MAX_ACTORS); // body top-left
+  readonly y = new Float32Array(MAX_ACTORS);
+  readonly vx = new Float32Array(MAX_ACTORS);
+  readonly vy = new Float32Array(MAX_ACTORS);
+  readonly dvx = new Float32Array(MAX_ACTORS);
+  readonly dvy = new Float32Array(MAX_ACTORS);
+  readonly dmg = new Float32Array(MAX_ACTORS);
+  readonly dmgBy = new Uint8Array(MAX_ACTORS);
+  readonly dmgWeapon = new Uint8Array(MAX_ACTORS);
+  private readonly bestHit = new Float32Array(MAX_ACTORS);
+  // Up to two bodies per field cell (bodies rarely overlap more than that).
+  private readonly cellA = new Int8Array(FW * FH).fill(-1);
+  private readonly cellB = new Int8Array(FW * FH).fill(-1);
+  private readonly used: number[] = [];
+
+  constructor(
+    readonly bodyW: number,
+    readonly bodyH: number,
+  ) {}
+
+  /** Drop last tick's bodies and results. */
+  clear(): void {
+    for (const c of this.used) {
+      this.cellA[c] = -1;
+      this.cellB[c] = -1;
+    }
+    this.used.length = 0;
+    for (let a = 0; a < this.n; a++) {
+      this.dvx[a] = this.dvy[a] = this.dmg[a] = this.bestHit[a] = 0;
+      this.dmgBy[a] = NO_OWNER;
+    }
+    this.n = 0;
+  }
+
+  /** Add a body; returns its slot. */
+  add(id: number, x: number, y: number, vx: number, vy: number): number {
+    const a = this.n++;
+    this.id[a] = id;
+    this.x[a] = x;
+    this.y[a] = y;
+    this.vx[a] = vx;
+    this.vy[a] = vy;
+    this.dvx[a] = this.dvy[a] = this.dmg[a] = this.bestHit[a] = 0;
+    this.dmgBy[a] = NO_OWNER;
+    const f0x = Math.max(0, Math.floor(x) >> FIELD_SHIFT);
+    const f1x = Math.min(FW - 1, Math.floor(x + this.bodyW - 1) >> FIELD_SHIFT);
+    const f0y = Math.max(0, Math.floor(y) >> FIELD_SHIFT);
+    const f1y = Math.min(FH - 1, Math.floor(y + this.bodyH - 1) >> FIELD_SHIFT);
+    for (let fy = f0y; fy <= f1y; fy++) {
+      for (let fx = f0x; fx <= f1x; fx++) {
+        const c = fy * FW + fx;
+        if (this.cellA[c] < 0) {
+          this.cellA[c] = a;
+          this.used.push(c);
+        } else if (this.cellB[c] < 0) this.cellB[c] = a;
+      }
+    }
+    return a;
+  }
+
+  /**
+   * First body whose box the segment (x0,y0)->(x1,y1) enters: walk the path in
+   * half-field-cell steps, test the (at most two) bodies registered in each
+   * cell with an exact slab test, keep the earliest entry. Writes the entry
+   * fraction to `out.t`.
+   */
+  segment(x0: number, y0: number, x1: number, y1: number, out: { t: number }): number {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const steps = Math.max(1, Math.ceil(len / (FIELD_CELL / 2)));
+    let best = -1;
+    let bestT = 2;
+    let tested0 = 0; // bitmask of slots already slab-tested (64 bodies)
+    let tested1 = 0;
+    for (let s = 0; s <= steps; s++) {
+      const c = fieldIndex(x0 + (dx * s) / steps, y0 + (dy * s) / steps);
+      if (c < 0) continue;
+      for (let k = 0; k < 2; k++) {
+        const a = k === 0 ? this.cellA[c] : this.cellB[c];
+        if (a < 0) break;
+        if (a < 32 ? tested0 & (1 << a) : tested1 & (1 << (a - 32))) continue;
+        if (a < 32) tested0 |= 1 << a;
+        else tested1 |= 1 << (a - 32);
+        const t = segmentBox(x0, y0, dx, dy, this.x[a], this.y[a], this.x[a] + this.bodyW, this.y[a] + this.bodyH);
+        if (t >= 0 && t < bestT) {
+          bestT = t;
+          best = a;
+        }
+      }
+      if (best >= 0) break; // later cells can only be further along the path
+    }
+    out.t = bestT;
+    return best;
+  }
+
+  /** Record a particle impact on body slot `a`. */
+  hit(a: number, jx: number, jy: number, dmg: number, owner: number, weapon: number): void {
+    this.dvx[a] += jx / ACTOR_MASS;
+    this.dvy[a] += jy / ACTOR_MASS;
+    if (dmg <= 0) return;
+    this.dmg[a] += dmg;
+    if (dmg > this.bestHit[a]) {
+      this.bestHit[a] = dmg;
+      this.dmgBy[a] = owner;
+      this.dmgWeapon[a] = weapon;
+    }
+  }
+
+  /**
+   * Field forces on bodies: over the field cells a body covers, a dense sand
+   * flow drags it toward the flow's mean velocity (landslides carry you), and
+   * a live blast wind blends its velocity toward the wind.
+   */
+  sampleFields(
+    density: Uint16Array,
+    momX: Float32Array,
+    momY: Float32Array,
+    airX: Float32Array,
+    airY: Float32Array,
+    airLive: Uint8Array,
+    _dt: number,
+  ): void {
+    for (let a = 0; a < this.n; a++) {
+      const f0x = Math.max(0, Math.floor(this.x[a]) >> FIELD_SHIFT);
+      const f1x = Math.min(FW - 1, Math.floor(this.x[a] + this.bodyW - 1) >> FIELD_SHIFT);
+      const f0y = Math.max(0, Math.floor(this.y[a]) >> FIELD_SHIFT);
+      const f1y = Math.min(FH - 1, Math.floor(this.y[a] + this.bodyH - 1) >> FIELD_SHIFT);
+      let d = 0;
+      let mx = 0;
+      let my = 0;
+      let ax = 0;
+      let ay = 0;
+      let an = 0;
+      for (let fy = f0y; fy <= f1y; fy++) {
+        for (let fx = f0x; fx <= f1x; fx++) {
+          const c = fy * FW + fx;
+          d += density[c];
+          mx += momX[c];
+          my += momY[c];
+          if (airLive[c]) {
+            ax += airX[c];
+            ay += airY[c];
+            an++;
+          }
+        }
+      }
+      if (d >= SAND_MIN) {
+        const k = Math.min(SAND_DRAG_MAX, d * SAND_DRAG);
+        this.dvx[a] += (mx / d - this.vx[a]) * k;
+        this.dvy[a] += (my / d - this.vy[a]) * k;
+      }
+      if (an > 0) {
+        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR;
+        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR;
+      }
+    }
+  }
+}
+
+interface FragmentDef {
+  shrapnel: number;
+  speed: number;
+  embers: number;
+}
+/** Explosion fragments by projectile kind (bullet, rocket, grenade). */
+const FRAGMENTS: readonly FragmentDef[] = [
+  { shrapnel: 0, speed: 0, embers: 0 },
+  { shrapnel: 24, speed: 360, embers: 18 },
+  { shrapnel: 40, speed: 420, embers: 24 },
+];
+
+/**
+ * Shrapnel and burning embers thrown by an explosion. The server spawns them
+ * as real, damaging particles; every client in range calls this with the same
+ * seed (sent in the projectile-end record) to mirror the same shower.
+ */
+export function explosionFragments(p: Particles, x: number, y: number, projKind: number, owner: number, rng: Rng): void {
+  const def = FRAGMENTS[projKind];
+  if (!def) return;
+  for (let k = 0; k < def.shrapnel; k++) {
+    // Direction from two uniforms, normalised: arithmetic only, no trig.
+    let dx = rng.range(-1, 1);
+    let dy = rng.range(-1, 1);
+    const d = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+    dx /= d;
+    dy /= d;
+    const s = def.speed * rng.range(0.55, 1);
+    p.spawn(PK.Shrapnel, x, y, dx * s, dy * s, rng.range(18, 30), projKind, 0, owner);
+  }
+  for (let k = 0; k < def.embers; k++) {
+    let dx = rng.range(-1, 1);
+    let dy = rng.range(-1, 1);
+    const d = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+    dx /= d;
+    dy /= d;
+    const s = def.speed * 0.35 * rng.range(0.3, 1);
+    p.spawn(PK.Flame, x, y, dx * s, dy * s - 30, rng.range(10, 18), 0, 0, owner);
   }
 }

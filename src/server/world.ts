@@ -26,7 +26,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { Particles, applyCarve, carveExtent, dropToSupport, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, Particles, applyCarve, carveExtent, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -131,6 +131,8 @@ export class World {
   readonly terrain = new Terrain();
   /** Server particles are grains only: they are authoritative terrain changes. */
   readonly grains = new Particles(32768);
+  /** Bodies as the particle engine sees them: particles hit, push and hurt players. */
+  readonly actors = new ActorField(ACTOR_W, ACTOR_H);
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
   readonly projectiles = new Projectiles(4096);
@@ -233,7 +235,7 @@ export class World {
    * Carve terrain (plus the collapse it causes), release grains, and log the op
    * for replication. Clients reproduce all of it from the 12-byte record.
    */
-  carve(x: number, y: number, r: number, core: number, debrisMax: number): number {
+  carve(x: number, y: number, r: number, core: number, debrisMax: number, owner = NO_OWNER): number {
     x = Math.max(0, Math.min(WORLD_W - 1, Math.round(x)));
     y = Math.max(0, Math.min(WORLD_H - 1, Math.round(y)));
     const removed = this.removedScratch;
@@ -241,7 +243,7 @@ export class World {
     const n = applyCarve(this.terrain, x, y, r, core, removed, detached);
     if (n === 0) return 0;
     const seed = this.rng.nextU32();
-    releaseCarve(this.grains, removed, detached, x, y, debrisMax, new Rng(seed), this.overflow);
+    releaseCarve(this.grains, removed, detached, x, y, debrisMax, new Rng(seed), this.overflow, owner);
     const w = this.tmp.reset();
     w.u8(R_CARVE);
     w.u16(x);
@@ -397,13 +399,18 @@ export class World {
     const owner = pr.owner[i];
     const def = PROJ[kind];
     if (actor >= 0) this.damage(this.players[actor]!, def.damage, owner, kind);
+    const seed = this.rng.nextU32();
     if (detonate) {
       if (def.carveR > 0 && (actor < 0 || kind !== ProjKind.Bullet)) {
-        this.carve(x, y, def.carveR, def.coreR, def.debris);
+        this.carve(x, y, def.carveR, def.coreR, def.debris, owner);
       }
       if (def.splashR > 0) {
-        // Blast wave into the air field: moves every grain already in flight nearby.
+        // Knockback and most of the harm come from the particle engine now:
+        // the blast writes the air field (which shoves bodies and loose
+        // particles), and shrapnel + embers are real particles that cut and
+        // burn whoever they reach. Only the overpressure is applied directly.
         this.grains.blast(x, y, def.splashR * 1.6, BLAST_IMPULSE);
+        explosionFragments(this.grains, x, y, kind, owner, new Rng(seed));
         for (const p of this.players) {
           if (!p || !p.alive) continue;
           const dx = p.cx - x;
@@ -411,10 +418,6 @@ export class World {
           const d = Math.sqrt(dx * dx + dy * dy);
           if (d < def.splashR) {
             const selfScale = p.id === owner ? 0.5 : 1;
-            // Push first so a killing blast flings the gibs.
-            const push = (1 - d / def.splashR) * 320;
-            p.body.vx += (dx / (d + 1)) * push;
-            p.body.vy += (dy / (d + 1)) * push - 60;
             this.damage(p, def.splashDamage * (1 - d / def.splashR) * selfScale, owner, kind);
           }
         }
@@ -427,6 +430,7 @@ export class World {
     w.u16(Math.max(0, Math.min(65535, Math.round(y + Y_BIAS))));
     w.u8(kind);
     w.u8(detonate ? 1 : 0);
+    w.u32(seed);
     this.projEnds.push({ bytes: w.finish(), id: pr.id[i], x, y });
   };
 
@@ -439,7 +443,7 @@ export class World {
     const oy = p.body.y + 5;
     if (def.proj < 0) {
       // Digger: vacuum terrain in front of the clone, banking any gold.
-      this.carve(ox + cos * DIGGER_REACH, oy + sin * DIGGER_REACH, DIGGER_R, DIGGER_CORE, 0);
+      this.carve(ox + cos * DIGGER_REACH, oy + sin * DIGGER_REACH, DIGGER_R, DIGGER_CORE, 0, p.id);
       p.gold += this.terrain.removedByMat[Mat.Gold];
       return;
     }
@@ -528,7 +532,22 @@ export class World {
     // clearance, so the field stays conservative for them.
     this.field.update();
     this.projectiles.step(this.collider, DT, this.segmentActor, this.onProjEnd);
-    this.grains.step(this.collider, DT, this.hooks);
+    const actors = this.actors;
+    actors.clear();
+    for (const p of this.players) if (p && p.alive) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    this.grains.step(this.collider, DT, this.hooks, actors);
+    // Apply what particles and fields did to bodies this tick.
+    for (let a = 0; a < actors.n; a++) {
+      const p = this.players[actors.id[a]];
+      if (!p || !p.alive) continue;
+      p.body.vx += actors.dvx[a];
+      p.body.vy += actors.dvy[a];
+      const dmg = actors.dmg[a];
+      if (dmg > 0) {
+        const by = actors.dmgBy[a];
+        this.damage(p, by === p.id ? dmg * 0.5 : dmg, by === NO_OWNER ? p.id : by, actors.dmgWeapon[a]);
+      }
+    }
     this.flushPixels();
 
     const t1 = performance.now();

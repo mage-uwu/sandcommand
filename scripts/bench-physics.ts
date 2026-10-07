@@ -8,10 +8,11 @@
  * 3. Incremental distance-field update cost per carve.
  * 4. A large sand collapse, tick by tick.
  */
-import { DT, WORLD_W } from '../src/shared/constants.ts';
+import { ACTOR_H, ACTOR_W, DT, WORLD_W } from '../src/shared/constants.ts';
 import { Collider, DistanceField, newHit } from '../src/shared/field.ts';
 import { Mat } from '../src/shared/materials.ts';
-import { PK, Particles, applyCarve, releaseCarve } from '../src/shared/particles.ts';
+import { ActorField, PK, Particles, applyCarve, releaseCarve } from '../src/shared/particles.ts';
+import { segmentBox } from '../src/shared/kernels.ts';
 import { Rng } from '../src/shared/rng.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { generateWorld } from '../src/shared/worldgen.ts';
@@ -108,6 +109,43 @@ console.log('\n1c) E explosions in one tick over 32k particles: air field vs per
     for (let rep = 0; rep < 20; rep++) for (let e = 0; e < E; e++) p.blast((e * 613) % WORLD_W, 300, 67, 260);
     const field = (performance.now() - t0) / 20;
     console.log(`  E=${String(E).padStart(2)}  per-explosion scan ${scan.toFixed(3)} ms   air-field writes ${field.toFixed(3)} ms`);
+  }
+}
+
+console.log('\n1d) particles acting on 64 bodies: actor field vs testing every particle against every body');
+{
+  const bodies = new ActorField(ACTOR_W, ACTOR_H);
+  for (const N of [4_000, 16_000, 64_000]) {
+    const p = new Particles(N);
+    for (let i = 0; i < N; i++) p.spawn(PK.Shrapnel, 64 + rng.next() * (WORLD_W - 128), 100 + rng.next() * 400, rng.range(-300, 300), rng.range(-300, 300), 600, 1, 0, 0);
+    const bx = new Float32Array(64);
+    const by = new Float32Array(64);
+    for (let a = 0; a < 64; a++) {
+      bx[a] = 64 + rng.next() * (WORLD_W - 128);
+      by[a] = 100 + rng.next() * 400;
+    }
+    // Field approach: the real step with bodies loaded.
+    let t0 = performance.now();
+    for (let k = 0; k < 10; k++) {
+      bodies.clear();
+      for (let a = 0; a < 64; a++) bodies.add(a, bx[a], by[a], 0, 0);
+      p.step(col, DT, {}, bodies);
+    }
+    const field = (performance.now() - t0) / 10;
+    // Naive: every particle's swept segment against every body.
+    t0 = performance.now();
+    let hits = 0;
+    for (let k = 0; k < 10; k++) {
+      for (let i = 0; i < p.n; i++) {
+        const x0 = p.x[i];
+        const y0 = p.y[i];
+        const dx = p.vx[i] * DT;
+        const dy = p.vy[i] * DT;
+        for (let a = 0; a < 64; a++) if (segmentBox(x0, y0, dx, dy, bx[a], by[a], bx[a] + ACTOR_W, by[a] + ACTOR_H) >= 0) hits++;
+      }
+    }
+    const naive = (performance.now() - t0) / 10;
+    console.log(`  N=${String(N).padStart(6)}  whole step with bodies ${field.toFixed(2)} ms   naive body tests alone ${naive.toFixed(2)} ms${hits < 0 ? '' : ''}`);
   }
 }
 

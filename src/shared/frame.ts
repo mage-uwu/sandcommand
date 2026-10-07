@@ -69,7 +69,8 @@ export interface FrameHandler {
   carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[], detached: number[]): void;
   chunkLoaded(ci: number): void;
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void;
-  projEnd(id: number, x: number, y: number, kind: number, detonate: boolean): void;
+  /** `seed` reproduces the explosion's shrapnel and embers (explosionFragments). */
+  projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void;
   kill(k: KillInfo): void;
   roster(id: number, present: boolean, name: string): void;
   scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void;
@@ -167,7 +168,9 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const id = r.u32();
         const x = r.u16();
         const y = r.u16() - Y_BIAS;
-        h.projEnd(id, x, y, r.u8(), r.u8() === 1);
+        const kind = r.u8();
+        const detonate = r.u8() === 1;
+        h.projEnd(id, x, y, kind, detonate, r.u32());
         break;
       }
       case R_KILL:

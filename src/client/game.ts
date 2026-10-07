@@ -4,7 +4,7 @@ import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_R
 import { type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
-import { Particles, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
@@ -100,6 +100,7 @@ export class Game implements FrameHandler {
    * and gib. Same pass, same fields, same pixel buffer.
    */
   readonly particles = new Particles(40000);
+  private readonly bodyField = new ActorField(ACTOR_W, ACTOR_H);
   /** Per-cell blood stain intensity (0-255). Cosmetic, never networked. */
   readonly stain = new Uint8Array(WORLD_W * WORLD_H);
   private readonly particleHooks = {
@@ -181,7 +182,16 @@ export class Game implements FrameHandler {
         jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
       }
     }
-    this.particles.step(this.collider, DT, this.particleHooks);
+    // Bodies in the engine so shrapnel stops in them and grains bounce off
+    // them on screen too; only the server's results (damage, knockback) count.
+    const actors = this.bodyField;
+    actors.clear();
+    if (this.alive) actors.add(this.myId, this.body.x, this.body.y, this.body.vx, this.body.vy);
+    for (const [id, s] of this.snaps) {
+      const last = s[s.length - 1];
+      if (last && last.flags & F_ALIVE && actors.n < MAX_ACTORS) actors.add(id, last.x, last.y, last.vx, last.vy);
+    }
+    this.particles.step(this.collider, DT, this.particleHooks, actors);
     this.shake *= 0.85;
     this.hurtFlash *= 0.9;
   }
@@ -335,7 +345,7 @@ export class Game implements FrameHandler {
     muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket);
   }
 
-  projEnd(id: number, x: number, y: number, kind: number, detonate: boolean): void {
+  projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void {
     const i = this.projectiles.indexOf(id);
     if (i >= 0) this.projectiles.removeAt(i);
     if (!detonate) return;
@@ -347,7 +357,7 @@ export class Game implements FrameHandler {
     this.flashes.push({ x, y, r: def.splashR, at: performance.now() });
     // Fireball, sparks, smoke, and a blast wave in the air field that moves
     // everything loose already in flight (grains, gibs, smoke, blood).
-    explosion(this.particles, x, y, def.splashR, BLAST_IMPULSE);
+    explosion(this.particles, x, y, kind, def.splashR, BLAST_IMPULSE, seed);
     const me = this.body;
     const d = Math.hypot(me.x - x, me.y - y);
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 400) * 8);
@@ -357,8 +367,11 @@ export class Game implements FrameHandler {
     const { killer, victim, weapon } = k;
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
-    const how = weapon === 255 ? 'fell' : WEAPONS[weapon]?.name ?? '';
-    const text = killer === victim || weapon === 255 ? `${vn} ${weapon === 255 ? 'cratered' : 'self-destructed'}` : `${kn} [${how}] ${vn}`;
+    const how = weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : (WEAPONS[weapon]?.name ?? '');
+    let text: string;
+    if (weapon === 255) text = `${vn} cratered`;
+    else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
+    else text = `${kn} [${how}] ${vn}`;
     const color = victim === this.myId ? '#ff6060' : killer === this.myId ? '#80ff80' : '#e0e0e0';
     this.feed.push({ text, color, at: performance.now() });
     if (this.feed.length > 6) this.feed.shift();

@@ -1,4 +1,5 @@
-import { PK, type Particles } from '../shared/particles.ts';
+import { NO_OWNER, PK, type Particles, explosionFragments } from '../shared/particles.ts';
+import { Rng } from '../shared/rng.ts';
 
 /**
  * Client-side effect emitters. There is no separate effects system: every
@@ -57,13 +58,16 @@ export function rocketTrail(p: Particles, x: number, y: number): void {
 }
 
 /**
- * Explosion: a fireball, sparks and a smoke column, plus a blast wave written
- * into the air field that every nearby particle (grains, gibs, smoke) feels.
+ * Explosion: the server's shrapnel and embers, mirrored from the record's
+ * seed (those are the particles that actually wound and push players), plus
+ * a cosmetic fireball core, sparks and smoke, and the blast wave written into
+ * the air field that every nearby particle feels.
  */
-export function explosion(p: Particles, x: number, y: number, radius: number, blastStrength: number): void {
+export function explosion(p: Particles, x: number, y: number, projKind: number, radius: number, blastStrength: number, seed: number): void {
   p.blast(x, y, radius * 1.6, blastStrength);
-  burst(p, PK.Flame, x, y, 50, radius * 9, 14);
-  burst(p, PK.Spark, x, y, 30, radius * 13, 20);
+  explosionFragments(p, x, y, projKind, NO_OWNER, new Rng(seed));
+  burst(p, PK.Flame, x, y, 24, radius * 6, 10);
+  burst(p, PK.Spark, x, y, 20, radius * 13, 20);
   burst(p, PK.Smoke, x, y, 40, radius * 3, 75);
 }
 

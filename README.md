@@ -99,6 +99,38 @@ runs once per grain when it settles, never as a per-tick grid update. A
 grain that is out of time is dropped onto support, so material is always
 conserved.
 
+### Particles act on players
+
+As in Cortex Command, particles are physical, not decoration. They push and
+hurt clones, so the server runs every kind that can (grains, shrapnel,
+embers) and is authoritative for the results.
+
+- **Actor field.** Each tick the live bodies are splatted into the coarse
+  field grid (`ActorField`). A moving particle finds the bodies near its swept
+  path with a few cell lookups, then runs an exact slab test against those
+  only. Coupling 64 bodies to 64k particles is a 7.3 ms whole-engine step.
+  The naive per-body tests alone take 101 ms.
+- **Impacts transfer momentum.** On a hit, the body receives
+  `pmass × (v_particle − v_body)`. Damage is `hurt × (relative speed −
+  hurtSpeed) / 100`, so a fast grain bruises, a slow one only nudges, and
+  shrapnel cuts. Per kind, the particle then embeds (shrapnel), rebounds
+  (grains, gibs) or passes through (flames, which `burn` per second of
+  contact instead).
+- **Fields push bodies.** Each body samples the fields over the cells it
+  covers. A dense sand flow drags it toward the flow's velocity (landslides
+  carry you off), and the explosion air field blends it toward the blast wind.
+  That is now the *only* explosion knockback.
+- **Explosions are mostly particles.** A rocket or grenade spawns seeded
+  shrapnel and embers on the server. Clients mirror the same shower from the
+  seed in the projectile-end record. Only the overpressure is applied
+  directly, so close range is lethal and fragments still sting far beyond
+  the blast radius. Averaged over 12 seeds, a grenade does 123 damage at 8
+  cells, 69 at 20, 32 at 35 and about 6 at 100.
+- **Credit.** Every particle carries an owner. Shrapnel credits the thrower,
+  and sand you undercut onto someone credits you. The kill feed shows
+  `[Debris]`, `[Fire]`, "was buried" and "burned". Self-inflicted particle
+  damage is halved.
+
 ### Falling sand
 
 Loose material (sand and rubble) needs support. A carve's full effect,
@@ -212,7 +244,7 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.86 ms  p99 2.6 ms      (grains, collapses, air field, distance field included; 3000 ticks)
+sim       avg 0.91 ms  p99 3.4 ms      (grains, shrapnel, embers, body coupling, collapses; 3000 ticks)
 replicate avg 0.98 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
 downstream per client: avg 25.9 KB/s; room egress 1.62 MB/s
 ```
