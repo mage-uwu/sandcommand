@@ -105,8 +105,11 @@ class Fbm {
  * server also sends every chunk's hash and clients ask again for any chunk
  * that came out different.
  */
-/** `fortresses`: build the two Regicide fortresses into the map as well. */
-export function generateWorld(t: Terrain, seed: number, fortresses = false): void {
+/**
+ * `fortresses`: build the two Regicide fortresses into the map as well.
+ * `backdrop` (clients only, WORLD_W x WORLD_H): filled with the bunkers' back walls.
+ */
+export function generateWorld(t: Terrain, seed: number, fortresses = false, backdrop?: Uint8Array): void {
   const rng = new Rng(seed);
   const p1 = rng.range(0, Math.PI * 2);
   const p2 = rng.range(0, Math.PI * 2);
@@ -152,7 +155,8 @@ export function generateWorld(t: Terrain, seed: number, fortresses = false): voi
     }
   }
   // Bunker complexes on a modular grid across part of the surface.
-  lastComplexes = placeStructures(m, heights, seed, fortresses);
+  backdrop?.fill(0);
+  lastComplexes = placeStructures(m, heights, seed, fortresses, backdrop);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the
   // moment anything touched it, so give it a cohesive dirt crust instead.

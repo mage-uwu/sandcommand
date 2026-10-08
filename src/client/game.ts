@@ -707,6 +707,9 @@ export class Game implements FrameHandler {
     }
   }
 
+  /** Bunker back walls (structures.ts Backdrop per cell): cosmetic, made with the map. */
+  readonly backdrop = new Uint8Array(WORLD_W * WORLD_H);
+
   /** Is this player a king right now (Regicide)? */
   isKing(id: number): boolean {
     const rs = this.roundState;
@@ -724,7 +727,7 @@ export class Game implements FrameHandler {
    * terrain, and flag any chunk that didn't come out identical to the server's.
    */
   wave(seed: number, hashes: Uint32Array, fortresses: boolean): void {
-    generateWorld(this.terrain, seed, fortresses);
+    generateWorld(this.terrain, seed, fortresses, this.backdrop);
     this.particles.n = 0;
     this.projectiles.n = 0;
     this.stain.fill(0);

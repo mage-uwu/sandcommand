@@ -67,7 +67,13 @@ const FORT_INSET = 15;
  * Build bunker complexes into `m` (a raw material grid, WORLD_W x WORLD_H)
  * along the surface `heights`. Returns the complexes for tests and spawning.
  */
-export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number, fortresses = false): Complex[] {
+/**
+ * Backdrop kinds (cosmetic, client side): the wall behind a bunker's rooms,
+ * which stays when the front is blown away.
+ */
+export const Backdrop = { None: 0, Concrete: 1, Steel: 2 } as const;
+
+export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number, fortresses = false, backdrop?: Uint8Array): Complex[] {
   const rng = new Rng(seed ^ 0xb0b5);
   const coverage = 0.15 + rng.next() * 0.45;
   const nMods = Math.floor((WORLD_W - 2 * MARGIN) / MOD_W);
@@ -108,6 +114,7 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
     i += len + 1 + rng.int(Math.max(1, Math.round(meanGap * 2 - 1)));
   }
   out.sort((a, b) => a.x0 - b.x0);
+  if (backdrop) for (const c of out) markBackdrop(backdrop, c);
   // Escape tunnels from end basements, out under the open ground beside them.
   for (let k = 0; k < out.length; k++) {
     const c = out[k];
@@ -119,6 +126,20 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
     tunnel(m, heights, c, right, limit, rng);
   }
   return out;
+}
+
+/** Every module's box, roof to deepest basement floor, gets a back wall (the king's vault in steel). */
+function markBackdrop(bd: Uint8Array, c: Complex): void {
+  const vault = c.fortress ? Math.floor((c.fortress.king.x - c.x0) / MOD_W) : -1;
+  for (let k = 0; k < c.heights.length; k++) {
+    const mx = c.x0 + k * MOD_W;
+    const top = c.floor - c.heights[k] * MOD_H + SLAB;
+    const bottom = c.floor + SLAB + c.basements[k] * MOD_H;
+    const steelFrom = k === vault ? c.floor + SLAB + (c.basements[k] - 1) * MOD_H : Infinity;
+    for (let y = Math.max(0, top); y < Math.min(WORLD_H, bottom); y++) {
+      bd.fill(y >= steelFrom ? Backdrop.Steel : Backdrop.Concrete, y * WORLD_W + mx, y * WORLD_W + mx + MOD_W);
+    }
+  }
 }
 
 function fill(m: Uint8Array, x0: number, y0: number, x1: number, y1: number, mat: number): void {

@@ -146,6 +146,24 @@ lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then gold, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
+## Bunker look
+
+Bunkers are drawn like a Cortex Command or Metal Slug bunker from around
+2002, not as bolted-together tiles (`src/client/texture.ts`):
+- **Concrete** is cast in big staggered panels with recessed joints. It is
+  mottled and gritty, with pockmarks and hairline cracks, and grime streaks
+  run down from every ledge.
+- **Steel** comes in riveted plates, brushed and rusting in blotches.
+- **Edges** are bevelled, with light from the top left.
+- **Back walls.** Every room has a back wall: dark panelled concrete with
+  bolts, vent grilles and conduit runs, shadowed into its corners. The
+  king's vault has a steel wall. The map generator lays these down as a
+  backdrop layer (client side only), so they stay when the front walls are
+  blown away.
+- **Cost.** Texturing is a pure function of the terrain around each cell,
+  so chunks always meet seamlessly. It costs about 0.14 ms per chunk, and a
+  new map is textured over a few frames, nearest the camera first.
+
 ## Regicide
 
 The third mode in the rotation (waves go Last Man Standing → Last Team

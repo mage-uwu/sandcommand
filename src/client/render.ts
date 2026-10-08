@@ -13,7 +13,11 @@ import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_PARTS, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
+import { backWallColor, structColor } from './texture.ts';
 import { type BodyFrame, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
+
+/** Most terrain chunks re-rasterized per frame (the rest wait for the next). */
+const CHUNKS_PER_FRAME = 64;
 
 /** World cells per minimap pixel: the minimap is 256 pixels wide whatever the world's width. */
 const MINI_SCALE = WORLD_W / 256;
@@ -93,12 +97,20 @@ export class Renderer {
   private updateChunks(game: Game): void {
     const t = game.terrain;
     this.rasterizedThisFrame = 0;
-    for (let ci = 0; ci < CHUNK_COUNT; ci++) {
-      if (!t.dirty[ci] || !game.loaded[ci]) continue;
+    // A whole new map is a lot of texturing: spread it over frames, the
+    // chunks around the camera first (whatever is in view is never stale).
+    const cx0 = Math.max(0, Math.floor((this.camX - VIEW_HALF_W) / CHUNK) - 1);
+    const cx1 = Math.min(CHUNKS_X - 1, Math.floor((this.camX + VIEW_HALF_W) / CHUNK) + 1);
+    const cy0 = Math.max(0, Math.floor((this.camY - VIEW_HALF_H) / CHUNK) - 1);
+    const cy1 = Math.min(CHUNKS_Y - 1, Math.floor((this.camY + VIEW_HALF_H) / CHUNK) + 1);
+    const visit = (ci: number) => {
+      if (!t.dirty[ci] || !game.loaded[ci]) return;
       t.dirty[ci] = 0;
       this.rasterize(game, ci);
       this.rasterizedThisFrame++;
-    }
+    };
+    for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) visit(cy * CHUNKS_X + cx);
+    for (let ci = 0; ci < CHUNK_COUNT && this.rasterizedThisFrame < CHUNKS_PER_FRAME; ci++) visit(ci);
   }
 
   private rasterize(game: Game, ci: number): void {
@@ -107,22 +119,25 @@ export class Renderer {
     const oy = Math.floor(ci / CHUNKS_X) << CHUNK_SHIFT;
     const px = this.chunkPixels;
     const stain = game.stain;
+    const backdrop = game.backdrop;
     for (let y = 0; y < CHUNK; y++) {
       const wy = oy + y;
       const row = wy * WORLD_W + ox;
       for (let x = 0; x < CHUNK; x++) {
         const m = t.mat[row + x];
         if (m === Mat.Air) {
-          px[y * CHUNK + x] = 0;
+          // Inside a bunker: its back wall instead of the open backdrop.
+          const bd = backdrop[row + x];
+          px[y * CHUNK + x] = bd ? backWallColor(t, bd, ox + x, wy) : 0;
           continue;
         }
         const wx = ox + x;
-        const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
-        let v = (hash2(wx, wy) & 3) + (exposed ? 4 : 0);
-        // Materialized concrete shows its blocks: dark mortar seams on the build grid.
-        if (m === Mat.Concrete && ((wx & 7) === 0 || (wy & 3) === 0)) v = 0;
-        else if (m === Mat.Concrete) v = 2 + (v & 1) + (exposed ? 4 : 0);
-        let c = PALETTE[m * 8 + v];
+        let c: number;
+        if (m === Mat.Concrete || m === Mat.Metal) c = structColor(t, m, wx, wy);
+        else {
+          const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
+          c = PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)];
+        }
         const st = stain[row + x];
         if (st) c = bloodied(c, st);
         px[y * CHUNK + x] = c;
@@ -692,7 +707,7 @@ export class Renderer {
         const m = p.cells[y * p.w + x];
         if (!m) continue;
         const [r, g, b] = MAT_COLOR[m];
-        const seam = m === Mat.Concrete && ((x & 7) === 0 || (y & 3) === 0) ? 0.8 : 1;
+        const seam = m === Mat.Concrete && (x === 0 || y === 0) ? 1.15 : m === Mat.Concrete && (x === p.w - 1 || y === p.h - 1) ? 0.7 : 1;
         ctx.fillStyle = `rgb(${Math.round(r * seam)},${Math.round(g * seam)},${Math.round(b * seam)})`;
         ctx.fillRect(x, y, 1, 1);
       }
