@@ -1,10 +1,10 @@
 import { ACTOR_H, ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
-import { WEAPONS } from '../shared/weapons.ts';
+import { WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
-import { assistAim } from './aim.ts';
+import { ASSIST_RANGE, assistAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
@@ -256,6 +256,16 @@ function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boo
   }
   return true;
 }
+/** Tools aimed at the ground or at friends (or nothing): no snapping onto enemies. */
+const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol]);
+/** Mouse aim assist: on unless switched off (V), and the choice is remembered. */
+let mouseAssist = storageGet('sc.assist') !== 'off';
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyV' || input.typing || e.repeat) return;
+  mouseAssist = !mouseAssist;
+  storageSet('sc.assist', mouseAssist ? 'on' : 'off');
+  game?.feed.push({ text: mouseAssist ? 'aim assist on (V)' : 'aim assist off (V)', color: '#b8a0ff', at: performance.now() });
+});
 let pulse = 0;
 const shoulderPt = { x: 0, y: 0 };
 
@@ -305,10 +315,17 @@ function frame(now: number): void {
       } else {
         aim = Math.atan2(wy - oy, wx - ox);
         if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
+        else if (mouseAssist && !g.drive && !NO_ASSIST.has(g.weapon)) {
+          // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
+          const reach = Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80));
+          aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach);
+        }
       }
+      const raw = Math.atan2(wy - oy, wx - ox);
       // Scoped onto someone: the aim locks onto them.
       aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
-      g.lockAim = g.scopeLock ? aim : null;
+      // Locked or assisted onto someone: the arm and the aim line show the snap.
+      g.lockAim = g.scopeLock || Math.abs(aim - raw) > 1e-4 ? aim : null;
       let buttons = input.buttons();
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
       // a held trigger pulses (fire on alternate ticks) and the gun keeps going.

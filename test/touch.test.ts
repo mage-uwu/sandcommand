@@ -26,6 +26,10 @@ describe('touch aim assist', () => {
     expect(assistAim(0, 0, 0, [{ x: 900, y: 0 }], open)).toBe(0); // out of range
     expect(assistAim(0, 0, 0.1, [{ x: 200, y: 0 }], () => false)).toBe(0.1); // no line of sight
   });
+  it('reaches further when asked (mouse aim reaches as far as the pointer)', () => {
+    expect(assistAim(0, 0, 0.05, [{ x: 800, y: 0 }], open)).toBe(0.05);
+    expect(assistAim(0, 0, 0.05, [{ x: 800, y: 0 }], open, 900)).toBeCloseTo(0, 5);
+  });
   it('prefers the target closest to the aim line', () => {
     const a = assistAim(0, 0, 0, [
       { x: 200, y: 30 },

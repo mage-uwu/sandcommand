@@ -22,7 +22,7 @@ Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
 to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
-drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** music, **N** sound effects. With the Materializer out, the wheel or a click
+drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** music, **N** sound effects, **V** aim assist. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
 **Keyboard-only aim** (no mouse needed): the **arrow keys** move the
@@ -30,7 +30,16 @@ reticle around your clone (slow at first for fine aim, faster the longer
 you hold). It stays put relative to you as you move, and settles onto an
 enemy it's near, as touch aim does. **Left Shift** scopes and **right Shift**
 fires. Right Shift also clicks, so it builds and picks radio calls at the
-reticle. Moving the mouse hands aim back to it. Clones gib on
+reticle. Moving the mouse hands aim back to it.
+
+**Aim assist** (`src/client/aim.ts`). The bots aim like machines, so to
+even things up, whenever your aim points loosely at an enemy, it snaps
+straight onto them. That's within about 11° (wider up close), with a clear
+line of sight. It works for mouse, touch and keyboard aim. With the mouse
+it reaches out as far as the pointer, up to 900 cells. Your arm and the
+aim line show the snap. Teammates are ignored, and so are tools aimed at
+the ground or at friends (digger, materializer, radio, repair kit).
+**V** turns it off or on for the mouse, and the choice is remembered. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
 **On phones and tablets** (`src/client/touch.ts`) touch controls switch on
@@ -45,8 +54,7 @@ on a touch-first device.
   Semi-automatic weapons keep firing as fast as they cycle while you hold.
 - **Aim assist.** When the stick, a tap or a hold points within about 11°
   of an enemy in sight and in range, the aim settles on it
-  (`src/client/aim.ts`). Teammates are ignored, and mouse aim is never
-  assisted.
+  (`src/client/aim.ts`). Teammates are ignored.
 - **Quick tap.** Shoots once at that spot. With the Materializer out, a tap
   builds there, and taps on its menu pick the piece. Once you're out of the
   wave, a tap moves to the next clone to watch. A finger held still fires
