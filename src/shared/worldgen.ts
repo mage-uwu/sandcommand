@@ -37,8 +37,11 @@ function fbm(x: number, y: number, scale: number, seed: number, octaves: number)
 }
 
 /**
- * Server-only procedural generation. Clients never run this — they receive
- * chunk snapshots — so it is free to use floating point and trig.
+ * Procedural generation. The server makes each wave's map with it, and
+ * clients make the same map from the same seed instead of downloading it.
+ * It uses floating-point trig, which engines may round differently, so the
+ * server also sends every chunk's hash and clients ask again for any chunk
+ * that came out different.
  */
 export function generateWorld(t: Terrain, seed: number): void {
   const rng = new Rng(seed);

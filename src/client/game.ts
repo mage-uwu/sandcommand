@@ -1,7 +1,7 @@
 import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type SelfCraftState, type SelfState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, applyFrameRecords } from '../shared/frame.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
@@ -26,6 +26,8 @@ export interface PlayerInfo {
   kills: number;
   deaths: number;
   gold: number;
+  wins: number;
+  bot: boolean;
   color: string;
   rgb: number;
 }
@@ -153,6 +155,11 @@ export class Game implements FrameHandler {
   invVersion = -1;
   private pickupHold = 0;
   private dropHold = 0;
+  /** Free-for-all round state (null in sandbox rooms), and who we watch while out. */
+  roundState: RoundState | null = null;
+  spectate = 255;
+  /** Chunks whose regenerated contents didn't match the server's hash: ask for them. */
+  readonly resyncWanted: number[] = [];
   /** Weapons lying on the ground near us, simulated like the server does. */
   readonly groundItems = new Map<number, GroundItem>();
   cooldown = 0;
@@ -347,6 +354,7 @@ export class Game implements FrameHandler {
     this.partHp = s.partHp;
     this.cooldown = s.cooldown;
     this.inv = s.inv;
+    this.spectate = s.spectate;
     if (s.invVersion !== this.invVersion) {
       this.invVersion = s.invVersion;
       this.slot = s.slot;
@@ -577,6 +585,32 @@ export class Game implements FrameHandler {
     for (const id of ids) this.groundItems.delete(id);
   }
 
+  round(s: RoundState): void {
+    this.roundState = s;
+  }
+
+  /**
+   * A new wave: the decoder has just regenerated the terrain from the seed.
+   * Clear everything left from the last one, rebuild what derives from the
+   * terrain, and flag any chunk that didn't come out identical to the server's.
+   */
+  wave(_seed: number, hashes: Uint32Array): void {
+    this.particles.n = 0;
+    this.projectiles.n = 0;
+    this.stain.fill(0);
+    this.groundItems.clear();
+    this.craftSnaps.clear();
+    this.ride = null;
+    this.rideSlot = -1;
+    this.beams.length = 0;
+    this.flashes.length = 0;
+    this.skyline.fill(WORLD_H);
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) {
+      this.chunkLoaded(ci);
+      if (this.terrain.chunkHash(ci) !== hashes[ci]) this.resyncWanted.push(ci);
+    }
+  }
+
   chunkLoaded(ci: number): void {
     this.loaded[ci] = 1;
     const ox = (ci % CHUNKS_X) << CHUNK_SHIFT;
@@ -630,8 +664,13 @@ export class Game implements FrameHandler {
     if (this.feed.length > 6) this.feed.shift();
 
     // Gib it. Skip the work for deaths far off-screen.
-    const camDx = k.x - this.body.x;
-    const camDy = k.y - this.body.y;
+    // Measured from where we are this frame (our own record comes first; the
+    // body itself is only rebased after the whole frame).
+    // While spectating, from whoever we're watching.
+    const watched = !this.alive && this.spectate !== 255 ? this.snaps.get(this.spectate)?.at(-1) : undefined;
+    const me = watched ?? this.lastSelf ?? this.body;
+    const camDx = k.x - me.x;
+    const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
     const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
@@ -648,16 +687,17 @@ export class Game implements FrameHandler {
       return;
     }
     const c = playerColor(id);
-    this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, color: c.css, rgb: c.rgb });
+    this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, wins: 0, bot: name.startsWith('BOT '), color: c.css, rgb: c.rgb });
   }
 
-  scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void {
+  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void {
     for (const s of list) {
       const p = this.players.get(s.id);
       if (p) {
         p.kills = s.kills;
         p.deaths = s.deaths;
         p.gold = s.gold;
+        p.wins = s.wins;
       }
     }
   }

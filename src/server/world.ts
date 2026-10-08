@@ -40,6 +40,7 @@ import {
   stumps,
 } from '../shared/body.ts';
 import { Writer, rleEncode } from '../shared/codec.ts';
+import { BotBrain, botName } from './bots.ts';
 import { type GroundItem, INV_DROP, INV_MAX, INV_PICKUP, type InvItem, ITEM_LIFE, MAX_ITEMS, NO_WEAPON, PICKUP_R, invByte, invSlot, invVersionBits, newItem, spawnLoadout, stepItem } from '../shared/items.ts';
 import { BuildResult, type BuildBlocker, PIECES, applyBuild, canBuild } from '../shared/build.ts';
 import {
@@ -74,6 +75,7 @@ import {
   F_ALIVE,
   F_FACE_LEFT,
   F_RELOAD,
+  Phase,
   F_CLASS_SHIFT,
   F_FIRING,
   F_GROUND,
@@ -81,6 +83,8 @@ import {
   R_ACTORS,
   R_BLIPS,
   R_BUILD,
+  R_ROUND,
+  R_WAVE,
   R_ITEMS,
   R_ITEMS_GONE,
   R_CARVE,
@@ -150,6 +154,13 @@ export class Player {
   reloadLeft = 0;
   /** Item in hand last tick (switching cancels a reload). */
   heldItem: InvItem | null = null;
+  /** Server-side bot brain (null for humans). */
+  bot: BotBrain | null = null;
+  /** FFA: waves won; in this wave; waiting for its drop rocket; who it's watching while out (255 none). */
+  wins = 0;
+  inWave = false;
+  pendingSpawn = false;
+  spectate = 255;
   /** Latest materializer request, applied on this player's next tick. */
   buildReq: { piece: number; gx: number; gy: number } | null = null;
   /** Buttons last tick, for semi-auto triggers and the reload key. */
@@ -252,9 +263,26 @@ export class World {
   lastStepMs = 0;
   lastReplicateMs = 0;
 
-  constructor(seed = 1337) {
+  /** Game mode: 'sandbox' (respawn forever) or 'ffa' (one life per wave, last one standing wins). */
+  readonly mode: 'sandbox' | 'ffa';
+  /** FFA: fill the room with bots up to this many clones (humans count first). */
+  readonly botFill: number;
+  /** Seed of the current map (each wave gets a new one). */
+  mapSeed: number;
+  /** FFA round state. */
+  phase: number = Phase.Waiting;
+  phaseTimer = 0;
+  wave = 0;
+  winner = 255;
+  /** Pre-encoded R_WAVE record to open every frame of the tick a new wave's map is made. */
+  private waveRecord: Uint8Array | null = null;
+
+  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number } = {}) {
     this.rng = new Rng(seed ^ 0x9e3779b9);
-    generateWorld(this.terrain, seed);
+    this.mode = opts.mode ?? 'sandbox';
+    this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
+    this.mapSeed = seed >>> 0;
+    generateWorld(this.terrain, this.mapSeed);
   }
 
   get playerCount(): number {
@@ -264,17 +292,176 @@ export class World {
   }
 
   addPlayer(name: string, link: ClientLink): Player | null {
+    let id = this.players.indexOf(null);
+    if (id < 0) {
+      // Full of bots: a human takes a bot's place (a dead one if possible).
+      const bot = this.players.find((o) => o?.bot && !o.alive) ?? this.players.find((o) => o?.bot);
+      if (!bot) return null;
+      this.removePlayer(bot.id);
+      id = bot.id;
+    }
+    const clean = name.replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 16) || `Clone${id}`;
+    return this.join(id, clean, link, null);
+  }
+
+  /** A server-side bot takes a free slot (FFA fills empty slots with them). */
+  addBot(): Player | null {
     const id = this.players.indexOf(null);
     if (id < 0) return null;
-    const clean = name.replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 16) || `Clone${id}`;
+    return this.join(id, botName(this.rng), { send() {} }, new BotBrain(this.rng.nextU32()));
+  }
+
+  get humanCount(): number {
+    let n = 0;
+    for (const p of this.players) if (p && !p.bot) n++;
+    return n;
+  }
+
+  private join(id: number, clean: string, link: ClientLink, bot: BotBrain | null): Player {
     const p = new Player(id, clean, link);
+    p.bot = bot;
+    // In FFA you join between waves (spectating until the next one starts).
+    if (this.mode === 'ffa') p.respawn = 0;
     this.players[id] = p;
     this.writeRoster(this.broadcast, p, true);
+    if (bot) return p;
     // The newcomer needs the whole roster; it gets it in its first frame.
     const w = this.tmp.reset();
     for (const o of this.players) if (o && o !== p) this.writeRoster(w, o, true);
     this.pendingRoster.set(id, w.finish());
     return p;
+  }
+
+  // ---------------------------------------------------------------- free for all
+
+  /** Clones still in the wave: alive, riding in, or waiting for their rocket. */
+  remaining(): number {
+    let n = 0;
+    for (const p of this.players) if (p && p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn)) n++;
+    return n;
+  }
+
+  /**
+   * One life each, last one standing wins:
+   * waiting (fewer than two clones) -> countdown -> live -> victory -> a new
+   * wave on a fresh map. Empty slots are filled with bots between waves.
+   */
+  private stepRound(): void {
+    if (this.phase === Phase.Waiting || this.phase === Phase.Victory) this.fillBots();
+    switch (this.phase) {
+      case Phase.Waiting:
+        if (this.humanCount > 0 && this.playerCount >= 2) this.setPhase(Phase.Countdown, COUNTDOWN_TICKS);
+        break;
+      case Phase.Countdown:
+        if (this.playerCount < 2) this.setPhase(Phase.Waiting, 0);
+        else if (--this.phaseTimer <= 0) this.startWave();
+        break;
+      case Phase.Live: {
+        if (this.remaining() <= 1) {
+          const last = this.players.find((p) => p && p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn));
+          this.winner = last ? last.id : 255;
+          if (last) last.wins++;
+          this.setPhase(Phase.Victory, VICTORY_TICKS);
+        }
+        break;
+      }
+      case Phase.Victory:
+        if (--this.phaseTimer <= 0) {
+          this.newMap();
+          this.setPhase(this.playerCount >= 2 ? Phase.Countdown : Phase.Waiting, COUNTDOWN_TICKS);
+        }
+        break;
+    }
+  }
+
+  private setPhase(phase: number, ticks: number): void {
+    this.phase = phase;
+    this.phaseTimer = ticks;
+  }
+
+  /** Bots take every slot no human has (while there is a human to play with). */
+  private fillBots(): void {
+    if (this.botFill === 0 || this.humanCount === 0) return;
+    while (this.playerCount < this.botFill && this.addBot()) {
+      // keep filling
+    }
+  }
+
+  /** Everyone present is in; rockets come in staggered over a couple of seconds. */
+  private startWave(): void {
+    this.wave++;
+    this.winner = 255;
+    for (const p of this.players) {
+      if (!p) continue;
+      p.inWave = true;
+      p.pendingSpawn = true;
+      p.respawn = 1 + this.rng.int(60);
+      p.spectate = 255;
+    }
+    this.setPhase(Phase.Live, 0);
+  }
+
+  /**
+   * A fresh battlefield for the next wave: new terrain from a new seed, and
+   * nothing left over (rockets, dropped weapons, debris in flight). Clients
+   * regenerate the same map from the seed; every chunk's hash rides along so
+   * any chunk that comes out different (engines may round trig differently)
+   * is simply re-sent.
+   */
+  private newMap(): void {
+    this.mapSeed = this.rng.nextU32();
+    generateWorld(this.terrain, this.mapSeed);
+    this.crafts.fill(null);
+    this.items.length = 0;
+    this.grains.n = 0;
+    this.projectiles.n = 0;
+    this.pendingPixels.clear();
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) this.chunkVersion[ci]++;
+    for (const p of this.players) {
+      if (!p) continue;
+      p.alive = false;
+      p.inWave = false;
+      p.pendingSpawn = false;
+      p.delivering = -1;
+      p.inv = [];
+      this.invChanged(p);
+      p.gold = STARTING_GOLD;
+      p.spectate = 255;
+      p.knownItems.clear();
+      p.seenProj.clear();
+      // The client regenerates this map itself (and asks again for any chunk whose hash differs).
+      for (let ci = 0; ci < CHUNK_COUNT; ci++) p.known[ci] = this.chunkVersion[ci];
+    }
+    const w = new Writer(8 + CHUNK_COUNT * 4);
+    w.u8(R_WAVE);
+    w.u32(this.mapSeed);
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) w.u32(this.terrain.chunkHash(ci));
+    this.waveRecord = w.finish();
+  }
+
+  /**
+   * Out of the wave: watch someone still in it (its killer first). A fresh
+   * click moves on to the next clone; the view, and so what this client is
+   * sent, follows whoever it's watching.
+   */
+  private spectateFrom(p: Player, prev: number): void {
+    let t = p.spectate !== 255 ? this.players[p.spectate] : null;
+    const next = p.buttons & BTN_FIRE && !(prev & BTN_FIRE);
+    if (!t || !t.alive || next) {
+      p.spectate = 255;
+      for (let k = 1; k <= MAX_PLAYERS; k++) {
+        const o = this.players[(Math.max(0, t ? t.id : p.id) + k) % MAX_PLAYERS];
+        if (o && o.alive && o !== p) {
+          p.spectate = o.id;
+          break;
+        }
+      }
+      t = p.spectate !== 255 ? this.players[p.spectate] : null;
+    }
+    if (t) {
+      p.camX = t.cx;
+      p.camY = t.cy;
+    }
   }
 
   private readonly pendingRoster = new Map<number, Uint8Array>();
@@ -535,6 +722,8 @@ export class World {
     victim.respawn = RESPAWN_TICKS;
     // Everything it carried spills where it fell, for anyone to take.
     this.dropAll(victim);
+    // Out of the wave: watch whoever did it.
+    if (this.mode === 'ffa') victim.spectate = attacker !== victim.id && this.players[attacker]?.alive ? attacker : 255;
     victim.deaths++;
     const killer = this.players[attacker];
     if (killer && killer !== victim) killer.kills++;
@@ -996,14 +1185,26 @@ export class World {
     const slot = this.crafts.indexOf(null);
     if (slot < 0) return; // sky is full; try again next tick
     const pick = () => 48 + CRAFT_W / 2 + this.rng.int(WORLD_W - 96 - CRAFT_W);
+    // Of a handful of candidate spots with sky above and ground below, take
+    // the one furthest from live clones and other incoming rockets, so a
+    // full room doesn't land on top of itself.
     let x = pick();
-    for (let attempt = 0; attempt < 16; attempt++) {
-      const top = this.terrain.surfaceY(Math.floor(x));
-      if (top > 60 && top < WORLD_H - 40) break; // land somewhere with sky above and ground below
-      x = pick();
+    let bestGap = -1;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const cx = pick();
+      const top = this.terrain.surfaceY(Math.floor(cx));
+      if (top <= 60 || top >= WORLD_H - 40) continue;
+      let gap = Infinity;
+      for (const o of this.players) if (o && o.alive) gap = Math.min(gap, Math.abs(o.cx - cx));
+      for (const c of this.crafts) if (c) gap = Math.min(gap, Math.abs(c.x - cx));
+      if (gap > bestGap) {
+        bestGap = gap;
+        x = cx;
+      }
     }
     this.crafts[slot] = newCraft(x, p.id);
     p.delivering = slot;
+    p.pendingSpawn = false;
   }
 
   private stepCrafts(): void {
@@ -1262,7 +1463,10 @@ export class World {
   step(): void {
     const t0 = performance.now();
     this.tick++;
+    if (this.mode === 'ffa') this.stepRound();
     const terrain = this.terrain;
+    // Bots decide this tick's input the way a client would send it.
+    for (const p of this.players) if (p?.bot) this.input(p.id, p.bot.think(this, p));
 
     for (const p of this.players) {
       if (!p) continue;
@@ -1280,8 +1484,9 @@ export class World {
       const prev = p.prevButtons;
       p.prevButtons = p.buttons;
       if (!p.alive) {
-        // Every clone arrives by drop rocket.
-        if (p.delivering < 0 && --p.respawn <= 0) this.launchCraft(p);
+        // Every clone arrives by drop rocket; in FFA only once per wave.
+        if (p.delivering < 0 && (this.mode !== 'ffa' || p.pendingSpawn) && --p.respawn <= 0) this.launchCraft(p);
+        else if (this.mode === 'ffa' && p.delivering < 0) this.spectateFrom(p, prev);
         if (p.delivering >= 0) {
           const c = this.crafts[p.delivering];
           if (c) {
@@ -1444,16 +1649,28 @@ export class World {
         w.u16(p.kills);
         w.u16(p.deaths);
         w.u16(Math.min(65535, p.gold));
+        w.u16(p.wins);
       }
       scores = w.finish();
     }
 
     for (const p of this.players) {
-      if (!p) continue;
+      if (!p || p.bot) continue; // bots read the world directly
       const w = this.frame.reset();
       w.u8(S_FRAME);
       w.u32(this.tick);
       w.u16(p.ack & 0xffff);
+      // A new wave's map comes first: every record after it applies to the new terrain.
+      if (this.waveRecord) w.bytes(this.waveRecord);
+      if (this.mode === 'ffa') {
+        w.u8(R_ROUND);
+        w.u8(this.phase);
+        w.u16(this.wave);
+        w.u16(Math.min(65535, this.phaseTimer));
+        w.u8(this.winner);
+        w.u8(this.remaining());
+        w.u8(p.inWave ? 1 : 0);
+      }
 
       // Own state at full float64 precision: the client's predictor rebases on
       // it and replays unacked inputs, so any rounding here would show up as
@@ -1479,6 +1696,7 @@ export class World {
       }
       w.u8(p.slot);
       w.u8(p.invVersion);
+      w.u8(p.spectate);
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
@@ -1600,6 +1818,7 @@ export class World {
     }
 
     this.ops.length = 0;
+    this.waveRecord = null;
     this.itemsGone.length = 0;
     this.projSpawns.length = 0;
     this.projEnds.length = 0;
@@ -1684,6 +1903,8 @@ export class World {
 }
 
 const TICKS_PER_SCORE = 30;
+const COUNTDOWN_TICKS = 30 * 4;
+const VICTORY_TICKS = 30 * 7;
 /** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
 const STARTING_GOLD = 60;
 /** Who a rocket's exhaust flames are credited to (and so who it is immune to). */

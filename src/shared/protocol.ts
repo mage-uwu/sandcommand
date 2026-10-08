@@ -42,6 +42,10 @@ export const R_CRAFT_PART = 18;
 export const R_BUILD = 19;
 export const R_ITEMS = 20;
 export const R_ITEMS_GONE = 21;
+/** FFA round state (every frame): phase, wave, timer, winner, clones left, whether you're in it. */
+export const R_ROUND = 22;
+/** A new wave's map: seed plus every chunk's hash (clients regenerate it locally and check). */
+export const R_WAVE = 23;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -55,7 +59,15 @@ export const F_CLASS_SHIFT = 6;
 export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
+
+/** Free-for-all round phases. */
+export const Phase = {
+  Waiting: 0, // not enough clones to fight
+  Countdown: 1,
+  Live: 2,
+  Victory: 3,
+} as const;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

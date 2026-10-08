@@ -11,10 +11,13 @@ import { Rng } from '../src/shared/rng.ts';
 import { World } from '../src/server/world.ts';
 
 const TICKS = Number(process.env.TICKS ?? 900);
-const world = new World(12345);
+// MODE=ffa: one human and 63 server-side bots playing free-for-all waves
+// (bot AI, rounds and map resets included). Default: 64 scripted clients.
+const FFA = process.env.MODE === 'ffa';
+const world = FFA ? new World(12345, { mode: 'ffa', bots: MAX_PLAYERS }) : new World(12345);
 const bytes = new Float64Array(MAX_PLAYERS);
 const ids: number[] = [];
-for (let i = 0; i < MAX_PLAYERS; i++) {
+for (let i = 0; i < (FFA ? 1 : MAX_PLAYERS); i++) {
   const p = world.addPlayer(`bot${i}`, { send: (d) => (bytes[p.id] += d.length) })!;
   ids.push(p.id);
 }
@@ -45,7 +48,8 @@ const wall = performance.now() - t0;
 const pct = (a: number[], q: number) => [...a].sort((x, y) => x - y)[Math.floor(a.length * q)];
 const avg = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
 const secs = (TICKS - 60) / TICK_RATE;
-const kbps = [...bytes].map((b) => b / secs / 1024);
+const kbps = [...bytes].slice(0, FFA ? 1 : MAX_PLAYERS).map((b) => b / secs / 1024);
+if (FFA) console.log(`mode=ffa waves=${world.wave} phase=${world.phase}`);
 console.log(`players=${MAX_PLAYERS} ticks=${TICKS} wall=${wall.toFixed(0)}ms (${(wall / TICKS).toFixed(2)} ms/tick, budget ${(1000 / TICK_RATE).toFixed(1)})`);
 console.log(`sim       avg ${avg(step).toFixed(3)} ms  p99 ${pct(step, 0.99).toFixed(3)} ms`);
 console.log(`replicate avg ${avg(repl).toFixed(3)} ms  p99 ${pct(repl, 0.99).toFixed(3)} ms`);

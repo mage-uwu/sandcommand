@@ -1,7 +1,8 @@
 # SandCommand
 
-A Cloudflare-native multiplayer sandbox shooter inspired by **Cortex Command**:
-up to **64 clones per room** share one fully destructible 2048×1024-cell world.
+A Cloudflare-native multiplayer shooter inspired by **Cortex Command**: up to
+**64 clones per room** fight free-for-all waves in one fully destructible
+2048×1024-cell world, with bots in every seat no human has taken.
 Every explosion carves terrain, throws debris, and the debris settles back as
 rubble. All of it is simulated on one authoritative Durable Object and
 streamed to every player at 30 Hz.
@@ -11,6 +12,7 @@ npm install
 npm run dev          # builds the client and runs wrangler dev on :8787
 npm test             # terrain, codec, replication and prediction tests
 npm run bench        # headless 64-player server benchmark
+npm run bench:ffa    # one human + 63 bots playing free-for-all waves for 2 minutes
 npm run bench:physics # particle/field scaling, collider probes, big collapse
 npm run loadtest     # 64 real WebSocket bots against a running server
 npm run deploy       # wrangler deploy (needs a Cloudflare account)
@@ -22,6 +24,53 @@ through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
 drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
+
+## Free for all
+
+Every room plays free-for-all waves (`stepRound` in `src/server/world.ts`):
+
+1. **Countdown.** Once there are two clones, a 4-second countdown starts.
+2. **The wave.** Everyone in the room is in it. Drop rockets bring them in
+   over a couple of seconds, each landing as far as it can from clones and
+   other incoming rockets.
+3. **One life.** Nobody respawns. When you die you spectate your killer
+   (click for the next clone), and the server moves what it sends you to
+   whoever you're watching. Players who join mid-wave watch it and play in
+   the next one.
+4. **Last clone standing wins.** The winner gets a win on the scoreboard
+   (Tab: wins, kills, deaths) and a 7-second victory lap.
+5. **A new wave on a fresh map.** The next wave gets a new seed: new
+   terrain, with nothing carried over (rockets, dropped weapons, debris in
+   flight).
+
+**Bots fill every seat no human has**, up to 64. When a human joins a full
+room, a bot gives up its seat, a dead one if there is one.
+- **Same rules as humans.** A bot is a `BotBrain` in `src/server/bots.ts`:
+  it reads the world directly and emits the same input command a client
+  sends. So it plays by exactly the same rules: rate of fire, magazines,
+  inventory, rockets, classes.
+- **What it does.** It picks the nearest living clone, closes to its
+  weapon's fighting range, then strafes. It jumps or jets over walls and up
+  to targets, and leads its shots by flight time, lifting lobbed ones.
+- **Weapon use.** It throws grenades up close now and then, digs through
+  when walled in, and fetches a gun from the ground if it lost its own.
+- **Fairness.** Bots get a beat to look around after landing, a reaction
+  delay on each new target, per-bot aim error, and no point-blank bazooka
+  shots.
+
+Thinking is cheap and staggered: targets twice a second, line of sight
+every 4 ticks, steering and aim every tick. A room of one human and 63 bots
+costs about 0.7 ms a tick (`npm run bench:ffa`), and a full 64-clone wave
+usually lasts 35–40 s.
+
+**New maps cost almost no bandwidth.** The map generator is shared code, so
+the server sends the seed (`R_WAVE`) and each client generates the same
+terrain itself. The generator uses floating-point trig, which different
+JavaScript engines may round differently, so the record also carries every
+chunk's hash. A client that comes out different on a chunk asks for that
+chunk again. The wave record opens the frame, so every record after it
+applies to the new terrain. Round state rides in a small per-frame
+`R_ROUND` record.
 
 ## Architecture
 
@@ -492,9 +541,17 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.80 ms  p99 5.1 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
-replicate avg 1.02 ms  p99 3.5 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 32.9 KB/s; room egress 2.06 MB/s
+sim       avg 0.81 ms  p99 4.4 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
+replicate avg 0.97 ms  p99 3.3 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 33.0 KB/s; room egress 2.06 MB/s
+```
+
+`npm run bench:ffa` (one human, 63 server-side bots, free-for-all waves for
+two minutes, map resets included):
+
+```
+sim       avg 0.68 ms  p99 3.3 ms      (bot AI and rounds included)
+downstream to the human: 29.7 KB/s
 ```
 
 `npm run bench:physics`:
@@ -559,7 +616,7 @@ match's sockets pin to it.
 ## Not done yet
 
 - Teams, brains, buying bodies and drop ships, which are the Cortex Command
-  meta-game.
+  meta-game. Free-for-all is the only mode so far.
 - Delta-compressing actor records against the last acknowledged frame.
 - Running the kernels in a WASM SIMD module. They are already laid out for it.
 - A learned (neural) surrogate for dense granular flow. The field formulation

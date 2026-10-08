@@ -4,7 +4,8 @@ import { CRAFT_PARTS } from './craft.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
-import { CHUNK, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
+import { CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
+import { generateWorld } from './worldgen.ts';
 import {
   R_ACTORS,
   R_BLIPS,
@@ -24,9 +25,11 @@ import {
   R_PIXELS,
   R_PROJ_END,
   R_PROJ_SPAWN,
+  R_ROUND,
   R_ROSTER,
   R_SCORES,
   R_SELF,
+  R_WAVE,
   Y_BIAS,
   dequantizeAim,
 } from './protocol.ts';
@@ -46,6 +49,8 @@ export interface SelfState {
   inv: { weapon: number; ammo: number }[];
   slot: number;
   invVersion: number;
+  /** FFA: who we're watching while out of the wave (255 none). */
+  spectate: number;
   reload: number; // ticks left reloading, 0 = not
   gold: number; // own gold, exact (the scoreboard only updates once a second)
   respawn: number;
@@ -111,6 +116,15 @@ export interface SelfCraftState {
   partHp: number[];
 }
 
+export interface RoundState {
+  phase: number; // Phase.*
+  wave: number;
+  timer: number; // ticks left in a countdown / victory
+  winner: number; // player id, 255 none
+  left: number; // clones still in the wave
+  inWave: boolean; // are we in it
+}
+
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
 export interface FrameHandler {
   self(s: SelfState): void;
@@ -133,7 +147,11 @@ export interface FrameHandler {
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void;
   kill(k: KillInfo): void;
   roster(id: number, present: boolean, name: string): void;
-  scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void;
+  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void;
+  /** FFA round state, every frame. */
+  round(s: RoundState): void;
+  /** A new wave: the terrain was just regenerated from `seed`; `hashes` are the server's per-chunk hashes. */
+  wave(seed: number, hashes: Uint32Array): void;
   hit(victim: number, x: number, y: number, amount: number): void;
   chat(id: number, text: string): void;
   /** Drop rockets near this client's view this tick (absent when none). */
@@ -176,6 +194,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           inv: Array.from({ length: r.u8() }, () => ({ weapon: r.u8(), ammo: r.u8() })),
           slot: r.u8(),
           invVersion: r.u8(),
+          spectate: r.u8(),
           respawn: r.u16(),
           parts: r.u16(),
           partHp: Array.from({ length: PART_COUNT }, () => r.u8()),
@@ -249,6 +268,18 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.itemsGone(ids);
         break;
       }
+      case R_ROUND:
+        h.round({ phase: r.u8(), wave: r.u16(), timer: r.u16(), winner: r.u8(), left: r.u8(), inWave: r.u8() === 1 });
+        break;
+      case R_WAVE: {
+        const seed = r.u32();
+        const hashes = new Uint32Array(CHUNK_COUNT);
+        for (let i = 0; i < CHUNK_COUNT; i++) hashes[i] = r.u32();
+        // Same generator, same seed: the new map is made here rather than downloaded.
+        generateWorld(terrain, seed);
+        h.wave(seed, hashes);
+        break;
+      }
       case R_PIXELS: {
         const ci = r.u16();
         const n = r.u16();
@@ -304,7 +335,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       case R_SCORES: {
         const n = r.u8();
         const list = [];
-        for (let i = 0; i < n; i++) list.push({ id: r.u8(), kills: r.u16(), deaths: r.u16(), gold: r.u16() });
+        for (let i = 0; i < n; i++) list.push({ id: r.u8(), kills: r.u16(), deaths: r.u16(), gold: r.u16(), wins: r.u16() });
         h.scores(list);
         break;
       }
@@ -398,6 +429,8 @@ export const nullHandler: FrameHandler = {
   blips() {},
   carved() {},
   chunkLoaded() {},
+  round() {},
+  wave() {},
   items() {},
   itemsGone() {},
   built() {},

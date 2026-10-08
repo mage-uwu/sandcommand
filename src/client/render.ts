@@ -1,10 +1,11 @@
 import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
 import { PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import type { CraftView, Game, RemoteView } from './game.ts';
+import type { RoundState } from '../shared/frame.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
@@ -197,6 +198,13 @@ export class Renderer {
         // Lead along the flight path so you can see where you'll land.
         this.camX += (mine.x + mine.vx * 0.3 - this.camX) * 0.2;
         this.camY += (mine.y + 30 + mine.vy * 0.3 - this.camY) * 0.2;
+      } else if (game.spectate !== 255) {
+        // Out of the wave: follow whoever we're watching.
+        const v = game.remoteViews().find((r) => r.id === game.spectate);
+        if (v) {
+          this.camX += (v.x + ACTOR_W / 2 - this.camX) * 0.15;
+          this.camY += (v.y + ACTOR_H / 2 - this.camY) * 0.15;
+        }
       }
     }
     const halfW = W / z / 2;
@@ -864,8 +872,12 @@ export class Renderer {
       ctx.fillRect(mx + game.body.x * k - 2 * s, my + game.body.y * k - 2 * s, 4 * s, 4 * s);
     }
 
+    // Free for all: the round, and what's happening to us in it.
+    const rs = game.roundState;
+    if (rs) this.drawRound(game, rs, s, W, H);
+
     // Death / respawn banner.
-    if (!game.alive && game.myId >= 0) {
+    if (!game.alive && game.myId >= 0 && (!rs || game.ride || game.myCraft())) {
       ctx.textAlign = 'center';
       ctx.font = `bold ${Math.round(22 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -894,9 +906,51 @@ export class Renderer {
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);
   }
 
+  /**
+   * Free-for-all banners: waiting, the countdown, clones left, who you're
+   * watching once you're out, and the winner of each wave.
+   */
+  private drawRound(game: Game, rs: RoundState, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const secs = Math.ceil(rs.timer / TICK_RATE);
+    const name = (id: number) => (id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '???'));
+    const big = (text: string, sub: string, color = '#fff') => {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(W / 2 - 300 * s, H * 0.22 - 34 * s, 600 * s, sub ? 70 * s : 48 * s);
+      ctx.font = `bold ${Math.round(26 * s)}px ui-monospace, monospace`;
+      ctx.fillStyle = color;
+      ctx.fillText(text, W / 2, H * 0.22);
+      if (sub) {
+        ctx.font = `${Math.round(14 * s)}px ui-monospace, monospace`;
+        ctx.fillStyle = '#ddd';
+        ctx.fillText(sub, W / 2, H * 0.22 + 24 * s);
+      }
+    };
+    if (rs.phase === Phase.Waiting) big('FREE FOR ALL', 'waiting for clones…');
+    else if (rs.phase === Phase.Countdown) big(`WAVE ${rs.wave + 1} IN ${secs}`, 'one life each · last clone standing wins', '#ffd34a');
+    else if (rs.phase === Phase.Victory) {
+      const won = rs.winner === game.myId;
+      big(rs.winner === 255 ? `NOBODY SURVIVED WAVE ${rs.wave}` : won ? `YOU WIN WAVE ${rs.wave}!` : `${name(rs.winner)} WINS WAVE ${rs.wave}`, `next wave in ${secs}`, won ? '#80ff80' : '#ffd34a');
+    } else {
+      // Live: a small status line, plus the spectator banner once we're out.
+      ctx.textAlign = 'center';
+      ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(W / 2 - 110 * s, 8 * s, 220 * s, 24 * s);
+      ctx.fillStyle = '#ffd34a';
+      ctx.fillText(`WAVE ${rs.wave} · ${rs.left} LEFT`, W / 2, 25 * s);
+      if (!game.alive && !game.ride && !game.myCraft()) {
+        const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : '';
+        big(rs.inWave ? 'YOU ARE OUT' : 'WAVE IN PROGRESS', rs.inWave ? watching : `you're in the next one · ${watching}`, rs.inWave ? '#ff8070' : '#fff');
+      }
+    }
+    ctx.textAlign = 'left';
+  }
+
   private drawScoreboard(game: Game, s: number, W: number, H: number): void {
     const ctx = this.ctx;
-    const rows = [...game.players.values()].sort((a, b) => b.kills * 10 + b.gold - (a.kills * 10 + a.gold));
+    const rows = [...game.players.values()].sort((a, b) => b.wins * 1000 + b.kills * 10 + b.gold - (a.wins * 1000 + a.kills * 10 + a.gold));
     const lineH = 16 * s;
     const cols = rows.length > 32 ? 2 : 1;
     const perCol = Math.ceil(rows.length / cols);
@@ -912,11 +966,11 @@ export class Renderer {
     for (let c = 0; c < cols; c++) {
       const cx = x0 + 10 * s + c * colW;
       ctx.fillStyle = '#999';
-      ctx.fillText('CLONE              KILLS DEATHS  GOLD', cx, y0 + 20 * s);
+      ctx.fillText('CLONE              WINS KILLS DEATHS', cx, y0 + 20 * s);
       rows.slice(c * perCol, (c + 1) * perCol).forEach((p, i) => {
         ctx.fillStyle = p.id === game.myId ? '#fff' : p.color;
         const name = p.name.padEnd(18).slice(0, 18);
-        ctx.fillText(`${name} ${String(p.kills).padStart(5)} ${String(p.deaths).padStart(6)} ${String(p.gold).padStart(5)}`, cx, y0 + 20 * s + (i + 1) * lineH);
+        ctx.fillText(`${name} ${String(p.wins).padStart(4)} ${String(p.kills).padStart(5)} ${String(p.deaths).padStart(6)}`, cx, y0 + 20 * s + (i + 1) * lineH);
       });
     }
   }

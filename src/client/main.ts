@@ -119,6 +119,10 @@ async function join(): Promise<void> {
     frame(tick, ack, r) {
       try {
         g.applyFrame(tick, ack, r);
+        // A regenerated map chunk that differs from the server's: fetch the real one.
+        if (g.resyncWanted.length) {
+          net?.resync(g.resyncWanted.splice(0));
+        }
       } catch (err) {
         // A corrupt frame leaves terrain in an unknown state: ask for fresh chunks.
         console.error('frame decode failed', err);
