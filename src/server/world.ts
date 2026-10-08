@@ -23,6 +23,8 @@ import {
   tankMuzzle,
   tankPartAt,
   tankPoint,
+  tankLocal,
+  tankSink,
 } from '../shared/tank.ts';
 import {
   CRAFT_H,
@@ -950,7 +952,10 @@ export class World {
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
       if (!t || (owner === t.pilot && owner !== 255)) continue;
-      const tt = segmentBox(x0, y0, dx, dy, t.x, t.y, t.x + TANK_W, t.y + TANK_H);
+      // In the tank's own frame its (tilted) hull is an axis-aligned box.
+      const la = tankLocal(t, x0, y0, this.segA);
+      const lb = tankLocal(t, x1, y1, this.segB);
+      const tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, TANK_W, TANK_H);
       if (tt >= 0 && tt < bestT) {
         bestT = tt;
         best = TANK_ID_BASE + k;
@@ -1908,8 +1913,15 @@ export class World {
     const b = p.body;
     // Under the shield, inside; with it blown off, head and shoulders out of the hatch.
     const exposed = !hasTankPart(t.parts, TankPart.Shield);
-    b.x = exposed ? t.x + (t.faceLeft ? TANK_W - 13.5 : 13.5) - ACTOR_W / 2 : t.x + TANK_W / 2 - ACTOR_W / 2;
-    b.y = t.y + (exposed ? EXPOSED_SEAT_Y : 2);
+    if (exposed) {
+      // Head and shoulders out of the hatch, wherever the tilted hull puts it.
+      const hatch = tankPoint(t, 13.5, EXPOSED_SEAT_Y + EXPOSED_H / 2, this.pt);
+      b.x = hatch.x - ACTOR_W / 2;
+      b.y = hatch.y - EXPOSED_H / 2;
+    } else {
+      b.x = t.x + TANK_W / 2 - ACTOR_W / 2;
+      b.y = t.y + 2;
+    }
     b.vx = t.vx;
     b.vy = t.vy;
     b.onGround = t.onGround;
@@ -1966,6 +1978,7 @@ export class World {
     this.spawnProj(this.nextProjId++, cannon ? ProjKind.Shell : ProjKind.TankBullet, owner, m.x, m.y, Math.cos(a) * speed + t.vx * 0.25, Math.sin(a) * speed + t.vy * 0.25);
     if (cannon) {
       t.vx -= Math.cos(a) * 30; // recoil
+      t.w += t.faceLeft ? 1.4 : -1.4; // and the nose kicks up
       t.firedCannon = true;
     } else t.firedSmg = true;
   }
@@ -2018,7 +2031,9 @@ export class World {
   private hitTank(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
     const t = this.tanks[slot];
     if (!t || this.friendlyTank(by, t)) return;
-    const part = tankPartAt(t, wx + dx * 2 - t.x, wy + dy * 2 - t.y);
+    // Into the hull's own (tilted) frame to find the part.
+    const l = tankLocal(t, wx + dx * 2, wy + dy * 2, this.pt);
+    const part = tankPartAt(t, l.x, l.y);
     this.hurtTankPart(slot, part, energy > TANK_INTEGRITY ? wound : wound * 0.2, by);
   }
 
@@ -2065,6 +2080,10 @@ export class World {
       const s = 40 * (1 - d / r);
       t.vx += ((nx - x) / dl) * s;
       t.vy += ((ny - y) / dl) * s;
+      // Off-centre blasts rock the hull (torque about the tread line).
+      const rx = nx - (t.x + TANK_W / 2);
+      const ry = ny - (t.y + TANK_H);
+      t.w += ((rx * (ny - y) - ry * (nx - x)) / dl) * s * 0.004;
     }
   }
 
@@ -2237,7 +2256,8 @@ export class World {
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
       // Immune to its own jet flames and shell fragments.
-      if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H, TANK_MASS, t.pilot !== 255 ? t.pilot : NO_OWNER, 0.3);
+      // The tilted hull dips below its box by up to tankSink: cover that too.
+      if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H + tankSink(t.a), TANK_MASS, t.pilot !== 255 ? t.pilot : NO_OWNER, 0.3);
     }
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
@@ -2461,6 +2481,8 @@ export class World {
         w.f64(drive.vx);
         w.f64(drive.vy);
         w.f64(drive.fuel);
+        w.f64(drive.a);
+        w.f64(drive.w);
         w.u8((drive.chute ? 1 : 0) | (drive.onGround ? 2 : 0) | (drive.jetting ? 4 : 0));
         w.u8(drive.parts);
         for (let part = 0; part < TANK_PARTS; part++) w.u16(Math.max(0, Math.ceil(drive.partHp[part])));
@@ -2563,6 +2585,7 @@ export class World {
           w.i16(clampI16(t.vx * VEL_SCALE));
           w.i16(clampI16(t.vy * VEL_SCALE));
           w.u16(quantizeAim(t.aim));
+          w.u8(Math.round(t.a * 100) & 255); // tilt, centiradians (signed)
           w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0));
           w.u8(t.parts);
           w.u16(Math.max(0, Math.ceil(t.hp)));

@@ -128,6 +128,7 @@ export interface TankState {
   parts: number; // attached-part mask (tank.ts)
   hp: number;
   pilot: number; // player id or 255
+  a: number; // hull tilt, radians
 }
 
 /** The tank this client drives, at full precision: everything stepTank needs, plus its damage. */
@@ -145,6 +146,8 @@ export interface SelfTankState {
   partHp: number[];
   /** Ticks until the cannon is loaded. */
   cannonCd: number;
+  a: number;
+  w: number;
 }
 
 /** This client's own drop rocket at full precision: everything stepCraft needs. */
@@ -500,6 +503,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const vx = r.i16() / 8;
           const vy = r.i16() / 8;
           const aim = dequantizeAim(r.u16());
+          const tilt = ((r.u8() << 24) >> 24) / 100;
           const f = r.u8();
           list.push({
             slot,
@@ -517,6 +521,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             parts: r.u8(),
             hp: r.u16(),
             pilot: r.u8(),
+            a: tilt,
           });
         }
         h.tanks(list);
@@ -529,10 +534,12 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const vx = r.f64();
         const vy = r.f64();
         const fuel = r.f64();
+        const a = r.f64();
+        const w = r.f64();
         const f = r.u8();
         const parts = r.u8();
         const partHp = Array.from({ length: TANK_PARTS }, () => r.u16());
-        h.selfTank({ slot, x, y, vx, vy, fuel, chute: (f & 1) !== 0, onGround: (f & 2) !== 0, jetting: (f & 4) !== 0, parts, partHp, cannonCd: r.u8() });
+        h.selfTank({ slot, x, y, vx, vy, fuel, chute: (f & 1) !== 0, onGround: (f & 2) !== 0, jetting: (f & 4) !== 0, parts, partHp, cannonCd: r.u8(), a, w });
         break;
       }
       case R_TANK_PART:

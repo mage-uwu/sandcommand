@@ -5,7 +5,7 @@ import { ACTOR_H, ACTOR_MAX_HP } from '../src/shared/constants.ts';
 import { invByte } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { Phase, quantizeAim } from '../src/shared/protocol.ts';
-import { TANK_H, TANK_HP, TANK_PART_CENTER, TANK_W, TankPart, hasTankPart, newTank } from '../src/shared/tank.ts';
+import { TANK_H, TANK_HP, TANK_PART_CENTER, TANK_W, TankPart, hasTankPart, newTank, tankMuzzle, tankPoint } from '../src/shared/tank.ts';
 import { ProjKind } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
@@ -204,6 +204,90 @@ describe('tanks', () => {
     expect(a.body.y).toBeLessThan(tank.y); // head and shoulders above the dome
     volley(10);
     expect(a.alive && a.hp === hp0).toBe(false);
+  });
+
+  it('the treads settle the hull onto a slope, both ends touching', () => {
+    const world = new World(51);
+    yard(world);
+    // A 30-degree ramp rising to the left, x 900..1000.
+    const t = world.terrain;
+    const slope = Math.tan(Math.PI / 6);
+    for (let x = 900; x < 1000; x++) for (let y = Math.round(FLOOR - (1000 - x) * slope); y < FLOOR; y++) t.set(x, y, Mat.Bedrock);
+    for (let x = 600; x < 900; x++) for (let y = Math.round(FLOOR - 100 * slope); y < FLOOR; y++) t.set(x, y, Mat.Bedrock);
+    world.terrainReplaced();
+    world.tanks[0] = newTank(930, FLOOR - 120);
+    const k = world.tanks[0]!;
+    for (let i = 0; i < 240; i++) world.step();
+    expect(k.onGround).toBe(true);
+    expect(k.a).toBeGreaterThan(Math.PI / 6 - 0.12); // right end lower, like the ramp
+    expect(k.a).toBeLessThan(Math.PI / 6 + 0.12);
+    // Both tread ends sit on the ramp (within a couple of cells).
+    const pt = { x: 0, y: 0 };
+    for (const lx of [3, TANK_W - 3]) {
+      tankPoint(k, lx, TANK_H, pt);
+      const ground = Math.round(FLOOR - (1000 - pt.x) * slope);
+      expect(Math.abs(pt.y - ground)).toBeLessThan(3);
+    }
+  });
+
+  it('climbs a hill (slower than on the flat), but not a cliff face', () => {
+    const climb = (deg: number) => {
+      const world = new World(52);
+      const a = world.addPlayer('d', { send() {} })!;
+      deliverAll(world, [a]);
+      yard(world);
+      const t = world.terrain;
+      const slope = Math.tan((deg * Math.PI) / 180);
+      // Flat until x 800, then up the slope to the right (for 120 cells high at most).
+      for (let x = 800; x < 1600; x++) {
+        const top = Math.max(FLOOR - 120, Math.round(FLOOR - (x - 800) * slope));
+        for (let y = top; y < FLOOR; y++) t.set(x, y, Mat.Bedrock);
+      }
+      world.terrainReplaced();
+      a.body.x = 700;
+      a.body.y = FLOOR - ACTOR_H;
+      world.tanks[0] = newTank(710, FLOOR - TANK_H - 2);
+      for (let k = 0; k < 10; k++) world.step();
+      tapPickup(world, a);
+      const k = world.tanks[0]!;
+      for (let i = 0; i < 150; i++) {
+        send(world, a, BTN_RIGHT);
+        world.step();
+      }
+      return { x: k.x, y: k.y };
+    };
+    const flat = climb(0);
+    const hill = climb(30);
+    const cliff = climb(75);
+    expect(hill.y).toBeLessThan(FLOOR - TANK_H - 40); // well up the hill
+    expect(hill.x).toBeLessThan(flat.x); // uphill is slower going
+    expect(cliff.y).toBeGreaterThan(FLOOR - TANK_H - 30); // a face too steep to grip
+  });
+
+  it('recoil kicks the nose up and the suspension settles it back', () => {
+    const { world, a, tank } = setup(53);
+    tapPickup(world, a);
+    for (let i = 0; i < 30; i++) world.step();
+    send(world, a, BTN_SCOPE, false, 0);
+    world.step();
+    let peak = 0;
+    for (let i = 0; i < 10; i++) {
+      send(world, a, 0, false, 0);
+      world.step();
+      peak = Math.max(peak, Math.abs(tank.a));
+    }
+    expect(peak).toBeGreaterThan(0.02);
+    for (let i = 0; i < 60; i++) world.step();
+    expect(Math.abs(tank.a)).toBeLessThan(0.01);
+  });
+
+  it('the guns and their muzzles tilt with the hull', () => {
+    const k = newTank(100, 100);
+    const flat = tankMuzzle(k, true, 0, { x: 0, y: 0, a: 0 });
+    const fy = flat.y;
+    k.a = 0.4; // nose (right end) down
+    const tilted = tankMuzzle(k, true, 0, { x: 0, y: 0, a: 0 });
+    expect(tilted.y).toBeGreaterThan(fy + 3);
   });
 
   it('when the hull goes it explodes and kills its driver, credited to whoever did it', () => {

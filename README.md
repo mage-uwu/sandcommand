@@ -265,7 +265,18 @@ come down by parachute** at spread-out spots and land empty.
   (touch: ⬆) to climb in. The same key climbs back out through the roof
   hatch. Your clone rides inside; you can see its head poking out of the
   hatch.
-- **Driving.** **A/D** drive the treads, which climb 6-cell steps. **W**
+- **Tread suspension.** The hull settles onto the ground under its rear and
+  front treads through a damped spring. It tilts to match hills, both
+  tread ends touching, and rocks a little. In the air it drifts level, and
+  it jolts on landing. Cannon recoil pitches the nose up, and blasts rock
+  it.
+- **Slopes.** Uphill is slower and downhill quicker. The treads climb
+  slopes up to about 50° but refuse a steeper face, and an idle tank slides
+  off steep ground. Lift jets push along the tilted hull's normal.
+- **Tilted parts.** The art, the cannon and SMG mounts, the muzzles, the
+  part hit zones and an exposed driver's head all rotate with the hull.
+  Tilt is part of the predicted state, at full precision for the driver.
+- **Driving.** **A/D** drive the treads, which climb 8-cell steps. **W**
   fires the lift jets (their own fuel, weaker than a jetpack). **S** drops
   you faster while airborne.
 - **Two guns.** **Left mouse** fires the vulcan SMG, which swivels all the

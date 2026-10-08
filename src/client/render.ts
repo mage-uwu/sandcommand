@@ -13,7 +13,7 @@ import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
-import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_PARTS, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor } from './texture.ts';
 import { Backdrop } from './backdrop.ts';
@@ -873,6 +873,12 @@ export class Renderer {
     // Tank-local x (as drawn facing right) to world, mirrored when facing left.
     const wx = (lx: number, w = 0) => (faceLeft ? x + TANK_W - lx - w : x + lx);
     if (t.chute) ctx.drawImage(sp.tankChute(), x - 8, ty - 34);
+    // Everything below is drawn in the hull's own frame, tilted with the
+    // treads about the middle of the tread line (sunk so both ends touch).
+    ctx.save();
+    ctx.translate(t.x + TANK_W / 2, t.y + TANK_H + tankSink(t.a));
+    ctx.rotate(t.a);
+    ctx.translate(-(x + TANK_W / 2), -(ty + TANK_H));
     const shield = hasTankPart(t.parts, TankPart.Shield);
     if (t.pilot !== 255 && !shield) {
       // Shield blown off: the driver's head and shoulders, out in the open.
@@ -887,7 +893,7 @@ export class Renderer {
       ctx.fillRect(wx(14, 1), y - 2, 1, 1);
     }
     if (hasTankPart(t.parts, TankPart.Cannon)) {
-      const a = cannonAngle(faceLeft, aim);
+      const a = cannonAngle(faceLeft, aim, t.a) - t.a; // relative to the tilted hull
       const g = sp.tankGun(false, a);
       const kick = t.firedCannon ? 3 : 0;
       const px = (faceLeft ? x + TANK_W - CANNON_PIVOT[0] : x + CANNON_PIVOT[0]) - Math.cos(a) * kick;
@@ -901,6 +907,7 @@ export class Renderer {
     ctx.drawImage(sp.tankTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft), x, y + 18);
     if (hasTankPart(t.parts, TankPart.Armor)) ctx.drawImage(sp.tankArmor(faceLeft), x, y);
     if (hasTankPart(t.parts, TankPart.Smg)) {
+      aim -= t.a; // the vulcan's swivel, relative to the tilted hull
       const g = sp.tankGun(true, aim);
       const px = faceLeft ? x + TANK_W - SMG_PIVOT[0] : x + SMG_PIVOT[0];
       const py = ty + SMG_PIVOT[1];
@@ -932,6 +939,7 @@ export class Renderer {
         ctx.fillRect(wx(7, 1), ty + 6, 1, 2);
       }
     }
+    ctx.restore();
   }
 
   /** A drop rocket: hull in the passenger's colour, exhaust plume along its axis, damage sparks. */

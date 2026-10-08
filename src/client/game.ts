@@ -386,6 +386,8 @@ export class Game implements FrameHandler {
     d.onGround = s.onGround;
     d.jetting = s.jetting;
     d.parts = s.parts;
+    d.a = s.a;
+    d.w = s.w;
     d.pilot = this.myId;
     // pending was already trimmed to unacked commands by reconcile().
     for (const p of this.pending) stepTank(d, this.terrain, DT, p.buttons);
@@ -942,7 +944,7 @@ export class Game implements FrameHandler {
         // Ours: wherever our seat is this frame.
         const pb = this.prevBody;
         const me = this.body;
-        out.push({ ...b, x: pb.x + (me.x - pb.x) * alpha + this.smoothX - SEAT_X, y: pb.y + (me.y - pb.y) * alpha + this.smoothY - SEAT_Y, parts: this.drive.parts, chute: false, jetting: this.drive.jetting });
+        out.push({ ...b, x: pb.x + (me.x - pb.x) * alpha + this.smoothX - SEAT_X, y: pb.y + (me.y - pb.y) * alpha + this.smoothY - SEAT_Y, parts: this.drive.parts, chute: false, jetting: this.drive.jetting, a: this.drive.a });
         continue;
       }
       let a = s[0];
@@ -955,7 +957,7 @@ export class Game implements FrameHandler {
         }
       }
       const t = a === c ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (c.tick - a.tick)));
-      out.push({ ...c, firedSmg: b.firedSmg, firedCannon: b.firedCannon, x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t });
+      out.push({ ...c, firedSmg: b.firedSmg, firedCannon: b.firedCannon, x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t, a: a.a + (c.a - a.a) * t });
     }
     return out;
   }

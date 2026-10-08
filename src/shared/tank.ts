@@ -32,7 +32,7 @@ export const TANK_MAX_FUEL = 100;
 const RUN = 64;
 const GROUND_ACCEL = 420;
 const AIR_ACCEL = 140;
-export const TANK_STEP_UP = 6;
+export const TANK_STEP_UP = 8;
 const JET_ACCEL = 1050; // vs GRAVITY 620: a slow, heavy climb
 const FUEL_BURN = 32; // per second
 const FUEL_REGEN = 22; // per second, on the ground
@@ -110,6 +110,9 @@ export interface Tank {
   /** Fired this tick (muzzle flashes on clients). */
   firedSmg: boolean;
   firedCannon: boolean;
+  /** Hull tilt (radians, clockwise on screen: positive = right end lower) and its angular velocity. */
+  a: number;
+  w: number;
 }
 
 export function newTank(x: number, y: number): Tank {
@@ -135,11 +138,13 @@ export function newTank(x: number, y: number): Tank {
     lastHitBy: 255,
     firedSmg: false,
     firedCannon: false,
+    a: 0,
+    w: 0,
   };
 }
 
 /** Which part is at tank-local (lx, ly) (from the top-left); missing parts expose the hull. */
-export function tankPartAt(t: Tank, lx: number, ly: number): number {
+export function tankPartAt(t: { faceLeft: boolean; parts: number }, lx: number, ly: number): number {
   const fx = t.faceLeft ? TANK_W - lx : lx;
   let p: number = TankPart.Hull;
   // Matches the sprite (client/sprites.ts): cannon out of the dome front,
@@ -151,27 +156,65 @@ export function tankPartAt(t: Tank, lx: number, ly: number): number {
   return p;
 }
 
-/** A tank-local point (facing right) in world cells, mirrored when facing left. */
-export function tankPoint(t: { x: number; y: number; faceLeft: boolean }, lx: number, ly: number, out: { x: number; y: number }): { x: number; y: number } {
-  out.x = t.x + (t.faceLeft ? TANK_W - lx : lx);
-  out.y = t.y + ly;
+type Posed = { x: number; y: number; faceLeft: boolean; a: number };
+
+/** Inset of the tread contact points from the hull's ends (cells). */
+const CONTACT = 3;
+
+/**
+ * How far the tilt pivot (the middle of the tread line) sits below the box:
+ * the box rests on the higher end, the hull rotates down onto the lower one.
+ */
+export function tankSink(a: number): number {
+  return (TANK_W / 2 - CONTACT) * Math.abs(Math.sin(a));
+}
+
+/**
+ * A tank-local point (as drawn facing right, from the box's top-left) in
+ * world cells: mirrored when facing left, then tilted with the hull about
+ * the middle of its tread line.
+ */
+export function tankPoint(t: Posed, lx: number, ly: number, out: { x: number; y: number }): { x: number; y: number } {
+  const dx = (t.faceLeft ? TANK_W - lx : lx) - TANK_W / 2;
+  const dy = ly - TANK_H;
+  const c = Math.cos(t.a);
+  const s = Math.sin(t.a);
+  out.x = t.x + TANK_W / 2 + dx * c - dy * s;
+  out.y = t.y + TANK_H + tankSink(t.a) + dx * s + dy * c;
   return out;
 }
 
-/** The cannon's actual firing angle for an aim: elevation clamped, always out the front. */
-export function cannonAngle(faceLeft: boolean, aim: number): number {
-  let e = -Math.atan2(Math.sin(aim), Math.abs(Math.cos(aim))); // elevation above horizontal
-  e = Math.max(-CANNON_DOWN, Math.min(CANNON_UP, e));
-  return faceLeft ? Math.PI + e : -e;
+/** World -> the tank's own (untilted, unmirrored) box coordinates: x along the box from its left end. */
+export function tankLocal(t: Posed, wx: number, wy: number, out: { x: number; y: number }): { x: number; y: number } {
+  const dx = wx - (t.x + TANK_W / 2);
+  const dy = wy - (t.y + TANK_H + tankSink(t.a));
+  const c = Math.cos(t.a);
+  const s = Math.sin(t.a);
+  out.x = TANK_W / 2 + dx * c + dy * s;
+  out.y = TANK_H - dx * s + dy * c;
+  return out;
 }
 
+/**
+ * The cannon's actual firing angle (world) for an aim: elevation clamped
+ * relative to the hull (so it tips with it), always out of the front.
+ */
+export function cannonAngle(faceLeft: boolean, aim: number, tilt = 0): number {
+  const local = aim - tilt;
+  let e = -Math.atan2(Math.sin(local), Math.abs(Math.cos(local))); // elevation above the hull's horizontal
+  e = Math.max(-CANNON_DOWN, Math.min(CANNON_UP, e));
+  return (faceLeft ? Math.PI + e : -e) + tilt;
+}
+
+const mzPt = { x: 0, y: 0 };
 /** Muzzle of the cannon or the SMG (world), and the angle it fires at. */
-export function tankMuzzle(t: { x: number; y: number; faceLeft: boolean }, cannon: boolean, aim: number, out: { x: number; y: number; a: number }): { x: number; y: number; a: number } {
+export function tankMuzzle(t: Posed, cannon: boolean, aim: number, out: { x: number; y: number; a: number }): { x: number; y: number; a: number } {
   const [px, py] = cannon ? CANNON_PIVOT : SMG_PIVOT;
-  const a = cannon ? cannonAngle(t.faceLeft, aim) : aim;
+  const a = cannon ? cannonAngle(t.faceLeft, aim, t.a) : aim;
   const len = cannon ? CANNON_LEN : SMG_LEN;
-  out.x = t.x + (t.faceLeft ? TANK_W - px : px) + Math.cos(a) * len;
-  out.y = t.y + py + Math.sin(a) * len;
+  const p = tankPoint(t, px, py, mzPt);
+  out.x = p.x + Math.cos(a) * len;
+  out.y = p.y + Math.sin(a) * len;
   out.a = a;
   return out;
 }
@@ -187,6 +230,32 @@ function collides(t: Terrain, x: number, y: number): boolean {
  * Returns the downward speed it hit the ground with this tick (crushes, and
  * the parachute coming off), else 0.
  */
+/** First solid row in column x from y0 down, within `depth` (else y0 + depth). */
+function groundAt(t: Terrain, x: number, y0: number, depth: number): number {
+  const ix = Math.floor(x);
+  for (let y = Math.floor(y0); y < y0 + depth; y++) if (t.isSolid(ix, y)) return y;
+  return y0 + depth;
+}
+
+const LOOK_AHEAD = 4;
+/** How high the ground stands LOOK_AHEAD cells beyond the nose, above the treads' bottom. */
+function riseAhead(t: Terrain, k: Tank, dir: number): number {
+  const x = Math.floor(dir > 0 ? k.x + TANK_W + LOOK_AHEAD : k.x - 1 - LOOK_AHEAD);
+  const bottom = Math.floor(k.y + TANK_H - 1);
+  let r = 0;
+  while (r < 40 && t.isSolid(x, bottom - r)) r++;
+  return r;
+}
+
+/** Steepest tilt the treads settle to, and the steepest slope they will climb. */
+const MAX_TILT = 0.9;
+const MAX_CLIMB = 0.85;
+/** Tread suspension: stiffness and damping of the hull's settling onto the ground; looser in the air. */
+const TILT_K = 70;
+const TILT_D = 10;
+const AIR_K = 5;
+const AIR_D = 1.5;
+
 export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): number {
   // Unstick: sand poured onto it, or it landed in a bunker's rubble.
   if (collides(t, k.x, k.y)) {
@@ -199,14 +268,36 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
   }
   const driven = k.pilot !== 255 && !k.chute ? buttons : 0;
   const dir = (driven & BTN_RIGHT ? 1 : 0) - (driven & BTN_LEFT ? 1 : 0);
+
+  // Tread suspension: the hull settles onto the ground under its rear and
+  // front treads (a damped spring, so it rocks a little); in the air it
+  // drifts back level. Landings, recoil and blasts kick it (w).
+  const sin0 = Math.sin(k.a);
+  if (k.onGround) {
+    const bottom = k.y + TANK_H;
+    const gl = groundAt(t, k.x + CONTACT, bottom, 30);
+    const gr = groundAt(t, k.x + TANK_W - CONTACT, bottom, 30);
+    const target = Math.max(-MAX_TILT, Math.min(MAX_TILT, Math.atan2(gr - gl, TANK_W - 2 * CONTACT)));
+    k.w += ((target - k.a) * TILT_K - k.w * TILT_D) * dt;
+  } else k.w += (-k.a * AIR_K - k.w * AIR_D) * dt;
+  k.a += k.w * dt;
+  if (k.a > 1) k.a = 1;
+  else if (k.a < -1) k.a = -1;
+
   if (dir !== 0 || k.onGround) {
     const accel = (k.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt;
-    const dv = dir * RUN - k.vx;
+    // Uphill is slow going, downhill quicker (sin0 > 0: the right end is lower).
+    const slope = k.onGround ? Math.max(0.3, Math.min(1.35, 1 + 0.7 * sin0 * dir)) : 1;
+    const dv = dir * RUN * slope - k.vx;
     k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   }
+  // Left on a steep slope without throttle, it slides off.
+  if (k.onGround && dir === 0 && Math.abs(k.a) > 0.55) k.vx += sin0 * GRAVITY * 0.5 * dt;
   k.jetting = false;
   if (driven & BTN_UP && k.fuel > 0) {
-    k.vy -= JET_ACCEL * dt;
+    // Lift jets push along the hull's normal: a tilted tank drifts sideways.
+    k.vx += sin0 * JET_ACCEL * dt;
+    k.vy -= Math.cos(k.a) * JET_ACCEL * dt;
     k.fuel = Math.max(0, k.fuel - FUEL_BURN * dt);
     k.jetting = true;
   } else if (k.onGround) k.fuel = Math.min(TANK_MAX_FUEL, k.fuel + FUEL_REGEN * dt);
@@ -229,7 +320,11 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
     if (!collides(t, nx, k.y)) k.x = nx;
     else {
       let climbed = false;
-      if (k.onGround) {
+      // The treads climb small steps, but not a face steeper than they can
+      // grip: already tilted too far up, or the ground just ahead of the nose
+      // rising faster than MAX_CLIMB allows.
+      const uphill = (step * k.a < 0 && Math.abs(k.a) > MAX_CLIMB) || riseAhead(t, k, step) > Math.tan(MAX_CLIMB) * LOOK_AHEAD;
+      if (k.onGround && !uphill) {
         for (let s = 1; s <= TANK_STEP_UP; s++) {
           if (!collides(t, nx, k.y - s)) {
             k.x = nx;
@@ -280,4 +375,6 @@ export function copyTankMotion(dst: Tank, src: Tank): void {
   dst.chute = src.chute;
   dst.pilot = src.pilot;
   dst.parts = src.parts;
+  dst.a = src.a;
+  dst.w = src.w;
 }
