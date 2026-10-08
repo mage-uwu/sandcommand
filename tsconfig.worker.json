@@ -6,5 +6,5 @@
   },
   "include": ["src/server", "src/shared", "test", "scripts/*.ts"],
   // Browser input code is checked with the DOM types (tsconfig.json).
-  "exclude": ["test/keyaim.test.ts"]
+  "exclude": ["test/keyaim.test.ts", "test/music.test.ts"]
 }

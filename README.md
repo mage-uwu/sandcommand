@@ -22,7 +22,7 @@ Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
 to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
-drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
+drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** music. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
 **Keyboard-only aim** (no mouse needed): the **arrow keys** move the
@@ -57,6 +57,31 @@ on a touch-first device.
 - **Screen layout.** The HUD shrinks on small screens. The minimap moves to
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
+
+## Soundtrack
+
+A dark, lo-fi theme after Crystal Castles and witch house, synthesized
+live with Web Audio (`src/client/music.ts`). There are no audio files.
+- **Harmony:** a D-minor progression (Dm7, Bbmaj7, Gm7, Am7) at a slow,
+  half-time 70 BPM.
+- **Pads:** detuned saw pads with a sub-octave triangle, under a low-pass
+  whose cutoff drifts on a slow LFO.
+- **Arpeggios:** square-wave sixteenths, bitcrushed to 5 bits and fed
+  through a dotted-eighth delay. Now and then a step drops out or jumps
+  an octave.
+- **Low end and drums:** an 808 sub with a little drive, and a half-time
+  trap kit (kick on one and the "and" of three, snare on three, hi-hats
+  with triplet rolls).
+- **Texture:** sparse glassy bells in minor pentatonic, tape hiss, and a
+  long, dark generated reverb.
+
+It runs in 8-bar sections: pads and bells, then the arp, then the drop
+(drums and 808), a fuller drop with rolls, a breakdown, and back in. It
+plays from Deploy (browsers only allow audio after a click) and is
+muffled behind a low-pass while you're dead, spectating or between waves.
+**M** toggles it, and the choice is remembered. `composeBar(bar, seed)` is
+pure and tested: what plays in each bar comes from the bar number and a
+per-session seed, so every session's variation differs.
 
 ## Mercenary vendors (factions)
 

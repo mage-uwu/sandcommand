@@ -6,6 +6,7 @@ import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
 import { assistAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
+import { Music } from './music.ts';
 import { BTN_FIRE, shoulderAt } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
@@ -64,7 +65,34 @@ async function refreshRooms(): Promise<void> {
 }
 refreshRooms();
 
+// The soundtrack starts on Deploy (browsers only allow audio after a click);
+// M toggles it, and the choice is remembered.
+let music: Music | null = null;
+let musicMuffled = false;
+function startMusic(): void {
+  if (music) return;
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    music = new Music(new Ctx());
+    if (storageGet('sc.music') === 'off') music.toggle();
+    (music.ctx as AudioContext).resume?.().catch(() => {});
+    music.start();
+  } catch {
+    music = null; // no audio here: play on in silence
+  }
+}
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyM' || input.typing || e.repeat) return;
+  startMusic();
+  if (!music) return;
+  const on = music.toggle();
+  storageSet('sc.music', on ? 'on' : 'off');
+  game?.feed.push({ text: on ? '♪ music on (M)' : '♪ music off (M)', color: '#b8a0ff', at: performance.now() });
+});
+
 async function join(): Promise<void> {
+  startMusic();
   if (touch.enabled) {
     // Phones: play fullscreen and sideways where the browser allows it.
     document.documentElement.requestFullscreen?.().catch(() => {});
@@ -223,6 +251,12 @@ function frame(now: number): void {
   acc += Math.min(250, now - last);
   last = now;
   const g = game;
+  // The music goes muffled, as if through a wall, while we aren't out there fighting.
+  const muffled = !g || !g.alive;
+  if (music && muffled !== musicMuffled) {
+    musicMuffled = muffled;
+    music.setMuffled(muffled);
+  }
   if (g && net) {
     while (acc >= TICK_MS) {
       acc -= TICK_MS;

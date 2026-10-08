@@ -4,5 +4,5 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": []
   },
-  "include": ["src/client", "src/shared", "test/keyaim.test.ts"]
+  "include": ["src/client", "src/shared", "test/keyaim.test.ts", "test/music.test.ts"]
 }
