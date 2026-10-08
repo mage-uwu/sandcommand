@@ -1,4 +1,4 @@
-import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
+import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
@@ -11,6 +11,7 @@ import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
+import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_PARTS, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor } from './texture.ts';
@@ -300,14 +301,17 @@ export class Renderer {
     for (const v of views) {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
-      this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts);
+      const aimR = dequantizeAim(v.aim);
+      const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
+      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean);
       if (game.isKing(v.id)) this.drawCrown(ctx, v.x, v.y, now);
     }
     // Own clone (hidden inside its tank while driving).
     if (game.alive && !game.drive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
-      const myAim = Math.atan2(wy - (selfY + SHOULDER_Y), wx - (selfX + SHOULDER_X));
+      const mySh = shoulderAt(selfX, selfY, b.stance, wx < selfX + ACTOR_W / 2, this.shPt);
+      const myAim = Math.atan2(wy - mySh.y, wx - mySh.x);
       const reloading = game.reloadLeft > 0;
       const dry = (WEAPONS[game.weapon]?.clip ?? 0) > 0 && game.ammo === 0;
       const flags =
@@ -317,7 +321,8 @@ export class Renderer {
         (input.mouseDown && !reloading && !dry ? F_FIRING : 0) |
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts);
+      const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean);
       if (game.isKing(game.myId)) this.drawCrown(ctx, selfX, selfY, now);
     }
 
@@ -568,30 +573,60 @@ export class Renderer {
     moving: boolean,
     now: number,
     parts: number,
+    stance: number = Stance.Stand,
+    lean = 0,
   ): void {
     const left = Math.cos(aim) < 0;
+    const face = left ? -1 : 1;
     const ix = Math.round(x);
     const iy = Math.round(y);
     // Walk cycle advances with distance travelled, so feet don't skate.
-    const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / 3) & 3] : 'idle';
-    ctx.drawImage(this.sprites.body(team, frame, left, parts, classOfFlags(flags)), ix - 1, iy - 2);
+    const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / (stance === Stance.Stand ? 3 : 2)) & 3] : 'idle';
+    const sprite = this.sprites.body(team, frame, left, parts, classOfFlags(flags));
+    // The torso pivots at the hip (leaning with the stance and the ragdoll
+    // sway); crouched, the legs fold under it; prone, the whole clone lies down.
+    const hipX = ix + HIP_X + 0.5;
+    const hipY = iy + HIP_Y + STANCE_DROP[stance];
+    const a = lean * face;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    // A point given relative to the hip in the standing pose, posed.
+    const posed = (dx: number, dy: number) => [hipX + dx * cos - dy * sin, hipY + dx * sin + dy * cos];
+    if (stance === Stance.Prone) {
+      ctx.save();
+      ctx.translate(hipX, hipY);
+      ctx.rotate(a);
+      ctx.drawImage(sprite, -5.5, -11);
+      ctx.restore();
+    } else {
+      const legH = stance === Stance.Crouch ? 3 : 5;
+      ctx.drawImage(sprite, 0, 11, 10, 5, ix - 1, iy + ACTOR_H - legH, 10, legH);
+      ctx.save();
+      ctx.translate(hipX, hipY);
+      ctx.rotate(a);
+      ctx.drawImage(sprite, 0, 0, 10, 11, -5.5, -11, 10, 11);
+      ctx.restore();
+    }
 
     // Jetpack exhaust under the pack (pack is on the clone's back).
     if (flags & F_JET && has(parts, Part.Jetpack)) {
-      const fx = left ? ix + 6 : ix - 1;
+      const [px, py] = posed(left ? 2.5 : -4.5, -1);
+      const fx = Math.round(px);
+      const fy = Math.round(py) - 9;
       const flick = Math.floor(now / 40) % 3;
       ctx.fillStyle = '#fff6c0';
-      ctx.fillRect(fx + 1, iy + 8, 1, 1);
+      ctx.fillRect(fx + 1, fy + 8, 1, 1);
       ctx.fillStyle = '#ffc040';
-      ctx.fillRect(fx, iy + 9, 3, 1);
-      ctx.fillRect(fx + 1, iy + 10, 1, 2 + flick);
+      ctx.fillRect(fx, fy + 9, 3, 1);
+      ctx.fillRect(fx + 1, fy + 10, 1, 2 + flick);
       ctx.fillStyle = '#ff6a20';
-      ctx.fillRect(fx + (flick === 1 ? 0 : 2), iy + 10 + flick, 1, 2);
+      ctx.fillRect(fx + (flick === 1 ? 0 : 2), fy + 10 + flick, 1, 2);
     }
 
-    // Arm + weapon, pre-rotated onto the pixel grid, pivoting at the shoulder.
-    const sx = ix + SHOULDER_X;
-    const sy = iy + SHOULDER_Y;
+    // Arm + weapon, pre-rotated onto the pixel grid, pivoting at the (posed) shoulder.
+    const [psx, psy] = posed(SHOULDER_X - HIP_X - 0.5, SHOULDER_Y - HIP_Y);
+    const sx = Math.round(psx);
+    const sy = Math.round(psy);
     if (!has(parts, Part.GunArm)) {
       // Arm (and the gun with it) gone: a bloody stump at the shoulder.
       ctx.fillStyle = '#a01818';
@@ -627,6 +662,36 @@ export class Renderer {
       }
     }
   }
+
+  /**
+   * Ragdoll-ish torso sway, per clone, purely cosmetic: a damped spring on
+   * the lean, pulled toward the stance's lean, tipped into the run, thrown
+   * around in the air (and flat into a jetpack dash), jolted on landing.
+   * Everything it reads is already replicated (stance, velocity, flags), so
+   * every client poses everyone the same way with no extra traffic.
+   */
+  private pose(id: number, stance: number, left: boolean, vx: number, vy: number, ground: boolean, jet: boolean, now: number): number {
+    let p = this.poses.get(id);
+    if (!p) this.poses.set(id, (p = { lean: STANCE_LEAN[stance], vel: 0, at: now, air: !ground, vy }));
+    const dt = Math.min(0.05, Math.max(0, (now - p.at) / 1000));
+    p.at = now;
+    const face = left ? -1 : 1;
+    let target = STANCE_LEAN[stance] + Math.max(-0.2, Math.min(0.2, ((vx * face) / ACTOR_RUN_SPEED) * 0.14));
+    if (!ground) {
+      target += Math.max(-0.35, Math.min(0.35, -vy / 900)) + Math.sin(now / 70 + id) * 0.08 * Math.min(1, Math.abs(vy) / 250);
+      if (jet && stance === Stance.Crouch && Math.abs(vx) > 60) target = 1.05; // flat into the dash
+    }
+    if (ground && p.air && p.vy > 160) p.vel += Math.min(9, p.vy / 45); // landing jolt
+    p.air = !ground;
+    p.vy = vy;
+    const acc = 140 * (target - p.lean) - 13 * p.vel;
+    p.vel += acc * dt;
+    p.lean += p.vel * dt;
+    p.lean = Math.max(-0.6, Math.min(1.6, p.lean));
+    return p.lean;
+  }
+  private readonly poses = new Map<number, { lean: number; vel: number; at: number; air: boolean; vy: number }>();
+  private readonly shPt = { x: 0, y: 0 };
 
   /**
    * Materializer preview: the build grid around the cursor, the reach ring,

@@ -45,6 +45,7 @@ interface Snap {
   hp: number;
   weapon: number;
   parts: number;
+  stance: number;
 }
 
 export interface RemoteView {
@@ -57,6 +58,9 @@ export interface RemoteView {
   weapon: number;
   moving: boolean;
   parts: number; // attached-part mask (body.ts)
+  stance: number; // actor.ts Stance
+  vx: number;
+  vy: number;
 }
 
 export interface CraftView extends CraftState {}
@@ -480,6 +484,8 @@ export class Game implements FrameHandler {
     b.legs = this.mob.legs;
     b.jet = this.mob.jet;
     b.cls = classOfFlags(s.flags);
+    b.stance = s.stance;
+    b.downTicks = s.downTicks;
     if (!this.alive) {
       copyBody(this.prevBody, b);
       this.smoothX = this.smoothY = 0;
@@ -541,7 +547,7 @@ export class Game implements FrameHandler {
         x = b.x;
         y = b.y;
       }
-      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5, parts: b.parts });
+      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5, parts: b.parts, stance: b.stance, vx: b.vx, vy: b.vy });
     }
     return out;
   }
@@ -558,7 +564,7 @@ export class Game implements FrameHandler {
       seen.add(a.id);
       let s = this.snaps.get(a.id);
       if (!s) this.snaps.set(a.id, (s = []));
-      s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts });
+      s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts, stance: a.stance });
       if (s.length > 12) s.shift();
       if (a.flags & F_FIRING && a.weapon === WeaponId.Digger) {
         digDust(this.particles, a.x + ACTOR_W / 2, a.y + 5, 0xa08060, 1);

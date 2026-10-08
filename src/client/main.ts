@@ -1,11 +1,11 @@
 import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
-import { SHOULDER_X, SHOULDER_Y, WEAPONS } from '../shared/weapons.ts';
+import { WEAPONS } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
 import { assistAim } from './aim.ts';
-import { BTN_FIRE } from '../shared/actor.ts';
+import { BTN_FIRE, shoulderAt } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
@@ -212,6 +212,7 @@ function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boo
   return true;
 }
 let pulse = 0;
+const shoulderPt = { x: 0, y: 0 };
 
 // Main loop: fixed 30 Hz simulation/input ticks, render every animation frame.
 let acc = 0;
@@ -227,8 +228,10 @@ function frame(now: number): void {
       const dpr = canvas.width / innerWidth;
       const wx = renderer.camX + (input.mouseX * dpr - canvas.width / 2) / renderer.zoom;
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
-      const ox = g.body.x + SHOULDER_X;
-      const oy = g.body.y + SHOULDER_Y;
+      // Aim from the shoulder, wherever the stance puts it (crouched, prone).
+      const sh = shoulderAt(g.body.x, g.body.y, g.body.stance, wx < g.body.x + ACTOR_W / 2, shoulderPt);
+      const ox = sh.x;
+      const oy = sh.y;
       let aim: number;
       const st = input.aimStick;
       if (st && (st.dx !== 0 || st.dy !== 0)) {

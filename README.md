@@ -18,7 +18,8 @@ npm run loadtest     # 64 real WebSocket bots against a running server
 npm run deploy       # wrangler deploy (needs a Cloudflare account)
 ```
 
-Controls: **A/D** run, **W/Space** jump (hold for jetpack), **mouse** aim and
+Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
+to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
 drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
@@ -49,6 +50,29 @@ on a touch-first device.
 - **Screen layout.** The HUD shrinks on small screens. The minimap moves to
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
+
+## Stances and ragdoll
+
+Hold **S** (touch: pull the move stick down) to crouch. Keep holding on the
+ground and the clone goes prone (`stepBody` in `src/shared/actor.ts`).
+- **Hitbox.** It shrinks from the top, 14 → 10 → 6 cells, with the feet
+  fixed. Shots at standing height pass over a prone clone. Hits on a
+  crouched or prone clone are mapped onto the right body part.
+- **Movement.** You move at half speed crouched and a crawl prone. You stand
+  back up only where there's headroom.
+- **Shoulder.** It pivots forward with the torso, so aiming and shots leave
+  from where the clone actually is (`shoulderAt`).
+- **Jet dash.** Crouching while jetpacking angles the thrust about 55°
+  forward into a dash, up to 250 cells/s.
+- **Networking.** Stance is part of the predicted body. It rides in the
+  spare top bits of each actor's parts word, so it costs no bandwidth.
+- **Drawing.** The torso pivots at the hip. Crouched, the legs fold under
+  it; prone, the whole clone lies along the ground.
+- **Ragdoll.** On top of the stance, a cosmetic spring on the lean tips the
+  torso into a run, throws it around in the air, lays it flat into a dash
+  and jolts it on landing. It reads only replicated state (stance,
+  velocity, flags), so every client poses every clone alike, with no extra
+  traffic and nothing to desync.
 
 ## Last Man Standing
 

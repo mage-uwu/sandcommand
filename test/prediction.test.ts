@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
+import { BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
 import { Reader } from '../src/shared/codec.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { Rng } from '../src/shared/rng.ts';
@@ -34,7 +34,7 @@ describe('client-side prediction', () => {
       for (now = 0; now < 900; now++) {
         if (rng.next() < 0.08) {
           const r = rng.next();
-          buttons = (r < 0.4 ? BTN_RIGHT : r < 0.8 ? BTN_LEFT : 0) | (rng.next() < 0.4 ? BTN_UP : 0);
+          buttons = (r < 0.4 ? BTN_RIGHT : r < 0.8 ? BTN_LEFT : 0) | (rng.next() < 0.4 ? BTN_UP : 0) | (rng.next() < 0.3 ? BTN_DOWN : 0);
         }
         const aim = quantizeAim(0);
         // Hands off the stick while riding in (piloting has its own test in

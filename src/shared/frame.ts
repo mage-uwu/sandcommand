@@ -37,6 +37,8 @@ import {
   R_WAVE,
   Y_BIAS,
   dequantizeAim,
+  PARTS_MASK,
+  STANCE_SHIFT,
 } from './protocol.ts';
 import type { Terrain } from './terrain.ts';
 
@@ -61,6 +63,8 @@ export interface SelfState {
   respawn: number;
   parts: number; // attached-part mask (body.ts)
   partHp: number[]; // 0..100 per part, 0 = gone
+  stance: number; // actor.ts Stance
+  downTicks: number; // how long down has been held (prediction)
 }
 
 export interface RemoteActor {
@@ -74,6 +78,7 @@ export interface RemoteActor {
   hp: number;
   weapon: number;
   parts: number;
+  stance: number; // actor.ts Stance
 }
 
 export interface KillInfo {
@@ -230,7 +235,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
     const type = r.u8();
     switch (type) {
       case R_SELF: {
-        h.self({
+        const self = {
           flags: r.u8(),
           x: r.f64(),
           y: r.f64(),
@@ -249,7 +254,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           respawn: r.u16(),
           parts: r.u16(),
           partHp: Array.from({ length: PART_COUNT }, () => r.u8()),
-        });
+          stance: 0,
+          downTicks: 0,
+        };
+        const st = r.u8();
+        self.stance = st & 3;
+        self.downTicks = st >> 2;
+        h.self(self);
         break;
       }
       case R_ACTORS: {
@@ -267,7 +278,11 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             hp: r.u8(),
             weapon: r.u8(),
             parts: r.u16(),
+            stance: 0,
           });
+          const a = list[list.length - 1];
+          a.stance = (a.parts >> STANCE_SHIFT) & 3;
+          a.parts &= PARTS_MASK;
         }
         h.actors(list);
         break;

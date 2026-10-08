@@ -1,4 +1,5 @@
-import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, newBody, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { STANCE_SHIFT } from '../shared/protocol.ts';
 import {
   CANNON_INTERVAL,
   CANNON_SPEED,
@@ -241,7 +242,11 @@ export class Player {
     return this.body.x + ACTOR_W / 2;
   }
   get cy(): number {
-    return this.body.y + ACTOR_H / 2;
+    return this.body.y + ACTOR_H - STANCE_H[this.body.stance] / 2;
+  }
+  /** Top of the hitbox (it shrinks from the top when crouched or prone). */
+  get top(): number {
+    return this.body.y + ACTOR_H - STANCE_H[this.body.stance];
   }
 }
 
@@ -920,7 +925,7 @@ export class World {
         const o = this.players[id]!;
         const b = o.body;
         // A driver whose shield is gone: only the head and shoulders stick out.
-        const t = segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + (o.tank >= 0 ? EXPOSED_H : ACTOR_H));
+        const t = o.tank >= 0 ? segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + EXPOSED_H) : segmentBox(x0, y0, dx, dy, b.x, o.top, b.x + ACTOR_W, b.y + ACTOR_H);
         if (t >= 0 && t < bestT) {
           bestT = t;
           best = id;
@@ -955,8 +960,23 @@ export class World {
   };
 
   private readonly segA = { x: 0, y: 0 };
+  private readonly shoulderPt = { x: 0, y: 0 };
   private readonly segB = { x: 0, y: 0 };
   private readonly strikeScratch: StrikeResult = newStrike();
+
+  /**
+   * The body part at (lx, ly) in a clone's hitbox. Crouched, the standing
+   * layout is squeezed into the shorter box; prone, it lies along it, head
+   * toward where the clone faces.
+   */
+  private partHit(p: Player, lx: number, ly: number): number {
+    const st = p.body.stance;
+    const left = this.facingLeft(p);
+    if (p.tank >= 0 || st === Stance.Stand) return partAt(p.parts.mask, lx, ly, left);
+    if (st === Stance.Crouch) return partAt(p.parts.mask, lx, (ly * ACTOR_H) / STANCE_H[st], left);
+    const along = left ? lx : ACTOR_W - lx; // 0 at the head
+    return partAt(p.parts.mask, ACTOR_W / 2, (along * ACTOR_H) / ACTOR_W, left);
+  }
 
   private facingLeft(p: Player): boolean {
     return Math.cos(dequantizeAim(p.aimQ)) < 0;
@@ -1088,7 +1108,7 @@ export class World {
       const energy = def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy);
       // Sample the part a little way in along the path, not on the box edge.
       const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
-      const part = partAt(v.parts.mask, x - v.body.x + (pr.vx[i] / sp) * 2, y - v.body.y + (pr.vy[i] / sp) * 2, this.facingLeft(v));
+      const part = this.partHit(v, x - v.body.x + (pr.vx[i] / sp) * 2, y - v.top + (pr.vy[i] / sp) * 2);
       const res = this.strikeScratch;
       res.hp = 0;
       res.detached.length = 0;
@@ -1430,8 +1450,9 @@ export class World {
     const aim = dequantizeAim(p.aimQ);
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
-    const ox = p.body.x + SHOULDER_X;
-    const oy = p.body.y + SHOULDER_Y;
+    const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
+    const ox = sh.x;
+    const oy = sh.y;
     if (def.proj === PROJ_DIG) {
       // Digger: vacuum terrain in front of the clone, banking any gold. It
       // bites at the first solid cell along the aim (so a wall you're
@@ -1454,7 +1475,7 @@ export class World {
     const id = this.nextProjId++;
     // Leave from the muzzle, unless the barrel is pushed into a wall: then
     // from the first solid cell along it (no shooting through walls).
-    const m = muzzlePoint(def, p.body.x, p.body.y, aim, this.muzzleAt);
+    const m = muzzlePoint(def, ox, oy, aim, this.muzzleAt);
     let sx = m.x;
     let sy = m.y;
     for (let d = 0.5; d < def.muzzle; d += 0.5) {
@@ -2208,7 +2229,7 @@ export class World {
     for (const p of this.players) {
       if (!p || !p.alive || this.shielded(p)) continue;
       if (p.tank >= 0) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy, ACTOR_W, EXPOSED_H);
-      else actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+      else actors.add(p.id, p.body.x, p.top, p.body.vx, p.body.vy, ACTOR_W, STANCE_H[p.body.stance]);
     }
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
@@ -2268,7 +2289,7 @@ export class World {
       const by = actors.hitOwner[h] === NO_OWNER ? p.id : actors.hitOwner[h];
       if (this.friendly(by, p)) continue;
       const self = by === p.id ? 0.5 : 1; // your own fragments hurt less
-      const part = partAt(p.parts.mask, actors.hitLx[h], actors.hitLy[h], this.facingLeft(p));
+      const part = this.partHit(p, actors.hitLx[h], actors.hitLy[h]);
       const res = this.strikeScratch;
       res.hp = 0;
       res.detached.length = 0;
@@ -2302,7 +2323,7 @@ export class World {
       w.u8(this.flagsOf(p));
       w.u8(Math.max(0, Math.ceil(p.hp)));
       w.u8(p.weapon);
-      w.u16(p.parts.mask);
+      w.u16(p.parts.mask | (b.stance << STANCE_SHIFT)); // stance rides in the spare top bits
     }
   }
 
@@ -2405,6 +2426,7 @@ export class World {
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
+      w.u8(b.stance | (b.downTicks << 2));
 
       // Riding in: the rocket at full precision too, since the client
       // predicts it from this state the same way it predicts its clone.

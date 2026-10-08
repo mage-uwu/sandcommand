@@ -110,10 +110,10 @@ export function projName(kind: number): string {
 export const SHOULDER_X = 4;
 export const SHOULDER_Y = 4;
 
-/** World position of a weapon's muzzle for a clone at (x, y) aiming at `aim`. */
-export function muzzlePoint(def: WeaponDef, x: number, y: number, aim: number, out: { x: number; y: number }): { x: number; y: number } {
-  out.x = x + SHOULDER_X + Math.cos(aim) * def.muzzle;
-  out.y = y + SHOULDER_Y + Math.sin(aim) * def.muzzle;
+/** World position of a weapon's muzzle for a clone whose shoulder (actor.ts shoulderAt) is at (sx, sy), aiming at `aim`. */
+export function muzzlePoint(def: WeaponDef, sx: number, sy: number, aim: number, out: { x: number; y: number }): { x: number; y: number } {
+  out.x = sx + Math.cos(aim) * def.muzzle;
+  out.y = sy + Math.sin(aim) * def.muzzle;
   return out;
 }
 
