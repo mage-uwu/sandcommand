@@ -10,6 +10,7 @@ import {
   SHIP_PART_CENTER,
   SHIP_W,
   type Ship,
+  ShipMission,
   ShipPart,
   TURRET_AT,
   hasShipPart,
@@ -137,6 +138,7 @@ import {
   R_ROUND,
   R_TRAPS,
   R_BEAM,
+  R_SPOTTED,
   R_WAVE,
   R_TEAMS,
   R_TANKS,
@@ -329,6 +331,8 @@ export class World {
   readonly tanks: (Tank | null)[] = new Array(MAX_TANKS).fill(null);
   /** Dropships: aerial support, called in by radio. */
   readonly ships: (Ship | null)[] = new Array(MAX_SHIPS).fill(null);
+  /** Enemies spotted from the air, per side (spotKey): clone id -> the tick the sighting goes stale. */
+  readonly spots = new Map<number, Map<number, number>>();
   /** Drop tanks into each wave (round rooms; sandbox rooms only on request). */
   readonly tankDrops: boolean;
   private readonly tankMz = { x: 0, y: 0, a: 0 };
@@ -1017,6 +1021,7 @@ export class World {
     this.crafts.fill(null);
     this.tanks.fill(null);
     this.ships.fill(null);
+    this.spots.clear();
     this.items.length = 0;
     this.grains.n = 0;
     this.projectiles.n = 0;
@@ -2701,6 +2706,124 @@ export class World {
     return p.alive && p.id !== sh.owner && !(sh.team !== Team.None && p.team === sh.team);
   }
 
+  /** Who a dropship works for: its caller, and in team modes the caller's whole team. */
+  private shipAlly(sh: Ship, p: Player): boolean {
+    return p.id === sh.owner || (sh.team !== Team.None && p.team === sh.team);
+  }
+
+  /** The side a sighting belongs to: a team, or (every clone for itself) just the caller. */
+  private spotKey(team: number, id: number): number {
+    return team !== Team.None ? 1000 + team : id;
+  }
+
+  /**
+   * The dropship's brain, a few times a second. In order:
+   * - **Cover:** an ally with an enemy close by (the one under most
+   *   pressure: nearest the threat, and hurt) gets the ship over that enemy.
+   * - **Strike:** otherwise it goes after the enemies its side knows of
+   *   within reach of an ally (spotted ones and groups first).
+   * - **Scout:** otherwise it flies out ahead of its lead (the caller, or
+   *   the nearest teammate when the caller's down), toward the enemy if it
+   *   knows where they are, sweeping back and forth to find them.
+   * It never strays further than a leash from its side. In team modes it
+   * works for the whole team, not only its caller.
+   */
+  private planShip(sh: Ship): void {
+    const cx = sh.x + SHIP_W / 2;
+    const allies: Player[] = [];
+    const foes: Player[] = [];
+    for (const o of this.players) {
+      if (!o || !o.alive) continue;
+      if (this.shipAlly(sh, o)) allies.push(o);
+      else if (this.shipFoe(sh, o)) foes.push(o);
+    }
+    const owner = this.players[sh.owner];
+    let lead: Player | null = owner && owner.alive ? owner : null;
+    for (const a of allies) if (!lead || Math.abs(a.cx - cx) < Math.abs(lead.cx - cx)) lead = a;
+    sh.focus = 255;
+    if (!lead) {
+      sh.mission = ShipMission.Escort;
+      sh.goalX = sh.anchorX;
+      return;
+    }
+    const spotted = this.spots.get(this.spotKey(sh.team, sh.owner));
+    // Cover: the ally under the most pressure.
+    let best = 0;
+    for (const a of allies) {
+      for (const o of foes) {
+        const d = Math.hypot(o.cx - a.cx, o.cy - a.cy);
+        if (d >= SHIP_COVER_R) continue;
+        const s = (SHIP_COVER_R - d) * (a.hp < ACTOR_MAX_HP / 2 ? 1.6 : 1) * (a === owner ? 1.25 : 1);
+        if (s > best) {
+          best = s;
+          sh.focus = o.id;
+        }
+      }
+    }
+    if (sh.focus !== 255) {
+      sh.mission = ShipMission.Cover;
+      sh.goalX = this.players[sh.focus]!.cx;
+      return;
+    }
+    // Strike: the best target its side could know of, groups and sightings first.
+    best = -Infinity;
+    for (const o of foes) {
+      let reach = Infinity;
+      for (const a of allies) reach = Math.min(reach, Math.abs(o.cx - a.cx));
+      if (reach > SHIP_STRIKE_R) continue;
+      let group = 0;
+      for (const q of foes) if (Math.abs(q.cx - o.cx) < 140 && Math.abs(q.cy - o.cy) < 140) group++;
+      const s = group * 200 - reach * 0.3 + ((spotted?.get(o.id) ?? 0) > this.tick ? 150 : 0);
+      if (s > best) {
+        best = s;
+        sh.focus = o.id;
+      }
+    }
+    if (sh.focus !== 255) {
+      sh.mission = ShipMission.Strike;
+      sh.goalX = this.players[sh.focus]!.cx;
+    } else {
+      // Scout: out ahead of the lead, toward the nearest enemy if any, else the way they face.
+      let dir = Math.cos(dequantizeAim(lead.aimQ)) < 0 ? -1 : 1;
+      let near = Infinity;
+      for (const o of foes) {
+        const d = Math.abs(o.cx - lead.cx);
+        if (d < near) {
+          near = d;
+          dir = o.cx < lead.cx ? -1 : 1;
+        }
+      }
+      sh.mission = ShipMission.Scout;
+      sh.goalX = lead.cx + dir * (SHIP_SCOUT_AHEAD + 200 * Math.sin(sh.age / 70));
+    }
+    // The leash: never far from its side.
+    const leash = sh.team !== Team.None ? SHIP_LEASH_TEAM : SHIP_LEASH;
+    let nearAlly = lead;
+    for (const a of allies) if (Math.abs(a.cx - sh.goalX) < Math.abs(nearAlly.cx - sh.goalX)) nearAlly = a;
+    sh.goalX = Math.max(nearAlly.cx - leash, Math.min(nearAlly.cx + leash, sh.goalX));
+  }
+
+  /** Every few ticks, each dropship marks the enemies it can see for its side. */
+  private shipSpotting(): void {
+    if (this.tick % 6 !== 0) return;
+    const pt = this.pt;
+    for (const sh of this.ships) {
+      if (!sh || sh.leaving) continue;
+      const key = this.spotKey(sh.team, sh.owner);
+      let m = this.spots.get(key);
+      const c = shipPoint(sh, SHIP_W / 2, SHIP_H, pt);
+      const ex = c.x;
+      const ey = c.y;
+      for (const o of this.players) {
+        if (!o || !this.shipFoe(sh, o)) continue;
+        if (Math.hypot(o.cx - ex, o.cy - ey) > SHIP_SIGHT || !this.clearLine(ex, ey, o.cx, o.cy)) continue;
+        if (!m) this.spots.set(key, (m = new Map()));
+        m.set(o.id, this.tick + SPOT_TICKS);
+      }
+    }
+    for (const [, m] of this.spots) for (const [id, until] of m) if (until <= this.tick || !this.players[id]?.alive) m.delete(id);
+  }
+
   /** Terrain-free line of sight (3-cell steps). */
   private clearLine(x0: number, y0: number, x1: number, y1: number): boolean {
     const d = Math.hypot(x1 - x0, y1 - y0);
@@ -2729,24 +2852,41 @@ export class World {
       if (sh.doors > 0) sh.doors--;
       const owner = this.players[sh.owner];
       if (owner && owner.alive) sh.anchorX = owner.cx;
-      if (!owner || (sh.bombs === 0 && sh.sinceBomb > 30 * 20) || sh.age > 30 * 120) sh.leaving = true;
-      // Station: over the enemy nearest its caller (bombs to drop, bay intact), else over the caller.
+      // In team modes it stays on for the team after its caller leaves, while any of them are left.
+      const served = !!owner || (sh.team !== Team.None && this.players.some((o) => o && o.team === sh.team));
+      const guns = hasShipPart(sh.parts, ShipPart.TurretL) || hasShipPart(sh.parts, ShipPart.TurretR);
+      if (!served || (sh.bombs === 0 && !guns && sh.sinceBomb > 30 * 20) || sh.age > 30 * 120) sh.leaving = true;
+      if (--sh.planCd <= 0) {
+        sh.planCd = 10;
+        this.planShip(sh);
+      }
+      // Station: on its mission's goal, tracking whoever it's after.
       const cx = sh.x + SHIP_W / 2;
-      let tx = sh.anchorX;
+      const focus = sh.focus !== 255 ? this.players[sh.focus] : null;
+      let tx = focus && focus.alive ? focus.cx : sh.goalX;
+      // Bombs: on whichever enemy is under it (bay intact), unless an ally is too close to them.
       let bombTarget: Player | null = null;
       if (!sh.leaving && sh.bombs > 0 && hasShipPart(sh.parts, ShipPart.Doors)) {
-        let best = 240;
+        let best = 90;
         for (const o of this.players) {
-          if (!o || !this.shipFoe(sh, o)) continue;
-          const d = Math.abs(o.cx - sh.anchorX);
-          if (d < best) {
-            best = d;
-            bombTarget = o;
-          }
+          if (!o || !this.shipFoe(sh, o) || o.cy < sh.y + SHIP_H) continue;
+          const d = Math.abs(o.cx - cx);
+          if (d >= best) continue;
+          let safe = true;
+          for (const a of this.players) if (a && a.alive && this.shipAlly(sh, a) && Math.hypot(a.cx - o.cx, a.cy - o.cy) < PROJ[ProjKind.Bomb].splashR + 16) safe = false;
+          if (!safe) continue;
+          best = d;
+          bombTarget = o;
         }
-        if (bombTarget) tx = bombTarget.cx;
+        if (bombTarget && (sh.mission === ShipMission.Cover || sh.mission === ShipMission.Strike)) tx = bombTarget.cx;
       }
-      const ground = this.terrain.surfaceY(Math.max(0, Math.min(WORLD_W - 1, Math.floor(tx))));
+      tx = Math.max(SHIP_W, Math.min(WORLD_W - SHIP_W, tx));
+      // Altitude over the highest ground (hills, towers) between here and the goal, and a little ahead.
+      const lo = Math.max(0, Math.floor(Math.min(cx, tx) - SHIP_W));
+      const hi = Math.min(WORLD_W - 1, Math.floor(Math.max(cx, tx) + SHIP_W));
+      let ground = WORLD_H;
+      for (let gx = lo; gx <= hi && gx <= lo + 600; gx += 6) ground = Math.min(ground, this.terrain.surfaceY(gx));
+      if (tx < cx) for (let gx = hi; gx >= lo && gx >= hi - 600; gx -= 6) ground = Math.min(ground, this.terrain.surfaceY(gx));
       const ty = sh.leaving ? -260 : Math.max(40, ground - SHIP_ALT);
       const impact = stepShip(sh, this.terrain, DT, sh.leaving ? cx : tx, ty);
       if (impact > 90) {
@@ -3022,6 +3162,7 @@ export class World {
     this.stepCrafts();
     this.stepTanks();
     this.stepShips();
+    this.shipSpotting();
     this.stepItems();
     this.stepTraps();
     this.stepEvac();
@@ -3436,9 +3577,27 @@ export class World {
           w.u8(sh.team);
           w.u16(quantizeAim(sh.aim[0]));
           w.u16(quantizeAim(sh.aim[1]));
-          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0));
+          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4));
           for (let e = 0; e < 4; e++) w.u8(Math.round(sh.thrust[e] * 255));
         }
+      }
+
+      // What our side's dropships have spotted (a few times a second).
+      const seen = (this.tick + p.id) % 3 === 0 ? this.spots.get(this.spotKey(p.team, p.id)) : undefined;
+      if (seen && seen.size > 0) {
+        w.u8(R_SPOTTED);
+        const at = w.pos;
+        w.u8(0);
+        let n = 0;
+        for (const [id] of seen) {
+          const o = this.players[id];
+          if (!o || !o.alive || n === 255) continue;
+          w.u8(id);
+          w.u16(clampU16(o.cx));
+          w.u16(clampU16(o.cy + Y_BIAS));
+          n++;
+        }
+        w.buf[at] = n;
       }
 
       this.replicateItems(p, w, vx0, vy0, vx1, vy1);
@@ -3572,6 +3731,14 @@ const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
 const SHIP_MASS = 120;
 /** Station altitude over the ground, turret reach, how long a radio waits between calls. */
 const SHIP_ALT = 80;
+/** The dropship brain: how close an enemy must be to an ally to need covering, how far out it strikes and scouts, its leash (solo / team), how far it sees, and how long a sighting lasts. */
+const SHIP_COVER_R = 320;
+const SHIP_STRIKE_R = 900;
+const SHIP_SCOUT_AHEAD = 480;
+const SHIP_LEASH = 750;
+const SHIP_LEASH_TEAM = 1100;
+const SHIP_SIGHT = 620;
+const SPOT_TICKS = 30 * 4;
 const SHIP_GUN_RANGE = 300;
 const CALL_COOLDOWN = 30 * 30;
 /** How close (cells, box to box) a clone must be to climb into a tank. */

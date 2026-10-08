@@ -83,6 +83,19 @@ const CRUISE = 95;
 const CLIMB = 75;
 const DRAG = 0.7;
 
+/**
+ * What a dropship is doing (server brain, shown to its side): flying ahead
+ * to find the enemy, covering an ally under fire, hitting enemies its side
+ * knows of, or holding over its caller.
+ */
+export const ShipMission = {
+  Escort: 0,
+  Scout: 1,
+  Cover: 2,
+  Strike: 3,
+} as const;
+export const SHIP_MISSION_NAMES = ['ESCORT', 'SCOUTING', 'COVERING', 'STRIKING'] as const;
+
 export interface Ship {
   x: number; // box top-left, world cells
   y: number;
@@ -114,6 +127,11 @@ export interface Ship {
   anchorX: number;
   leaving: boolean;
   lastHitBy: number;
+  /** The brain: its mission (ShipMission), where it's headed, who it's after or covering (255 none), and ticks to its next rethink. */
+  mission: number;
+  goalX: number;
+  focus: number;
+  planCd: number;
 }
 
 export function newShip(x: number, y: number, owner: number, team: number): Ship {
@@ -143,6 +161,10 @@ export function newShip(x: number, y: number, owner: number, team: number): Ship
     anchorX: x + SHIP_W / 2,
     leaving: false,
     lastHitBy: 255,
+    mission: ShipMission.Escort,
+    goalX: x + SHIP_W / 2,
+    focus: 255,
+    planCd: 0,
   };
 }
 

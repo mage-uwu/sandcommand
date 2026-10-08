@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ACTOR_H } from '../src/shared/constants.ts';
 import { Reader } from '../src/shared/codec.ts';
-import { ENGINE_NOZZLE_Y, ENGINE_X, HULL_W, HULL_X, SHIP_BOMBS, SHIP_H, SHIP_HP, SHIP_PART_CENTER, SHIP_W, ShipPart, hasShipPart, newShip, shipPoint } from '../src/shared/dropship.ts';
+import { ENGINE_NOZZLE_Y, ENGINE_X, HULL_W, HULL_X, SHIP_BOMBS, SHIP_H, SHIP_HP, SHIP_PART_CENTER, SHIP_W, ShipMission, ShipPart, hasShipPart, newShip, shipPoint } from '../src/shared/dropship.ts';
 import { WEAPONS, WeaponId, ProjKind, PROJ } from '../src/shared/weapons.ts';
-import { CALL_COST, CallKind } from '../src/shared/protocol.ts';
+import { CALL_COST, CallKind, Team } from '../src/shared/protocol.ts';
 import { TANK_HP } from '../src/shared/tank.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
@@ -96,13 +96,97 @@ describe('radio and dropship', () => {
     expect(hit).toBe(true);
     expect(bombed).toBe(true);
     expect(b.alive).toBe(false);
-    // Hovering over the caller afterwards, level, at altitude.
+    // Afterwards it's off on its own (scouting or after the next target), but on its leash, flying level, up high.
     for (let k = 0; k < 30 * 6; k++) world.step();
     if (world.ships[world.ships.indexOf(sh)] === sh) {
-      expect(Math.abs(sh.x + SHIP_W / 2 - a.cx)).toBeLessThan(30);
-      expect(Math.abs(sh.a)).toBeLessThan(0.1);
-      expect(a.cy - (sh.y + SHIP_H / 2)).toBeGreaterThan(40);
+      expect(Math.abs(sh.x + SHIP_W / 2 - a.cx)).toBeLessThan(800);
+      expect(Math.abs(sh.a)).toBeLessThan(0.45);
+      expect(world.terrain.surfaceY(Math.floor(sh.x + SHIP_W / 2)) - (sh.y + SHIP_H)).toBeGreaterThan(20);
     }
+  });
+
+  it('with nobody about, it scouts out ahead of its caller, toward the enemy', () => {
+    const { world, a, b } = setup(70);
+    // The enemy far off to the east, beyond striking reach.
+    const x = Math.min(a.body.x + 1500, 3900);
+    internals(world).placeClone(b, x, world.terrain.surfaceY(Math.floor(x + 4)) - ACTOR_H, 0, 0);
+    world.call(a.id, CallKind.Dropship);
+    const sh = world.ships.find(Boolean)!;
+    let ahead = 0;
+    for (let k = 0; k < 30 * 14; k++) {
+      a.body.vx = 0;
+      hold(world, b);
+      world.step();
+      if (world.ships.indexOf(sh) < 0) break;
+      if (sh.mission === ShipMission.Scout) ahead = Math.max(ahead, sh.x + SHIP_W / 2 - a.cx);
+    }
+    expect(world.ships.indexOf(sh)).toBeGreaterThanOrEqual(0);
+    expect(ahead).toBeGreaterThan(250); // out east, the enemy's way
+    expect(ahead).toBeLessThan(800); // on its leash
+  });
+
+  it('in a team mode it covers any teammate under fire, not just its caller', () => {
+    const world = new World(71);
+    const a = world.addPlayer('caller', { send() {} })!;
+    const c = world.addPlayer('mate', { send() {} })!;
+    const b = world.addPlayer('enemy', { send() {} })!;
+    deliverAll(world, [a, b, c]);
+    a.team = c.team = Team.Red;
+    b.team = Team.Green;
+    // The teammate 500 cells off with an enemy right on them; the caller alone.
+    const cx = a.body.x + 500;
+    internals(world).placeClone(c, cx, world.terrain.surfaceY(Math.floor(cx + 4)) - ACTOR_H, 0, 0);
+    internals(world).placeClone(b, cx + 60, world.terrain.surfaceY(Math.floor(cx + 64)) - ACTOR_H, 0, 0);
+    a.gold = CALL_COST;
+    world.equip(a, WeaponId.Radio);
+    world.step();
+    expect(world.call(a.id, CallKind.Dropship)).toBe(true);
+    const sh = world.ships.find(Boolean)!;
+    let covered = false;
+    let closest = Infinity;
+    for (let k = 0; k < 30 * 12 && b.alive; k++) {
+      a.body.vx = c.body.vx = b.body.vx = 0;
+      c.hp = 100; // (the teammate holds out)
+      world.step();
+      if (sh.mission === ShipMission.Cover && sh.focus === b.id) covered = true;
+      closest = Math.min(closest, Math.abs(sh.x + SHIP_W / 2 - b.cx));
+    }
+    expect(covered).toBe(true);
+    expect(closest).toBeLessThan(80);
+  });
+
+  it("it spots enemies for its side: they're marked on the caller's screen", () => {
+    const frames: Uint8Array[] = [];
+    const world = new World(72);
+    const a = world.addPlayer('a', { send: (d) => frames.push(d) })!;
+    const b = world.addPlayer('b', { send() {} })!;
+    deliverAll(world, [a, b]);
+    const x = a.body.x + 200;
+    internals(world).placeClone(b, x, world.terrain.surfaceY(Math.floor(x + 4)) - ACTOR_H, 0, 0);
+    a.gold = CALL_COST;
+    world.equip(a, WeaponId.Radio);
+    world.step();
+    world.call(a.id, CallKind.Dropship);
+    frames.length = 0;
+    for (let k = 0; k < 30 * 6; k++) {
+      b.body.vx = 0;
+      world.step();
+    }
+    expect(world.spots.get(a.id)?.has(b.id)).toBe(true);
+    const game = new Game();
+    game.myId = a.id;
+    for (const f of frames) {
+      const r = new Reader(f);
+      r.u8();
+      const tick = r.u32();
+      const ack = r.u16();
+      game.applyFrame(tick, ack, r);
+    }
+    const seen = game.spottedNow();
+    expect(seen.map((e) => e.id)).toContain(b.id);
+    expect(Math.abs(seen[0].x - b.cx)).toBeLessThan(40);
+    expect(game.feed.some((f) => f.text.includes('dropship: contact'))).toBe(true);
+    expect(game.shipViews()[0].mission).toBeGreaterThanOrEqual(0);
   });
 
   it('carries 8 bombs of 5x a bazooka blast, and never hits its caller or itself', () => {

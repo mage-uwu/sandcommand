@@ -72,6 +72,8 @@ export const R_SHIP_BOOM = 31;
 export const R_TRAPS = 32;
 /** A laser beam fired: from, to, power (0..255) and who fired it. */
 export const R_BEAM = 33;
+/** Enemies this client's side has spotted from the air (its dropships): ids and where they are. */
+export const R_SPOTTED = 34;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -89,7 +91,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
 
 /** Last Man Standing round phases. */
 export const Phase = {

@@ -458,15 +458,35 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
   Hits are tested against the real hull, pods and turrets, not the ship's
   bounding box, so shots pass through the open space under the pylons. An autopilot tilts the hull to move and shares lift and attitude torque
   between the engines still attached; it holds attitude first and lift
-  second. It flies in, stations about 80 cells over its caller, and does
-  three things:
+  second. It flies in, then works on its own (`World.planShip`). In team
+  modes it works for the **whole team**, not only its caller. A few times
+  a second it picks a mission, shown on its tag to its own side:
+  - **Covering.** When an enemy is close to an ally, it flies over that
+    enemy. It picks the ally under the most pressure: nearest the threat,
+    hurt, and its caller first.
+  - **Striking.** Otherwise it goes after enemies within 900 cells of
+    any ally. Groups and enemies already spotted come first.
+  - **Scouting.** Otherwise it flies 300–700 cells out ahead of its lead
+    (its caller, or the nearest teammate while the caller is down). It
+    heads the enemy's way, or the way the lead faces, and sweeps back and
+    forth.
+  - **Leash.** It never strays further than 750 cells from its side
+    (1100 in team modes). It climbs over the highest ground between
+    itself and its goal, so it doesn't fly into hills or towers.
+  - **Spotting.** Enemies in its sight (620 cells, with a clear line)
+    are spotted for its side for 4 s (`R_SPOTTED`). Spotted enemies get red
+    brackets on screen, an arrow at the screen's edge when off screen,
+    and a red ring on the minimap. A fresh contact is called in on the
+    feed: "▲ dropship: 3 contacts, 420m east".
   - **Turrets.** It strafes enemies in sight with a turret on either side.
-  - **Bombs.** It slides over enemies near its caller, opens the bomb-bay
-    doors in its belly and drops bombs. It carries **8**, each with five
-    times a bazooka's blast. It leads each bomb by its fall time and
-    drops only with a clear line down.
-  - **Leaving.** It flies home when it's out of bombs and idle, after two
-    minutes, or when its caller leaves.
+  - **Bombs.** It bombs whichever enemy is under it (it carries **8**,
+    each with five times a bazooka's blast). It leads each bomb by its
+    fall time, drops only with a clear line down, and never bombs an enemy
+    standing next to an ally.
+  - **Leaving.** It flies home after two minutes, when it has no bombs or
+    turrets left and has been idle a while, or when its caller leaves. In
+    team modes it stays on while any of the caller's team is still in the
+    match.
 - **Damage.** The dropship has about half a tank's toughness (3750 hull).
   Each engine, each turret and the bay doors can be shot off separately.
   Without doors it can't bomb. On three engines it leans on the rest and
@@ -479,8 +499,8 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
   explodes along with whatever bombs it still carries. Its caller's and
   teammates' fire doesn't hurt it.
 - **Networking.** Dropships go out every frame (`R_SHIPS`, 24 bytes each).
-  Each record carries position, tilt, parts, bombs, turret aims, doors and
-  per-engine throttle for the exhaust. Parts lost and the final explosion
+  Each record carries position, tilt, parts, bombs, turret aims, doors, its
+  mission and per-engine throttle for the exhaust. Parts lost and the final explosion
   are seeded records (`R_SHIP_PART`, `R_SHIP_BOOM`).
 
 ## Bunkers

@@ -29,6 +29,7 @@ import {
   R_TEAMS,
   R_TRAPS,
   R_BEAM,
+  R_SPOTTED,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -154,6 +155,8 @@ export interface ShipState {
   fired: [boolean, boolean];
   leaving: boolean;
   thrust: number[]; // per engine, 0..1
+  /** What it's doing (dropship.ts ShipMission). */
+  mission: number;
 }
 
 /** The tank this client drives, at full precision: everything stepTank needs, plus its damage. */
@@ -213,6 +216,8 @@ export interface FrameHandler {
   self(s: SelfState): void;
   actors(list: RemoteActor[]): void;
   blips(list: { id: number; x: number; y: number }[]): void;
+  /** Enemies our side's dropships can see, and where. */
+  spotted(list: { id: number; x: number; y: number }[]): void;
   /**
    * Called after a carve op was applied (including the collapse it caused);
    * `removed` and `detached` hold x, y, mat triples.
@@ -332,6 +337,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           a.parts &= PARTS_MASK;
         }
         h.actors(list);
+        break;
+      }
+      case R_SPOTTED: {
+        const n = r.u8();
+        const list = [];
+        for (let i = 0; i < n; i++) list.push({ id: r.u8(), x: r.u16(), y: r.u16() - Y_BIAS });
+        h.spotted(list);
         break;
       }
       case R_BLIPS: {
@@ -627,7 +639,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const aim: [number, number] = [dequantizeAim(r.u16()), dequantizeAim(r.u16())];
           const f = r.u8();
           const thrust = [r.u8() / 255, r.u8() / 255, r.u8() / 255, r.u8() / 255];
-          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust });
+          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: (f >> 4) & 3 });
         }
         h.ships(list);
         break;
@@ -687,6 +699,7 @@ export const nullHandler: FrameHandler = {
   self() {},
   actors() {},
   blips() {},
+  spotted() {},
   carved() {},
   chunkLoaded() {},
   round() {},

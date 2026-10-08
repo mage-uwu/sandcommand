@@ -17,7 +17,7 @@ import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
-import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
+import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor, frostColor, grassBlade } from './texture.ts';
@@ -533,7 +533,9 @@ export class Renderer {
       const sx = offX + (sh.x + SHIP_W / 2) * z;
       const sy = offY + (sh.y - 6) * z - 10 * dpr;
       const info = game.players.get(sh.owner);
-      const tag = `${info?.name ?? '?'}'s dropship  ✸${sh.bombs}`;
+      // Our side's dropships say what they're up to.
+      const ours = sh.owner === game.myId || (sh.team !== Team.None && sh.team === game.myTeam);
+      const tag = `${info?.name ?? '?'}'s dropship  ✸${sh.bombs}${ours && !sh.leaving ? `  · ${SHIP_MISSION_NAMES[sh.mission]}` : ''}`;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillText(tag, sx + dpr, sy + dpr);
       ctx.fillStyle = info?.color ?? '#ccc';
@@ -544,6 +546,48 @@ export class Renderer {
         ctx.fillRect(sx - w / 2, sy + 3 * dpr, w, 3 * dpr);
         ctx.fillStyle = sh.hp > SHIP_HP * 0.35 ? '#d8c040' : '#e33';
         ctx.fillRect(sx - w / 2, sy + 3 * dpr, (w * sh.hp) / SHIP_HP, 3 * dpr);
+      }
+    }
+    // Enemies our dropships have eyes on: red brackets on them, or an arrow
+    // at the screen's edge pointing their way.
+    const spotted = game.spottedNow();
+    if (spotted.length) {
+      const pulse = 0.65 + 0.35 * Math.sin(now / 160);
+      ctx.strokeStyle = `rgba(255,90,60,${pulse})`;
+      ctx.fillStyle = `rgba(255,90,60,${pulse})`;
+      ctx.lineWidth = Math.max(1, 1.5 * dpr);
+      const live = new Map(views.map((v) => [v.id, v]));
+      for (const e of spotted) {
+        const v = live.get(e.id);
+        const wx = v ? v.x + ACTOR_W / 2 : e.x;
+        const wy = v ? v.y + ACTOR_H / 2 : e.y;
+        const sx = offX + wx * z;
+        const sy = offY + wy * z;
+        const m = 18 * dpr;
+        if (sx > m && sx < W - m && sy > m && sy < H - m) {
+          const r = (ACTOR_H / 2 + 3) * z;
+          const c = r * 0.45;
+          for (const [kx, ky] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+            ctx.beginPath();
+            ctx.moveTo(sx + kx * r, sy + ky * (r - c));
+            ctx.lineTo(sx + kx * r, sy + ky * r);
+            ctx.lineTo(sx + kx * (r - c), sy + ky * r);
+            ctx.stroke();
+          }
+        } else {
+          const cx0 = W / 2;
+          const cy0 = H / 2;
+          const a = Math.atan2(sy - cy0, sx - cx0);
+          const t = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m) / Math.abs(Math.sin(a) || 1e-6));
+          const ax = cx0 + Math.cos(a) * t;
+          const ay = cy0 + Math.sin(a) * t;
+          ctx.beginPath();
+          ctx.moveTo(ax + Math.cos(a) * 9 * dpr, ay + Math.sin(a) * 9 * dpr);
+          ctx.lineTo(ax + Math.cos(a + 2.5) * 7 * dpr, ay + Math.sin(a + 2.5) * 7 * dpr);
+          ctx.lineTo(ax + Math.cos(a - 2.5) * 7 * dpr, ay + Math.sin(a - 2.5) * 7 * dpr);
+          ctx.closePath();
+          ctx.fill();
+        }
       }
     }
     // Tanks: who's driving, and how much hull is left.
@@ -1575,6 +1619,14 @@ export class Renderer {
       if (!(v.flags & F_ALIVE)) continue;
       ctx.fillStyle = game.colorOf(v.id);
       ctx.fillRect(mx + v.x * k - 1.5 * s, my + v.y * k - 1.5 * s, 3 * s, 3 * s);
+    }
+    // Spotted enemies: a red ring around their dot.
+    ctx.strokeStyle = '#ff5a3c';
+    ctx.lineWidth = Math.max(1, s);
+    for (const e of game.spottedNow()) {
+      ctx.beginPath();
+      ctx.arc(mx + e.x * k, my + e.y * k, 4 * s, 0, Math.PI * 2);
+      ctx.stroke();
     }
     // Kings stand out: a gold square around their dot (radar blips included).
     const rs0 = game.roundState;

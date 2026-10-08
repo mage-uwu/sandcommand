@@ -692,6 +692,41 @@ export class Game implements FrameHandler {
     for (const id of this.snaps.keys()) if (!seen.has(id)) this.snaps.delete(id);
   }
 
+  /** Enemies our side's dropships have eyes on: where, and when last reported. */
+  readonly spottedFoes = new Map<number, { x: number; y: number; at: number }>();
+  /** When our dropships last reported contact (for the radio callout). */
+  private lastContact = 0;
+
+  spotted(list: { id: number; x: number; y: number }[]): void {
+    const now = performance.now();
+    let fresh = 0;
+    for (const e of list) {
+      if (!this.spottedFoes.has(e.id)) fresh++;
+      this.spottedFoes.set(e.id, { x: e.x, y: e.y, at: now });
+    }
+    // A fresh contact after a quiet spell: the dropship calls it in.
+    if (fresh > 0 && now - this.lastContact > 8000) {
+      const me = this.ear();
+      const e = list[0];
+      const dir = e.x < me.x ? 'west' : 'east';
+      const dist = Math.round(Math.abs(e.x - me.x) / 10) * 10;
+      this.feed.push({ text: `▲ dropship: ${list.length === 1 ? 'contact' : `${list.length} contacts`}, ${dist}m ${dir}`, color: '#ff9a5a', at: now });
+      if (this.feed.length > 6) this.feed.shift();
+    }
+    this.lastContact = now;
+  }
+
+  /** Sightings still fresh (they lapse a second after the last report). */
+  spottedNow(): { id: number; x: number; y: number }[] {
+    const now = performance.now();
+    const out = [];
+    for (const [id, e] of this.spottedFoes) {
+      if (now - e.at > 1000) this.spottedFoes.delete(id);
+      else out.push({ id, x: e.x, y: e.y });
+    }
+    return out;
+  }
+
   blips(list: { id: number; x: number; y: number }[]): void {
     this.radar = list;
   }
