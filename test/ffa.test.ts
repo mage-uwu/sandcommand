@@ -97,7 +97,8 @@ describe('free for all', () => {
     until(world, () => me.alive, 600);
     kill(world, me, me);
     let kills = 0;
-    until(world, () => world.phase === Phase.Victory, 30 * 60 * 4);
+    // Well inside the time limit: bots find each other, through bunkers if they must.
+    until(world, () => world.phase === Phase.Victory, 30 * 60 * 2);
     for (const p of world.players) if (p) kills += p.kills;
     expect(kills).toBeGreaterThan(5);
     expect(world.phase).toBe(Phase.Victory);
@@ -105,6 +106,21 @@ describe('free for all', () => {
     expect(champ?.bot).toBeTruthy();
     expect(inWave(world).filter((p) => p.alive).length).toBeLessThanOrEqual(1);
   }, 60_000);
+
+  it('a wave that runs out of time goes to the survivor with the most kills', () => {
+    const world = new World(12, { mode: 'ffa' });
+    const [a, b, c] = ['a', 'b', 'c'].map((n) => world.addPlayer(n, { send() {} })!);
+    until(world, () => a.alive && b.alive && c.alive);
+    b.waveKills = 2;
+    a.waveKills = 1;
+    world.phaseTimer = 2; // the clock is nearly out
+    world.step();
+    world.step();
+    expect(world.phase).toBe(Phase.Victory);
+    expect(world.winner).toBe(b.id);
+    expect(b.wins).toBe(1);
+    void c;
+  });
 
   it('clients make the new map from the seed and agree with the server chunk for chunk', () => {
     const frames: Uint8Array[] = [];
@@ -129,6 +145,7 @@ describe('free for all', () => {
     until(world, () => world.wave === 1 && world.phase === Phase.Countdown);
     pump();
     expect(game.roundState?.phase).toBe(Phase.Countdown);
+    expect(game.roundState?.out).toBe(false);
     expect(game.resyncWanted.length).toBe(0); // same engine here, so every hash matches
     for (let ci = 0; ci < CHUNK_COUNT; ci++) expect(game.terrain.chunkHash(ci)).toBe(world.terrain.chunkHash(ci));
   });

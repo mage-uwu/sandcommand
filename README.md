@@ -38,7 +38,11 @@ Every room plays free-for-all waves (`stepRound` in `src/server/world.ts`):
    whoever you're watching. Players who join mid-wave watch it and play in
    the next one.
 4. **Last clone standing wins.** The winner gets a win on the scoreboard
-   (Tab: wins, kills, deaths) and a 7-second victory lap.
+   (Tab: wins, kills, deaths) and a 7-second victory lap. A wave has a
+   4-minute clock (top of the screen). If time runs out, the survivor with
+   the most kills that wave wins, so nobody wins by hiding in a bunker.
+   Big messages (WAVE 3 IN 2, FRAGGED, HAWKINS WINS) are retro console
+   banners in block letters (`src/client/banner.ts`).
 5. **A new wave on a fresh map.** The next wave gets a new seed: new
    terrain, with nothing carried over (rockets, dropped weapons, debris in
    flight).
@@ -52,8 +56,14 @@ room, a bot gives up its seat, a dead one if there is one.
 - **What it does.** It picks the nearest living clone, closes to its
   weapon's fighting range, then strafes. It jumps or jets over walls and up
   to targets, and leads its shots by flight time, lifting lobbed ones.
-- **Weapon use.** It throws grenades up close now and then, digs through
-  when walled in, and fetches a gun from the ground if it lost its own.
+- **Weapon use.** It throws grenades up close now and then, and fetches a
+  gun from the ground if it lost its own. Up close with a launcher it
+  switches to a gun if it has one.
+- **Getting unstuck.** It jumps or jets over walls with headroom, digs
+  straight through anything else (sweeping the beam so the hole is
+  clone-sized), and digs straight at a target hiding just the other side
+  of a floor or wall. When boxed in, it clears the nearest leftover
+  pixels.
 - **Fairness.** Bots get a beat to look around after landing, a reaction
   delay on each new target, per-bot aim error, and no point-blank bazooka
   shots.
@@ -61,7 +71,7 @@ room, a bot gives up its seat, a dead one if there is one.
 Thinking is cheap and staggered: targets twice a second, line of sight
 every 4 ticks, steering and aim every tick. A room of one human and 63 bots
 costs about 0.7 ms a tick (`npm run bench:ffa`), and a full 64-clone wave
-usually lasts 35–40 s.
+usually lasts 30–65 s, bunkers and all.
 
 **New maps cost almost no bandwidth.** The map generator is shared code, so
 the server sends the seed (`R_WAVE`) and each client generates the same
@@ -82,6 +92,32 @@ Generating the map takes about 0.4 s. Each octave of the noise caches its
 lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then gold, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
+
+## Bunkers
+
+Every map has bunker complexes on the surface (`src/shared/structures.ts`),
+built on a modular grid of 32×24-cell modules as part of map generation.
+Clients build identical ones from the seed. Between 15% and 60% of the
+surface is built on (random per map), in complexes of 2–7 modules with open
+ground between them. Each complex is assembled like this:
+
+- **Levelled site.** It stands on a concrete foundation, cutting a notch
+  into a hillside or filling a dip down to solid ground.
+- **Rooms and towers.** Ground-floor rooms have metal roofs, and some
+  modules rise into towers 2–3 storeys high.
+- **Ways through.** Doorways join neighbouring rooms, holes in the floor
+  slabs join storeys (jet up, drop down), and doors at the ends lead
+  outside. Firing slits look out where a tower overlooks a lower roof.
+- **Underground.** Basements below are reached by shafts, with doorways
+  between neighbouring basements. Sometimes a lined escape tunnel runs out
+  under the open ground and climbs to a hatch.
+- **Battle damage.** Some modules come pre-shot.
+
+Everything is concrete and metal plate, so small arms barely scratch it.
+Explosion cores and diggers get through. The digger bites at the first
+solid cell along its aim, so a wall you're pressed against gets dug.
+Building uses only integer arithmetic and the seeded RNG, so every engine
+produces the same complexes.
 
 ## Architecture
 
@@ -552,17 +588,17 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.87 ms  p99 5.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
-replicate avg 0.87 ms  p99 3.3 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 18.9 KB/s; room egress 1.18 MB/s
+sim       avg 0.85 ms  p99 4.7 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
+replicate avg 0.87 ms  p99 2.6 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 18.2 KB/s; room egress 1.14 MB/s
 ```
 
 `npm run bench:ffa` (one human, 63 server-side bots, free-for-all waves for
 two minutes, map resets included):
 
 ```
-sim       avg 0.53 ms  p99 3.1 ms      (bot AI and rounds included)
-downstream to the human: 22.1 KB/s
+sim       avg 0.57 ms  p99 4.0 ms      (bot AI and rounds included)
+downstream to the human: 22.9 KB/s
 ```
 
 `npm run bench:physics`:

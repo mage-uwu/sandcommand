@@ -122,6 +122,7 @@ export interface RoundState {
   winner: number; // player id, 255 none
   left: number; // clones still in the wave
   inWave: boolean; // are we in it
+  out: boolean; // were we in it, and got fragged
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -267,9 +268,16 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.itemsGone(ids);
         break;
       }
-      case R_ROUND:
-        h.round({ phase: r.u8(), wave: r.u16(), timer: r.u16(), winner: r.u8(), left: r.u8(), inWave: r.u8() === 1 });
+      case R_ROUND: {
+        const phase = r.u8();
+        const wave = r.u16();
+        const timer = r.u16();
+        const winner = r.u8();
+        const left = r.u8();
+        const status = r.u8();
+        h.round({ phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2 });
         break;
+      }
       case R_WAVE: {
         const seed = r.u32();
         const hashes = new Uint32Array(CHUNK_COUNT);

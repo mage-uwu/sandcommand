@@ -2,6 +2,10 @@ import { WORLD_H, WORLD_W } from './constants.ts';
 import { Mat } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
+import { type Complex, placeStructures } from './structures.ts';
+
+/** The bunker complexes of the most recently generated map (tests, spawning). */
+export let lastComplexes: Complex[] = [];
 
 function smooth(t: number): number {
   return t * t * (3 - 2 * t);
@@ -146,6 +150,8 @@ export function generateWorld(t: Terrain, seed: number): void {
       m[y * WORLD_W + x] = v;
     }
   }
+  // Bunker complexes on a modular grid across part of the surface.
+  lastComplexes = placeStructures(m, heights, seed);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the
   // moment anything touched it, so give it a cohesive dirt crust instead.

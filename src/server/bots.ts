@@ -43,6 +43,8 @@ export class BotBrain {
   private strafe = 1;
   private strafeUntil = 0;
   private stuck = 0;
+  /** Ticks a nearby target has been out of sight (a floor or wall between us). */
+  private blind = 0;
   private lastX = 0;
   private trigger = false;
   private seq = 0;
@@ -124,7 +126,19 @@ export class BotBrain {
     const digSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Digger);
     if (nadeSlot >= 0 && dist < 150 && t > this.nadeUntil + 90 && rng.next() < 0.01) this.nadeUntil = t + 30;
     if (t < this.nadeUntil && nadeSlot >= 0) want = nadeSlot;
-    if (this.stuck > 40 && digSlot >= 0 && !this.seeTarget) want = digSlot;
+    // Up close with a launcher: a gun that won't blow us up too, if we carry one.
+    if (dist < 70 && p.inv[want]?.weapon === WeaponId.Bazooka) {
+      const gun = p.inv.findIndex((it) => it.weapon === WeaponId.Rifle || it.weapon === WeaponId.Sniper);
+      if (gun >= 0) want = gun;
+    }
+    this.blind = tgt && !this.seeTarget && dist < 160 ? this.blind + 1 : 0;
+    // Walled in, or a target close by on the other side of a floor or wall: dig to it.
+    // Headroom: open sky (or room) above means a wall can be jumped or jetted over.
+    const bx0 = Math.floor(p.body.x);
+    const by0 = Math.floor(p.body.y);
+    const headClear = !world.terrain.rectSolid(bx0, by0 - 22, bx0 + 7, by0 - 1);
+    const digging = digSlot >= 0 && !this.seeTarget && (this.stuck > 75 || this.blind > 60);
+    if (digging) want = digSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
     const weapon = p.inv[want]?.weapon ?? WeaponId.Digger;
 
@@ -151,7 +165,7 @@ export class BotBrain {
     if (dir < 0) buttons |= BTN_LEFT;
     // Jump or jet: over walls, up to a target above, and to break a long fall.
     const b = p.body;
-    if (dir !== 0 && this.stuck > 6 && weapon !== WeaponId.Digger) buttons |= BTN_UP;
+    if (dir !== 0 && this.stuck > 6 && headClear) buttons |= BTN_UP;
     if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
     if (b.vy > 260 && b.fuel > 5) buttons |= BTN_UP;
 
@@ -166,18 +180,44 @@ export class BotBrain {
       ay = tgt.cy + tgt.body.vy * lead * 0.5;
       if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
     }
+    let sweep = 0;
     if (weapon === WeaponId.Digger) {
-      ax = p.cx + Math.sign(dx || 1) * 20;
-      ay = tgt && tgt.cy < p.cy - 20 ? p.cy - 14 : tgt && tgt.cy > p.cy + 20 ? p.cy + 14 : p.cy;
+      // Dig at the target when it's just the other side of a floor or wall;
+      // otherwise through the obstacle in the way.
+      let tx = (tgt ? tgt.cx : goalX) - p.cx;
+      let ty = (tgt ? tgt.cy : p.cy) - p.cy;
+      if (this.blind <= 60) {
+        // Blocked on the way somewhere: straight through whatever is ahead.
+        tx = Math.sign(tx) || 1;
+        ty = 0;
+      }
+      const tl = Math.hypot(tx, ty) || 1;
+      ax = sx + (tx / tl) * 20;
+      ay = sy + 3 + (ty / tl) * 20; // from mid-body
+      // Boxed in for a while (leftover pixels of concrete or rock pinning
+      // it): clear the nearest solid cell around the body, leaning toward
+      // where it's going, never the floor under its feet.
+      if (this.stuck > 150) {
+        const near = nearestBlock(world, p, Math.sign(dx) || 1);
+        if (near) {
+          ax = near.x;
+          ay = near.y;
+          sweep = 0;
+        }
+      }
+      // Sweep the beam up and down so the hole is tall enough to walk through
+      // (in concrete only the beam's core bites).
+      if (this.stuck <= 150) sweep = Math.sin(t * 0.35) * 0.65;
     }
-    const aim = Math.atan2(ay - sy, ax - sx) + (rng.next() - 0.5) * 2 * this.noise;
+    const aim = Math.atan2(ay - sy, ax - sx) + sweep + (rng.next() - 0.5) * 2 * this.noise;
     cmd.aim = quantizeAim(aim);
 
     // Fire: with a clear line (or digging), in range; semi-auto weapons get a fresh press each shot.
-    const minRange = weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade ? 50 : 0; // no point-blank blasts
+    // No point-blank blasts, unless cornered with nothing else.
+    const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade ? 50 : 0;
     const shoot =
       weapon === WeaponId.Digger
-        ? this.stuck > 20
+        ? digging
         : tgt !== null && t >= this.holdFire && this.seeTarget && dist < MAX_SHOT && dist > minRange && (weapon !== WeaponId.Grenade || dist < 220);
     if (shoot) {
       this.trigger = def?.auto ? true : !this.trigger;
@@ -202,4 +242,26 @@ function clearLine(world: World, x0: number, y0: number, x1: number, y1: number)
     if (t.isSolid(Math.floor(x0 + (dx * i) / n), Math.floor(y0 + (dy * i) / n))) return false;
   }
   return true;
+}
+
+/** The solid cell nearest a clone's body (biased toward `dir`), excluding the floor under it. */
+function nearestBlock(world: World, p: Player, dir: number): { x: number; y: number } | null {
+  const t = world.terrain;
+  const bx = Math.floor(p.body.x);
+  const by = Math.floor(p.body.y);
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  for (let y = by - 6; y <= by + 13; y++) {
+    for (let x = bx - 7; x <= bx + 14; x++) {
+      if (!t.isSolid(x, y)) continue;
+      const dx = x - (bx + 4);
+      const dy = y - (by + 7);
+      const d = dx * dx + dy * dy - dir * dx * 4;
+      if (d < bestD) {
+        bestD = d;
+        best = { x: x + 0.5, y: y + 0.5 };
+      }
+    }
+  }
+  return best;
 }

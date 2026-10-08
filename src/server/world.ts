@@ -162,6 +162,7 @@ export class Player {
   bot: BotBrain | null = null;
   /** FFA: waves won; in this wave; waiting for its drop rocket; who it's watching while out (255 none). */
   wins = 0;
+  waveKills = 0;
   inWave = false;
   pendingSpawn = false;
   spectate = 255;
@@ -388,10 +389,17 @@ export class World {
         else if (--this.phaseTimer <= 0) this.startWave();
         break;
       case Phase.Live: {
-        if (this.remaining() <= 1) {
-          const last = this.players.find((p) => p && p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn));
-          this.winner = last ? last.id : 255;
-          if (last) last.wins++;
+        // Last one standing; or, when time runs out, the survivor with the
+        // most kills this wave (so nobody can win by hiding in a bunker).
+        const timeUp = --this.phaseTimer <= 0;
+        if (this.remaining() <= 1 || timeUp) {
+          let best: Player | null = null;
+          for (const p of this.players) {
+            if (!p || !p.inWave || !(p.alive || p.delivering >= 0 || p.pendingSpawn)) continue;
+            if (!best || p.waveKills > best.waveKills || (p.waveKills === best.waveKills && p.hp > best.hp)) best = p;
+          }
+          this.winner = best ? best.id : 255;
+          if (best) best.wins++;
           this.setPhase(Phase.Victory, VICTORY_TICKS);
         }
         break;
@@ -428,8 +436,9 @@ export class World {
       p.pendingSpawn = true;
       p.respawn = 1 + this.rng.int(60);
       p.spectate = 255;
+      p.waveKills = 0;
     }
-    this.setPhase(Phase.Live, 0);
+    this.setPhase(Phase.Live, WAVE_TICKS);
   }
 
   /**
@@ -754,7 +763,10 @@ export class World {
     if (this.mode === 'ffa') victim.spectate = attacker !== victim.id && this.players[attacker]?.alive ? attacker : 255;
     victim.deaths++;
     const killer = this.players[attacker];
-    if (killer && killer !== victim) killer.kills++;
+    if (killer && killer !== victim) {
+      killer.kills++;
+      killer.waveKills++;
+    }
     // The clone gibs. Gibs are cosmetic and simulated by each client from this
     // record; the gold it spills is real terrain, thrown from `seed` so clients
     // can mirror the shower without it being streamed.
@@ -1140,8 +1152,17 @@ export class World {
     const ox = p.body.x + SHOULDER_X;
     const oy = p.body.y + SHOULDER_Y;
     if (def.proj === PROJ_DIG) {
-      // Digger: vacuum terrain in front of the clone, banking any gold.
-      this.carve(ox + cos * DIGGER_REACH, oy + sin * DIGGER_REACH, DIGGER_R, DIGGER_CORE, 0, p.id);
+      // Digger: vacuum terrain in front of the clone, banking any gold. It
+      // bites at the first solid cell along the aim (so a wall you're
+      // pressed against gets dug), up to its reach.
+      let d = DIGGER_REACH;
+      for (let r = 2; r < DIGGER_REACH; r++) {
+        if (this.terrain.isSolid(Math.floor(ox + cos * r), Math.floor(oy + sin * r))) {
+          d = Math.min(DIGGER_REACH, r + 1); // the core (radius DIGGER_CORE) still covers that cell
+          break;
+        }
+      }
+      this.carve(ox + cos * d, oy + sin * d, DIGGER_R, DIGGER_CORE, 0, p.id);
       p.gold += this.terrain.removedByMat[Mat.Gold];
       return;
     }
@@ -1704,7 +1725,8 @@ export class World {
         w.u16(Math.min(65535, this.phaseTimer));
         w.u8(this.winner);
         w.u8(this.remaining());
-        w.u8(p.inWave ? 1 : 0);
+        // 0 not in this wave, 1 in it (alive, riding in, or waiting for a rocket), 2 out.
+        w.u8(!p.inWave ? 0 : p.alive || p.delivering >= 0 || p.pendingSpawn ? 1 : 2);
       }
 
       // Own state at full float64 precision: the client's predictor rebases on
@@ -1940,6 +1962,8 @@ export class World {
 const TICKS_PER_SCORE = 30;
 const COUNTDOWN_TICKS = 30 * 4;
 const VICTORY_TICKS = 30 * 7;
+/** A wave's time limit. */
+const WAVE_TICKS = 30 * 60 * 4;
 /** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
 const STARTING_GOLD = 60;
 /** Who a rocket's exhaust flames are credited to (and so who it is immune to). */

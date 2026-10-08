@@ -6,6 +6,7 @@ import { PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import type { CraftView, Game, RemoteView } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
+import { bannerLines } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
@@ -915,37 +916,73 @@ export class Renderer {
     const ctx = this.ctx;
     const secs = Math.ceil(rs.timer / TICK_RATE);
     const name = (id: number) => (id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '???'));
-    const big = (text: string, sub: string, color = '#fff') => {
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(W / 2 - 300 * s, H * 0.22 - 34 * s, 600 * s, sub ? 70 * s : 48 * s);
-      ctx.font = `bold ${Math.round(26 * s)}px ui-monospace, monospace`;
-      ctx.fillStyle = color;
-      ctx.fillText(text, W / 2, H * 0.22);
-      if (sub) {
-        ctx.font = `${Math.round(14 * s)}px ui-monospace, monospace`;
-        ctx.fillStyle = '#ddd';
-        ctx.fillText(sub, W / 2, H * 0.22 + 24 * s);
-      }
-    };
-    if (rs.phase === Phase.Waiting) big('FREE FOR ALL', 'waiting for clones…');
+    const big = (text: string, sub: string, color = '#fff') => this.drawBanner(text, sub, color, s, W, H);
+    if (rs.phase === Phase.Waiting) big('FREE FOR ALL', 'waiting for clones...');
     else if (rs.phase === Phase.Countdown) big(`WAVE ${rs.wave + 1} IN ${secs}`, 'one life each · last clone standing wins', '#ffd34a');
     else if (rs.phase === Phase.Victory) {
       const won = rs.winner === game.myId;
-      big(rs.winner === 255 ? `NOBODY SURVIVED WAVE ${rs.wave}` : won ? `YOU WIN WAVE ${rs.wave}!` : `${name(rs.winner)} WINS WAVE ${rs.wave}`, `next wave in ${secs}`, won ? '#80ff80' : '#ffd34a');
+      const who = (game.players.get(rs.winner)?.name ?? '').replace(/^BOT /, '');
+      big(rs.winner === 255 ? 'NO SURVIVORS' : won ? 'YOU WIN!' : `${who} WINS`, `${rs.winner !== 255 && !won ? name(rs.winner) + ' takes ' : ''}wave ${rs.wave} · next wave in ${secs}`, won ? '#80ff80' : '#ffd34a');
     } else {
       // Live: a small status line, plus the spectator banner once we're out.
       ctx.textAlign = 'center';
       ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(W / 2 - 110 * s, 8 * s, 220 * s, 24 * s);
-      ctx.fillStyle = '#ffd34a';
-      ctx.fillText(`WAVE ${rs.wave} · ${rs.left} LEFT`, W / 2, 25 * s);
+      ctx.fillRect(W / 2 - 150 * s, 8 * s, 300 * s, 24 * s);
+      ctx.fillStyle = secs <= 30 ? '#ff8070' : '#ffd34a';
+      const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      ctx.fillText(`WAVE ${rs.wave} · ${rs.left} LEFT · ${clock}`, W / 2, 25 * s);
       if (!game.alive && !game.ride && !game.myCraft()) {
-        const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : '';
-        big(rs.inWave ? 'YOU ARE OUT' : 'WAVE IN PROGRESS', rs.inWave ? watching : `you're in the next one · ${watching}`, rs.inWave ? '#ff8070' : '#fff');
+        const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
+        if (rs.out) big('FRAGGED', `(${watching})`, '#ff6050');
+        else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${watching}`, '#c8d0d8');
+        else big('INBOUND', 'drop rocket on its way', '#ffd34a');
       }
     }
+    ctx.textAlign = 'left';
+  }
+
+  /**
+   * A big message as a retro console banner: block letters made of █,
+   * a hard drop shadow, on a dark panel, with a prompt-style line under it.
+   */
+  private drawBanner(text: string, sub: string, color: string, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const lines = bannerLines(text);
+    const cols = Math.max(1, lines[0].length);
+    // Monospace cells are ~0.6em wide: fit the banner in 86% of the screen.
+    const px = Math.max(5, Math.min(15 * s, (W * 0.86) / (cols * 0.6)));
+    const lineH = px;
+    const bw = cols * px * 0.6;
+    const bh = lines.length * lineH;
+    const cy = H * 0.2;
+    const subPx = Math.round(13 * s);
+    const padX = 18 * s;
+    const padY = 12 * s;
+    ctx.fillStyle = 'rgba(4,8,6,0.72)';
+    ctx.fillRect(W / 2 - bw / 2 - padX, cy - padY, bw + 2 * padX, bh + 2 * padY + (sub ? subPx * 1.8 : 0));
+    ctx.strokeStyle = 'rgba(160,255,160,0.25)';
+    ctx.lineWidth = Math.max(1, s);
+    ctx.strokeRect(W / 2 - bw / 2 - padX + 3 * s, cy - padY + 3 * s, bw + 2 * padX - 6 * s, bh + 2 * padY + (sub ? subPx * 1.8 : 0) - 6 * s);
+    ctx.font = `${px}px ui-monospace, Menlo, Consolas, monospace`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const x0 = W / 2 - bw / 2;
+    const off = Math.max(1, Math.round(px * 0.18));
+    for (let r = 0; r < lines.length; r++) {
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillText(lines[r], x0 + off, cy + r * lineH + off);
+    }
+    ctx.fillStyle = color;
+    for (let r = 0; r < lines.length; r++) ctx.fillText(lines[r], x0, cy + r * lineH);
+    if (sub) {
+      ctx.font = `${subPx}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#9fe89f';
+      const cursor = Math.floor(performance.now() / 500) % 2 ? '_' : ' ';
+      ctx.fillText(`> ${sub}${cursor}`, W / 2, cy + bh + padY * 0.9);
+    }
+    ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
   }
 

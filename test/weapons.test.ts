@@ -110,6 +110,24 @@ describe('firing', () => {
   });
 });
 
+describe('digger', () => {
+  it('digs a wall you are pressed against (it bites at the first solid cell along the aim)', () => {
+    const { world, p } = range();
+    const wx = Math.floor(p.body.x) + 9; // right against the clone's right side
+    for (let y = 300; y < 400; y++) for (let x = wx; x < wx + 3; x++) world.terrain.set(x, y, Mat.Concrete);
+    hold(world, p, 0, WeaponId.Digger, 2);
+    let left = 0;
+    const count = () => {
+      left = 0;
+      for (let y = Math.floor(p.body.y); y < p.body.y + 14; y++) for (let x = wx; x < wx + 3; x++) if (world.terrain.isSolid(x, y)) left++;
+      return left;
+    };
+    const before = count();
+    for (const aim of [-0.5, -0.25, 0, 0.25, 0.5, 0.7]) hold(world, p, BTN_FIRE, WeaponId.Digger, 8, aim);
+    expect(count()).toBeLessThan(before / 3);
+  });
+});
+
 describe('magazines and reloading', () => {
   it('a clip empties, the weapon reloads for its reload time, then fires again', () => {
     const { world, p, shots } = range();
