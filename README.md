@@ -486,6 +486,45 @@ solid cell along its aim, so a wall you're pressed against gets dug.
 Building uses only integer arithmetic and the seeded RNG, so every engine
 produces the same complexes.
 
+Complexes vary in style and layout:
+- **Styles.** Each complex is built in one of four styles. *Concrete* is
+  the classic look. *Steelworks* has metal walls and ceilings and a steel
+  back wall. *Ruined* has most modules shot through and rubble heaped on
+  the floors. *Fortified* has steel facing on its outer walls and merlons
+  along its roofs.
+- **Grand halls.** Some complexes open a hall two storeys high across two
+  modules, with mezzanine ledges and a heavy gun on the floor (Gatling,
+  shotgun, GL or laser).
+- **Bank vaults.** Some have a steel-lined vault in the deepest basement,
+  sometimes two modules wide, with gold bars stacked on its floor.
+- **Sniper towers.** Narrow towers 3–5 storeys tall stand clear of the
+  complexes. Each has doors on both sides, firing slits on every storey,
+  holes in alternate floors, and a battlemented metal roof with a sniper
+  rifle lying on it.
+- **Map loot.** Guns placed by the generator spawn when the wave starts
+  and don't expire.
+
+## Biomes
+
+Each map's seed picks a biome (`biomeOf` in `src/shared/worldgen.ts`). The
+countdown banner names it.
+
+| Biome | Terrain |
+|---|---|
+| **Dunes** | Rolling sand over dirt, as before. Patches of grass. |
+| **Canyons** | A high rock plateau cut by 3–5 deep ravines, 45–120 cells wide and up to 340 deep. The rock is banded with strata and the ravine floors are sand. Some ravines have a natural rock bridge. Extra sniper towers. |
+| **Highlands** | Ridged mountains up to 330 cells above the valleys, rockier underground, and capped with snow above the snowline. Many sniper towers. |
+| **Meadows** | Gentle hills under a thin sand crust, mostly grassed over. |
+
+Fortress maps are only Dunes or Meadows, so the forts have room to stand.
+Extraction's labyrinth is always Dunes.
+
+**Frosting.** After the bunkers are built, the top of the natural ground
+gets a cover: grass turf 2–3 cells deep in patches (not on rock or steep
+slopes), or snow on the high Highlands. Bunkers never get it. Grass and
+snow are new soft materials. Grass is drawn with blades poking into the air
+above it. Snow is drawn with a bright crust, blue shadows and glints.
+
 ## Architecture
 
 ```

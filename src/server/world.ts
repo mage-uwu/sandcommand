@@ -376,6 +376,8 @@ export class World {
   mapKind: number = MapKind.Plain;
   /** Extraction: the labyrinth of this map. */
   dungeon: Dungeon | null = null;
+  /** Weapons the map's bunkers hold at the start of a wave (sniper rifles up the towers, heavy guns in the halls). */
+  mapLoot: { x: number; y: number; weapon: number }[] = [];
   /** Extraction: mines gone off (bit per trap id), its revision, and every trap's rearm timer. */
   readonly trapSpent = new Uint8Array(32);
   trapsRev = 0;
@@ -438,6 +440,7 @@ export class World {
     this.fortresses = [];
     for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
     this.dungeon = lastDungeon;
+    this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
     this.trapSpent.fill(0);
     this.trapCd.fill(0);
     this.trapsRev++;
@@ -991,6 +994,11 @@ export class World {
     if (this.tankDrops && mode !== GameMode.Extraction) this.dropTanks(1 + this.rng.int(2));
     if (mode === GameMode.Regicide) this.startRegicide();
     if (mode === GameMode.Extraction) this.startExtraction();
+    // The bunkers' own weapons, lying where they were left (all wave long).
+    for (const l of this.mapLoot) {
+      this.spawnItem(l.weapon, WEAPONS[l.weapon].clip, l.x, l.y, 0, 0);
+      this.items[this.items.length - 1].age = -30 * 60 * 15;
+    }
     this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : WAVE_TICKS);
   }
 

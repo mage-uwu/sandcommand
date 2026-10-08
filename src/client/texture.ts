@@ -223,6 +223,52 @@ function glyphStone(t: Terrain, x: number, y: number): number {
   return abgr(r * kb, g * kb, b * kb);
 }
 
+/**
+ * Frosting on the topsoil. Grass: bright tips on its top row (some blades
+ * lighter, some darker), deepening to a rooty green-brown underneath. Snow:
+ * a bright crust lit from above, cold blue in its depths and shadows, the
+ * odd glint.
+ */
+export function frostColor(t: Terrain, m: number, x: number, y: number): number {
+  let d = 0; // depth below open air
+  while (d < 4 && matAt(t, x, y - d - 1) !== Mat.Air) d++;
+  const n = h(x, y, 61);
+  if (m === Mat.Snow) {
+    if (n < 0.012) return abgr(255, 255, 255);
+    const k = (d === 0 ? 1.04 : d === 1 ? 0.97 : 0.88 - (d - 2) * 0.04) * (0.96 + 0.06 * noise(x, y, 9, 62));
+    const shade = matAt(t, x + 1, y) === Mat.Air ? 0.9 : 1;
+    return abgr(222 * k * shade, 232 * k * shade, 246 * k);
+  }
+  const blade = h(x, 0, 63);
+  let r = 86;
+  let g = 150;
+  let b = 58;
+  if (d === 0) {
+    r = blade < 0.3 ? 128 : 104;
+    g = blade < 0.3 ? 188 : 168;
+    b = blade < 0.3 ? 72 : 62;
+  } else if (d >= 2) {
+    r = 78;
+    g = 112;
+    b = 52;
+  }
+  const k = 0.92 + 0.14 * n;
+  return abgr(r * k, g * k, b * k);
+}
+
+/**
+ * Air just over grass: a blade or two poking up (from the column's hash), so
+ * a turf edge reads as grass, not a green stripe. 0: nothing there.
+ */
+export function grassBlade(t: Terrain, x: number, y: number): number {
+  const below1 = matAt(t, x, y + 1) === Mat.Grass;
+  const below2 = !below1 && matAt(t, x, y + 2) === Mat.Grass && matAt(t, x, y + 1) === Mat.Air;
+  if (!below1 && !below2) return 0;
+  const tall = h(x, 7, 64);
+  if (below1 ? tall < 0.45 : tall < 0.82) return 0;
+  return below1 ? abgr(96, 170, 64) : abgr(122, 190, 78);
+}
+
 /** A built solid (concrete, steel, ancient cobble or temple stone) at (x, y). */
 export function structColor(t: Terrain, m: number, x: number, y: number): number {
   if (m === Mat.Cobble) return cobble(t, x, y);

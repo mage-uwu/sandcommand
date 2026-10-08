@@ -1,6 +1,7 @@
 import { ACTOR_H, WORLD_H, WORLD_W } from './constants.ts';
 import { Mat } from './materials.ts';
 import { Rng } from './rng.ts';
+import { WeaponId } from './weapons.ts';
 
 /**
  * Bunker complexes on the surface, built on a modular grid as part of map
@@ -39,7 +40,34 @@ export interface Complex {
   basements: number[]; // storeys below ground per module
   /** Regicide fortresses only: whose it is, where its king starts, and where its soldiers do. */
   fortress?: Fortress;
+  /** How it's built (Style). */
+  style?: number;
+  /** A freestanding sniper tower (one narrow column of storeys). */
+  tower?: boolean;
+  /** Grand halls (two storeys high, two modules wide) and steel-lined bank vaults in it: boxes, cells. */
+  halls?: Box[];
+  vaults?: Box[];
+  /** Weapons waiting in it at the start of a wave (a sniper rifle up a tower, a heavy gun in a hall). */
+  loot?: { x: number; y: number; weapon: number }[];
 }
+
+export interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * How a complex is built:
+ * - Concrete: the standard bunker.
+ * - Steelworks: walls and ceilings of riveted steel plate.
+ * - Ruined: badly shot up, rubble heaped in its rooms.
+ * - Fortified: steel-faced outer walls and battlements along every roof.
+ */
+export const Style = { Concrete: 0, Steelworks: 1, Ruined: 2, Fortified: 3 } as const;
+/** Width of a sniper tower (cells). */
+export const TOWER_W = 26 * SCALE;
 
 /** A standing spot: x centre, y the surface a clone stands on. */
 export interface Spot {
@@ -73,7 +101,7 @@ const FORT_INSET = 15;
  */
 export const Backdrop = { None: 0, Concrete: 1, Steel: 2 } as const;
 
-export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number, fortresses = false, backdrop?: Uint8Array): Complex[] {
+export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number, fortresses = false, backdrop?: Uint8Array, extraTowers = 0): Complex[] {
   const rng = new Rng(seed ^ 0xb0b5);
   const coverage = 0.15 + rng.next() * 0.45;
   const nMods = Math.floor((WORLD_W - 2 * MARGIN) / MOD_W);
@@ -108,7 +136,10 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
       continue;
     }
     const x0 = MARGIN + i * MOD_W;
-    const c = buildComplex(m, heights, x0, len, rng);
+    // Too uneven a site for one this long (a dune, a ravine edge)? Try it shorter.
+    const style = rng.int(4);
+    let c: Complex | null = null;
+    for (let l = len; l >= Math.min(2, len) && !c; l--) c = buildComplex(m, heights, x0, l, rng, undefined, style);
     if (c) out.push(c);
     built += len;
     i += len + 1 + rng.int(Math.max(1, Math.round(meanGap * 2 - 1)));
@@ -125,11 +156,89 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
     const limit = right ? (out[k + 1]?.x0 ?? WORLD_W - MARGIN) - 24 * SCALE : (out[k - 1]?.x1 ?? MARGIN) + 24 * SCALE;
     tunnel(m, heights, c, right, limit, rng);
   }
+  // Sniper towers on open ground between the complexes.
+  // (Rugged maps get more of them: they perch where no complex can.)
+  const towers = 1 + rng.int(4) + extraTowers;
+  for (let tries = 0, built = 0; tries < 40 + extraTowers * 20 && built < towers; tries++) {
+    const cx = MARGIN + 60 + rng.int(WORLD_W - 2 * MARGIN - 120);
+    const clear = out.every((c) => cx + TOWER_W / 2 + (c.fortress ? 64 : 30) < c.x0 || cx - TOWER_W / 2 - (c.fortress ? 64 : 30) > c.x1);
+    if (!clear) continue;
+    const tw = tower(m, heights, cx, rng, extraTowers > 0);
+    if (!tw) continue;
+    out.push(tw);
+    if (backdrop) markBox(backdrop, tw.x0 + WALL, tw.floor - tw.heights[0] * MOD_H + SLAB, tw.x1 - WALL, tw.floor, Backdrop.Concrete);
+    built++;
+  }
+  out.sort((a, b) => a.x0 - b.x0);
   return out;
 }
 
-/** Every module's box, roof to deepest basement floor, gets a back wall (the king's vault in steel). */
+function markBox(bd: Uint8Array, x0: number, y0: number, x1: number, y1: number, kind: number): void {
+  for (let y = Math.max(0, y0); y < Math.min(WORLD_H, y1); y++) bd.fill(kind, y * WORLD_W + Math.max(0, x0), y * WORLD_W + Math.min(WORLD_W, x1));
+}
+
+/**
+ * A freestanding sniper tower: a narrow concrete column three to five
+ * storeys tall on a levelled footing, doors at the bottom, firing slits on
+ * both sides of every storey, holes up through each floor (alternating
+ * sides), and an open roof behind battlements, where a sniper rifle waits.
+ */
+function tower(m: Uint8Array, heights: Int32Array, cx: number, rng: Rng, rugged = false): Complex | null {
+  const x0 = cx - TOWER_W / 2;
+  const x1 = x0 + TOWER_W;
+  const hs: number[] = [];
+  for (let x = x0; x < x1; x += 2) hs.push(heights[x]);
+  hs.sort((a, b) => a - b);
+  if (hs[hs.length - 1] - hs[0] > MOD_H * (rugged ? 1.5 : 1)) return null; // not on a cliff edge
+  const floor = (hs[hs.length >> 1] >> 2) << 2;
+  let storeys = 3 + rng.int(3);
+  while (storeys > 2 && floor - storeys * MOD_H - 10 * SCALE < 12) storeys--;
+  if (floor - storeys * MOD_H - 10 * SCALE < 12 || floor + SLAB > WORLD_H - 40) return null;
+  const roof = floor - storeys * MOD_H;
+  fill(m, x0 - 2 * SCALE, roof - 10 * SCALE, x1 + 2 * SCALE, floor, Mat.Air);
+  fill(m, x0, floor, x1, floor + SLAB, Mat.Concrete);
+  for (let x = x0; x < x1; x++) {
+    for (let y = floor + SLAB, n = 0; y < WORLD_H - 12 && n < MAX_FOUNDATION; y++, n++) {
+      if (m[y * WORLD_W + x] !== Mat.Air) break;
+      m[y * WORLD_W + x] = Mat.Concrete;
+    }
+  }
+  fill(m, x0, roof, x0 + WALL, floor, Mat.Concrete);
+  fill(m, x1 - WALL, roof, x1, floor, Mat.Concrete);
+  for (let lv = 0; lv < storeys; lv++) {
+    const yTop = floor - (lv + 1) * MOD_H;
+    const yFloor = floor - lv * MOD_H;
+    fill(m, x0, yTop, x1, yTop + SLAB, lv === storeys - 1 ? Mat.Metal : Mat.Concrete);
+    fill(m, x0 + WALL, yTop + SLAB, x1 - WALL, yFloor, Mat.Air);
+    // Up through the ceiling, alternating sides (the top one opens onto the roof).
+    const hx = (lv & 1) === 0 ? x0 + WALL : x1 - WALL - HOLE_W;
+    fill(m, hx, yTop, hx + HOLE_W, yTop + SLAB, Mat.Air);
+    if (lv > 0) {
+      // Firing slits both ways at head height.
+      fill(m, x0, yFloor - 12 * SCALE, x0 + WALL, yFloor - 9 * SCALE, Mat.Air);
+      fill(m, x1 - WALL, yFloor - 12 * SCALE, x1, yFloor - 9 * SCALE, Mat.Air);
+    }
+  }
+  fill(m, x0, floor - DOOR_H, x0 + WALL, floor, Mat.Air);
+  fill(m, x1 - WALL, floor - DOOR_H, x1, floor, Mat.Air);
+  // Battlements round the roof.
+  const MERLON = 5 * SCALE;
+  for (let x = x0; x + MERLON <= x1; x += 2 * MERLON) fill(m, x, roof - 5 * SCALE, x + MERLON, roof, Mat.Concrete);
+  fill(m, x1 - MERLON, roof - 5 * SCALE, x1, roof, Mat.Concrete);
+  return { x0, x1, floor, heights: [storeys], basements: [0], tower: true, style: Style.Concrete, loot: [{ x: cx, y: roof - 2, weapon: WeaponId.Sniper }] };
+}
+
+/** Every module's box, roof to deepest basement floor, gets a back wall (the king's vault, steelworks and bank vaults in steel). */
 function markBackdrop(bd: Uint8Array, c: Complex): void {
+  if (c.tower) return;
+  if (c.style === Style.Steelworks) {
+    for (let k = 0; k < c.heights.length; k++) {
+      const mx = c.x0 + k * MOD_W;
+      markBox(bd, mx, c.floor - c.heights[k] * MOD_H + SLAB, mx + MOD_W, c.floor + SLAB + c.basements[k] * MOD_H, Backdrop.Steel);
+    }
+    return;
+  }
+  for (const v of c.vaults ?? []) markBox(bd, v.x0, v.y0, v.x1, v.y1, Backdrop.Steel);
   const vault = c.fortress ? Math.floor((c.fortress.king.x - c.x0) / MOD_W) : -1;
   for (let k = 0; k < c.heights.length; k++) {
     const mx = c.x0 + k * MOD_W;
@@ -140,6 +249,7 @@ function markBackdrop(bd: Uint8Array, c: Complex): void {
       bd.fill(y >= steelFrom ? Backdrop.Steel : Backdrop.Concrete, y * WORLD_W + mx, y * WORLD_W + mx + MOD_W);
     }
   }
+  for (const v of c.vaults ?? []) markBox(bd, v.x0, v.y0, v.x1, v.y1, Backdrop.Steel);
 }
 
 function fill(m: Uint8Array, x0: number, y0: number, x1: number, y1: number, mat: number): void {
@@ -158,18 +268,27 @@ interface FortPlan {
   team: number;
 }
 
-function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: number, rng: Rng, plan?: FortPlan): Complex | null {
+function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: number, rng: Rng, plan?: FortPlan, style: number = Style.Concrete): Complex | null {
   const x1 = x0 + len * MOD_W;
   // Level the site at the median ground height under it (snapped to 4).
   const hs: number[] = [];
   for (let x = x0; x < x1; x += 4) hs.push(heights[x]);
   hs.sort((a, b) => a - b);
+  // Not across a ravine or a mountainside: the ground under it can't vary too much.
+  if (!plan && hs[hs.length - 1] - hs[0] > MOD_H * 1.6) return null;
+  const wallMat = style === Style.Steelworks ? Mat.Metal : Mat.Concrete;
   let floor = (hs[hs.length >> 1] >> 2) << 2;
   const storeys: number[] = [];
   const basements: number[] = [];
   for (let k = 0; k < len; k++) {
     storeys.push(plan ? plan.storeys[k] : [1, 1, 1, 1, 2, 2, 3][rng.int(7)]);
     basements.push(plan ? plan.basements[k] : [0, 0, 1, 1, 1, 2][rng.int(6)]);
+  }
+  // A grand hall over two neighbouring modules (each at least two storeys tall for it).
+  const hallK = !plan && len >= 2 && rng.next() < 0.45 ? rng.int(len - 1) : -1;
+  if (hallK >= 0) {
+    storeys[hallK] = Math.max(2, storeys[hallK]);
+    storeys[hallK + 1] = Math.max(2, storeys[hallK + 1]);
   }
   const deepest = Math.max(...basements);
   if (plan) {
@@ -195,7 +314,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
     const mx = x0 + k * MOD_W;
     for (let lv = 0; lv < storeys[k]; lv++) {
       const yTop = floor - (lv + 1) * MOD_H;
-      fill(m, mx, yTop, mx + MOD_W, yTop + SLAB, lv === storeys[k] - 1 ? Mat.Metal : Mat.Concrete);
+      fill(m, mx, yTop, mx + MOD_W, yTop + SLAB, lv === storeys[k] - 1 ? Mat.Metal : wallMat);
     }
   }
   for (let b = 0; b <= len; b++) {
@@ -203,7 +322,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
     const left = b > 0 ? storeys[b - 1] : 0;
     const right = b < len ? storeys[b] : 0;
     const h = Math.max(left, right);
-    fill(m, bx, floor - h * MOD_H, bx + WALL, floor, Mat.Concrete);
+    fill(m, bx, floor - h * MOD_H, bx + WALL, floor, wallMat);
     for (let lv = 0; lv < h; lv++) {
       const yFloor = floor - lv * MOD_H; // standing surface of this storey
       const inside = lv < Math.min(left, right);
@@ -256,11 +375,75 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
 
   if (plan) return fortify(m, x0, len, floor, storeys, basements, plan, rng);
 
-  // Battle damage: some modules come pre-shot.
+  // A grand hall: two neighbouring modules' lower two storeys opened into one
+  // tall room, with a mezzanine ledge along each end wall.
+  const halls: Box[] = [];
+  const loot: { x: number; y: number; weapon: number }[] = [];
+  if (hallK >= 0) {
+    const k = hallK;
+    {
+      const hx0 = x0 + k * MOD_W + WALL;
+      const hx1 = k + 2 === len ? x1 - WALL : x0 + (k + 2) * MOD_W;
+      const hy0 = floor - 2 * MOD_H + SLAB;
+      fill(m, hx0, hy0, hx1, floor, Mat.Air);
+      const LEDGE = 10 * SCALE;
+      fill(m, hx0, floor - MOD_H, hx0 + LEDGE, floor - MOD_H + SLAB, Mat.Concrete);
+      fill(m, hx1 - LEDGE, floor - MOD_H, hx1, floor - MOD_H + SLAB, Mat.Concrete);
+      halls.push({ x0: hx0, y0: hy0, x1: hx1, y1: floor });
+      const heavy = [WeaponId.Gatling, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Laser];
+      loot.push({ x: (hx0 + hx1) >> 1, y: floor - 2, weapon: heavy[rng.int(heavy.length)] });
+    }
+  }
+
+  // A bank vault: the deepest basement room lined in steel (two modules wide
+  // where the neighbour goes as deep), gold bars stacked along its floor.
+  const vaults: Box[] = [];
+  if (rng.next() < 0.35) {
+    let k = 0;
+    for (let i = 1; i < len; i++) if (basements[i] > basements[k]) k = i;
+    const j = basements[k] - 1;
+    if (j >= 0) {
+      const wide = k + 1 < len && basements[k + 1] > j;
+      const vx0 = x0 + k * MOD_W;
+      const vx1 = vx0 + (wide ? 2 : 1) * MOD_W;
+      const vy0 = floor + SLAB + j * MOD_H;
+      const vy1 = vy0 + MOD_H;
+      if (wide) fill(m, vx0 + MOD_W - WALL, vy0 + (j > 0 ? SLAB : 0), vx0 + MOD_W + WALL, vy1 - SLAB, Mat.Air);
+      for (let y = vy0; y < vy1 + SLAB; y++) {
+        for (let x = vx0; x < vx1; x++) {
+          const i = y * WORLD_W + x;
+          if (m[i] === Mat.Concrete) m[i] = Mat.Metal;
+        }
+      }
+      const fy = vy1 - SLAB; // vault floor
+      for (let gx = vx0 + WALL + 4; gx + 8 < vx1 - WALL - 2; gx += 14) {
+        if (rng.next() < 0.25) continue;
+        const h = 2 + rng.int(3) * 2;
+        fill(m, gx, fy - h, gx + 8, fy, Mat.Gold);
+      }
+      vaults.push({ x0: vx0 + WALL, y0: vy0, x1: vx1 - WALL, y1: vy1 });
+    }
+  }
+
+  if (style === Style.Fortified) {
+    // Steel facing on the outer walls (doors left open) and battlements along every roof.
+    const FACING = 2 * SCALE;
+    fill(m, x0 - FACING, floor - storeys[0] * MOD_H, x0, floor - DOOR_H, Mat.Metal);
+    fill(m, x1, floor - storeys[len - 1] * MOD_H, x1 + FACING, floor - DOOR_H, Mat.Metal);
+    const MERLON = 6 * SCALE;
+    for (let k = 0; k < len; k++) {
+      const mx = x0 + k * MOD_W;
+      const roof = floor - storeys[k] * MOD_H;
+      for (let x = mx; x + MERLON <= mx + MOD_W; x += 2 * MERLON) fill(m, x, roof - 5 * SCALE, x + MERLON, roof, Mat.Concrete);
+    }
+  }
+
+  // Battle damage: some modules come pre-shot (a ruin, most of them, badly).
+  const ruined = style === Style.Ruined;
   for (let k = 0; k < len; k++) {
-    if (rng.next() > 0.22) continue;
+    if (rng.next() > (ruined ? 0.75 : 0.22)) continue;
     const mx = x0 + k * MOD_W;
-    const holes = 2 + rng.int(4);
+    const holes = ruined ? 4 + rng.int(5) : 2 + rng.int(4);
     for (let n = 0; n < holes; n++) {
       const cx = mx + rng.int(MOD_W);
       const cy = floor - rng.int(storeys[k] * MOD_H);
@@ -276,8 +459,18 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
         }
       }
     }
+    if (ruined) {
+      // Rubble heaped on the ground floor (on solid floor, never over a shaft down).
+      const rx = mx + WALL + rng.int(MOD_W - 2 * WALL - 16);
+      let solid = true;
+      for (let j = 0; j < 16; j++) if (m[floor * WORLD_W + rx + j] === Mat.Air) solid = false;
+      for (let j = 0; j < 16 && solid; j++) {
+        const hgt = Math.max(0, 6 - Math.abs(j - 8)) + rng.int(2);
+        fill(m, rx + j, floor - hgt, rx + j + 1, floor, Mat.Rubble);
+      }
+    }
   }
-  return { x0, x1, floor, heights: storeys, basements };
+  return { x0, x1, floor, heights: storeys, basements, style, halls, vaults, loot };
 }
 
 /**

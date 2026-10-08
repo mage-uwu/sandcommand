@@ -3,6 +3,7 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
+import { BIOME_NAMES } from '../shared/worldgen.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
@@ -19,7 +20,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { backWallColor, structColor } from './texture.ts';
+import { backWallColor, structColor, frostColor, grassBlade } from './texture.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
@@ -138,12 +139,13 @@ export class Renderer {
         if (m === Mat.Air) {
           // Inside a bunker: its back wall instead of the open backdrop.
           const bd = backdrop[row + x];
-          px[y * CHUNK + x] = bd ? backWallColor(t, bd, ox + x, wy) : 0;
+          px[y * CHUNK + x] = bd ? backWallColor(t, bd, ox + x, wy) : grassBlade(t, ox + x, wy);
           continue;
         }
         const wx = ox + x;
         let c: number;
         if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph) c = structColor(t, m, wx, wy);
+        else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)];
@@ -1658,13 +1660,14 @@ export class Renderer {
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
-        extraction
+        (extraction ? '' : `${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} · `) +
+        (extraction
           ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
           : regicide
           ? 'regicide · kill their king · guard yours'
           : teams
             ? 'last team standing · red vs green · one life each'
-            : 'last man standing · one life each · every clone for itself',
+            : 'last man standing · one life each · every clone for itself'),
         '#ffd34a',
       );
     } else if (rs.phase === Phase.Victory && extraction) {
