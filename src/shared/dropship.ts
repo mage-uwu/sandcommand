@@ -3,9 +3,9 @@ import type { Terrain } from './terrain.ts';
 
 /**
  * The dropship: an aerial support gunship, called in by radio. Unlike a drop
- * rocket it hangs from four engine pods on struts above its hull, like a
- * modern drone (chunky rocket motors out on pylons past the hull's
- * ends, open to fire from below), and stays on station: it hovers over whoever called it,
+ * rocket it is held up by four engine pods, like a modern drone: chunky
+ * rocket motors out on pylons past the hull's ends, open to fire from
+ * below. It stays on station: it hovers over whoever called it,
  * strafes enemies with a small turret on either side, and opens the bomb-bay
  * doors in its belly to drop heavy bombs (eight in all) on enemies below.
  *
