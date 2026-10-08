@@ -215,6 +215,24 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 1,
   },
+  {
+    // Golden idol: a squat alien figure in gold with a ruby in its chest, held up on its plinth
+    grid: [
+      '.....YYYY...',
+      '....YyYYyY..',
+      '....YYYYYY..',
+      '.....yYYy...',
+      '...YYYYYYYY.',
+      '...Y.YYYY.Y.',
+      '.....YrrY...',
+      '.....YYYY...',
+      'KAAK.Y..Y...',
+      'KAAKyYy.yYy.',
+      '.KKKKKKKKKK.',
+    ],
+    px: 1,
+    py: 8,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
@@ -237,6 +255,62 @@ const GIBS: Grid[] = [
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
   ['Y.Y.Y', 'YYYYY', 'yYrYy'], // a king's crown, knocked off
 ];
+
+/**
+ * The extraction rocket, 18x40: a white heavy lifter with a gold band, a
+ * row of ports, fins and a bell; its hatch open (lit inside) once it's down.
+ */
+function evacGrid(open: boolean): Grid {
+  const W = 18;
+  const H = 40;
+  const g: string[][] = Array.from({ length: H }, () => new Array<string>(W).fill('.'));
+  for (let y = 0; y < H - 4; y++) {
+    // Nose: an ogive over the first 10 rows; then a straight body 14 wide.
+    const half = y < 10 ? Math.max(1, Math.round(7 * Math.sin(((y + 1) / 10) * (Math.PI / 2)))) : 7;
+    for (let x = 9 - half; x < 9 + half; x++) {
+      const edge = x === 9 - half || x === 9 + half - 1;
+      g[y][x] = edge ? 'K' : x < 7 ? 'W' : x < 12 ? 'w' : 'v';
+    }
+  }
+  for (let x = 2; x < 16; x++) {
+    if (g[12][x] !== 'K') g[12][x] = 'Y';
+    if (g[13][x] !== 'K') g[13][x] = 'y';
+    if (g[31][x] !== 'K') g[31][x] = 'Y';
+  }
+  for (const wx of [5, 9, 13]) {
+    g[16][wx - 1] = g[16][wx] = 'B';
+    g[17][wx - 1] = 'b';
+    g[17][wx] = 'B';
+  }
+  // The hatch.
+  for (let y = 21; y < 31; y++) for (let x = 6; x < 12; x++) g[y][x] = open ? (y > 22 ? 'L' : 'l') : x === 6 || x === 11 || y === 21 ? 'K' : 'w';
+  // Fins and the bell.
+  for (let y = 26; y < H - 2; y++) {
+    const out = Math.min(2, Math.floor((y - 26) / 3));
+    for (let k = 0; k <= out; k++) {
+      g[y][1 - k + 1] = g[y][1 - k + 1] === '.' ? 'r' : g[y][1 - k + 1];
+      g[y][16 + k - 1] = g[y][16 + k - 1] === '.' ? 'r' : g[y][16 + k - 1];
+    }
+  }
+  for (let y = H - 4; y < H; y++) for (let x = 6 - (y - H + 4); x < 12 + (y - H + 4); x++) g[y][x] = 'D';
+  g[0][8] = g[0][9] = 'R'; // beacon
+  return g.map((r) => r.join(''));
+}
+const EVAC_PAL: Record<string, number> = {
+  K: 0x16181c,
+  W: 0xf4f6f8,
+  w: 0xd2d8de,
+  v: 0xa4acb6,
+  Y: 0xf0c040,
+  y: 0xa07c20,
+  B: 0x23405e,
+  b: 0x8ad0ff,
+  L: 0xffe9a0,
+  l: 0xffc860,
+  r: 0xc8402c,
+  D: 0x3a3f46,
+  R: 0xff3020,
+};
 
 /** A king's crown as worn (5x3, sits on the head's top row): gold spikes, a band, a red jewel. */
 export const CROWN: Grid = ['Y.Y.Y', 'YYYYY', 'yYrYy'];
@@ -548,6 +622,11 @@ export class SpriteCache {
     let c = this.bodies.get(key);
     if (!c) this.bodies.set(key, (c = bakeBody(factionGrid(BODY[frame], faction), factionPalette(classPalette(this.pal(team), cls), faction, cls), left, mask)));
     return c;
+  }
+
+  /** The extraction rocket, hatch shut or open. */
+  evac(open: boolean): HTMLCanvasElement {
+    return this.tankSprite(`evac${open ? 1 : 0}`, () => bake(evacGrid(open), EVAC_PAL));
   }
 
   /** The top row of a body frame's head (it bobs down a row in some frames). */

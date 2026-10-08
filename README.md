@@ -230,7 +230,7 @@ Bunkers are drawn like a Cortex Command or Metal Slug bunker from around
 ## Regicide
 
 The third mode in the rotation (waves go Last Man Standing → Last Team
-Standing → Regicide; `rotation` in the `World` options).
+Standing → Regicide → Extraction; `rotation` in the `World` options).
 - **Two fortresses.** A Regicide map always has two large fortresses built
   into it, one per team: red's in the west, green's in the east, about
   1500 cells apart. Each is six modules wide, with two- and three-storey
@@ -263,6 +263,74 @@ Standing → Regicide; `rotation` in the `World` options).
 - **Bots.** About half the bots assault: they go straight for the enemy king
   and dig through whatever is in the way. The rest fight whoever is
   nearest. A bot king holds his vault and shoots whatever comes into view.
+
+## Extraction
+
+The fourth mode. **Four teams** (red, green, blue, gold) race down one
+massive labyrinth for the **golden idol** at its bottom and out again on an
+extraction rocket. Everyone respawns by drop rocket after 10 seconds,
+landing around their own team's well. A wave runs 12 minutes.
+- **The map** (`src/shared/dungeon.ts`, `MapKind.Dungeon`) is unusually
+  deep. The desert sits high (about 140 cells down), and almost everything
+  under it is one labyrinth, about 880 cells deep. It's a 63 × 16 grid of
+  stone rooms carved as a maze: a depth-first maze biased toward long
+  galleries, plus extra doorways and shafts so it plays as a dungeon with
+  many routes. Rooms side by side join through full-height doorways (tanks
+  fit); rooms above and below join through shafts you jet up or drop down.
+- **Ancient stone.** The upper five rows are an alien temple: carved
+  sandstone in big ashlar blocks, some engraved with glyphs that glow teal
+  (`Mat.Glyph`). Below that are cobblestone ruins: rounded stones in dark
+  mortar, with moss in the damp (`Mat.Cobble`). Both are *fixed*, so
+  nothing digs or blasts through them. You find the way through.
+- **Open spaces.** Up to nine large spaces break up the grid. **Temple
+  halls** are tall chambers with ledges where the floors were (clear over
+  the middle of each cell, so you can still jet between levels) and
+  statues for cover. **Caverns** are irregular voids with rubble heaps and
+  boulders on their floors.
+- **Landmarks.** A **step pyramid** stands over the middle. It has a shrine
+  on its apex, a shaft straight down its heart into the labyrinth, and a
+  gallery through its base at ground level. Each team has a **well**, a
+  cobble-lined shaft flanked by two obelisks. The inner teams' wells open
+  into the top row nearer the middle; the outer teams' wells drop deeper,
+  so every team has about as far to go. At the bottom centre is the
+  **sanctum**, a glyph-lined hall with the idol on a stepped altar.
+- **Booby traps.** There are about 180 per map; the server springs them
+  and the client draws them, both from the seed.
+  - **Spike pits** in floors bite the legs of anyone who stands in them.
+  - **Dart throwers** are carved stone faces in a room's wall. They fire
+    across the room whenever someone's in it, at chest height, so going
+    prone ducks them.
+  - **Brass pressure plates** blow up under whoever steps on them, clone
+    or tank, once (`R_TRAPS` carries which have gone off).
+
+  Rooms also hold loot: weapons on the floor, and gold nuggets to dig. Three
+  **vacant tanks** wait in the labyrinth, in halls where there's room to
+  drive.
+- **The idol** is an item (`WeaponId.Idol`). You carry it in your
+  inventory, it spills when you die, and you can drop it to pass it on.
+  It's heavy: its carrier runs at 80% speed and burns jetpack fuel 50%
+  faster (thrust is untouched, so anyone can still climb). Its glow shows
+  in the dark, and the minimap shows it to everyone as a pulsing gold
+  diamond.
+- **Extraction.** Carry the idol up out of the labyrinth into the open (or
+  onto the pyramid's steps) and the **extraction rocket** is sent for it.
+  It takes 20 seconds to come, so hold out. It lands a little way off.
+  Get the idol aboard and your team wins; the rocket lifts off with
+  carrier and prize. If the idol surfaces far from where the rocket waits,
+  it flies over to land nearer. When time runs out, whoever holds the idol
+  takes the wave.
+- **Bots** (`src/server/maze.ts`) route through the labyrinth with a
+  breadth-first search over its grid graph, cell by cell. They walk
+  through doorways, drop down shafts, and jet up them, resting on a ledge
+  when the jetpack runs low. Carrying the idol, they climb out by the
+  nearest well and run for the rocket. When a teammate has it, they stay
+  with them; otherwise they go after it, wherever it is. With 48 bots a
+  wave usually ends in two to four minutes, the idol changing hands a few
+  times on the way up.
+- **Networking.** The map is built from the seed like every other (its
+  kind rides in `R_WAVE`). `R_ROUND` adds each team's clones left, where
+  the idol is and who carries it, and the rocket's state, position and
+  ETA.
 
 ## Tanks
 

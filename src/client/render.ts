@@ -1,6 +1,7 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { CALL_COST, CallKind, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { hash2 } from '../shared/rng.ts';
 import { PROJ, PROJ_BUILD, REPAIR_REACH, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
@@ -138,7 +139,7 @@ export class Renderer {
         }
         const wx = ox + x;
         let c: number;
-        if (m === Mat.Concrete || m === Mat.Metal) c = structColor(t, m, wx, wy);
+        if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph) c = structColor(t, m, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)];
@@ -288,6 +289,11 @@ export class Renderer {
       }
     }
 
+    // Extraction: the labyrinth's traps, and the extraction rocket.
+    if (game.dungeon) this.drawTraps(ctx, game, camX - halfW, camY - halfH, camX + halfW, camY + halfH);
+    const rsE = game.roundState;
+    if (rsE?.evac && rsE.evac.state !== Evac.None) this.drawEvac(ctx, rsE.evac, now);
+
     // Drop rockets.
     for (const c of game.craftViews()) this.drawCraft(ctx, c, game, now);
     const ride = game.myCraft(alpha);
@@ -343,7 +349,8 @@ export class Renderer {
     // Weapons lying on the ground (spinning while they fly), and a prompt
     // over the one we'd pick up.
     for (const [, it] of game.groundItems) {
-      const ang = it.rest ? (it.left ? Math.PI : 0) : (now / 90) % (Math.PI * 2);
+      if (it.weapon === WeaponId.Idol) this.drawIdolGlow(ctx, it.x, it.y - 4, now);
+      const ang = it.rest || it.weapon === WeaponId.Idol ? (it.left ? Math.PI : 0) : (now / 90) % (Math.PI * 2);
       const g = this.sprites.gun(it.weapon, ang);
       ctx.drawImage(g.c, Math.round(it.x) - g.r, Math.round(it.y) - 1 - g.r);
     }
@@ -685,6 +692,13 @@ export class Renderer {
       ctx.drawImage(g.c, sx - g.r, sy - g.r);
       return;
     }
+    if (weapon === WeaponId.Idol) {
+      // The idol is held up, upright, shining.
+      this.drawIdolGlow(ctx, sx + face * 4, sy - 2, now);
+      const gi = this.sprites.gun(weapon, left ? Math.PI : 0);
+      ctx.drawImage(gi.c, sx - gi.r, sy - gi.r);
+      return;
+    }
     const g = this.sprites.gun(weapon, aim);
     ctx.drawImage(g.c, sx - g.r, sy - g.r);
     if (flags & F_FIRING && WEAPONS[weapon]?.proj !== PROJ_BUILD) {
@@ -1024,6 +1038,91 @@ export class Renderer {
     }
   }
 
+  /** A soft golden halo around the idol, pulsing, so it can be spotted in the dark of the labyrinth. */
+  private drawIdolGlow(ctx: CanvasRenderingContext2D, x: number, y: number, now: number): void {
+    const p = 0.5 + 0.5 * Math.sin(now / 260);
+    const g = ctx.createRadialGradient(x, y, 1, x, y, 16 + p * 4);
+    g.addColorStop(0, `rgba(255,220,110,${0.45 + 0.2 * p})`);
+    g.addColorStop(1, 'rgba(255,200,60,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 22, y - 22, 44, 44);
+  }
+
+  /**
+   * The labyrinth's booby traps in view: spikes bristling in their pits,
+   * stone dart throwers set into the walls (a carved face, its mouth the
+   * barrel), and brass pressure plates in the floor (gone once they've fired).
+   */
+  private drawTraps(ctx: CanvasRenderingContext2D, game: Game, x0: number, y0: number, x1: number, y1: number): void {
+    const d = game.dungeon!;
+    for (const t of d.traps) {
+      if (t.x < x0 - 20 || t.x > x1 + 20 || t.y < y0 - 20 || t.y > y1 + 20) continue;
+      if (t.kind === TrapKind.Spikes) {
+        const bottom = t.y + SPIKE_DEPTH;
+        for (let x = t.x + 1; x < t.x + t.w - 1; x += 3) {
+          ctx.fillStyle = '#8a9096';
+          ctx.fillRect(x, bottom - 3, 2, 3);
+          ctx.fillStyle = '#c8ced4';
+          ctx.fillRect(x, bottom - 4, 1, 1);
+          ctx.fillStyle = '#7a1c14';
+          ctx.fillRect(x + 1, bottom - 4, 1, 1);
+        }
+      } else if (t.kind === TrapKind.Darts) {
+        // Built into the wall the dart comes out of.
+        const wx = t.dir > 0 ? t.x - 1 : t.x - 4;
+        ctx.fillStyle = '#6e6250';
+        ctx.fillRect(wx, t.y - 5, 5, 10);
+        ctx.fillStyle = '#9a8a6a';
+        ctx.fillRect(wx, t.y - 5, 5, 1);
+        ctx.fillStyle = '#40e0d0';
+        ctx.fillRect(wx + 1, t.y - 3, 1, 1);
+        ctx.fillRect(wx + 3, t.y - 3, 1, 1);
+        ctx.fillStyle = '#120e0a';
+        ctx.fillRect(t.dir > 0 ? t.x + 1 : t.x - 2, t.y - 1, 2, 2);
+      } else if (!game.trapGone(t.id)) {
+        ctx.fillStyle = '#5a4a2a';
+        ctx.fillRect(t.x - t.w / 2, t.y - 1, t.w, 1);
+        ctx.fillStyle = '#b89a50';
+        ctx.fillRect(t.x - t.w / 2 + 1, t.y - 1, t.w - 2, 1);
+      }
+    }
+  }
+
+  /** The extraction rocket: flames while it flies, its hatch open and a beacon over it once it's down. */
+  private drawEvac(ctx: CanvasRenderingContext2D, e: { state: number; x: number; y: number }, now: number): void {
+    const landed = e.state === Evac.Landed;
+    const x = Math.round(e.x - EVAC_W / 2);
+    const y = Math.round(e.y);
+    if (!landed) {
+      const len = 10 + ((now / 40) % 3) * 3;
+      ctx.fillStyle = '#ff8a24';
+      ctx.fillRect(x + 5, y + EVAC_H, 8, len);
+      ctx.fillStyle = '#ffd860';
+      ctx.fillRect(x + 6, y + EVAC_H, 6, len - 3);
+      ctx.fillStyle = '#fffbe0';
+      ctx.fillRect(x + 7, y + EVAC_H, 4, len - 6);
+    }
+    ctx.drawImage(this.sprites.evac(landed), x, y);
+    if ((now / 300) % 2 < 1) {
+      ctx.fillStyle = 'rgba(255,60,40,0.5)';
+      ctx.fillRect(x + 6, y - 3, 6, 4);
+    }
+    if (landed) {
+      // Light spilling from the hatch, and a bouncing marker over the nose.
+      ctx.fillStyle = 'rgba(255,230,150,0.22)';
+      ctx.fillRect(x - 6, y + 22, EVAC_W + 12, EVAC_H - 22);
+      const bob = Math.round(Math.sin(now / 180) * 2);
+      ctx.fillStyle = '#ffd34a';
+      ctx.font = '6px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('EXTRACTION', e.x, y - 12 + bob);
+      ctx.fillRect(e.x - 2, y - 9 + bob, 5, 1);
+      ctx.fillRect(e.x - 1, y - 8 + bob, 3, 1);
+      ctx.fillRect(e.x, y - 7 + bob, 1, 1);
+      ctx.textAlign = 'left';
+    }
+  }
+
   /**
    * A king's crown, worn on the head: drawn in the torso's posed frame (hip
    * at the origin, the sprite's top-left at (-5.5, -11)) so it leans, ducks
@@ -1336,6 +1435,26 @@ export class Renderer {
       for (const bl of game.radar) if (game.isKing(bl.id)) ctx.strokeRect(mx + bl.x * k - 3 * s, my + bl.y * k - 3 * s, 6 * s, 6 * s);
       for (const v of views) if (v.flags & F_ALIVE && game.isKing(v.id)) ctx.strokeRect(mx + v.x * k - 3 * s, my + v.y * k - 3 * s, 6 * s, 6 * s);
     }
+    // Extraction: the idol (a pulsing gold diamond) and the extraction rocket, for everyone to race to.
+    if (rs0?.idol && rs0.mode === GameMode.Extraction) {
+      const ix = mx + rs0.idol.x * k;
+      const iy = my + rs0.idol.y * k;
+      const r = (3 + Math.sin(performance.now() / 200)) * s;
+      ctx.fillStyle = '#ffd34a';
+      ctx.beginPath();
+      ctx.moveTo(ix, iy - r);
+      ctx.lineTo(ix + r, iy);
+      ctx.lineTo(ix, iy + r);
+      ctx.lineTo(ix - r, iy);
+      ctx.closePath();
+      ctx.fill();
+      if (rs0.evac && rs0.evac.state !== Evac.None) {
+        ctx.fillStyle = '#fff';
+        const ex = mx + rs0.evac.x * k;
+        const ey = my + Math.max(0, rs0.evac.y) * k;
+        ctx.fillRect(ex - 1.5 * s, ey - 3 * s, 3 * s, 6 * s);
+      }
+    }
     if (game.alive) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(mx + game.body.x * k - 2 * s, my + game.body.y * k - 2 * s, 4 * s, 4 * s);
@@ -1385,19 +1504,26 @@ export class Renderer {
     const name = (id: number) => (id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '???'));
     const big = (text: string, sub: string, color = '#fff') => this.drawBanner(text, sub, color, s, W, H);
     const regicide = rs.mode === GameMode.Regicide;
-    const teams = rs.mode === GameMode.Lts || regicide;
+    const extraction = rs.mode === GameMode.Extraction;
+    const teams = rs.mode === GameMode.Lts || regicide || extraction;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(regicide ? 'REGICIDE' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
+    if (rs.phase === Phase.Waiting) big(extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
-        regicide
+        extraction
+          ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
+          : regicide
           ? 'regicide · kill their king · guard yours'
           : teams
             ? 'last team standing · red vs green · one life each'
             : 'last man standing · one life each · every clone for itself',
         '#ffd34a',
       );
+    } else if (rs.phase === Phase.Victory && extraction) {
+      const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
+      if (rs.winner === 255) big('NOBODY GOT OUT', `the idol stays buried · wave ${rs.wave} · next wave in ${secs}`);
+      else big(`${TEAM_NAMES[rs.winner]} EXTRACTED`, `${mine ? 'your team got' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' got'} the golden idol out · next wave in ${secs}`, teamCss(rs.winner));
     } else if (rs.phase === Phase.Victory && regicide) {
       const loser = rs.winner === Team.Red ? Team.Green : Team.Red;
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
@@ -1419,7 +1545,31 @@ export class Renderer {
       ctx.fillRect(W / 2 - 150 * s, 8 * s, 300 * s, 24 * s);
       ctx.fillStyle = secs <= 30 ? '#ff8070' : '#ffd34a';
       const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-      if (regicide) {
+      if (extraction) {
+        // Extraction: the clock; every team's clones; where the idol is.
+        ctx.fillText(`WAVE ${rs.wave} · EXTRACTION · ${clock}`, W / 2, 25 * s);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(W / 2 - 230 * s, 32 * s, 460 * s, 42 * s);
+        const cols = [-165, -55, 55, 165];
+        for (let t = 0; t < 4; t++) {
+          ctx.fillStyle = teamCss(t);
+          ctx.fillText(`${TEAM_NAMES[t]}${game.myTeam === t ? '*' : ''} ${rs.teamLeft[t] ?? 0}`, W / 2 + cols[t] * s, 48 * s);
+        }
+        const idol = rs.idol;
+        const evac = rs.evac;
+        let line = 'IDOL: deep in the sanctum';
+        let color = '#ffd34a';
+        if (idol && idol.holder !== 255) {
+          const team = game.teamOf[idol.holder] ?? Team.None;
+          line = idol.holder === game.myId ? 'YOU HAVE THE IDOL · get it to the surface' : `IDOL: carried by ${name(idol.holder)}${team !== Team.None ? ' (' + TEAM_NAMES[team] + ')' : ''}`;
+          color = team !== Team.None ? teamCss(team) : color;
+        } else if (idol && game.dungeon && Math.hypot(idol.x - game.dungeon.idol.x, idol.y - game.dungeon.idol.y) > 12) line = 'IDOL: dropped!';
+        if (evac?.state === Evac.Inbound) line += evac.eta > 0 ? ` · EXTRACTION IN ${Math.ceil(evac.eta / TICK_RATE)}s` : ' · EXTRACTION LANDING';
+        else if (evac?.state === Evac.Landed) line += ' · EXTRACTION WAITING';
+        else if (evac?.state === Evac.Moving) line += ' · EXTRACTION MOVING';
+        ctx.fillStyle = color;
+        ctx.fillText(line, W / 2, 67 * s);
+      } else if (regicide) {
         // Regicide: the clock, then each side's king beneath it.
         ctx.fillText(`WAVE ${rs.wave} · REGICIDE · ${clock}`, W / 2, 25 * s);
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -1460,7 +1610,7 @@ export class Renderer {
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
         if (rs.out) big('FRAGGED', `(${watching})`, '#ff6050');
-        else if (regicide && rs.inWave) {
+        else if ((regicide || extraction) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           big('FRAGGED', back > 0 ? `reinforcements in ${back}s by drop rocket · ${watching}` : 'drop rocket inbound', '#ff6050');
         }

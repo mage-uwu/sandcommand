@@ -120,7 +120,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -135,6 +135,7 @@ import {
   R_BLIPS,
   R_BUILD,
   R_ROUND,
+  R_TRAPS,
   R_WAVE,
   R_TEAMS,
   R_TANKS,
@@ -146,7 +147,9 @@ import {
   CallKind,
   R_TANK_PART,
   R_TANK_BOOM,
+  Evac,
   GameMode,
+  TEAMS_IN_MODE,
   Team,
   R_ITEMS,
   R_ITEMS_GONE,
@@ -173,8 +176,9 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
-import { generateWorld, lastComplexes } from '../shared/worldgen.ts';
+import { PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
+import { MapKind, generateWorld, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
 
@@ -237,6 +241,9 @@ export class Player {
   callCd = 0;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
+  /** Extraction: the trap revision this client last got, and ticks until a spike pit can bite again. */
+  trapsSeen = -1;
+  spikeCd = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
   /** Latest materializer request, applied on this player's next tick. */
@@ -358,8 +365,16 @@ export class World {
   readonly rotation: readonly number[];
   /** Bumped whenever the team table changes (clients are re-sent it). */
   teamsRev = 0;
-  /** This map has the two Regicide fortresses (clients build them too). */
-  mapFortresses = false;
+  /** What kind of map this is (worldgen MapKind: plain, Regicide's fortresses, Extraction's labyrinth); clients build it too. */
+  mapKind: number = MapKind.Plain;
+  /** Extraction: the labyrinth of this map. */
+  dungeon: Dungeon | null = null;
+  /** Extraction: mines gone off (bit per trap id), its revision, and every trap's rearm timer. */
+  readonly trapSpent = new Uint8Array(32);
+  trapsRev = 0;
+  private trapCd = new Uint16Array(256);
+  /** Extraction: the extraction rocket. */
+  readonly evac = { state: Evac.None as number, x: 0, y: 0, vy: 0, toX: 0, idle: 0, team: 255, eta: 0 };
   /** Regicide: each team's fortress (by team), and each team's king (player id, 255 none). */
   fortresses: Fortress[] = [];
   readonly kings = [255, 255];
@@ -379,10 +394,10 @@ export class World {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
     this.tankDrops = opts.tanks ?? this.mode === 'ffa';
-    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts, GameMode.Regicide];
+    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction];
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
-    this.makeMap(this.mode === 'ffa' && this.modeOfWave(1) === GameMode.Regicide);
+    this.makeMap(this.mapKindFor(1));
     this.sealMap();
   }
 
@@ -402,12 +417,24 @@ export class World {
     this.mapRecord = null;
   }
 
-  /** Generate the map for `mapSeed` (with the Regicide fortresses if asked) and note the fortresses. */
-  private makeMap(fortresses: boolean): void {
-    this.mapFortresses = fortresses;
-    generateWorld(this.terrain, this.mapSeed, fortresses);
+  /** The kind of map wave `n` is fought on. */
+  private mapKindFor(n: number): number {
+    if (this.mode !== 'ffa') return MapKind.Plain;
+    const mode = this.modeOfWave(n);
+    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : MapKind.Plain;
+  }
+
+  /** Generate the map for `mapSeed` (fortresses or a labyrinth, by kind) and note what's in it. */
+  private makeMap(kind: number): void {
+    this.mapKind = kind;
+    generateWorld(this.terrain, this.mapSeed, kind);
     this.fortresses = [];
     for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
+    this.dungeon = lastDungeon;
+    this.trapSpent.fill(0);
+    this.trapCd.fill(0);
+    this.trapsRev++;
+    this.evac.state = Evac.None;
   }
 
   /** Remember the freshly generated map, so newcomers can make it themselves instead of downloading it. */
@@ -416,7 +443,7 @@ export class World {
     const w = new Writer(8 + CHUNK_COUNT * 4);
     w.u8(R_WAVE);
     w.u32(this.mapSeed);
-    w.u8(this.mapFortresses ? 1 : 0);
+    w.u8(this.mapKind);
     for (let ci = 0; ci < CHUNK_COUNT; ci++) w.u32(this.terrain.chunkHash(ci));
     this.mapRecord = w.finish();
   }
@@ -459,13 +486,12 @@ export class World {
     // In FFA you join between waves (spectating until the next one starts).
     if (this.mode === 'ffa') p.respawn = 0;
     this.players[id] = p;
-    if (this.regicideLive) {
-      // Regicide has reinforcements: join the smaller side and drop in.
-      let red = 0;
-      let green = 0;
-      for (const o of this.players) if (o && o !== p && o.team === Team.Red) red++;
-      else if (o && o !== p && o.team === Team.Green) green++;
-      p.team = red <= green ? Team.Red : Team.Green;
+    if (this.respawnLive) {
+      // Regicide and Extraction have reinforcements: join the smallest side and drop in.
+      const n = TEAMS_IN_MODE[this.modeOfWave(this.wave)];
+      const count = new Array<number>(n).fill(0);
+      for (const o of this.players) if (o && o !== p && o.team < n) count[o.team]++;
+      p.team = count.indexOf(Math.min(...count));
       p.inWave = true;
       p.pendingSpawn = true;
       p.respawn = REGICIDE_RESPAWN_TICKS;
@@ -536,6 +562,10 @@ export class World {
         }
         if (this.modeOfWave(this.wave) === GameMode.Regicide) {
           this.stepRegicide(timeUp);
+          break;
+        }
+        if (this.modeOfWave(this.wave) === GameMode.Extraction) {
+          this.stepExtraction(timeUp);
           break;
         }
         if (this.remaining() <= 1 || timeUp) {
@@ -631,6 +661,233 @@ export class World {
     p.parts.wounds[Part.Crown] = 0;
   }
 
+  // ---------------------------------------------------------------- Extraction
+
+  /**
+   * Extraction opening: the golden idol on its altar at the bottom of the
+   * labyrinth, vacant tanks in their halls, loot lying in the rooms.
+   * Everyone comes down by drop rocket around their team's well.
+   */
+  private startExtraction(): void {
+    const d = this.dungeon;
+    if (!d) return;
+    this.spawnItem(WeaponId.Idol, 0, d.idol.x, d.idol.y, 0, 0);
+    for (const t of d.tanks) {
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0) break;
+      const k = newTank(t.x, t.y);
+      k.chute = false;
+      this.tanks[slot] = k;
+    }
+    for (const l of d.loot) {
+      this.spawnItem(l.weapon, WEAPONS[l.weapon].clip, l.x, l.y, 0, 0);
+      this.items[this.items.length - 1].age = -EXTRACTION_TICKS; // lies there all wave
+    }
+    this.evac.state = Evac.None;
+    this.evac.team = 255;
+  }
+
+  /** Whoever is carrying the golden idol, if anyone. */
+  idolHolder(): Player | null {
+    for (const p of this.players) if (p && p.alive && p.inv.some((it) => it.weapon === WeaponId.Idol)) return p;
+    return null;
+  }
+
+  /** Where the idol is: its carrier, or where it lies. */
+  idolAt(): { x: number; y: number; holder: number } | null {
+    const h = this.idolHolder();
+    if (h) return { x: h.cx, y: h.cy, holder: h.id };
+    const it = this.items.find((o) => o.weapon === WeaponId.Idol);
+    return it ? { x: it.x, y: it.y, holder: 255 } : null;
+  }
+
+  /** Out of the labyrinth, up in the open desert (or on the pyramid's steps). */
+  surfaced(p: Player): boolean {
+    return p.cy < Y0 - 16 && p.body.y + ACTOR_H <= this.terrain.surfaceY(Math.floor(p.cx)) + 3;
+  }
+
+  /** Where the extraction rocket would stand (its base) at column x: on the highest ground under it. */
+  private evacGround(x: number): number {
+    let g = WORLD_H;
+    for (let dx = -EVAC_W / 2; dx <= EVAC_W / 2; dx += 3) g = Math.min(g, this.terrain.surfaceY(Math.max(0, Math.min(WORLD_W - 1, Math.floor(x + dx)))));
+    return g;
+  }
+
+  /** A flat-enough spot to set the extraction rocket down, near x. */
+  private landingX(x: number): number {
+    for (let k = 0; k <= 16; k++) {
+      for (const sgn of k ? [1, -1] : [1]) {
+        const cx = Math.max(80, Math.min(WORLD_W - 80, x + sgn * (80 + k * 12)));
+        let lo = WORLD_H;
+        let hi = 0;
+        for (let dx = -EVAC_W / 2; dx <= EVAC_W / 2; dx += 3) {
+          const s = this.terrain.surfaceY(Math.floor(cx + dx));
+          lo = Math.min(lo, s);
+          hi = Math.max(hi, s);
+        }
+        if (hi - lo <= 6 && lo < Y0 - 10) return cx;
+      }
+    }
+    return Math.max(80, Math.min(WORLD_W - 80, x + 40));
+  }
+
+  /** Is the idol's carrier at the landed rocket's hatch? */
+  private boarding(p: Player): boolean {
+    const e = this.evac;
+    return e.state === Evac.Landed && Math.abs(p.cx - e.x) < EVAC_W / 2 + 8 && p.cy > e.y - 4 && p.cy < e.y + EVAC_H + 8;
+  }
+
+  /**
+   * Extraction: when the idol comes up out of the labyrinth, the extraction
+   * rocket is sent for it (and moves nearer if it comes up far from where the
+   * rocket landed). Carry it aboard and your team wins. When time runs out,
+   * whoever holds it takes the wave.
+   */
+  private stepExtraction(timeUp: boolean): void {
+    const e = this.evac;
+    const holder = this.idolHolder();
+    if (holder && this.surfaced(holder)) {
+      if (e.state === Evac.None) {
+        // On its way: it takes a while to come (hold out up there).
+        e.x = this.landingX(holder.cx);
+        e.y = -EVAC_H - 120;
+        e.vy = 280;
+        e.eta = EVAC_ETA;
+        e.state = Evac.Inbound;
+      } else if (e.state === Evac.Landed && Math.abs(holder.cx - e.x) > 520 && e.idle > 30 * 15) {
+        e.toX = this.landingX(holder.cx);
+        e.vy = 0;
+        e.state = Evac.Moving;
+      }
+    }
+    if (holder && this.boarding(holder)) {
+      // Aboard: the idol is theirs. The rocket lifts off with carrier and prize.
+      e.state = Evac.Leaving;
+      e.team = holder.team;
+      e.vy = 0;
+      holder.inv = [];
+      this.invChanged(holder);
+      this.leaveTank(holder, false);
+      holder.alive = false;
+      holder.respawn = 0;
+      holder.pendingSpawn = false;
+      this.endExtraction(holder.team);
+      return;
+    }
+    if (timeUp) this.endExtraction(holder ? holder.team : 255);
+  }
+
+  private endExtraction(winner: number): void {
+    this.winner = winner;
+    if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /** Fly the extraction rocket (scripted, not physical: nothing stops it). */
+  private stepEvac(): void {
+    const e = this.evac;
+    switch (e.state) {
+      case Evac.Inbound: {
+        if (e.eta > 0) {
+          e.eta--;
+          break;
+        }
+        const ty = this.evacGround(e.x) - EVAC_H;
+        e.vy = Math.max(30, Math.min(280, (ty - e.y) * 1.6));
+        e.y = Math.min(ty, e.y + e.vy * DT);
+        if (ty - e.y < 0.5) {
+          e.y = ty;
+          e.vy = 0;
+          e.idle = 0;
+          e.state = Evac.Landed;
+        }
+        break;
+      }
+      case Evac.Landed:
+        e.idle++;
+        e.y = this.evacGround(e.x) - EVAC_H; // the ground under it may have been blown away
+        break;
+      case Evac.Leaving:
+        e.vy = Math.max(-640, e.vy - 520 * DT);
+        e.y = Math.max(-400, e.y + e.vy * DT);
+        break;
+      case Evac.Moving:
+        e.vy = Math.max(-420, e.vy - 520 * DT);
+        e.y += e.vy * DT;
+        if (e.y < -EVAC_H - 120) {
+          e.x = e.toX;
+          e.vy = 280;
+          e.eta = EVAC_ETA / 2;
+          e.state = Evac.Inbound;
+        }
+        break;
+    }
+  }
+
+  /**
+   * The labyrinth's booby traps: spike pits bite the legs of whoever stands
+   * in them, dart throwers fire across their room at anyone in it, and
+   * pressure plates blow up (once) under whoever steps on them, clone or tank.
+   */
+  private stepTraps(): void {
+    const d = this.dungeon;
+    if (!d || !this.extractionLive) return;
+    for (const p of this.players) if (p && p.spikeCd > 0) p.spikeCd--;
+    for (const t of d.traps) {
+      if (t.kind === TrapKind.Spikes) {
+        for (const p of this.players) {
+          if (!p || !p.alive || p.tank >= 0 || p.spikeCd > 0) continue;
+          const b = p.body;
+          if (b.x + ACTOR_W <= t.x || b.x >= t.x + t.w || b.y + ACTOR_H <= t.y + 1 || b.y > t.y + SPIKE_DEPTH) continue;
+          p.spikeCd = 12;
+          const res = this.strikeScratch;
+          res.hp = 0;
+          res.detached.length = 0;
+          res.vital = false;
+          // Up through the boots: whichever legs are left, hard enough to pierce.
+          for (const leg of [Part.LegF, Part.LegB]) if (has(p.parts.mask, leg)) strike(p.parts, leg, 240, 9, res);
+          if (!has(p.parts.mask, Part.LegF) && !has(p.parts.mask, Part.LegB)) strike(p.parts, Part.Torso, 240, 9, res);
+          b.vy = Math.min(b.vy, 0);
+          this.applyStrike(p, res, NO_OWNER, W_TRAP, b.x + ACTOR_W / 2, t.y + 2);
+        }
+      } else if (t.kind === TrapKind.Darts) {
+        if (this.trapCd[t.id] > 0) {
+          this.trapCd[t.id]--;
+          continue;
+        }
+        const x0 = cellX(t.c) + ROOM_L;
+        const x1 = cellX(t.c) + ROOM_R;
+        const y0 = cellY(t.r) + ROOM_T;
+        const y1 = cellY(t.r) + ROOM_B;
+        let seen = false;
+        for (const p of this.players) if (p && p.alive && p.cx >= x0 && p.cx < x1 && p.cy >= y0 && p.cy < y1) seen = true;
+        if (!seen) continue;
+        this.spawnProj(this.nextProjId++, ProjKind.Dart, NO_OWNER, t.x, t.y, t.dir * 760, -6);
+        this.trapCd[t.id] = 36 + this.rng.int(20);
+      } else if (!(this.trapSpent[t.id >> 3] & (1 << (t.id & 7)))) {
+        let stepped = false;
+        for (const p of this.players) {
+          if (p && p.alive && p.tank < 0 && Math.abs(p.cx - t.x) < t.w / 2 + 3 && Math.abs(p.body.y + ACTOR_H - t.y) < 2.5) stepped = true;
+        }
+        for (const k of this.tanks) if (k && t.x > k.x && t.x < k.x + TANK_W && Math.abs(k.y + TANK_H - t.y) < 4) stepped = true;
+        if (!stepped) continue;
+        this.trapSpent[t.id >> 3] |= 1 << (t.id & 7);
+        this.trapsRev++;
+        this.spawnProj(this.nextProjId++, ProjKind.Mine, NO_OWNER, t.x, t.y - 2, 0, 420);
+      }
+    }
+  }
+
+  /** An Extraction wave is being fought right now. */
+  get extractionLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Extraction;
+  }
+
+  /** A wave with reinforcements (soldiers come back by drop rocket) is being fought. */
+  get respawnLive(): boolean {
+    return this.regicideLive || this.extractionLive;
+  }
+
   /** Is this clone a king (this wave)? */
   isKing(p: Player): boolean {
     return p.team !== Team.None && this.kings[p.team] === p.id;
@@ -678,10 +935,10 @@ export class World {
   }
 
   /**
-   * Split everyone into two even teams: humans dealt out first (so people
-   * end up on both sides), then bots evening up the numbers.
+   * Split everyone into `n` even teams (none for 0): humans dealt out first
+   * (so people end up on every side), then bots evening up the numbers.
    */
-  private drawTeams(tdm: boolean): void {
+  private drawTeams(n: number): void {
     const order: Player[] = [];
     for (const p of this.players) if (p) order.push(p);
     for (let i = order.length - 1; i > 0; i--) {
@@ -689,8 +946,8 @@ export class World {
       [order[i], order[j]] = [order[j], order[i]];
     }
     order.sort((a, b) => (a.bot ? 1 : 0) - (b.bot ? 1 : 0));
-    const first = this.rng.int(2);
-    order.forEach((p, i) => (p.team = tdm ? (first + i) & 1 : Team.None));
+    const first = this.rng.int(Math.max(1, n));
+    order.forEach((p, i) => (p.team = n ? (first + i) % n : Team.None));
     this.teamsRev++;
   }
 
@@ -712,7 +969,7 @@ export class World {
     this.wave++;
     this.winner = 255;
     const mode = this.modeOfWave(this.wave);
-    this.drawTeams(mode === GameMode.Lts || mode === GameMode.Regicide);
+    this.drawTeams(TEAMS_IN_MODE[mode]);
     this.kings[0] = this.kings[1] = 255;
     for (const p of this.players) {
       if (!p) continue;
@@ -722,10 +979,12 @@ export class World {
       p.spectate = 255;
       p.waveKills = 0;
     }
-    // One or two tanks come down by parachute for whoever gets to them first.
-    if (this.tankDrops) this.dropTanks(1 + this.rng.int(2));
+    // One or two tanks come down by parachute for whoever gets to them first
+    // (Extraction's tanks wait in the labyrinth instead).
+    if (this.tankDrops && mode !== GameMode.Extraction) this.dropTanks(1 + this.rng.int(2));
     if (mode === GameMode.Regicide) this.startRegicide();
-    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : WAVE_TICKS);
+    if (mode === GameMode.Extraction) this.startExtraction();
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : WAVE_TICKS);
   }
 
   /**
@@ -737,8 +996,8 @@ export class World {
    */
   private newMap(): void {
     this.mapSeed = this.rng.nextU32();
-    // A Regicide wave is fought over two fortresses built into the map.
-    this.makeMap(this.modeOfWave(this.wave + 1) === GameMode.Regicide);
+    // Regicide is fought over two fortresses built into the map, Extraction down a labyrinth.
+    this.makeMap(this.mapKindFor(this.wave + 1));
     this.kings[0] = this.kings[1] = 255;
     this.crafts.fill(null);
     this.tanks.fill(null);
@@ -1101,7 +1360,7 @@ export class World {
     victim.respawn = RESPAWN_TICKS;
     this.leaveTank(victim, false);
     // Regicide: soldiers come back by drop rocket after a while; the king never does.
-    if (this.regicideLive && victim.inWave && !this.isKing(victim)) {
+    if (((this.regicideLive && !this.isKing(victim)) || this.extractionLive) && victim.inWave) {
       victim.pendingSpawn = true;
       victim.respawn = REGICIDE_RESPAWN_TICKS;
     }
@@ -1262,7 +1521,7 @@ export class World {
     }
     p.cooldown -= 1;
     // The repair kit works off either hand (so it can regrow a lost gun arm).
-    const want = def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
+    const want = def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && def.proj !== PROJ_IDOL && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
     if (want && p.cooldown <= 0) {
       this.fire(p, def);
       p.firing = true;
@@ -1391,7 +1650,7 @@ export class World {
     for (let k = 0; k < 16 && this.terrain.isSolid(Math.floor(x), Math.floor(y)); k++) y -= 1;
     this.items.push({ id: this.nextItemId, weapon, ammo, x, y, vx, vy, rest: false, left: vx < 0, age: 0, rev: 0 });
     this.nextItemId = (this.nextItemId % 65535) + 1;
-    if (this.items.length > MAX_ITEMS) this.removeItem(0); // the oldest goes
+    if (this.items.length > MAX_ITEMS) this.removeItem(this.items.findIndex((o) => o.weapon !== WeaponId.Idol)); // the oldest goes (never the idol)
   }
 
   private removeItem(i: number): void {
@@ -1445,7 +1704,7 @@ export class World {
   private stepItems(): void {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
-      if (++it.age > ITEM_LIFE) {
+      if (++it.age > ITEM_LIFE && it.weapon !== WeaponId.Idol) {
         this.removeItem(i);
         continue;
       }
@@ -1659,7 +1918,12 @@ export class World {
     let lo = 48 + CRAFT_W / 2;
     let span = WORLD_W - 96 - CRAFT_W;
     const fort = this.regicideLive && p.team !== Team.None ? this.fortresses[p.team] : undefined;
-    if (fort) {
+    const well = this.extractionLive && this.dungeon && p.team < 4 ? this.dungeon.entrances[p.team] : undefined;
+    if (well) {
+      // Extraction: each team comes down around its own well.
+      lo = Math.max(48 + CRAFT_W / 2, well.x - 170);
+      span = 340;
+    } else if (fort) {
       // Reinforcements land at their own fortress.
       const spots = fort.spawns;
       const xs = spots.map((s) => s.x);
@@ -2579,6 +2843,7 @@ export class World {
         }
         continue;
       }
+      p.body.burdened = p.inv.some((it) => it.weapon === WeaponId.Idol);
       const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
@@ -2623,6 +2888,8 @@ export class World {
     this.stepTanks();
     this.stepShips();
     this.stepItems();
+    this.stepTraps();
+    this.stepEvac();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
     // the chunks that changed). Removals later in the tick only increase true
@@ -2815,6 +3082,24 @@ export class World {
         w.u8(this.remaining(Team.Green));
         w.u8(this.kings[0]);
         w.u8(this.kings[1]);
+        w.u8(this.remaining(Team.Blue));
+        w.u8(this.remaining(Team.Gold));
+        if (this.waveMode === GameMode.Extraction) {
+          const at = this.idolAt();
+          w.u8(at ? at.holder : 255);
+          w.u16(clampU16(at ? at.x : 0));
+          w.u16(clampU16((at ? at.y : 0) + Y_BIAS));
+          w.u8(this.evac.state);
+          w.u16(clampU16(this.evac.x));
+          w.u16(clampU16(this.evac.y + Y_BIAS));
+          w.u16(this.evac.state === Evac.Inbound ? this.evac.eta : 0);
+        }
+        if (this.dungeon && p.trapsSeen !== this.trapsRev) {
+          p.trapsSeen = this.trapsRev;
+          w.u8(R_TRAPS);
+          w.u8(this.trapSpent.length);
+          for (const b of this.trapSpent) w.u8(b);
+        }
         if (p.teamsSeen !== this.teamsRev) {
           p.teamsSeen = this.teamsRev;
           w.u8(R_TEAMS);
@@ -3130,6 +3415,11 @@ const WAVE_TICKS = 30 * 60 * 4;
 const REGICIDE_TICKS = 30 * 60 * 6;
 /** Regicide reinforcements: dead soldiers drop back in after this long. */
 const REGICIDE_RESPAWN_TICKS = 30 * 10;
+/** Extraction waves run twelve minutes. */
+const EXTRACTION_TICKS = 30 * 60 * 12;
+/** How long the extraction rocket takes to come once the idol surfaces. */
+const EVAC_ETA = 30 * 20;
+
 /** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
 const STARTING_GOLD = 60;
 /** Who a rocket's exhaust flames are credited to (and so who it is immune to). */

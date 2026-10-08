@@ -7,13 +7,14 @@ import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts'
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { generateWorld } from '../shared/worldgen.ts';
+import { generateWorld, lastDungeon } from '../shared/worldgen.ts';
+import type { Dungeon } from '../shared/dungeon.ts';
 import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
@@ -116,10 +117,12 @@ function playerColor(id: number): { css: string; rgb: number } {
   return { css: `rgb(${r},${g},${b})`, rgb: (r << 16) | (g << 8) | b };
 }
 
-/** Last Team Standing colours: red and green fatigues (Team.Red, Team.Green). */
+/** Team colours: red and green fatigues, and Extraction's blue and gold (Team.Red .. Team.Gold). */
 export const TEAM_COLORS = [
   { css: 'rgb(222,64,56)', rgb: 0xde4038 },
   { css: 'rgb(76,190,72)', rgb: 0x4cbe48 },
+  { css: 'rgb(70,130,236)', rgb: 0x4682ec },
+  { css: 'rgb(236,190,52)', rgb: 0xecbe34 },
 ] as const;
 
 export class Game implements FrameHandler {
@@ -192,6 +195,16 @@ export class Game implements FrameHandler {
   reloadLeft = 0;
   /** Own gold, exact (from our own record, not the once-a-second scoreboard). */
   gold = 0;
+  /** Extraction: this map's labyrinth (built from the seed, like the server's), and which traps have gone off. */
+  dungeon: Dungeon | null = null;
+  trapSpent: Uint8Array = new Uint8Array(32);
+  traps(spent: Uint8Array): void {
+    this.trapSpent = spent;
+  }
+  trapGone(id: number): boolean {
+    return (this.trapSpent[id >> 3] & (1 << (id & 7))) !== 0;
+  }
+
   /** Beams to fade out: materializer (builder muzzle to piece centre) and sniper tracers (muzzle to impact). */
   readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number; tracer?: boolean }[] = [];
   /** Where each sniper slug in flight was fired from, for its tracer. */
@@ -267,6 +280,7 @@ export class Game implements FrameHandler {
       this.seat(this.drive);
       if (this.drive.jetting) tankJets(this.particles, this.drive.x, this.drive.y, this.drive.vx, this.drive.vy);
     } else if (this.alive) {
+      this.body.burdened = this.inv.some((it) => it.weapon === WeaponId.Idol);
       stepBody(this.body, buttons, this.terrain, DT);
       if (this.body.jetting) {
         const b = this.body;
@@ -537,6 +551,7 @@ export class Game implements FrameHandler {
       b.y = rawY;
       return;
     }
+    b.burdened = this.inv.some((it) => it.weapon === WeaponId.Idol);
     for (const p of this.pending) stepBody(b, p.buttons, this.terrain, DT);
     // Hide small corrections by easing the visual offset back to zero.
     const ex = oldX - b.x;
@@ -778,8 +793,10 @@ export class Game implements FrameHandler {
    * Clear everything left from the last one, rebuild what derives from the
    * terrain, and flag any chunk that didn't come out identical to the server's.
    */
-  wave(seed: number, hashes: Uint32Array, fortresses: boolean): void {
-    generateWorld(this.terrain, seed, fortresses, this.backdrop);
+  wave(seed: number, hashes: Uint32Array, kind: number): void {
+    generateWorld(this.terrain, seed, kind, this.backdrop);
+    this.dungeon = lastDungeon;
+    this.trapSpent = new Uint8Array(32);
     this.particles.n = 0;
     this.projectiles.n = 0;
     this.stain.fill(0);
@@ -852,6 +869,9 @@ export class Game implements FrameHandler {
     const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
+    else if (killer === 255 && weapon === W_TRAP) text = `${vn} was impaled on the spikes`;
+    else if (killer === 255 && weapon === ProjKind.Dart) text = `${vn} took a poisoned dart`;
+    else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
     if (!has(k.parts, Part.Head)) text += ' (headshot)';

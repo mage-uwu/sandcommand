@@ -131,8 +131,102 @@ function steel(t: Terrain, x: number, y: number): number {
   return abgr(r, g, b);
 }
 
-/** A bunker solid (concrete or steel) at (x, y). */
+/**
+ * Cobblestone: irregular rounded stones in dark mortar (a jittered grid of
+ * stone centres; the mortar runs where two centres are nearly equidistant),
+ * each stone lit on its top left, moss creeping over some in the damp.
+ */
+function cobble(t: Terrain, x: number, y: number): number {
+  const gx = Math.floor(x / 7);
+  const gy = Math.floor(y / 6);
+  let d1 = 1e9;
+  let d2 = 1e9;
+  let sx = 0;
+  let sy = 0;
+  let id = 0;
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const cx = (gx + i) * 7 + 1 + h(gx + i, gy + j, 41) * 5;
+      const cy = (gy + j) * 6 + 1 + h(gx + i, gy + j, 42) * 4;
+      const d = (x - cx) * (x - cx) + (y - cy) * (y - cy) * 1.3;
+      if (d < d1) {
+        d2 = d1;
+        d1 = d;
+        sx = cx;
+        sy = cy;
+        id = (gx + i) * 7919 + (gy + j);
+      } else if (d < d2) d2 = d;
+    }
+  }
+  const edge = Math.sqrt(d2) - Math.sqrt(d1);
+  let k = 0.82 + 0.3 * h(id, 0, 43);
+  if (edge < 0.9) k = 0.42; // mortar
+  else {
+    // Rounded: lit toward the top left of each stone, shaded bottom right.
+    const lx = x - sx;
+    const ly = y - sy;
+    k *= 1 - (lx + ly) * 0.045;
+    if (edge < 1.8) k *= 0.85;
+  }
+  k *= (0.94 + 0.1 * h(x, y, 44)) * bevel(t, x, y);
+  let r = 98 * k;
+  let g = 94 * k;
+  let b = 90 * k;
+  const moss = noise(x, y, 30, 45);
+  if (moss > 0.62 && edge >= 0.9) {
+    const a = Math.min(0.6, (moss - 0.62) * 2.5);
+    r += (64 * k - r) * a;
+    g += (96 * k - g) * a;
+    b += (52 * k - b) * a;
+  }
+  return abgr(r, g, b);
+}
+
+/** One block of an alien glyph: a 5x4 symbol of strokes from the block's hash (bit per cell). */
+function glyphBit(bx: number, by: number, gx: number, gy: number): boolean {
+  const bits = Math.floor(h(bx, by, 51) * 0xfffff);
+  // Symmetric about its vertical axis, and always a frame stroke on top: reads as a carved sign.
+  const col = gx < 3 ? gx : 4 - gx;
+  return gy === 0 ? col !== 0 : ((bits >> (col * 4 + gy)) & 1) === 1;
+}
+
+/**
+ * Temple sandstone: big ashlar blocks in running bond, weathered, a few
+ * carved with alien glyphs whose grooves glow teal, like the step pyramid's
+ * faces and the upper halls of the labyrinth.
+ */
+function glyphStone(t: Terrain, x: number, y: number): number {
+  const course = Math.floor(y / 10);
+  const ox = x + (course & 1) * 9;
+  const bx = Math.floor(ox / 18);
+  const px = ((ox % 18) + 18) % 18;
+  const py = ((y % 10) + 10) % 10;
+  let k = (0.86 + 0.18 * noise(x, y, 26, 52)) * (0.9 + 0.16 * h(bx, course, 53)) * (0.95 + 0.07 * h(x, y, 54));
+  if (px === 0 || py === 0) k *= 0.6;
+  else if (px === 1 || py === 1) k *= 1.12;
+  else if (px === 17 || py === 9) k *= 0.82;
+  let r = 188 * k;
+  let g = 152 * k;
+  let b = 100 * k;
+  // Carved glyphs on some blocks: the groove is dark, lit from within.
+  if (h(bx, course, 55) < 0.16 && px >= 6 && px <= 12 && py >= 3 && py <= 7) {
+    const gx = Math.floor((px - 6) * 5 / 7);
+    const gy = py - 3;
+    if (gy < 4 && glyphBit(bx, course, gx, gy)) {
+      const glow = 0.75 + 0.25 * h(bx, course, 56);
+      r = 64 * glow;
+      g = 226 * glow;
+      b = 208 * glow;
+    }
+  }
+  const kb = bevel(t, x, y);
+  return abgr(r * kb, g * kb, b * kb);
+}
+
+/** A built solid (concrete, steel, ancient cobble or temple stone) at (x, y). */
 export function structColor(t: Terrain, m: number, x: number, y: number): number {
+  if (m === Mat.Cobble) return cobble(t, x, y);
+  if (m === Mat.Glyph) return glyphStone(t, x, y);
   return m === Mat.Metal ? steel(t, x, y) : concrete(t, x, y);
 }
 
@@ -154,6 +248,12 @@ function openRun(t: Terrain, x: number, y: number, dx: number, dy: number): numb
 export function backWallColor(t: Terrain, kind: number, x: number, y: number): number {
   const near = Math.min(openRun(t, x, y, -1, 0), openRun(t, x, y, 1, 0), openRun(t, x, y, 0, -1), openRun(t, x, y, 0, 1));
   let k = (0.5 + 0.5 * Math.min(1, (near - 1) / (AO - 2))) * (0.88 + 0.2 * noise(x, y, 26, 21)) * (0.95 + 0.08 * h(x, y, 22));
+  if (kind === 3 || kind === 4) {
+    // The labyrinth's back walls: the same stone as its walls, deep in shadow (temple halls a warmer dark).
+    const c = kind === 3 ? glyphStone(t, x, y) : cobble(t, x, y);
+    const s = k * 0.38;
+    return abgr((c & 255) * s, ((c >> 8) & 255) * s, ((c >> 16) & 255) * s);
+  }
   if (kind === 2) {
     const course = Math.floor(y / 12);
     const px = (((x + (course & 1) * 8) % 16) + 16) % 16;

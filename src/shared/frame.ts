@@ -27,6 +27,8 @@ import {
   R_PROJ_SPAWN,
   R_ROUND,
   R_TEAMS,
+  R_TRAPS,
+  GameMode,
   R_SHIPS,
   R_SHIP_PART,
   R_SHIP_BOOM,
@@ -198,8 +200,11 @@ export interface RoundState {
   inWave: boolean; // are we in it
   out: boolean; // were we in it, and got fragged
   mode: number; // GameMode of this wave (between waves: the next one)
-  teamLeft: [number, number]; // team modes: red and green clones still in the wave
+  teamLeft: number[]; // team modes: each team's clones still in the wave (red, green, blue, gold)
   kings: [number, number]; // Regicide: red's and green's king (player id, 255 none)
+  /** Extraction: where the golden idol is (and who carries it, 255 nobody), and the extraction rocket. */
+  idol?: { x: number; y: number; holder: number };
+  evac?: { state: number; x: number; y: number; eta: number };
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -227,10 +232,13 @@ export interface FrameHandler {
   scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void;
   /** FFA round state, every frame. */
   round(s: RoundState): void;
+  /** Extraction: which traps have gone off (bit per trap id). */
+  traps(spent: Uint8Array): void;
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
-  wave(seed: number, hashes: Uint32Array, fortresses: boolean): void;
+  /** A new map: its seed, kind (worldgen MapKind) and every chunk's hash as generated. */
+  wave(seed: number, hashes: Uint32Array, kind: number): void;
   hit(victim: number, x: number, y: number, amount: number): void;
   chat(id: number, text: string): void;
   /** Drop rockets near this client's view this tick (absent when none). */
@@ -381,7 +389,27 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const red = r.u8();
         const green = r.u8();
         const kings: [number, number] = [r.u8(), r.u8()];
-        h.round({ phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green], kings });
+        const blue = r.u8();
+        const gold = r.u8();
+        const s: RoundState = { phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green, blue, gold], kings };
+        if (mode === GameMode.Extraction) {
+          const holder = r.u8();
+          const ix = r.u16();
+          const iy = r.u16() - Y_BIAS;
+          s.idol = { x: ix, y: iy, holder };
+          const state = r.u8();
+          const ex = r.u16();
+          const ey = r.u16() - Y_BIAS;
+          s.evac = { state, x: ex, y: ey, eta: r.u16() };
+        }
+        h.round(s);
+        break;
+      }
+      case R_TRAPS: {
+        const n = r.u8();
+        const spent = new Uint8Array(n);
+        for (let i = 0; i < n; i++) spent[i] = r.u8();
+        h.traps(spent);
         break;
       }
       case R_TEAMS: {
@@ -392,13 +420,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       }
       case R_WAVE: {
         const seed = r.u32();
-        const fortresses = (r.u8() & 1) !== 0;
+        const kind = r.u8();
         const hashes = new Uint32Array(CHUNK_COUNT);
         for (let i = 0; i < CHUNK_COUNT; i++) hashes[i] = r.u32();
         // The handler makes the map from the seed (same generator as the
         // server) before any later record touches the terrain; headless
         // decoders that don't keep terrain can skip it.
-        h.wave(seed, hashes, fortresses);
+        h.wave(seed, hashes, kind);
         break;
       }
       case R_PIXELS: {
@@ -649,6 +677,7 @@ export const nullHandler: FrameHandler = {
   carved() {},
   chunkLoaded() {},
   round() {},
+  traps() {},
   teams() {},
   wave() {},
   items() {},

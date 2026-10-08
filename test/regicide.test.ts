@@ -5,7 +5,7 @@ import { ClassId } from '../src/shared/body.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { GameMode, Phase, Team } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { generateWorld, lastComplexes } from '../src/shared/worldgen.ts';
+import { MapKind, generateWorld, lastComplexes } from '../src/shared/worldgen.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 
@@ -58,7 +58,7 @@ describe('Regicide', () => {
 
   it('crowns a heavy king per side in his vault; soldiers start at their fortress, no rockets', () => {
     const { world, ps } = regicide(41, 8);
-    expect(world.mapFortresses).toBe(true);
+    expect(world.mapKind === MapKind.Fortress).toBe(true);
     for (const team of [Team.Red, Team.Green]) {
       const king = world.players[world.kings[team]]!;
       expect(king.team).toBe(team);

@@ -1,12 +1,14 @@
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
 import { stumps } from '../shared/body.ts';
-import { GRAVITY } from '../shared/constants.ts';
+import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
-import { Team, quantizeAim } from '../shared/protocol.ts';
+import { Evac, Team, quantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
 import type { InputCmd, Player, World } from './world.ts';
+import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
+import { cellCentreX, cellOfFeet, inShaftUnder, mazeDistances, nextHop } from './maze.ts';
 
 /** Names for bots (shown with a BOT tag). */
 const NAMES = [
@@ -67,6 +69,12 @@ export class BotBrain {
   /** A tank it gave up on, left alone until `abandonUntil`. */
   private abandoned = -1;
   private abandonUntil = 0;
+  /** Extraction: distances through the labyrinth to the current goal, what goal they're for, and when they were worked out. */
+  private navDist: Int16Array | null = null;
+  private navKey = '';
+  private navAt = -1e9;
+  /** Extraction: resting on a ledge to refill the jetpack before the next climb. */
+  private resting = false;
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -136,7 +144,7 @@ export class BotBrain {
 
     // An empty tank landed close by, and nobody to fight right here: take it.
     const near = tgt ? Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) : Infinity;
-    if (this.tanker && near > 120) {
+    if (this.tanker && near > 120 && !world.extractionLive) {
       for (let slot = 0; slot < world.tanks.length; slot++) {
         const k = world.tanks[slot];
         if (!k || k.pilot !== 255 || k.chute || (slot === this.abandoned && t < this.abandonUntil)) continue;
@@ -148,6 +156,13 @@ export class BotBrain {
         pickup = dx <= 8 && dy <= 8 && (t & 7) === 0;
         break;
       }
+    }
+
+    // Extraction: the objective comes first (the idol, the surface, the rocket).
+    const nav = world.extractionLive ? this.extractionNav(world, p) : null;
+    if (nav) {
+      goalX = nav.goalX;
+      if (nav.pickup) pickup = (t & 1) === 0;
     }
 
     // Moving and getting nowhere: stuck against a wall.
@@ -175,7 +190,8 @@ export class BotBrain {
     const bx0 = Math.floor(p.body.x);
     const by0 = Math.floor(p.body.y);
     const headClear = !world.terrain.rectSolid(bx0, by0 - 22, bx0 + 7, by0 - 1);
-    const digging = digSlot >= 0 && !this.seeTarget && (this.stuck > 75 || this.blind > 60);
+    // (The labyrinth's stone never yields: no digging through it.)
+    const digging = !world.extractionLive && digSlot >= 0 && !this.seeTarget && (this.stuck > 75 || this.blind > 60);
     if (digging) want = digSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
     // Hurt or maimed, with nobody shooting back right now: patch up with the nanobots.
@@ -192,7 +208,10 @@ export class BotBrain {
     const range = RANGE[weapon] ?? 120;
     const dx = goalX - p.cx;
     let dir = 0;
-    if (gunSlot < 0 || !tgt) dir = Math.sign(dx);
+    // On the objective unless someone's right in our face (a carrier never stops to brawl).
+    const onTask = nav && !(tgt && this.seeTarget && dist < 100 && !nav.urgent);
+    if (onTask) dir = Math.abs(dx) < 2.5 || nav.fall ? 0 : Math.sign(dx);
+    else if (gunSlot < 0 || !tgt) dir = Math.sign(dx);
     else if (weapon === WeaponId.Digger) dir = Math.sign(dx);
     else if (dist > range + 30 || !this.seeTarget) dir = Math.sign(dx);
     else if (dist < range - 50) dir = -Math.sign(dx);
@@ -208,7 +227,9 @@ export class BotBrain {
     // Jump or jet: over walls, up to a target above, and to break a long fall.
     const b = p.body;
     if (dir !== 0 && this.stuck > 6 && headClear) buttons |= BTN_UP;
-    if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
+    if (onTask) {
+      if (nav.up) buttons |= BTN_UP;
+    } else if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
     if (b.vy > 260 && b.fuel > 5) buttons |= BTN_UP;
 
     // Aim: lead the target by the shot's flight time, lift lobbed shots, add skill noise.
@@ -285,6 +306,114 @@ export class BotBrain {
    * treads, hose it with the vulcan and lob shells at it. A tank that gets
    * nowhere for long enough is abandoned (out of the hatch, on foot again).
    */
+  /**
+   * Extraction: where to go next. Carrying the idol, out by the nearest well
+   * and on to the extraction rocket; a teammate carrying it, stay with them;
+   * otherwise after the idol (on its altar, dropped, or in an enemy's hands).
+   * Through the labyrinth it follows a breadth-first route cell by cell:
+   * sideways through doorways, down by dropping through a floor shaft, up by
+   * jetting through one (resting on a ledge when the jetpack runs low).
+   */
+  private extractionNav(world: World, p: Player): { goalX: number; up: boolean; fall: boolean; pickup: boolean; carrying: boolean; urgent: boolean } | null {
+    const d = world.dungeon;
+    if (!d) return null;
+    const b = p.body;
+    const holder = world.idolHolder();
+    const carrying = holder === p;
+    let tx = p.cx;
+    let ty = p.cy;
+    let pickup = false;
+    let urgent = carrying;
+    if (holder && !carrying) {
+      tx = holder.cx;
+      ty = holder.body.y;
+    } else if (!holder) {
+      const it = world.items.find((o) => o.weapon === WeaponId.Idol);
+      if (it) {
+        tx = it.x;
+        ty = it.y - ACTOR_H + 1;
+        const d2 = Math.hypot(it.x - p.cx, it.y - p.cy);
+        pickup = d2 < PICKUP_R - 2;
+        urgent = d2 < 80; // it's right there: grab it, fight later
+      }
+    }
+    const wantSurface = carrying || cellOfFeet(tx, ty) < 0;
+    const wells = d.entrances.slice(0, 4);
+    const here = cellOfFeet(p.cx, b.y);
+    const out = { goalX: tx, up: false, fall: false, pickup, carrying, urgent };
+
+    if (here < 0) {
+      // Up top: the desert, or inside a well.
+      let well = wells[0];
+      for (const w of wells) if (Math.abs(w.x - p.cx) < Math.abs(well.x - p.cx)) well = w;
+      const inWell = Math.abs(p.cx - well.x) < SHAFT_HALF + 2 && b.y + ACTOR_H > well.top - 1;
+      if (wantSurface) {
+        if (inWell) {
+          // Climb out of the well, then step off its mouth.
+          out.goalX = b.y + ACTOR_H > well.top - 3 ? well.x : well.x + (p.cx < well.x ? -40 : 40);
+          out.up = b.y + ACTOR_H > well.top - 6;
+          return out;
+        }
+        if (carrying) {
+          const e = world.evac;
+          out.goalX = e.state === Evac.Landed ? e.x : p.cx;
+        } else out.up = ty < b.y - 20 && b.fuel > 20; // up to wherever it is
+        return out;
+      }
+      // Down the nearest well (the pyramid's shaft is a long climb back).
+      out.goalX = well.x;
+      out.fall = Math.abs(p.cx - well.x) < 3;
+      return out;
+    }
+
+    // In the labyrinth: route to the goal cell(s).
+    const goals = wantSurface ? wells.map((w) => w.c) : [cellOfFeet(tx, ty)];
+    const key = goals.join(',');
+    if (key !== this.navKey || world.tick - this.navAt > 45) {
+      this.navDist = mazeDistances(d, goals);
+      this.navKey = key;
+      this.navAt = world.tick;
+    }
+    const dist = this.navDist!;
+    const r = Math.floor(here / COLS);
+    const centre = cellCentreX(here);
+    const climb = () => {
+      // Rest on the floor beside the shaft when low, then go up its middle.
+      if (this.resting && b.fuel > 90) this.resting = false;
+      if (!this.resting && b.fuel < 18) this.resting = true;
+      if (this.resting) {
+        out.goalX = centre + (p.cx < centre ? -SHAFT_HALF - 7 : SHAFT_HALF + 7);
+        return out;
+      }
+      out.goalX = centre;
+      out.up = Math.abs(p.cx - centre) < SHAFT_HALF - 4 || inShaftUnder(b.y, r);
+      return out;
+    };
+    if (wantSurface && dist[here] === 0) return climb(); // up the well
+    if (dist[here] === 0) {
+      out.goalX = tx;
+      out.up = ty < b.y - 24 && b.fuel > 20; // up on a ledge in the same hall
+      return out;
+    }
+    const nxt = nextHop(d, dist, here);
+    if (nxt < 0) return out;
+    if (nxt === here + COLS) {
+      out.goalX = centre;
+      out.fall = Math.abs(p.cx - centre) < 3;
+      return out;
+    }
+    if (nxt === here - COLS) return climb();
+    this.resting = false;
+    if (inShaftUnder(b.y, r)) {
+      // Still coming up through the floor: clear it first.
+      out.goalX = centre;
+      out.up = true;
+      return out;
+    }
+    out.goalX = cellCentreX(nxt);
+    return out;
+  }
+
   private driveTank(world: World, p: Player, tgt: Player | null, cmd: InputCmd): InputCmd {
     const t = world.tick;
     const k = world.tanks[p.tank];

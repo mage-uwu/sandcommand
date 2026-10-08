@@ -78,7 +78,13 @@ export interface Body {
   /** Stance (Stance.*), and how long down has been held. */
   stance: number;
   downTicks: number;
+  /** Carrying Extraction's golden idol: it's heavy (a slower run, a thirstier jetpack). */
+  burdened?: boolean;
 }
+
+/** What carrying the golden idol costs: run speed and jetpack fuel (thrust is untouched, so anyone can still climb). */
+export const IDOL_BURDEN = { run: 0.8, fuel: 1.5 };
+const NO_BURDEN = { run: 1, fuel: 1 };
 
 export function newBody(x: number, y: number): Body {
   return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false, legs: 2, jet: true, cls: ClassId.Medium, faction: 0, stance: Stance.Stand, downTicks: 0 };
@@ -94,6 +100,7 @@ export function copyBody(dst: Body, src: Body): void {
   dst.jetting = src.jetting;
   dst.legs = src.legs;
   dst.jet = src.jet;
+  dst.burdened = src.burdened;
   dst.cls = src.cls;
   dst.faction = src.faction;
   dst.stance = src.stance;
@@ -142,7 +149,8 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
 
   const base = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
   const fac = FACTIONS[b.faction] ?? FACTIONS[0];
-  const cls = { run: base.run * fac.run, jet: base.jet * fac.jet, fuel: base.fuel * fac.fuel };
+  const load = b.burdened ? IDOL_BURDEN : NO_BURDEN;
+  const cls = { run: base.run * fac.run * load.run, jet: base.jet * fac.jet, fuel: base.fuel * fac.fuel * load.fuel };
   const dir = (buttons & BTN_RIGHT ? 1 : 0) - (buttons & BTN_LEFT ? 1 : 0);
   // Crouched on a burning jetpack in the air: the thrust swings forward into a dash.
   const dashDir = dir !== 0 ? dir : Math.sign(b.vx);

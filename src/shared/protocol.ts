@@ -68,6 +68,8 @@ export const R_SHIPS = 29;
 /** A part blown off a dropship / a dropship exploding (same layout as the tank records). */
 export const R_SHIP_PART = 30;
 export const R_SHIP_BOOM = 31;
+/** Extraction: which booby traps (mines) have gone off, as a bitset by trap id (sent when it changes). */
+export const R_TRAPS = 32;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -85,7 +87,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 /** Last Man Standing round phases. */
 export const Phase = {
@@ -100,14 +102,32 @@ export const GameMode = {
   Lms: 0, // Last Man Standing: every clone for itself, last one alive wins
   Lts: 1, // Last Team Standing: red vs green, last team with a clone alive wins
   Regicide: 2, // two fortresses, a king in each: kill theirs, keep yours (everyone else respawns)
+  Extraction: 3, // four teams race down a labyrinth for the golden idol and out on the extraction rocket (everyone respawns)
 } as const;
 
 export const Team = {
   Red: 0,
   Green: 1,
+  Blue: 2,
+  Gold: 3,
   None: 255,
 } as const;
-export const TEAM_NAMES = ['RED', 'GREEN'] as const;
+export const TEAM_NAMES = ['RED', 'GREEN', 'BLUE', 'GOLD'] as const;
+/** How many teams a wave of each mode splits into (0: every clone for itself). */
+export const TEAMS_IN_MODE = [0, 2, 2, 4] as const;
+
+/** Extraction rocket states (R_ROUND). */
+export const Evac = {
+  None: 0,
+  /** Coming down to where the idol came out. */
+  Inbound: 1,
+  /** On the ground, hatch open: bring the idol aboard. */
+  Landed: 2,
+  /** Lifting off with the idol (the wave is won). */
+  Leaving: 3,
+  /** Flying off to land nearer the idol. */
+  Moving: 4,
+} as const;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

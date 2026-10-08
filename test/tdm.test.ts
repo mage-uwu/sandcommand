@@ -37,7 +37,8 @@ describe('Last Team Standing', () => {
     expect(a.team).not.toBe(Team.None);
     expect(b.team).not.toBe(a.team);
     expect(world.modeOfWave(3)).toBe(GameMode.Regicide);
-    expect(world.modeOfWave(4)).toBe(GameMode.Lms);
+    expect(world.modeOfWave(4)).toBe(GameMode.Extraction);
+    expect(world.modeOfWave(5)).toBe(GameMode.Lms);
   });
 
   it('splits the room into even teams, humans across both, and lands them on opposite sides', () => {
@@ -161,6 +162,6 @@ describe('Last Team Standing', () => {
     expect(game.teamOf[b.id]).toBe(b.team);
     expect(game.players.get(a.id)?.rgb).toBe(TEAM_COLORS[a.team].rgb);
     expect(game.players.get(b.id)?.rgb).toBe(TEAM_COLORS[b.team].rgb);
-    expect(game.roundState?.teamLeft).toEqual([1, 1]);
+    expect(game.roundState?.teamLeft).toEqual([1, 1, 0, 0]); // red, green (blue and gold are Extraction's)
   });
 });

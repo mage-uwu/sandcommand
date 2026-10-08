@@ -8,21 +8,25 @@ export const Mat = {
   Rubble: 6,
   Metal: 7, // scrap from destroyed drop rockets, and materialized armour plate
   Concrete: 8, // materialized fortifications
+  /** Cobblestone of the deep ruins (Extraction's labyrinth): ancient, never yields. */
+  Cobble: 9,
+  /** Carved sandstone of the alien temple and its step pyramid, inlaid with glowing glyphs: never yields. */
+  Glyph: 10,
 } as const;
 
-export const MAT_COUNT = 9;
+export const MAT_COUNT = 11;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false];
 
 /** Base RGB colors; the renderer adds per-cell hashed variation. */
 export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
@@ -35,6 +39,8 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [140, 104, 72],
   [150, 158, 170],
   [170, 166, 156],
+  [98, 94, 90],
+  [188, 152, 100],
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph'];

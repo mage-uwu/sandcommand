@@ -18,6 +18,10 @@ export const ProjKind = {
    * faster, until it smashes into the ground or someone and blows up.
    */
   Engine: 8,
+  /** A booby-trap dart, out of a labyrinth wall. */
+  Dart: 9,
+  /** A booby-trap pressure plate going off. */
+  Mine: 10,
 } as const;
 
 export interface ProjDef {
@@ -58,6 +62,10 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 1, life: 240, damage: 120, mass: 4, sharp: 0.4, carveR: 40, coreR: 18, splashR: 64, splashDamage: 350, debris: 140, bounce: 0, ballistic: false },
   // Runaway dropship engine: still burning for 2.5 s, then it falls; it goes off like a big rocket wherever it lands.
   { gravity: 1, life: 180, damage: 60, mass: 5, sharp: 0.5, carveR: 22, coreR: 10, splashR: 40, splashDamage: 120, debris: 70, bounce: 0, ballistic: false, thrust: 1.45 * 620, burn: 75, drag: 2.2 },
+  // Booby-trap dart: a fast, sharp sliver that gets through a vest.
+  { gravity: 0.05, life: 40, damage: 22, mass: 0.45, sharp: 0.95, carveR: 1, coreR: 0, splashR: 0, splashDamage: 0, debris: 1, bounce: 0, ballistic: true },
+  // Booby-trap mine: a grenade's worth of blast under your feet (it goes off the tick it's stepped on).
+  { gravity: 1, life: 2, damage: 0, mass: 0.6, sharp: 0.1, carveR: 22, coreR: 10, splashR: 40, splashDamage: 95, debris: 60, bounce: 0, ballistic: false },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -68,6 +76,8 @@ export const PROJ_BUILD = -2;
 export const PROJ_RADIO = -3;
 /** WeaponDef.proj for the repair kit, which sprays nanobots that heal (and regrow limbs) instead of shooting. */
 export const PROJ_REPAIR = -4;
+/** WeaponDef.proj for the golden idol (Extraction): carried, never fired. */
+export const PROJ_IDOL = -5;
 /** How far the repair kit's nanobot spray reaches (cells), and how much it mends per tick of spraying. */
 export const REPAIR_REACH = 30;
 export const REPAIR_HP = 1.5;
@@ -86,6 +96,8 @@ export const WeaponId = {
   Radio: 6,
   /** Nanobots: heals whoever it's sprayed on (a teammate, or yourself) and regrows lost limbs. */
   RepairKit: 7,
+  /** Extraction's golden idol: the prize. Carried in the inventory like a weapon (and spilled on death); does nothing. */
+  Idol: 8,
 } as const;
 
 /**
@@ -125,6 +137,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Radio', proj: PROJ_RADIO, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
   // Sprays every tick; a canister lasts 4 s of spraying and takes 5 s to brew more nanobots.
   { name: 'Repair Kit', proj: PROJ_REPAIR, muzzle: 11, rpm: 1800, auto: true, speed: 0, spread: 0, clip: 120, reload: 150, scope: 40 },
+  { name: 'Golden Idol', proj: PROJ_IDOL, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
@@ -144,6 +157,8 @@ export function projName(kind: number): string {
   if (kind === ProjKind.ShipGun) return 'Dropship Gun';
   if (kind === ProjKind.Bomb) return 'Dropship Bomb';
   if (kind === ProjKind.Engine) return 'Runaway Engine';
+  if (kind === ProjKind.Dart) return 'Dart Trap';
+  if (kind === ProjKind.Mine) return 'Booby Trap';
   return weaponOfProj(kind)?.name ?? '';
 }
 

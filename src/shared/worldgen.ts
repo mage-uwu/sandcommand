@@ -3,9 +3,19 @@ import { Mat } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { type Complex, placeStructures } from './structures.ts';
+import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
 export let lastComplexes: Complex[] = [];
+/** The labyrinth of the most recently generated map, if it is an Extraction map. */
+export let lastDungeon: Dungeon | null = null;
+
+/** What kind of map to make: the usual bunkers, Regicide's two fortresses, or Extraction's labyrinth. */
+export const MapKind = {
+  Plain: 0,
+  Fortress: 1,
+  Dungeon: 2,
+} as const;
 
 function smooth(t: number): number {
   return t * t * (3 - 2 * t);
@@ -109,19 +119,24 @@ class Fbm {
  * `fortresses`: build the two Regicide fortresses into the map as well.
  * `backdrop` (clients only, WORLD_W x WORLD_H): filled with the bunkers' back walls.
  */
-export function generateWorld(t: Terrain, seed: number, fortresses = false, backdrop?: Uint8Array): void {
+export function generateWorld(t: Terrain, seed: number, kind: number | boolean = MapKind.Plain, backdrop?: Uint8Array): void {
+  const mapKind = kind === true ? MapKind.Fortress : kind === false ? MapKind.Plain : kind;
+  const dungeon = mapKind === MapKind.Dungeon;
   const rng = new Rng(seed);
   const p1 = rng.range(0, Math.PI * 2);
   const p2 = rng.range(0, Math.PI * 2);
   const p3 = rng.range(0, Math.PI * 2);
   const heights = new Int32Array(WORLD_W);
   for (let x = 0; x < WORLD_W; x++) {
+    // An Extraction desert sits high (the labyrinth under it is deep) and flatter.
+    const amp = dungeon ? 0.25 : 1;
     const h =
-      WORLD_H * 0.36 +
-      Math.sin(x * 0.0041 + p1) * 70 +
-      Math.sin(x * 0.011 + p2) * 28 +
-      Math.sin(x * 0.031 + p3) * 7 +
-      (fbm(x, 0, 96, seed ^ 0x51, 3) - 0.5) * 60;
+      (dungeon ? DUNGEON_SURFACE : WORLD_H * 0.36) +
+      (Math.sin(x * 0.0041 + p1) * 70 +
+        Math.sin(x * 0.011 + p2) * 28 +
+        Math.sin(x * 0.031 + p3) * 7 +
+        (fbm(x, 0, 96, seed ^ 0x51, 3) - 0.5) * 60) *
+        amp;
     heights[x] = Math.floor(h);
   }
 
@@ -156,7 +171,13 @@ export function generateWorld(t: Terrain, seed: number, fortresses = false, back
   }
   // Bunker complexes on a modular grid across part of the surface.
   backdrop?.fill(0);
-  lastComplexes = placeStructures(m, heights, seed, fortresses, backdrop);
+  if (dungeon) {
+    lastComplexes = [];
+    lastDungeon = generateDungeon(m, heights, seed, backdrop);
+  } else {
+    lastComplexes = placeStructures(m, heights, seed, mapKind === MapKind.Fortress, backdrop);
+    lastDungeon = null;
+  }
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the
   // moment anything touched it, so give it a cohesive dirt crust instead.
