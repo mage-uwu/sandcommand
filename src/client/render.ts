@@ -69,7 +69,7 @@ export class Renderer {
   /** Aiming down the scope this frame (camera pushed out, overlay drawn). */
   private scoped = false;
   /** The scope's line of sight this frame: from the shoulder along the aim to the first solid cell. */
-  private sight: { x: number; y: number; aim: number; dist: number } | null = null;
+  private sight: { x: number; y: number; aim: number; mouseAim: number; cone: number; dist: number } | null = null;
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
   camX = WORLD_W / 2;
@@ -205,9 +205,10 @@ export class Renderer {
       const my = this.camY + (input.mouseY * (H / innerHeight) - H / 2) / z;
       const sh = shoulderAt(selfX, selfY, b.stance, mx < selfX + ACTOR_W / 2, this.shPt);
       // (Locked on: down the line to them.) Clones stop the line as walls do.
-      const aim = game.lockAim ?? Math.atan2(my - sh.y, mx - sh.x);
+      const mouseAim = Math.atan2(my - sh.y, mx - sh.x);
+      const aim = game.lockAim ?? mouseAim;
       const reach = lineOfFire(game, sh.x, sh.y, aim, WEAPONS[game.weapon]?.scope ?? 0).dist;
-      this.sight = { x: sh.x, y: sh.y, aim, dist: sightLine(game.terrain, sh.x, sh.y, aim, 2000) };
+      this.sight = { x: sh.x, y: sh.y, aim, mouseAim, cone: WEAPONS[game.weapon]?.lockCone ?? 0, dist: sightLine(game.terrain, sh.x, sh.y, aim, 2000) };
       this.camX += (sh.x + Math.cos(aim) * reach - this.camX) * 0.12;
       this.camY += (sh.y + Math.sin(aim) * reach - this.camY) * 0.12;
     } else if (game.alive) {
@@ -1062,6 +1063,21 @@ export class Renderer {
    */
   private drawSightLine(ctx: CanvasRenderingContext2D, game: Game, now: number): void {
     const s = this.sight!;
+    if (s.cone > 0) {
+      // The lock cone's edges, faint and dashed: anyone between them can be locked onto.
+      ctx.strokeStyle = 'rgba(255,120,90,0.18)';
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      for (const side of [-1, 1]) {
+        const a = s.mouseAim + side * s.cone;
+        const len = sightLine(game.terrain, s.x, s.y, a, 420);
+        ctx.moveTo(s.x + Math.cos(a) * 10, s.y + Math.sin(a) * 10);
+        ctx.lineTo(s.x + Math.cos(a) * len, s.y + Math.sin(a) * len);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     const lof = lineOfFire(game, s.x, s.y, s.aim, 2000);
     const ex = s.x + Math.cos(s.aim) * lof.dist;
     const ey = s.y + Math.sin(s.aim) * lof.dist;

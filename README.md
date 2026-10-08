@@ -797,12 +797,21 @@ How each field works:
   as it would stop the shot. While scoped, a faint laser runs from the
   barrel to where the shot would land, and brackets mark the first clone in
   its path (grey for a teammate). What the scope shows is what you can hit.
-- **Scope lock-on** (`src/client/scope.ts`): scope onto an enemy and the
-  aim locks onto that point on them, head or chest, wherever the line
-  crossed them (solid brackets, a LOCK tag). It follows them while they
-  stay in the line of fire. Sweeping across them moves the locked point.
-  Pulling the aim well off them (about 17°), or losing sight of them,
-  breaks it.
+- **Scope lock-on** (`src/client/scope.ts`) is radial. Scoped with a gun
+  that can lock, any enemy inside a cone around your aim, and in the clear
+  line of fire, is locked onto: the one nearest the crosshair if there are
+  several, at centre mass. Put the line itself on someone and it locks
+  onto exactly that point on them (head or chest), so headshots stay
+  yours to line up.
+  - **Holding:** the lock follows them while they stay in sight and within
+    reach of your aim (cone + about 11°). Sweeping across them moves the
+    locked point.
+  - **Breaking:** pulling well off them, or losing sight of them, breaks it,
+    and the cone looks for someone else.
+  - **Cone sizes** (`lockCone`): sniper ±9°, bazooka ±3.4°, rifle ±2.9°.
+    Grenades are lobbed, so they never lock.
+  - **On screen:** the cone's edges show as faint dashed lines; a lock
+    shows solid brackets, the locked point and a LOCK tag.
 - **Recoil:** every gun shoves its shooter back along the barrel and climbs
   the muzzle a little with each shot; the climb settles back over a
   moment. Crouched you feel about half of the shove, prone under a third.

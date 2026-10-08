@@ -100,6 +100,8 @@ function fakeGame(views: { id: number; x: number; y: number }[], solidX = 1e9, m
   } as unknown as Game;
 }
 
+const CONE = WEAPONS[WeaponId.Sniper].lockCone!;
+
 describe('scope lock-on', () => {
   it('clones are part of the line of fire: the first one in it stops it', () => {
     const g = fakeGame([{ id: 2, x: 200, y: 46 }, { id: 3, x: 120, y: 46 }], 400);
@@ -116,22 +118,51 @@ describe('scope lock-on', () => {
     const ox = 100;
     const oy = 50;
     // The line crosses their head: locked onto the head.
-    let aim = scopeLock(g, ox, oy, Math.atan2(42 - oy, 300 - ox), true);
+    let aim = scopeLock(g, ox, oy, Math.atan2(42 - oy, 300 - ox), CONE);
     expect(g.scopeLock?.id).toBe(5);
     expect(g.scopeLock!.ly).toBeLessThan(5);
     // They move; the mouse doesn't, quite: the aim follows the locked point.
     views[0].y = 30;
-    aim = scopeLock(g, ox, oy, aim, true);
+    aim = scopeLock(g, ox, oy, aim, CONE);
     expect(Math.abs(oy + Math.tan(aim) * (300 - ox) - (30 + g.scopeLock!.ly))).toBeLessThan(1.5);
     // Pulled right off them: the lock breaks.
-    scopeLock(g, ox, oy, aim + 0.6, true);
+    scopeLock(g, ox, oy, aim + 0.6, CONE);
     expect(g.scopeLock).toBeNull();
     // And it never locks onto a teammate.
     const mates = fakeGame([{ id: 7, x: 300, y: 40 }], 1e9, Team.Red, { 0: Team.Red, 7: Team.Red });
-    scopeLock(mates, ox, oy, Math.atan2(46 - oy, 300 - ox), true);
+    scopeLock(mates, ox, oy, Math.atan2(46 - oy, 300 - ox), CONE);
     expect(mates.scopeLock).toBeNull();
     void ACTOR_W;
     void ACTOR_H;
+  });
+
+  it('is radial: anyone in the cone around the aim gets locked, the nearest to the crosshair first', () => {
+    const ox = 100;
+    const oy = 50;
+    // Two enemies off to the side of the line (clear of it), both inside the sniper's cone; one well outside it.
+    // Boxes are 8x14: centre mass at (x + 4, y + 6).
+    const g = fakeGame([
+      { id: 4, x: 396, y: 50 + 35 - 6 },
+      { id: 5, x: 396, y: 50 - 20 - 6 },
+      { id: 6, x: 396, y: 50 + 120 - 6 },
+    ]);
+    const aim = scopeLock(g, ox, oy, 0, CONE);
+    expect(g.scopeLock?.id).toBe(5);
+    // Locked at centre mass: the aim runs to it.
+    expect(aim).toBeCloseTo(Math.atan2(-20, 300), 5);
+    // Outside the cone, or behind a wall: nobody.
+    const far = fakeGame([{ id: 6, x: 396, y: 50 + 120 - 6 }]);
+    scopeLock(far, ox, oy, 0, CONE);
+    expect(far.scopeLock).toBeNull();
+    const walled = fakeGame([{ id: 5, x: 396, y: 50 - 20 - 6 }], 250);
+    scopeLock(walled, ox, oy, 0, CONE);
+    expect(walled.scopeLock).toBeNull();
+    // No cone (not scoping a lock-capable weapon): no lock at all.
+    const none = fakeGame([{ id: 5, x: 300, y: 46 }]);
+    expect(scopeLock(none, ox, oy, 0, 0)).toBe(0);
+    expect(none.scopeLock).toBeNull();
+    expect(WEAPONS[WeaponId.Grenade].lockCone ?? 0).toBe(0); // lobbed: never locks
+    expect(CONE).toBeGreaterThan(WEAPONS[WeaponId.Rifle].lockCone! * 2);
   });
 
   it("the server's scoped view stops at a clone in the line too", () => {

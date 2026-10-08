@@ -28,20 +28,28 @@ export function lineOfFire(g: Game, ox: number, oy: number, aim: number, max: nu
   return { dist: wall * t, hit, foe };
 }
 
+/** Where a lock acquired by the cone (not the line itself) aims on a clone: centre mass, hitbox-local. */
+const CENTRE = { lx: ACTOR_W / 2, ly: 6 };
+
 /**
- * Scope lock-on, once a tick while scoping: put the crosshair's line on an
- * enemy and the aim locks onto that point on them (head or chest, wherever
- * it was), following them while they stay in the line of fire. Sweeping the
- * line across them moves the locked point; pulling the aim well off them
- * (or losing sight of them) breaks the lock. Returns the aim to fire on.
+ * Scope lock-on, once a tick while scoping (`cone`: the weapon's lock cone
+ * half-angle, 0 when not scoping a lock-capable weapon). It's radial: any
+ * enemy within the cone around the aim, and in the clear line of fire, is
+ * locked onto (the one nearest the crosshair if there are several), at
+ * centre mass. Put the line itself on someone and it locks onto exactly that
+ * point on them (head or chest). The lock follows them while they stay in
+ * the line of fire and within reach of the aim; sweeping the line across
+ * them moves the locked point; pulling well off them or losing sight of
+ * them lets go (and the cone looks for someone else). Returns the aim to
+ * fire on.
  */
-export function scopeLock(g: Game, ox: number, oy: number, aim: number, scoping: boolean): number {
-  if (!scoping) {
+export function scopeLock(g: Game, ox: number, oy: number, aim: number, cone: number): number {
+  if (cone <= 0) {
     g.scopeLock = null;
     return aim;
   }
   const lof = lineOfFire(g, ox, oy, aim, 2000);
-  const at = (v: RemoteView) => {
+  const along = (v: RemoteView) => {
     // The point the line enters them at, a cell or two in.
     const d = lof.dist + 2;
     return {
@@ -50,20 +58,40 @@ export function scopeLock(g: Game, ox: number, oy: number, aim: number, scoping:
       ly: Math.max(1, Math.min(ACTOR_H - 1, oy + Math.sin(aim) * d - v.y)),
     };
   };
+  const angleTo = (v: RemoteView, lx: number, ly: number) => Math.atan2(v.y + ly - oy, v.x + lx - ox);
+  const off = (a: number) => Math.abs(Math.atan2(Math.sin(aim - a), Math.cos(aim - a)));
+  const inSight = (v: RemoteView, a: number) => lineOfFire(g, ox, oy, a, 2000).hit?.id === v.id;
+  // The line itself on an enemy: lock exactly there.
+  if (lof.hit && lof.foe) {
+    g.scopeLock = along(lof.hit);
+    return aim;
+  }
+  // Keep a lock we have while it's within reach of the aim and in sight.
   const lock = g.scopeLock;
   if (lock) {
-    if (lof.hit && lof.hit.id === lock.id) {
-      g.scopeLock = at(lof.hit);
-      return aim;
-    }
     const v = g.remoteViews().find((r) => r.id === lock.id);
     if (v && v.flags & F_ALIVE) {
-      const ta = Math.atan2(v.y + lock.ly - oy, v.x + lock.lx - ox);
-      const off = Math.abs(Math.atan2(Math.sin(aim - ta), Math.cos(aim - ta)));
-      if (off < 0.3 && lineOfFire(g, ox, oy, ta, 2000).hit?.id === lock.id) return ta;
+      const a = angleTo(v, lock.lx, lock.ly);
+      if (off(a) < cone + 0.2 && inSight(v, a)) return a;
     }
     g.scopeLock = null;
   }
-  if (lof.hit && lof.foe) g.scopeLock = at(lof.hit);
-  return aim;
+  // Anyone else in the cone: the enemy nearest the crosshair that a shot could reach.
+  let best: RemoteView | null = null;
+  let bestOff = cone;
+  let bestA = aim;
+  for (const v of g.remoteViews()) {
+    if (!(v.flags & F_ALIVE) || v.id === g.myId || g.tankPilots.has(v.id)) continue;
+    if (g.myTeam !== Team.None && g.teamOf[v.id] === g.myTeam) continue;
+    const a = angleTo(v, CENTRE.lx, CENTRE.ly);
+    const o = off(a);
+    if (o < bestOff && inSight(v, a)) {
+      best = v;
+      bestOff = o;
+      bestA = a;
+    }
+  }
+  if (!best) return aim;
+  g.scopeLock = { id: best.id, ...CENTRE };
+  return bestA;
 }

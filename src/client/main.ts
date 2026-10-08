@@ -257,7 +257,7 @@ function frame(now: number): void {
         if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
       }
       // Scoped onto someone: the aim locks onto them.
-      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && (WEAPONS[g.weapon]?.scope ?? 0) > 0);
+      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
       g.lockAim = g.scopeLock ? aim : null;
       let buttons = input.buttons();
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
