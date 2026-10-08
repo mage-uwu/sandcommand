@@ -125,6 +125,21 @@ export const TEAM_COLORS = [
   { css: 'rgb(236,190,52)', rgb: 0xecbe34 },
 ] as const;
 
+/** What the game tells the sound effects (sfx.ts; structural, so the game needs no DOM audio types). */
+export interface Sfx {
+  listen(x: number, y: number): void;
+  shot(kind: number, x: number, y: number, owner: number): void;
+  explode(x: number, y: number, radius: number): void;
+  impact(x: number, y: number): void;
+  hit(x: number, y: number, amount: number, synthetic: boolean): void;
+  limb(x: number, y: number, synthetic: boolean): void;
+  gib(x: number, y: number, violence: number, synthetic: boolean): void;
+  laser(x0: number, y0: number, x1: number, y1: number, power: number): void;
+  engines(level: number, pan: number): void;
+  jets(level: number, pan: number): void;
+  charge(level: number): void;
+}
+
 export class Game implements FrameHandler {
   readonly terrain = new Terrain();
   readonly loaded = new Uint8Array(CHUNK_COUNT);
@@ -212,6 +227,15 @@ export class Game implements FrameHandler {
     return (this.trapSpent[id >> 3] & (1 << (id & 7))) !== 0;
   }
 
+  /** Sound effects (main.ts plugs them in once audio is allowed; none in tests). */
+  sfx: Sfx | null = null;
+
+  /** Where we hear (and gib) from: the clone being watched while spectating, else our own. */
+  private ear(): { x: number; y: number } {
+    const watched = !this.alive && this.spectate !== 255 ? this.snaps.get(this.spectate)?.at(-1) : undefined;
+    return watched ?? this.lastSelf ?? this.body;
+  }
+
   /** Beams to fade out: materializer (builder muzzle to piece centre) and sniper tracers (muzzle to impact). */
   readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number; tracer?: boolean }[] = [];
   /** Laser beams to draw, fading (power 0..1), and the last few beam ids seen. */
@@ -227,6 +251,7 @@ export class Game implements FrameHandler {
     this.laserBeams.push({ x0, y0, x1, y1, power, at: performance.now() });
     if (this.laserBeams.length > 12) this.laserBeams.shift();
     laserHit(this.particles, x1, y1, (x1 - x0) / (Math.hypot(x1 - x0, y1 - y0) || 1), (y1 - y0) / (Math.hypot(x1 - x0, y1 - y0) || 1), power);
+    this.sfx?.laser(x0, y0, x1, y1, power);
     if (owner < 64) this.kicks.set(owner, { at: performance.now(), k: 0.3 + power * 0.7 });
     const me = this.body;
     const d = Math.min(Math.hypot(me.x - x0, me.y - y0), Math.hypot(me.x - x1, me.y - y1));
@@ -378,6 +403,7 @@ export class Game implements FrameHandler {
       if (last.parts !== ALL_PARTS) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
     }
     if (this.alive && this.parts !== ALL_PARTS) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
+    if (this.sfx) this.soundBeds(this.sfx);
     // Bodies in the engine so shrapnel stops in them and grains bounce off
     // them on screen too; only the server's results (damage, knockback) count.
     const actors = this.bodyField;
@@ -853,6 +879,49 @@ export class Game implements FrameHandler {
     }
   }
 
+  /** Feed the looping sounds: thrusters and jets near the ear, summed and panned toward where they are. */
+  private soundBeds(sfx: Sfx): void {
+    const ear = this.ear();
+    sfx.listen(ear.x, ear.y);
+    sfx.charge(this.laserCharge / LASER_MAX);
+    const eng = { l: 0, p: 0 };
+    const jet = { l: 0, p: 0 };
+    const add = (acc: { l: number; p: number }, x: number, y: number, amount: number) => {
+      const d = Math.hypot(x - ear.x, y - ear.y);
+      if (d > 1400 || amount <= 0) return;
+      const w = amount * (1 - d / 1400) ** 2;
+      acc.l += w;
+      acc.p += w * Math.max(-1, Math.min(1, (x - ear.x) / 600));
+    };
+    for (const [, ss] of this.shipSnaps) {
+      const s = ss[ss.length - 1];
+      if (!s) continue;
+      for (let e = 0; e < 4; e++) if (s.parts & (1 << (1 + e))) add(eng, s.x, s.y, s.thrust[e] * 0.45);
+    }
+    for (const [slot, cs] of this.craftSnaps) {
+      const c = slot === this.rideSlot && this.ride ? this.ride : cs[cs.length - 1];
+      if (c) add(eng, c.x, c.y, c.thrust);
+    }
+    const pr = this.projectiles;
+    for (let i = 0; i < pr.n; i++) {
+      const k = pr.kind[i];
+      if (k === ProjKind.Engine && PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0)) add(eng, pr.x[i], pr.y[i], 0.8);
+      else if (k === ProjKind.Rocket) add(jet, pr.x[i], pr.y[i], 0.4);
+    }
+    if (this.alive && this.drive?.jetting) add(jet, this.drive.x, this.drive.y, 0.8);
+    else if (this.alive && this.body.jetting) add(jet, this.body.x, this.body.y, 0.6);
+    for (const [slot, ts] of this.tankSnaps) {
+      const t = ts[ts.length - 1];
+      if (t && t.jetting && slot !== this.driveSlot) add(jet, t.x, t.y, 0.8);
+    }
+    for (const [id, s] of this.snaps) {
+      const last = s[s.length - 1];
+      if (id !== this.myId && last && last.flags & F_ALIVE && last.flags & F_JET) add(jet, last.x, last.y, 0.45);
+    }
+    sfx.engines(eng.l, eng.l > 0 ? eng.p / eng.l : 0);
+    sfx.jets(jet.l, jet.l > 0 ? jet.p / jet.l : 0);
+  }
+
   chunkLoaded(ci: number): void {
     this.loaded[ci] = 1;
     const ox = (ci % CHUNKS_X) << CHUNK_SHIFT;
@@ -873,6 +942,7 @@ export class Game implements FrameHandler {
       if (this.slugFrom.size > 64) this.slugFrom.delete(this.slugFrom.keys().next().value!);
       heavyMuzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp);
     } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell);
+    this.sfx?.shot(kind, x, y, owner);
     // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
     const w = weaponOfProj(kind);
     if (w && owner < 64) {
@@ -892,7 +962,10 @@ export class Game implements FrameHandler {
       const me = this.body;
       slugTrail(this.particles, from.x, from.y, x, y, me.x, me.y, 700);
       const len = Math.hypot(x - from.x, y - from.y) || 1;
-      if (detonate) slugImpact(this.particles, x, y, (x - from.x) / len, (y - from.y) / len, this.dustColorAt(x, y));
+      if (detonate) {
+        slugImpact(this.particles, x, y, (x - from.x) / len, (y - from.y) / len, this.dustColorAt(x, y));
+        this.sfx?.impact(x, y);
+      }
       return;
     }
     if (!detonate) return;
@@ -905,6 +978,7 @@ export class Game implements FrameHandler {
     // Fireball, sparks, smoke, and a blast wave in the air field that moves
     // everything loose already in flight (grains, gibs, smoke, blood).
     explosion(this.particles, x, y, kind, def.splashR, BLAST_IMPULSE, seed);
+    this.sfx?.explode(x, y, def.splashR);
     const me = this.body;
     const d = Math.hypot(me.x - x, me.y - y);
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 400) * 8);
@@ -934,14 +1008,14 @@ export class Game implements FrameHandler {
     // Measured from where we are this frame (our own record comes first; the
     // body itself is only rebased after the whole frame).
     // While spectating, from whoever we're watching.
-    const watched = !this.alive && this.spectate !== 255 ? this.snaps.get(this.spectate)?.at(-1) : undefined;
-    const me = watched ?? this.lastSelf ?? this.body;
+    const me = this.ear();
     const camDx = k.x - me.x;
     const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
     const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === W_TANK || weapon === W_SHIP;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
+    this.sfx?.gib(k.x, k.y, violence, this.synthetic(victim));
     // Same seed as the server, so the gold shower matches what will settle.
     spillGold(this.particles, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
     this.snaps.delete(victim);
@@ -971,6 +1045,7 @@ export class Game implements FrameHandler {
 
   hit(victim: number, x: number, y: number, amount: number): void {
     bloodSplat(this.particles, x, y, Math.min(24, 3 + amount / 3), 60 + amount * 1.5);
+    this.sfx?.hit(x, y, amount, this.synthetic(victim));
     if (victim === this.myId) this.hurtFlash = Math.min(1, this.hurtFlash + amount / 60);
   }
 
@@ -1192,6 +1267,7 @@ export class Game implements FrameHandler {
 
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void {
     limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc, this.synthetic(id));
+    this.sfx?.limb(x, y, this.synthetic(id));
     if (id === this.myId) this.hurtFlash = 1;
   }
 

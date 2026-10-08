@@ -7,6 +7,7 @@ import { TANK_W, TANK_H } from '../shared/tank.ts';
 import { assistAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
+import { Sfx } from './sfx.ts';
 import { BTN_FIRE, shoulderAt } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
@@ -65,9 +66,11 @@ async function refreshRooms(): Promise<void> {
 }
 refreshRooms();
 
-// The soundtrack starts on Deploy (browsers only allow audio after a click);
-// M toggles it, and the choice is remembered.
+// The soundtrack and sound effects start on Deploy (browsers only allow
+// audio after a click); M toggles the music, N the effects, and the choices
+// are remembered.
 let music: Music | null = null;
+let sfx: Sfx | null = null;
 let musicMuffled = false;
 function startMusic(): void {
   if (music) return;
@@ -78,8 +81,12 @@ function startMusic(): void {
     if (storageGet('sc.music') === 'off') music.toggle();
     (music.ctx as AudioContext).resume?.().catch(() => {});
     music.start();
+    sfx = new Sfx(music.ctx);
+    if (storageGet('sc.sfx') === 'off') sfx.toggle();
+    if (game) game.sfx = sfx;
   } catch {
     music = null; // no audio here: play on in silence
+    sfx = null;
   }
 }
 addEventListener('keydown', (e) => {
@@ -89,6 +96,14 @@ addEventListener('keydown', (e) => {
   const on = music.toggle();
   storageSet('sc.music', on ? 'on' : 'off');
   game?.feed.push({ text: on ? '♪ music on (M)' : '♪ music off (M)', color: '#b8a0ff', at: performance.now() });
+});
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyN' || input.typing || e.repeat) return;
+  startMusic();
+  if (!sfx) return;
+  const on = sfx.toggle();
+  storageSet('sc.sfx', on ? 'on' : 'off');
+  game?.feed.push({ text: on ? 'sound effects on (N)' : 'sound effects off (N)', color: '#b8a0ff', at: performance.now() });
 });
 
 async function join(): Promise<void> {
@@ -114,6 +129,7 @@ async function join(): Promise<void> {
   }
   statusEl.textContent = `Connecting to ${room}…`;
   const g = new Game();
+  g.sfx = sfx;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${proto}//${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}`;
   net?.close();

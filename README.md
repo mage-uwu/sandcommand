@@ -22,7 +22,7 @@ Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
 to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
-drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** music. With the Materializer out, the wheel or a click
+drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** music, **N** sound effects. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
 **Keyboard-only aim** (no mouse needed): the **arrow keys** move the
@@ -82,6 +82,32 @@ muffled behind a low-pass while you're dead, spectating or between waves.
 **M** toggles it, and the choice is remembered. `composeBar(bar, seed)` is
 pure and tested: what plays in each bar comes from the bar number and a
 per-session seed, so every session's variation differs.
+
+## Sound effects
+
+Every sound is synthesized too, from noise bursts and swept oscillators
+(`src/client/sfx.ts`):
+
+| Source | Sound |
+|---|---|
+| **Rifle** | A sharp crack over a short, punchy body. |
+| **Gatling, tank and dropship guns** | A lower, chunkier report, thinned out at full rate. |
+| **Shotgun** | One big, wide boom per shell, not nine. |
+| **Sniper** | A .50-cal supersonic crack, a deep boom, an echo rolling back, and a hard strike where it lands. |
+| **Bazooka and tank cannon** | A thump and a roaring whoosh. |
+| **Grenade launcher** | A hollow "thoomp". |
+| **Thrown grenades, bombs, darts** | A swish, a bomb-bay clunk, a blowpipe "fft". |
+| **Laser** | A zap sweeping down, fuller the longer it charged, with a rising whine while you charge it. |
+| **Explosions** | A crack, a roar and a sub-bass thump, sized by blast radius, then debris pattering down. |
+| **Gore** | Meaty thwacks on hits, a bone crack and a wet tear for a lost limb, and squelches, cracking bones and a thud for a gibbing. Synthetic mercenaries clank and spark instead. |
+| **Thrusters** | Dropship pods, drop rockets and runaway engines roar; jetpacks and tank jets hiss. |
+
+Sounds are placed in the world. They fade and lose their highs with
+distance from the clone you're playing or watching, and pan to the side
+they're on. Big guns and blasts carry further. A short room reverb slaps
+gunshots back, and a limiter keeps a 64-player firefight from clipping.
+A voice budget drops the quietest sounds when too many play at once.
+**N** toggles the effects, and the choice is remembered.
 
 ## Mercenary vendors (factions)
 
