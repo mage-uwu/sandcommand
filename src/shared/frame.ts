@@ -39,6 +39,7 @@ import {
   dequantizeAim,
   PARTS_MASK,
   STANCE_SHIFT,
+  FACTION_SHIFT,
 } from './protocol.ts';
 import type { Terrain } from './terrain.ts';
 
@@ -65,6 +66,7 @@ export interface SelfState {
   partHp: number[]; // 0..100 per part, 0 = gone
   stance: number; // actor.ts Stance
   downTicks: number; // how long down has been held (prediction)
+  faction: number; // factions.ts: this clone's vendor
 }
 
 export interface RemoteActor {
@@ -79,6 +81,7 @@ export interface RemoteActor {
   weapon: number;
   parts: number;
   stance: number; // actor.ts Stance
+  faction: number; // factions.ts: this clone's vendor
 }
 
 export interface KillInfo {
@@ -256,10 +259,12 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           partHp: Array.from({ length: PART_COUNT }, () => r.u8()),
           stance: 0,
           downTicks: 0,
+          faction: 0,
         };
         const st = r.u8();
         self.stance = st & 3;
-        self.downTicks = st >> 2;
+        self.downTicks = (st >> 2) & 15;
+        self.faction = st >> 6;
         h.self(self);
         break;
       }
@@ -279,9 +284,11 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             weapon: r.u8(),
             parts: r.u16(),
             stance: 0,
+            faction: 0,
           });
           const a = list[list.length - 1];
           a.stance = (a.parts >> STANCE_SHIFT) & 3;
+          a.faction = (a.parts >> FACTION_SHIFT) & 3;
           a.parts &= PARTS_MASK;
         }
         h.actors(list);

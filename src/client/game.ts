@@ -3,6 +3,7 @@ import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type TankState, applyFrameRecords } from '../shared/frame.ts';
 import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts';
+import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_TANK, releaseCarve, spillGold } from '../shared/particles.ts';
@@ -46,6 +47,7 @@ interface Snap {
   weapon: number;
   parts: number;
   stance: number;
+  faction: number;
 }
 
 export interface RemoteView {
@@ -59,6 +61,7 @@ export interface RemoteView {
   moving: boolean;
   parts: number; // attached-part mask (body.ts)
   stance: number; // actor.ts Stance
+  faction: number; // factions.ts: this clone's vendor
   vx: number;
   vy: number;
 }
@@ -291,9 +294,9 @@ export class Game implements FrameHandler {
       const last = s[s.length - 1];
       if (!last || !(last.flags & F_ALIVE)) continue;
       if (last.flags & F_JET) jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
-      if (last.parts !== ALL_PARTS) stumpDrip(this.particles, last.x, last.y, last.parts);
+      if (last.parts !== ALL_PARTS) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
     }
-    if (this.alive && this.parts !== ALL_PARTS) stumpDrip(this.particles, this.body.x, this.body.y, this.parts);
+    if (this.alive && this.parts !== ALL_PARTS) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
     // Bodies in the engine so shrapnel stops in them and grains bounce off
     // them on screen too; only the server's results (damage, knockback) count.
     const actors = this.bodyField;
@@ -486,6 +489,7 @@ export class Game implements FrameHandler {
     b.cls = classOfFlags(s.flags);
     b.stance = s.stance;
     b.downTicks = s.downTicks;
+    b.faction = s.faction;
     if (!this.alive) {
       copyBody(this.prevBody, b);
       this.smoothX = this.smoothY = 0;
@@ -547,7 +551,7 @@ export class Game implements FrameHandler {
         x = b.x;
         y = b.y;
       }
-      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5, parts: b.parts, stance: b.stance, vx: b.vx, vy: b.vy });
+      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5, parts: b.parts, stance: b.stance, faction: b.faction, vx: b.vx, vy: b.vy });
     }
     return out;
   }
@@ -564,7 +568,7 @@ export class Game implements FrameHandler {
       seen.add(a.id);
       let s = this.snaps.get(a.id);
       if (!s) this.snaps.set(a.id, (s = []));
-      s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts, stance: a.stance });
+      s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts, stance: a.stance, faction: a.faction });
       if (s.length > 12) s.shift();
       if (a.flags & F_FIRING && a.weapon === WeaponId.Digger) {
         digDust(this.particles, a.x + ACTOR_W / 2, a.y + 5, 0xa08060, 1);
@@ -716,6 +720,12 @@ export class Game implements FrameHandler {
   /** Bunker back walls (structures.ts Backdrop per cell): cosmetic, made with the map. */
   readonly backdrop = new Uint8Array(WORLD_W * WORLD_H);
 
+  /** Is this clone a machine (a Synth Legion body)? Its debris is scrap, not meat. */
+  synthetic(id: number): boolean {
+    const f = id === this.myId ? this.body.faction : this.snaps.get(id)?.at(-1)?.faction;
+    return f !== undefined && !!FACTIONS[f]?.synthetic;
+  }
+
   /** Is this player a king right now (Regicide)? */
   isKing(id: number): boolean {
     const rs = this.roundState;
@@ -813,7 +823,7 @@ export class Game implements FrameHandler {
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
     const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === W_TANK;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
-    gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts);
+    gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
     // Same seed as the server, so the gold shower matches what will settle.
     spillGold(this.particles, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
     this.snaps.delete(victim);
@@ -1010,7 +1020,7 @@ export class Game implements FrameHandler {
   }
 
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void {
-    limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc);
+    limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc, this.synthetic(id));
     if (id === this.myId) this.hurtFlash = 1;
   }
 

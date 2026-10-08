@@ -67,12 +67,13 @@ export const F_RELOAD = 32;
 /** Bits 6-7 of the actor flags: the clone's class (body.ts ClassId). */
 export const F_CLASS_SHIFT = 6;
 export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
-/** R_ACTORS parts word: the body-part mask in the low bits, the stance (actor.ts Stance) in bits 12-13. */
+/** R_ACTORS parts word: the body-part mask in the low bits, the stance (actor.ts Stance) in bits 12-13, the vendor (factions.ts) in bits 14-15. */
 export const STANCE_SHIFT = 12;
+export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /** Last Man Standing round phases. */
 export const Phase = {

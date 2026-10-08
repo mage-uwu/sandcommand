@@ -51,6 +51,23 @@ on a touch-first device.
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
 
+## Mercenary vendors (factions)
+
+Factions are mercenary vendors: the outfit that built and supplied a clone
+(`src/shared/factions.ts`). Every clone rolls its vendor when it spawns,
+like its class, so every side fields a mix of them. The red/green team
+colour stays on the torso, so you can still tell sides apart.
+
+| Vendor | Look | Handling and toughness |
+|---|---|---|
+| **Guild-Tech** (≈45%) | Grey helmets, cyan visors, olive fatigues: the original clones | The baseline |
+| **Rust Nomads** (≈30%) | Tan headwraps trailing loose ends, amber goggles, leather and rusty kit; red bandanas for scouts, scrap plate for heavies | 10% faster runners and frugal on fuel, but thinner-skinned |
+| **Synth Legion** (≈25%) | Chrome and gunmetal with a red optic and an antenna; white plastic scouts, black-armoured heavies | Slower and much tougher; lost limbs don't bleed, they spark; they die in scrap and sparks, not blood |
+
+The vendor scales the class's movement (in the shared, predicted physics)
+and toughness. It rides in spare bits of each actor's parts word, so it
+adds nothing to the frame. The HUD names your body's vendor and class.
+
 ## Stances and ragdoll
 
 Hold **S** (touch: pull the move stick down) to crouch. Keep holding on the

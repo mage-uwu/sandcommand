@@ -1,5 +1,6 @@
 import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
-import { STANCE_SHIFT } from '../shared/protocol.ts';
+import { FACTION_SHIFT, STANCE_SHIFT } from '../shared/protocol.ts';
+import { FACTIONS, rollFaction } from '../shared/factions.ts';
 import {
   CANNON_INTERVAL,
   CANNON_SPEED,
@@ -1515,9 +1516,11 @@ export class World {
     b.vx = vx;
     b.vy = vy;
     b.fuel = 100;
-    // Every clone rolls a class: scout, medium or heavy.
-    resetBody(p.parts, rollClass(this.rng.next()));
+    // Every clone rolls a class (scout, medium or heavy) and the mercenary
+    // vendor that supplied it (Guild-Tech, Rust Nomads, Synth Legion).
+    resetBody(p.parts, rollClass(this.rng.next()), rollFaction(this.rng.next()));
     b.cls = p.parts.cls;
+    b.faction = p.parts.faction;
     mobility(p.parts.mask, p.mob);
     b.legs = p.mob.legs;
     b.jet = p.mob.jet;
@@ -2196,8 +2199,8 @@ export class World {
         continue;
       }
       if (p.body.y > WORLD_H) this.damage(p, 999, p.id, 255);
-      // Open stumps bleed; bleeding out credits whoever did it.
-      const n = stumps(p.parts.mask);
+      // Open stumps bleed (machines' just spark); bleeding out credits whoever did it.
+      const n = FACTIONS[p.parts.faction].bleeds ? stumps(p.parts.mask) : 0;
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
       this.handleInventory(p);
@@ -2323,7 +2326,7 @@ export class World {
       w.u8(this.flagsOf(p));
       w.u8(Math.max(0, Math.ceil(p.hp)));
       w.u8(p.weapon);
-      w.u16(p.parts.mask | (b.stance << STANCE_SHIFT)); // stance rides in the spare top bits
+      w.u16(p.parts.mask | (b.stance << STANCE_SHIFT) | (b.faction << FACTION_SHIFT)); // stance and vendor ride in the spare top bits
     }
   }
 
@@ -2426,7 +2429,7 @@ export class World {
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
-      w.u8(b.stance | (b.downTicks << 2));
+      w.u8(b.stance | (b.downTicks << 2) | (b.faction << 6));
 
       // Riding in: the rocket at full precision too, since the client
       // predicts it from this state the same way it predicts its clone.

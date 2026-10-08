@@ -93,7 +93,7 @@ export function bloodSplat(p: Particles, x: number, y: number, count: number, sp
  * scatter harder. Part offsets follow the body layout so the helmet starts at
  * the top and boots at the bottom.
  */
-export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: number, team: number, violence: number, parts = 0x1ff): void {
+export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: number, team: number, violence: number, parts = 0x1ff, synthetic = false): void {
   const v = Math.min(2.6, 1 + violence * 0.6);
   const on = (part: number) => has(parts, part);
   const fling = (ox: number, oy: number, piece: number, speed: number) => {
@@ -112,6 +112,13 @@ export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: n
   if (on(Part.LegF)) fling(1, 5, GIB_LEG[1], 60);
   if (on(Part.Jetpack)) fling(-3, 0, GIB_PACK, 45);
   const meat = Math.round(8 + 6 * v);
+  if (synthetic) {
+    // A machine comes apart in plates and wiring: scrap, sparks, a puff of black smoke.
+    for (let k = 0; k < meat; k++) fling((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10, k % 3 === 0 ? GIB_NOZZLE : GIB_PLATE, 90);
+    burst(p, PK.Spark, cx, cy, Math.round(30 + 16 * v), 200 + 60 * v, 14, 0, vx * 0.3, vy * 0.3);
+    burst(p, PK.Smoke, cx, cy, 14, 40, 60);
+    return;
+  }
   for (let k = 0; k < meat; k++) fling((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10, GIB_MEAT[k % GIB_MEAT.length], 90);
   bloodSplat(p, cx, cy, Math.round(24 + 14 * v), 70 + 30 * v, vx * 0.3, vy * 0.3);
 }
@@ -141,11 +148,11 @@ const PART_GIB: Record<number, number> = {
  * A part torn off a living clone: the piece flies off, flesh parts spray a
  * fountain of blood and a little meat; armour just clatters away with sparks.
  */
-export function limbOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, team: number): void {
+export function limbOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, team: number, synthetic = false): void {
   const piece = PART_GIB[part];
   if (piece === undefined) return;
   spawnGib(p, x, y, vx, vy, piece, team);
-  if (part === Part.Helmet || part === Part.Vest || part === Part.Jetpack) {
+  if (part === Part.Helmet || part === Part.Vest || part === Part.Jetpack || synthetic) {
     burst(p, PK.Spark, x, y, 8, 160, 10);
     return;
   }
@@ -154,9 +161,13 @@ export function limbOff(p: Particles, part: number, x: number, y: number, vx: nu
 }
 
 /** Open stumps drip: call once per tick per maimed clone. */
-export function stumpDrip(p: Particles, x: number, y: number, parts: number): void {
+export function stumpDrip(p: Particles, x: number, y: number, parts: number, synthetic = false): void {
   for (const [part, ox, oy] of STUMPS) {
-    if (!has(parts, part) && Math.random() < 0.6) p.spawn(PK.Blood, x + ox, y + oy, rnd(-25, 25), rnd(-30, 10), 40);
+    if (has(parts, part)) continue;
+    // Machines' stumps spark now and then instead of bleeding.
+    if (synthetic) {
+      if (Math.random() < 0.12) p.spawn(PK.Spark, x + ox, y + oy, rnd(-60, 60), rnd(-80, 0), 8);
+    } else if (Math.random() < 0.6) p.spawn(PK.Blood, x + ox, y + oy, rnd(-25, 25), rnd(-30, 10), 40);
   }
 }
 const STUMPS: [number, number, number][] = [

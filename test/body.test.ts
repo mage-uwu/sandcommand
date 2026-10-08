@@ -1,3 +1,4 @@
+import { Faction } from '../src/shared/factions.ts';
 import { describe, expect, it } from 'vitest';
 import { deliverAll } from './helpers.ts';
 import { BTN_RIGHT, BTN_UP, newBody, stepBody } from '../src/shared/actor.ts';
@@ -102,8 +103,9 @@ describe('modular body', () => {
     const victim = world.addPlayer('victim', { send() {} })!;
     deliverAll(world, [shooter, victim]);
     // A standard (medium) clone: heavies shrug rifle rounds off (see the class tests).
-    resetBody(victim.parts, ClassId.Medium);
+    resetBody(victim.parts, ClassId.Medium, Faction.GuildTech);
     victim.body.cls = ClassId.Medium;
+    victim.body.faction = Faction.GuildTech;
     const t = world.terrain;
     for (let x = 900; x < 1100; x++) {
       for (let y = 300; y < 310; y++) t.set(x, y, Mat.Bedrock);

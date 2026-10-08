@@ -11,6 +11,7 @@ import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
+import { FACTIONS } from '../shared/factions.ts';
 import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_PARTS, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
@@ -307,7 +308,7 @@ export class Renderer {
       const info = game.players.get(v.id);
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
-      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean);
+      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction);
       if (game.isKing(v.id)) this.drawCrown(ctx, v.x, v.y, now);
     }
     // Own clone (hidden inside its tank while driving).
@@ -326,7 +327,7 @@ export class Renderer {
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction);
       if (game.isKing(game.myId)) this.drawCrown(ctx, selfX, selfY, now);
     }
 
@@ -561,6 +562,7 @@ export class Renderer {
     parts: number,
     stance: number = Stance.Stand,
     lean = 0,
+    faction = 0,
   ): void {
     const left = Math.cos(aim) < 0;
     const face = left ? -1 : 1;
@@ -568,7 +570,7 @@ export class Renderer {
     const iy = Math.round(y);
     // Walk cycle advances with distance travelled, so feet don't skate.
     const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / (stance === Stance.Stand ? 3 : 2)) & 3] : 'idle';
-    const sprite = this.sprites.body(team, frame, left, parts, classOfFlags(flags));
+    const sprite = this.sprites.body(team, frame, left, parts, classOfFlags(flags), faction);
     // The torso pivots at the hip (leaning with the stance and the ragdoll
     // sway); crouched, the legs fold under it; prone, the whole clone lies down.
     const hipX = ix + HIP_X + 0.5;
@@ -1016,7 +1018,8 @@ export class Renderer {
     ctx.fillText(`GOLD ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
     if (game.alive) {
       ctx.fillStyle = '#c8d0d8';
-      ctx.fillText(CLASSES[game.body.cls]?.name.toUpperCase() ?? '', 14 * s, 78 * s);
+      // Who supplied this body, and what kind of body it is.
+      ctx.fillText(`${FACTIONS[game.body.faction]?.name.toUpperCase() ?? ''} ${CLASSES[game.body.cls]?.name.toUpperCase() ?? ''}`, 14 * s, 78 * s);
     }
     if (game.building) this.drawBuildMenu(game, input, s, H);
     else this.menuRects.length = 0;

@@ -16,6 +16,7 @@ import {
 } from './constants.ts';
 import type { Terrain } from './terrain.ts';
 import { CLASSES, ClassId } from './body.ts';
+import { FACTIONS } from './factions.ts';
 
 export const BTN_LEFT = 1;
 export const BTN_RIGHT = 2;
@@ -72,13 +73,15 @@ export interface Body {
   jet: boolean;
   /** Clone class (body.ts): scales run speed, jetpack thrust and fuel use. */
   cls: number;
+  /** Faction (factions.ts): scales run speed, jetpack thrust and fuel use on top of the class. */
+  faction: number;
   /** Stance (Stance.*), and how long down has been held. */
   stance: number;
   downTicks: number;
 }
 
 export function newBody(x: number, y: number): Body {
-  return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false, legs: 2, jet: true, cls: ClassId.Medium, stance: Stance.Stand, downTicks: 0 };
+  return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false, legs: 2, jet: true, cls: ClassId.Medium, faction: 0, stance: Stance.Stand, downTicks: 0 };
 }
 
 export function copyBody(dst: Body, src: Body): void {
@@ -92,6 +95,7 @@ export function copyBody(dst: Body, src: Body): void {
   dst.legs = src.legs;
   dst.jet = src.jet;
   dst.cls = src.cls;
+  dst.faction = src.faction;
   dst.stance = src.stance;
   dst.downTicks = src.downTicks;
 }
@@ -136,7 +140,9 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
     }
   }
 
-  const cls = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
+  const base = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
+  const fac = FACTIONS[b.faction] ?? FACTIONS[0];
+  const cls = { run: base.run * fac.run, jet: base.jet * fac.jet, fuel: base.fuel * fac.fuel };
   const dir = (buttons & BTN_RIGHT ? 1 : 0) - (buttons & BTN_LEFT ? 1 : 0);
   // Crouched on a burning jetpack in the air: the thrust swings forward into a dash.
   const dashDir = dir !== 0 ? dir : Math.sign(b.vx);

@@ -1,3 +1,4 @@
+import { FACTIONS } from './factions.ts';
 import { ACTOR_H, ACTOR_W } from './constants.ts';
 
 /**
@@ -127,14 +128,16 @@ export interface BodyState {
   mask: number; // attached parts
   readonly wounds: Float32Array; // per part
   cls: number; // ClassId
+  faction: number; // factions.ts Faction
 }
 
 export function newBodyState(cls: number = ClassId.Medium): BodyState {
-  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls };
+  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls, faction: 0 };
 }
 
-export function resetBody(s: BodyState, cls: number = ClassId.Medium): void {
+export function resetBody(s: BodyState, cls: number = ClassId.Medium, faction = s.faction): void {
   s.cls = cls;
+  s.faction = faction;
   s.mask = CLASSES[cls].mask;
   s.wounds.fill(0);
 }
@@ -142,12 +145,12 @@ export function resetBody(s: BodyState, cls: number = ClassId.Medium): void {
 /** A part's integrity for this body's class (armour layers scale with it). */
 function integrityOf(s: BodyState, part: number): number {
   const d = PARTS[part];
-  return d.flesh ? d.integrity : d.integrity * CLASSES[s.cls].armor;
+  return d.flesh ? d.integrity : d.integrity * CLASSES[s.cls].armor * FACTIONS[s.faction].armor;
 }
 
 /** A part's wound limit for this body's class. */
 export function limitOf(s: BodyState, part: number): number {
-  return PARTS[part].limit * CLASSES[s.cls].limit;
+  return PARTS[part].limit * CLASSES[s.cls].limit * FACTIONS[s.faction].limit;
 }
 
 /** Result of one strike: HP lost, parts torn off (in order), whether a vital part went. */
@@ -187,7 +190,7 @@ export function strike(s: BodyState, part: number, energy: number, wound: number
   for (const layer of layers) {
     const integ = integrityOf(s, layer);
     if (energy <= integ) {
-      out.hp += energy * BLUNT * CLASSES[s.cls].harm; // stopped here: a bruise
+      out.hp += energy * BLUNT * CLASSES[s.cls].harm * FACTIONS[s.faction].harm; // stopped here: a bruise
       return;
     }
     woundLayer(s, layer, wound, out);
@@ -202,7 +205,7 @@ export function strike(s: BodyState, part: number, energy: number, wound: number
 export function harm(s: BodyState, part: number, amount: number, out: StrikeResult): void {
   if (!has(s.mask, part) || amount <= 0) return;
   const armor = ARMOR_OVER[part];
-  woundLayer(s, armor >= 0 && has(s.mask, armor) ? armor : part, amount * CLASSES[s.cls].harm, out);
+  woundLayer(s, armor >= 0 && has(s.mask, armor) ? armor : part, amount * CLASSES[s.cls].harm * FACTIONS[s.faction].harm, out);
 }
 
 /** What a body can still do. Shared by server simulation and client prediction. */

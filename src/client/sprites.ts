@@ -265,6 +265,49 @@ function classPalette(base: Record<string, number>, cls: number): Record<string,
   return base;
 }
 
+/**
+ * Each mercenary vendor's gear over the class palette (factions.ts):
+ * Guild-Tech is the original look; the Rust Nomads wear tan headwraps,
+ * amber goggles, leather and rusty kit (a red bandana for scouts, scrap
+ * plate for heavies); the Synth Legion is chrome and gunmetal with a red
+ * optic, metal where skin would show and dark oil for blood (white plastic
+ * scouts, black-armoured heavies).
+ */
+function factionPalette(base: Record<string, number>, faction: number, cls: number): Record<string, number> {
+  if (faction === 1) {
+    const p = { ...base, L: 0xd2b07a, H: 0x9a7448, V: 0xffb030, v: 0x8a5410, P: 0x6a5236, B: 0x2c1e14, g: 0xb07448, G: 0x6e4026, A: 0x8a6a46, b: 0x3a2a1c };
+    if (cls === 0) return { ...p, L: 0xd0503c, H: 0x8e2c22 };
+    if (cls === 2) return { ...p, L: 0xb08a6a, H: 0x7a5a44, P: 0x5c5048, A: 0x7a6a5c, g: 0x9a6a4a, G: 0x5c3c26 };
+    return p;
+  }
+  if (faction === 2) {
+    const p = { ...base, L: 0xdfe4ea, H: 0x5a6270, V: 0xff3a2a, v: 0x8a1410, P: 0x30343a, B: 0x16181c, g: 0xa8b2bc, G: 0x40464e, A: 0x7a828c, S: 0x9aa2ac, e: 0xff3a2a, b: 0x22252a, R: 0x2a2a2e };
+    if (cls === 0) return { ...p, L: 0xf2f4f6, H: 0xa8b0ba };
+    if (cls === 2) return { ...p, L: 0x8a929c, H: 0x3a4048, V: 0xffa020, v: 0x8a5410, A: 0x50565e };
+    return p;
+  }
+  return base;
+}
+
+/** A vendor's silhouette touches on a body frame: a headwrap tail for Nomads, an antenna for Synths. */
+function factionGrid(grid: Grid, faction: number): Grid {
+  if (faction === 0) return grid;
+  const g = grid.map((r) => r.split(''));
+  // Rows of the head shift down a row in some frames: find the helmet's top row.
+  const top = g.findIndex((r) => r.includes('K'));
+  if (faction === 1) {
+    // The wrap's loose end trails off the back of the head.
+    if (g[top + 2]?.[1] === '.') g[top + 2][1] = 'H';
+    if (g[top + 2]?.[0] === '.') g[top + 2][0] = 'K';
+    if (g[top + 3]?.[1] === '.') g[top + 3][1] = 'K';
+  } else if (faction === 2 && top >= 0) {
+    // An antenna stub on the crown, lit at the tip.
+    if (top > 0 && g[top - 1][6] === '.') g[top - 1][6] = 'L';
+    else if (g[top][7] === '.') g[top][7] = 'L';
+  }
+  return g.map((r) => r.join(''));
+}
+
 /** Palette char -> 0xRRGGBB, or -1 for transparent. */
 function paletteFor(team: number): Record<string, number> {
   return {
@@ -466,11 +509,11 @@ export class SpriteCache {
     return p;
   }
 
-  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff, cls = 1): HTMLCanvasElement {
+  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff, cls = 1, faction = 0): HTMLCanvasElement {
     const mask = parts & BODY_RENDER_PARTS;
-    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}|${cls}`;
+    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}|${cls}|${faction}`;
     let c = this.bodies.get(key);
-    if (!c) this.bodies.set(key, (c = bakeBody(BODY[frame], classPalette(this.pal(team), cls), left, mask)));
+    if (!c) this.bodies.set(key, (c = bakeBody(factionGrid(BODY[frame], faction), factionPalette(classPalette(this.pal(team), cls), faction, cls), left, mask)));
     return c;
   }
 
