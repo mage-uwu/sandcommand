@@ -61,8 +61,8 @@ room, a bot gives up its seat, a dead one if there is one.
   switches to a gun if it has one.
 - **Getting unstuck.** It jumps or jets over walls with headroom, digs
   straight through anything else (sweeping the beam so the hole is
-  clone-sized), and digs straight at a target hiding just the other side
-  of a floor or wall. When boxed in, it clears the nearest leftover
+  clone-sized), and digs straight at a target hiding the other side of a
+  floor or wall, or straight above or below, however high. When boxed in, it clears the nearest leftover
   pixels.
 - **Fairness.** Bots get a beat to look around after landing, a reaction
   delay on each new target, per-bot aim error, and no point-blank bazooka
@@ -71,7 +71,7 @@ room, a bot gives up its seat, a dead one if there is one.
 Thinking is cheap and staggered: targets twice a second, line of sight
 every 4 ticks, steering and aim every tick. A room of one human and 63 bots
 costs about 0.7 ms a tick (`npm run bench:ffa`), and a full 64-clone wave
-usually lasts 30–65 s, bunkers and all.
+usually lasts 20–75 s, bunkers and all.
 
 **New maps cost almost no bandwidth.** The map generator is shared code, so
 the server sends the seed (`R_WAVE`) and each client generates the same
@@ -96,7 +96,10 @@ terrain in less than half the time.
 ## Bunkers
 
 Every map has bunker complexes on the surface (`src/shared/structures.ts`),
-built on a modular grid of 32×24-cell modules as part of map generation.
+built on a modular grid of 64×48-cell modules as part of map generation.
+Walls and floor slabs are 6 cells thick, and doorways are 34 cells tall
+against a 14-cell clone. Everything is built at twice the clone's scale
+(`SCALE` in `structures.ts`), so rooms feel like rooms.
 Clients build identical ones from the seed. Between 15% and 60% of the
 surface is built on (random per map), in complexes of 2–7 modules with open
 ground between them. Each complex is assembled like this:

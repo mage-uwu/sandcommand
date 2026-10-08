@@ -19,14 +19,17 @@ import { Rng } from './rng.ts';
  * cores and diggers get through. Integer arithmetic and the seeded Rng only,
  * so every engine builds the same thing.
  */
-export const MOD_W = 32;
-export const MOD_H = 24;
-const WALL = 3; // wall thickness
-const SLAB = 3; // floor / ceiling thickness
-const DOOR_H = ACTOR_H + 3; // doorways a clone walks through
-const HOLE_W = 12; // floor holes and shafts a clone can jet through
+/** Size of everything below relative to a clone (8x14): 2 = built big, so rooms feel like rooms. */
+export const SCALE = 2;
+export const MOD_W = 32 * SCALE;
+export const MOD_H = 24 * SCALE;
+const WALL = 3 * SCALE; // wall thickness
+export const SLAB = 3 * SCALE; // floor / ceiling thickness
+const DOOR_H = (ACTOR_H + 3) * SCALE; // doorways
+const HOLE_W = 12 * SCALE; // floor holes and shafts a clone can jet through
 const MARGIN = 96; // keep clear of the world's edge walls
-const MAX_FOUNDATION = 90;
+const MAX_FOUNDATION = 90 * SCALE;
+const LINING = 2 * SCALE; // tunnel and shaft lining
 
 export interface Complex {
   x0: number; // footprint, cells
@@ -67,7 +70,7 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
     const right = rng.next() < 0.5;
     const end = right ? c.basements.length - 1 : 0;
     if (c.basements[end] === 0) continue;
-    const limit = right ? (out[k + 1]?.x0 ?? WORLD_W - MARGIN) - 24 : (out[k - 1]?.x1 ?? MARGIN) + 24;
+    const limit = right ? (out[k + 1]?.x0 ?? WORLD_W - MARGIN) - 24 * SCALE : (out[k - 1]?.x1 ?? MARGIN) + 24 * SCALE;
     tunnel(m, heights, c, right, limit, rng);
   }
   return out;
@@ -100,7 +103,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
   // Site: clear the ground above the floor (a notch where the hill rises),
   // pour the floor slab, and fill any dip beneath it down to solid ground.
   const top = floor - Math.max(...storeys) * MOD_H;
-  fill(m, x0 - 2, top - 6, x1 + 2, floor, Mat.Air);
+  fill(m, x0 - 2 * SCALE, top - 6 * SCALE, x1 + 2 * SCALE, floor, Mat.Air);
   fill(m, x0, floor, x1, floor + SLAB, Mat.Concrete);
   for (let x = x0; x < x1; x++) {
     for (let y = floor + SLAB, n = 0; y < WORLD_H - 12 && n < MAX_FOUNDATION; y++, n++) {
@@ -135,7 +138,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
         if (rng.next() < 0.8 || (b === 0 && len === 1)) fill(m, bx, yFloor - DOOR_H, bx + WALL, yFloor, Mat.Air);
       } else if (rng.next() < 0.6) {
         // An upper storey looking out over a lower roof: a firing slit at head height.
-        fill(m, bx, yFloor - 12, bx + WALL, yFloor - 9, Mat.Air);
+        fill(m, bx, yFloor - 12 * SCALE, bx + WALL, yFloor - 9 * SCALE, Mat.Air);
       }
     }
   }
@@ -148,7 +151,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
       const yTop = floor - (lv + 1) * MOD_H;
       fill(m, ix0, yTop + SLAB, ix1, floor - lv * MOD_H, Mat.Air);
       if (lv > 0) {
-        const hx = ix0 + 2 + rng.int(Math.max(1, ix1 - ix0 - HOLE_W - 4));
+        const hx = ix0 + 2 * SCALE + rng.int(Math.max(1, ix1 - ix0 - HOLE_W - 4 * SCALE));
         fill(m, hx, yTop + MOD_H, hx + HOLE_W, yTop + MOD_H + SLAB, Mat.Air);
       }
     }
@@ -164,7 +167,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
       fill(m, mx, by0, mx + MOD_W, by1, Mat.Concrete);
       fill(m, mx + WALL, by0 + (j > 0 ? SLAB : 0), mx + MOD_W - WALL, by1 - SLAB, Mat.Air);
       // Shaft down from the room above (the ground floor, or the basement above).
-      const sx = mx + WALL + 2 + rng.int(MOD_W - 2 * WALL - HOLE_W - 4);
+      const sx = mx + WALL + 2 * SCALE + rng.int(MOD_W - 2 * WALL - HOLE_W - 4 * SCALE);
       fill(m, sx, by0 - SLAB - (j > 0 ? SLAB : 0), sx + HOLE_W, by0 + SLAB, Mat.Air);
     }
     for (let j = 0; j < basements[k] && k > 0; j++) {
@@ -182,7 +185,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
     for (let n = 0; n < holes; n++) {
       const cx = mx + rng.int(MOD_W);
       const cy = floor - rng.int(storeys[k] * MOD_H);
-      const r = 3 + rng.int(5);
+      const r = (3 + rng.int(5)) * SCALE;
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           if (dx * dx + dy * dy > r * r) continue;
@@ -206,17 +209,17 @@ function tunnel(m: Uint8Array, heights: Int32Array, c: Complex, right: boolean, 
   const floorY = c.floor + SLAB + MOD_H - SLAB; // basement floor surface
   const ty = floorY - DOOR_H;
   const start = right ? c.x1 - WALL : c.x0 + WALL;
-  const want = 64 + rng.int(180);
+  const want = (64 + rng.int(180)) * SCALE;
   const end = right ? Math.min(start + want, limit) : Math.max(start - want, limit);
-  if (Math.abs(end - start) < 40) return;
+  if (Math.abs(end - start) < 40 * SCALE) return;
   const xa = Math.min(start, end);
   const xb = Math.max(start, end);
-  fill(m, xa, ty - 2, xb, floorY + 2, Mat.Concrete);
+  fill(m, xa, ty - LINING, xb, floorY + LINING, Mat.Concrete);
   fill(m, xa, ty, xb, floorY, Mat.Air);
   // Up to the surface at the far end.
-  const sx = right ? end - HOLE_W - 2 : end + 2;
+  const sx = right ? end - HOLE_W - LINING : end + LINING;
   const surface = Math.min(heights[sx], heights[sx + HOLE_W]);
   if (surface >= ty - 4) return;
-  fill(m, sx - 2, surface - 2, sx + HOLE_W + 2, ty, Mat.Concrete);
-  fill(m, sx, surface - 2, sx + HOLE_W, ty + 2, Mat.Air);
+  fill(m, sx - LINING, surface - 2, sx + HOLE_W + LINING, ty, Mat.Concrete);
+  fill(m, sx, surface - 2, sx + HOLE_W, ty + LINING, Mat.Air);
 }

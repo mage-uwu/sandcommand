@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ACTOR_H, ACTOR_W, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
-import { MOD_H, MOD_W } from '../src/shared/structures.ts';
+import { MOD_H, MOD_W, SLAB } from '../src/shared/structures.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { generateWorld, lastComplexes } from '../src/shared/worldgen.ts';
 import { bannerLines } from '../src/client/banner.ts';
@@ -63,7 +63,7 @@ describe('bunker complexes', () => {
       generateWorld(t, seed);
       for (const c of lastComplexes) {
         const top = c.floor - Math.max(...c.heights) * MOD_H - 10;
-        const bottom = c.floor + 3 + Math.max(...c.basements) * MOD_H + 4;
+        const bottom = c.floor + SLAB + Math.max(...c.basements) * MOD_H + 4;
         const x0 = c.x0 - 260;
         const x1 = c.x1 + 260;
         // From the open sky above the complex, through doors, holes and shafts.
@@ -71,12 +71,12 @@ describe('bunker complexes', () => {
         const at = (x: number, y: number) => reach[(y - top) * (x1 - x0) + (x - x0)] === 1;
         for (let k = 0; k < c.heights.length; k++) {
           // Inside each ground-floor room, at standing height, with room for a clone.
-          const rx = c.x0 + k * MOD_W + 8;
+          const rx = c.x0 + k * MOD_W + 2 * SLAB + 4;
           const ry = c.floor - ACTOR_H;
           expect(t.rectSolid(rx, ry, rx + ACTOR_W - 1, c.floor - 1)).toBe(false);
           expect(at(rx + 2, c.floor - 2)).toBe(true);
           for (let j = 0; j < c.basements[k]; j++) {
-            const by = c.floor + 3 + j * MOD_H + MOD_H - 3 - 2;
+            const by = c.floor + SLAB + j * MOD_H + MOD_H - SLAB - 2;
             expect(at(c.x0 + k * MOD_W + MOD_W / 2, by)).toBe(true);
           }
         }

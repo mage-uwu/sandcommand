@@ -131,7 +131,9 @@ export class BotBrain {
       const gun = p.inv.findIndex((it) => it.weapon === WeaponId.Rifle || it.weapon === WeaponId.Sniper);
       if (gun >= 0) want = gun;
     }
-    this.blind = tgt && !this.seeTarget && dist < 160 ? this.blind + 1 : 0;
+    // Out of sight but close, or straight above/below (a roof or floor away,
+    // however high): counts toward digging to it.
+    this.blind = tgt && !this.seeTarget && (dist < 160 || Math.abs(tgt.cx - p.cx) < 60) ? this.blind + 1 : 0;
     // Walled in, or a target close by on the other side of a floor or wall: dig to it.
     // Headroom: open sky (or room) above means a wall can be jumped or jetted over.
     const bx0 = Math.floor(p.body.x);
