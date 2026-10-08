@@ -487,6 +487,43 @@ export class SpriteCache {
     return g;
   }
 
+  private tankSprites = new Map<string, HTMLCanvasElement>();
+  private tankGuns = new Map<number, { c: HTMLCanvasElement; r: number }>();
+
+  /** Tank hull (with its dome), facing right or left. */
+  tankHull(left: boolean): HTMLCanvasElement {
+    return this.tankSprite(`hull${left ? 1 : 0}`, () => bake(TANK_HULL, TANK_PAL, left));
+  }
+  /** The armour plate over the roof and nose. */
+  tankArmor(left: boolean): HTMLCanvasElement {
+    return this.tankSprite(`armor${left ? 1 : 0}`, () => bake(TANK_ARMOR, TANK_PAL, left));
+  }
+  /** The tracks, animation frame chosen by how far the tank has rolled. */
+  tankTread(frame: number, left: boolean): HTMLCanvasElement {
+    const f = ((frame % TREAD_FRAMES) + TREAD_FRAMES) % TREAD_FRAMES;
+    return this.tankSprite(`tread${f}${left ? 1 : 0}`, () => bake(tankTread(f), TANK_PAL, left));
+  }
+  tankChute(): HTMLCanvasElement {
+    return this.tankSprite('chute', bakeChute);
+  }
+  /** Cannon (or vulcan) rotated to world angle `a` about its pivot. Draw at pivot - r. */
+  tankGun(vulcan: boolean, a: number): { c: HTMLCanvasElement; r: number } {
+    const step = ((Math.round((a / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
+    const key = step * 2 + (vulcan ? 1 : 0);
+    let g = this.tankGuns.get(key);
+    if (!g) {
+      const ang = (step / ANGLE_STEPS) * Math.PI * 2;
+      g = vulcan ? bakeRotatedGrid(TANK_VULCAN, TANK_PAL, ang, 1, 3) : bakeRotatedGrid(TANK_CANNON, TANK_PAL, ang, 1, 2);
+      this.tankGuns.set(key, g);
+    }
+    return g;
+  }
+  private tankSprite(key: string, make: () => HTMLCanvasElement): HTMLCanvasElement {
+    let c = this.tankSprites.get(key);
+    if (!c) this.tankSprites.set(key, (c = make()));
+    return c;
+  }
+
   private gibData = new Map<string, { w: number; h: number; data: Uint32Array }>();
 
   private crafts = new Map<string, { c: HTMLCanvasElement; r: number }>();
@@ -549,8 +586,168 @@ function rotate90(g: Grid): Grid {
 }
 
 /** Validate grids are rectangular (used by tests). */
+// ---------------------------------------------------------------- tanks
+
+/**
+ * The tank, after Metal Slug's SV-001: a squat olive hull with a bulbous
+ * dome turret (vision slit, roof hatch), hazard stripe and rivets, chunky
+ * dark outlines and banded light from the top left. Facing right; the hull
+ * sprite is TANK_W wide and its top row sits TANK_SPRITE_TOP above the
+ * tank's box (the dome rises over it). The treads (with turning road
+ * wheels), the armour plate, the cannon and the vulcan are separate layers
+ * so parts can come off and the guns can swivel.
+ */
+const TANK_PAL: Record<string, number> = {
+  K: 0x1a1c10, // outline
+  H: 0xd6e08a, // highlight
+  L: 0xa0b054, // light olive
+  O: 0x78883a, // olive
+  D: 0x566328, // dark olive
+  d: 0x3a441e, // deepest shadow
+  g: 0x282c2e, // gunmetal
+  m: 0x586064, // steel
+  s: 0x96a0a6, // light steel
+  S: 0xcdd4d7, // steel glint
+  e: 0x0e100c, // vision slit
+  Y: 0xe2b63a, // hazard yellow
+  r: 0xb8342a, // hazard red
+  w: 0xece8d6, // headlight
+  t: 0x222222, // track
+  T: 0x50504c, // track links
+  W: 0xaaaca0, // wheel face
+  R: 0x696c64, // wheel rim
+};
+/** Rows of hull sprite above the tank's box. */
+export const TANK_SPRITE_TOP = 3;
+const TANK_HULL: Grid = [
+  '...........KKKKKK...............',
+  '..........KmsssmgK..............',
+  '.......KKKKgmmmmgKKKK...........',
+  '.....KKLHHHHHHHHLLLLOKK.........',
+  '....KLHHHHHLLLLLLLLOOODK........',
+  '...KLHHLLLLLLLLLLLLOOeeDK.......',
+  '...KHHLLLLLLLLLLLLOOOeeDK.......',
+  '...KLLLLOOOOOOOOOOOOODDDDK......',
+  '..KKOOOODDDDDDDDDDDDDDDddKKK....',
+  '.KLHHHHHHHHHHHHHHHHHHHHHLLOOKK..',
+  'KgLHLLLLLLLLLLLLLLLLLLLLLLOODDK.',
+  'KgLLKLLLLKLLLLKLLLLKLLLLLOOODSSK',
+  'KgOLLLLLLLLLLLLLLLLLLLLLOOODDSwK',
+  'KgOOOOOOOOOOOOOOOOOOOOOOOODDDDKK',
+  '.KDDDDDDDDDDDDDDDDDDDDDDDDDDDdK.',
+  '.KOYYrrOOOOOOOOOOOOOOOOOOODDddK.',
+  '..KYYrrDDDDDDDDDDDDDDDDDDDdddK..',
+  '..KKKKKKKKKKKKKKKKKKKKKKKKKKKK..',
+];
+const TANK_ARMOR: Grid = [
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '..KKKKKKKKKKKKKKKKKKKKKKKK......',
+  '.KSssssssssssssssssssssssKKK....',
+  '.KmKmmmmKmmmmKmmmmKmmmmmsSSKK...',
+  '........................KKsssSK.',
+  '........................KmssssK.',
+  '........................KmKmssK.',
+  '........................KmmmssK.',
+  '........................KmKmsmK.',
+  '........................KmmmmK..',
+  '........................KKKKK...',
+];
+/** Cannon, pointing right; pivot (1, 2) sits inside the dome. */
+const TANK_CANNON: Grid = [
+  '..KKKKKKKKKKKKKKKKKKKKKKK',
+  '.KmssssssssssssssssKKKsSK',
+  'KgmmmmmmmmmmmmmmmmmKgKmmK',
+  '.KggggggggggggggggggKgKgK',
+  '..KKKKKKKKKKKKKKKKKKKKKKK',
+];
+/** Twin vulcan barrels, pointing right; pivot (1, 3) in the housing. */
+const TANK_VULCAN: Grid = [
+  'KKKK.........',
+  'KmmKKKKKKKKKK',
+  'KgmKsssssssSK',
+  'KggKKKKKKKKKK',
+  'KgmKsssssssSK',
+  'KmmKKKKKKKKKK',
+  'KKKK.........',
+];
+const TREAD_FRAMES = 4;
+
+/** The track under the hull: links that crawl and road wheels whose spoke turns, by frame. */
+function tankTread(frame: number): Grid {
+  const w = 32;
+  const h = 7;
+  const g: string[][] = [];
+  for (let y = 0; y < h; y++) {
+    const inset = [2, 1, 0, 0, 0, 1, 2][y];
+    const row: string[] = [];
+    for (let x = 0; x < w; x++) {
+      if (x < inset || x >= w - inset) row.push('.');
+      else row.push(x === inset || x === w - inset - 1 || y === 0 || y === h - 1 ? 'K' : 't');
+    }
+    g.push(row);
+  }
+  for (let x = 2; x < w - 2; x++) {
+    if ((x + frame) % 3 === 0) {
+      g[1][x] = 'T';
+      g[h - 2][x] = 'T';
+    }
+  }
+  const wheel = ['.RRR.', 'RWWWR', 'RWKWR', 'RWWWR', '.RRR.'];
+  const spoke = [
+    [0, -1],
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+  ][frame % 4];
+  for (const cx of [5, 11, 16, 21, 27]) {
+    for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) if (wheel[y][x] !== '.') g[1 + y][cx - 2 + x] = wheel[y][x];
+    g[3 + spoke[1]][cx + spoke[0]] = 'K';
+  }
+  return g.map((r) => r.join(''));
+}
+
+/** The parachute: a striped canopy and its rigging down to the hull's corners (bakes a 48x40 canvas; tank box at (8, 34)). */
+function bakeChute(): HTMLCanvasElement {
+  const w = 48;
+  const h = 40;
+  const g: string[][] = Array.from({ length: h }, () => new Array<string>(w).fill('.'));
+  const cx = 24;
+  const cy = 12;
+  for (let y = 0; y <= cy; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (x - cx + 0.5) / 23;
+      const dy = (cy - y) / 12;
+      const d = dx * dx + dy * dy;
+      if (d > 1) continue;
+      const edge = d > 0.82 || y === cy;
+      const gore = Math.floor(((Math.atan2(cy - y, x - cx + 0.5) / Math.PI) * 7)) & 1;
+      g[y][x] = edge ? 'K' : gore ? 'w' : 'r';
+    }
+  }
+  // Rigging lines from the canopy rim down to the hull's top corners.
+  for (const [x0, x1] of [
+    [2, 11],
+    [12, 14],
+    [36, 34],
+    [46, 37],
+  ]) {
+    for (let y = cy + 1; y < h; y++) {
+      const x = Math.round(x0 + ((x1 - x0) * (y - cy)) / (h - cy));
+      if (g[y][x] === '.') g[y][x] = 'g';
+    }
+  }
+  return bake(g.map((r) => r.join('')), { ...TANK_PAL, r: 0xc8402c, w: 0xf2efe6 });
+}
+
 export function spriteGridsAreRectangular(): boolean {
-  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT];
+  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT, TANK_HULL, TANK_ARMOR, TANK_CANNON, TANK_VULCAN, tankTread(0)];
   return all.every((g) => g.every((row) => row.length === g[0].length)) &&
     Object.values(BODY).every((g) => g.length === BODY_H && g[0].length === BODY_W);
 }

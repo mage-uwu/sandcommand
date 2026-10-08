@@ -179,7 +179,13 @@ Standing → Regicide; `rotation` in the `World` options).
 
 ## Tanks
 
-Metal Slug style tanks (`src/shared/tank.ts`). Each wave, **one or two
+Metal Slug style tanks (`src/shared/tank.ts`), drawn as pixel art after
+the SV-001 (`src/client/sprites.ts`). The art is a domed turret with a
+vision slit and a roof hatch for the driver's head, an olive hull with
+rivets and a hazard stripe, tracks whose links crawl and road wheels turn,
+a riveted steel plate, a cannon with a muzzle brake, twin vulcan barrels,
+and a striped parachute. Each part is a separate layer, so it disappears
+when blown off. Each wave, **one or two
 come down by parachute** at spread-out spots and land empty.
 - **Getting in and out.** Walk up to an empty tank and press **3 / F**
   (touch: ⬆) to climb in. The same key climbs back out through the roof

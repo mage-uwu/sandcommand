@@ -11,9 +11,9 @@ import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
-import { CANNON_INTERVAL, CANNON_LEN, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { type BodyFrame, SpriteCache, WALK_CYCLE } from './sprites.ts';
+import { type BodyFrame, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
 /** World cells per minimap pixel: the minimap is 256 pixels wide whatever the world's width. */
 const MINI_SCALE = WORLD_W / 256;
@@ -342,10 +342,10 @@ export class Renderer {
       const tx = boardable.x + TANK_W / 2;
       const tw = ctx.measureText(label).width;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(tx - tw / 2 - 1, boardable.y - 15, tw + 2, 6);
+      ctx.fillRect(tx - tw / 2 - 1, boardable.y - 19, tw + 2, 6);
       ctx.fillStyle = '#9fe870';
       ctx.textAlign = 'center';
-      ctx.fillText(label, tx, boardable.y - 10);
+      ctx.fillText(label, tx, boardable.y - 14);
       ctx.textAlign = 'left';
     }
 
@@ -418,7 +418,7 @@ export class Renderer {
     // Tanks: who's driving, and how much hull is left.
     for (const t of game.tankViews(alpha)) {
       const sx = offX + (t.x + TANK_W / 2) * z;
-      const sy = offY + t.y * z - 10 * dpr;
+      const sy = offY + (t.y - 8) * z - 10 * dpr;
       if (t.pilot !== 255 && t.pilot !== game.myId) {
         const info = game.players.get(t.pilot);
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -790,153 +790,77 @@ export class Renderer {
   }
 
   /**
-   * A tank, Metal Slug style: olive hull on treads, a domed turret with a
-   * long cannon, a twin-barrel vulcan swivelling on the front, a riveted
-   * steel plate over the nose and roof, and its driver's head out of the
-   * hatch. Drawn facing right in tank-local cells, mirrored when facing left.
+   * A tank, after Metal Slug's SV-001, in pixel-art layers from the sprite
+   * cache: the cannon (its root hidden behind the dome, kicking back after a
+   * shot), the hull, the tracks (links crawl and wheels turn as it rolls),
+   * the armour plate and the vulcan, while each is still attached. Its
+   * driver's head pokes out of the hatch in their colour; a parachute holds
+   * it while it comes down; scorch marks spread as the hull weakens.
    */
   private drawTank(ctx: CanvasRenderingContext2D, t: TankView, faceLeft: boolean, aim: number, game: Game, now: number): void {
-    ctx.save();
-    ctx.translate(t.x, t.y);
-    if (faceLeft) {
-      ctx.translate(TANK_W, 0);
-      ctx.scale(-1, 1);
-    }
-    // In the mirrored frame a world angle a reads as PI - a.
-    const local = (a: number) => (faceLeft ? Math.PI - a : a);
-    if (t.chute) {
-      // Striped canopy and its lines.
-      ctx.strokeStyle = 'rgba(40,30,20,0.8)';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      for (const [ax, bx] of [
-        [-8, 3],
-        [4, 10],
-        [28, 22],
-        [40, 29],
-      ]) {
-        ctx.moveTo(ax, -30);
-        ctx.lineTo(bx, 4);
-      }
-      ctx.stroke();
-      const gores = 6;
-      for (let i = 0; i < gores; i++) {
-        ctx.fillStyle = i % 2 ? '#f2efe6' : '#c8402c';
-        ctx.beginPath();
-        ctx.moveTo(16, -30);
-        ctx.arc(16, -30, 24, Math.PI + (i * Math.PI) / gores, Math.PI + ((i + 1) * Math.PI) / gores);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-    // Driver's head out of the hatch.
+    const sp = this.sprites;
+    const x = Math.round(t.x);
+    const ty = Math.round(t.y);
+    const y = ty - TANK_SPRITE_TOP;
+    // Tank-local x (as drawn facing right) to world, mirrored when facing left.
+    const wx = (lx: number, w = 0) => (faceLeft ? x + TANK_W - lx - w : x + lx);
+    if (t.chute) ctx.drawImage(sp.tankChute(), x - 8, ty - 34);
     if (t.pilot !== 255) {
+      // The driver, head and shoulders out of the hatch.
       const rgb = game.players.get(t.pilot)?.rgb ?? 0x7a8a50;
-      ctx.fillStyle = '#e0b48c';
-      ctx.fillRect(12, -1, 4, 3);
+      ctx.fillStyle = '#141012';
+      ctx.fillRect(wx(11, 6), y - 5, 6, 5);
       ctx.fillStyle = `#${rgb.toString(16).padStart(6, '0')}`;
-      ctx.fillRect(11.5, -2.5, 5, 2);
+      ctx.fillRect(wx(12, 4), y - 4, 4, 2);
+      ctx.fillStyle = '#e0b48c';
+      ctx.fillRect(wx(12, 4), y - 2, 4, 2);
+      ctx.fillStyle = '#141012';
+      ctx.fillRect(wx(14, 1), y - 2, 1, 1);
     }
-    // Cannon (behind the turret dome), recoiling just after a shot.
     if (hasTankPart(t.parts, TankPart.Cannon)) {
-      const a = local(cannonAngle(faceLeft, aim));
-      ctx.save();
-      ctx.translate(CANNON_PIVOT[0], CANNON_PIVOT[1]);
-      ctx.rotate(a);
-      const kick = t.firedCannon ? -3 : 0;
-      ctx.fillStyle = '#4c5629';
-      ctx.fillRect(kick, -1.5, CANNON_LEN - 2, 3);
-      ctx.fillStyle = '#3a4220';
-      ctx.fillRect(kick + CANNON_LEN - 4, -2, 4, 4);
-      ctx.fillStyle = '#7f8b4a';
-      ctx.fillRect(kick, -1.5, CANNON_LEN - 2, 0.8);
-      ctx.restore();
+      const a = cannonAngle(faceLeft, aim);
+      const g = sp.tankGun(false, a);
+      const kick = t.firedCannon ? 3 : 0;
+      const px = (faceLeft ? x + TANK_W - CANNON_PIVOT[0] : x + CANNON_PIVOT[0]) - Math.cos(a) * kick;
+      const py = ty + CANNON_PIVOT[1] - Math.sin(a) * kick;
+      ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
     }
-    // Turret dome and hatch.
-    ctx.fillStyle = '#7d8946';
-    ctx.beginPath();
-    ctx.ellipse(14, 8, 9, 6.5, 0, Math.PI, 0);
-    ctx.fill();
-    ctx.fillStyle = '#5d6733';
-    ctx.fillRect(10, 1.5, 8, 1.5);
-    // Hull: sloped glacis at the front.
-    ctx.fillStyle = '#6f7a3c';
-    ctx.beginPath();
-    ctx.moveTo(1, 16);
-    ctx.lineTo(3, 8);
-    ctx.lineTo(25, 8);
-    ctx.lineTo(31, 12);
-    ctx.lineTo(31, 16);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#56602e';
-    ctx.fillRect(1.5, 13, 29.5, 3);
-    ctx.fillStyle = '#909c58';
-    ctx.fillRect(3, 8, 22, 1);
-    // Lift-jet nozzles.
-    ctx.fillStyle = '#333';
-    ctx.fillRect(5, 20.5, 4, 2);
-    ctx.fillRect(TANK_W - 9, 20.5, 4, 2);
-    // Treads: a belt with links that crawl as it moves, and road wheels.
-    ctx.fillStyle = '#262626';
-    ctx.beginPath();
-    ctx.roundRect(0.5, 15.5, 31, 6.5, 3);
-    ctx.fill();
-    ctx.fillStyle = '#4a4a4a';
-    const crawl = (((t.x * (faceLeft ? -1 : 1)) % 3) + 3) % 3;
-    for (let x = 2 + crawl; x < 30; x += 3) {
-      ctx.fillRect(x, 15.5, 1, 1);
-      ctx.fillRect(x, 21, 1, 1);
-    }
-    for (const wx of [5, 10.5, 16, 21.5, 27]) {
-      ctx.fillStyle = '#5c5c5c';
-      ctx.beginPath();
-      ctx.arc(wx, 18.7, 2.4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#9a9a9a';
-      ctx.fillRect(wx - 0.5, 18.2, 1, 1);
-    }
-    // Armour plate over the nose and roof, riveted.
-    if (hasTankPart(t.parts, TankPart.Armor)) {
-      ctx.fillStyle = '#98a0a4';
-      ctx.beginPath();
-      ctx.moveTo(25, 7.5);
-      ctx.lineTo(29, 7.5);
-      ctx.lineTo(32.5, 11.5);
-      ctx.lineTo(32.5, 15.5);
-      ctx.lineTo(27.5, 15.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillRect(3.5, 6.8, 21.5, 1.8);
-      ctx.fillStyle = '#5e6468';
-      for (let x = 5; x < 25; x += 4) ctx.fillRect(x, 7.3, 0.8, 0.8);
-      ctx.fillRect(29.5, 10, 0.8, 0.8);
-      ctx.fillRect(30.5, 13.5, 0.8, 0.8);
-    }
-    // The vulcan: a housing on the nose, twin barrels toward the aim.
+    ctx.drawImage(sp.tankHull(faceLeft), x, y);
+    // Tracks: one frame per two cells rolled.
+    ctx.drawImage(sp.tankTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft), x, y + 18);
+    if (hasTankPart(t.parts, TankPart.Armor)) ctx.drawImage(sp.tankArmor(faceLeft), x, y);
     if (hasTankPart(t.parts, TankPart.Smg)) {
-      ctx.save();
-      ctx.translate(SMG_PIVOT[0], SMG_PIVOT[1]);
-      ctx.rotate(local(aim));
-      ctx.fillStyle = '#2e2e2e';
-      ctx.fillRect(0, -1.6, SMG_LEN, 1.1);
-      ctx.fillRect(0, 0.5, SMG_LEN, 1.1);
-      if (t.firedSmg && (now / 40) % 2 < 1) {
-        ctx.fillStyle = '#ffe080';
-        ctx.fillRect(SMG_LEN, -2, 2.5, 4);
+      const g = sp.tankGun(true, aim);
+      const px = faceLeft ? x + TANK_W - SMG_PIVOT[0] : x + SMG_PIVOT[0];
+      const py = ty + SMG_PIVOT[1];
+      ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
+      if (t.firedSmg && (now / 45) % 2 < 1) {
+        // Muzzle flash: a hot star at the barrel tips.
+        const fx = Math.round(px + Math.cos(aim) * (SMG_LEN + 1));
+        const fy = Math.round(py + Math.sin(aim) * (SMG_LEN + 1));
+        ctx.fillStyle = '#fff4b0';
+        ctx.fillRect(fx - 1, fy - 1, 3, 3);
+        ctx.fillStyle = '#ffb030';
+        ctx.fillRect(fx - 2, fy, 5, 1);
+        ctx.fillRect(fx, fy - 2, 1, 5);
       }
-      ctx.restore();
-      ctx.fillStyle = '#444b2a';
-      ctx.fillRect(SMG_PIVOT[0] - 2.5, SMG_PIVOT[1] - 2.5, 5, 5);
     }
-    // Battered: scorch marks spread as the hull weakens.
+    // Battle damage: scorch blotches spread as the hull weakens, then it burns.
     const wear = 1 - t.hp / TANK_HP;
-    if (wear > 0.3) {
-      ctx.fillStyle = `rgba(20,15,10,${Math.min(0.5, wear * 0.6)})`;
-      ctx.fillRect(6, 9, 6, 4);
-      if (wear > 0.6) ctx.fillRect(18, 10, 5, 3);
+    if (wear > 0.25) {
+      ctx.fillStyle = 'rgba(16,12,8,0.55)';
+      ctx.fillRect(wx(5, 4), ty + 8, 4, 2);
+      ctx.fillRect(wx(6, 2), ty + 10, 2, 1);
+      if (wear > 0.5) {
+        ctx.fillRect(wx(18, 5), ty + 9, 5, 2);
+        ctx.fillRect(wx(9, 3), ty + 2, 3, 2);
+      }
+      if (wear > 0.75 && (now / 90) % 3 < 2) {
+        ctx.fillStyle = (now / 60) % 2 < 1 ? '#ff9a30' : '#ffd060';
+        ctx.fillRect(wx(19, 2), ty + 7, 2, 2);
+        ctx.fillRect(wx(7, 1), ty + 6, 1, 2);
+      }
     }
-    ctx.restore();
   }
 
   /** A drop rocket: hull in the passenger's colour, exhaust plume along its axis, damage sparks. */

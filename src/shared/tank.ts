@@ -52,22 +52,22 @@ export const TANK_PART_HP = [TANK_HP, 320, 220, 520];
 export const TANK_PART_NAMES = ['hull', 'cannon', 'SMG', 'armour'];
 /** Part centres, tank-local (facing right, from the top-left corner). */
 export const TANK_PART_CENTER: readonly (readonly [number, number])[] = [
-  [16, 13],
-  [22, 5],
-  [28, 14],
-  [27, 8],
+  [16, 12],
+  [21, 3],
+  [27, 11],
+  [14, 6],
 ];
 
 export const hasTankPart = (mask: number, part: number) => (mask & (1 << part)) !== 0;
 
 /** Turret pivot, cannon barrel length, and the cannon's elevation limits (radians above horizontal). */
-export const CANNON_PIVOT = [15, 6] as const;
-export const CANNON_LEN = 17;
+export const CANNON_PIVOT = [15, 3] as const;
+export const CANNON_LEN = 23;
 export const CANNON_UP = 1.25;
 export const CANNON_DOWN = 0.45;
 /** The vulcan: pivot and barrel length. It swivels all the way round. */
-export const SMG_PIVOT = [26, 14] as const;
-export const SMG_LEN = 9;
+export const SMG_PIVOT = [25, 11] as const;
+export const SMG_LEN = 12;
 
 /** Seconds between shots. */
 export const SMG_INTERVAL = 60 / 720;
@@ -134,9 +134,11 @@ export function newTank(x: number, y: number): Tank {
 export function tankPartAt(t: Tank, lx: number, ly: number): number {
   const fx = t.faceLeft ? TANK_W - lx : lx;
   let p: number = TankPart.Hull;
-  if (fx >= 17 && ly < 9 && hasTankPart(t.parts, TankPart.Cannon)) p = TankPart.Cannon;
-  else if (fx >= 23 && ly >= 11 && ly < 18 && hasTankPart(t.parts, TankPart.Smg)) p = TankPart.Smg;
-  else if ((fx >= 25 || ly < 4) && hasTankPart(t.parts, TankPart.Armor)) p = TankPart.Armor;
+  // Matches the sprite (client/sprites.ts): cannon out of the dome front,
+  // vulcan housing on the nose, the plate over the roof and the glacis.
+  if (fx >= 17 && ly < 6 && hasTankPart(t.parts, TankPart.Cannon)) p = TankPart.Cannon;
+  else if (fx >= 24 && ly >= 9 && ly <= 13 && hasTankPart(t.parts, TankPart.Smg)) p = TankPart.Smg;
+  else if ((fx >= 25 || ly < 8) && hasTankPart(t.parts, TankPart.Armor)) p = TankPart.Armor;
   return p;
 }
 
