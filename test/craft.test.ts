@@ -58,6 +58,7 @@ describe('drop rockets', () => {
   it('deliver a clone: fall in, brake on thrust, drop it beside the hatch, leave', () => {
     const world = new World(3);
     arena(world.terrain);
+    world.terrainReplaced();
     const p = world.addPlayer('newbie', { send() {} })!;
     expect(p.alive).toBe(false);
     let maxThrust = 0;
@@ -90,6 +91,7 @@ describe('drop rockets', () => {
   it('can be shot down: passenger thrown clear, hull becomes scrap metal', () => {
     const world = new World(5);
     arena(world.terrain);
+    world.terrainReplaced();
     const shooter = world.addPlayer('shooter', { send() {} })!;
     const rider = world.addPlayer('rider', { send() {} })!;
     deliverAll(world, [shooter, rider]);
@@ -125,6 +127,7 @@ describe('drop rockets', () => {
   it('hull fragments maim bystanders', () => {
     const world = new World(8);
     arena(world.terrain);
+    world.terrainReplaced();
     const a = world.addPlayer('a', { send() {} })!;
     const b = world.addPlayer('b', { send() {} })!;
     for (let t = 0; t < 1200 && !(a.alive && b.alive && world.crafts.every((k) => k === null)); t++) world.step();
@@ -151,6 +154,7 @@ describe('drop rockets', () => {
   it('crashes if it hits the ground too fast', () => {
     const world = new World(2);
     arena(world.terrain);
+    world.terrainReplaced();
     const p = world.addPlayer('p', { send() {} })!;
     world.step();
     const c = world.crafts.find((k) => k !== null)!;
@@ -270,6 +274,7 @@ describe('drop rocket parts', () => {
   it('shooting the engine off sends the part flying and the rocket down', () => {
     const world = new World(11);
     arena(world.terrain);
+    world.terrainReplaced();
     const p = world.addPlayer('p', { send() {} })!;
     let c: Craft | undefined;
     for (let t = 0; t < 200 && !(c && c.y > 0); t++) {
@@ -292,6 +297,7 @@ describe('drop rocket parts', () => {
   it('bullets tear off the part they hit', () => {
     const world = new World(12);
     arena(world.terrain);
+    world.terrainReplaced();
     const shooter = world.addPlayer('s', { send() {} })!;
     const rider = world.addPlayer('r', { send() {} })!;
     deliverAll(world, [shooter, rider]);
@@ -323,6 +329,8 @@ describe('drop rocket prediction', () => {
     it(`the passenger's client predicts its own rocket exactly at ${latencyTicks * 33}ms one-way latency`, () => {
       const world = new World(77);
       arena(world.terrain);
+      world.terrainReplaced();
+    world.terrainReplaced();
       const game = new Game();
       // The client has the same flat terrain (as if every chunk had arrived).
       arena(game.terrain);

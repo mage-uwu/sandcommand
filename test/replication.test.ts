@@ -6,6 +6,7 @@ import { applyFrameRecords, nullHandler } from '../src/shared/frame.ts';
 import { S_FRAME, quantizeAim } from '../src/shared/protocol.ts';
 import { Rng } from '../src/shared/rng.ts';
 import { Terrain } from '../src/shared/terrain.ts';
+import { generateWorld } from '../src/shared/worldgen.ts';
 import { World } from '../src/server/world.ts';
 
 interface FakeClient {
@@ -27,13 +28,29 @@ function connect(world: World, name: string): FakeClient {
   return c;
 }
 
+/** Maps by seed, generated once and copied into each replica (as a real client would generate it). */
+const maps = new Map<number, Terrain>();
+function makeMap(into: Terrain, seed: number): void {
+  let m = maps.get(seed);
+  if (!m) {
+    m = new Terrain();
+    generateWorld(m, seed);
+    maps.set(seed, m);
+  }
+  into.mat.set(m.mat);
+  into.solid.set(m.solid);
+  into.hard.set(m.hard);
+  into.fixed.set(m.fixed);
+  into.loose.set(m.loose);
+}
+
 function drain(c: FakeClient): void {
   for (const msg of c.inbox) {
     const r = new Reader(msg);
     expect(r.u8()).toBe(S_FRAME);
     r.u32();
     r.u16();
-    applyFrameRecords(r, c.replica, nullHandler);
+    applyFrameRecords(r, c.replica, { ...nullHandler, wave: (seed) => makeMap(c.replica, seed) });
   }
   c.inbox.length = 0;
 }

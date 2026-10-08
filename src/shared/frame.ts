@@ -4,8 +4,7 @@ import { CRAFT_PARTS } from './craft.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
-import { CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
-import { generateWorld } from './worldgen.ts';
+import { BLIP_X, BLIP_Y, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
 import {
   R_ACTORS,
   R_BLIPS,
@@ -150,7 +149,7 @@ export interface FrameHandler {
   scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void;
   /** FFA round state, every frame. */
   round(s: RoundState): void;
-  /** A new wave: the terrain was just regenerated from `seed`; `hashes` are the server's per-chunk hashes. */
+  /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
   wave(seed: number, hashes: Uint32Array): void;
   hit(victim: number, x: number, y: number, amount: number): void;
   chat(id: number, text: string): void;
@@ -224,7 +223,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       case R_BLIPS: {
         const n = r.u8();
         const list = [];
-        for (let i = 0; i < n; i++) list.push({ id: r.u8(), x: r.u8() * 8, y: r.u8() * 8 });
+        for (let i = 0; i < n; i++) list.push({ id: r.u8(), x: r.u8() * BLIP_X, y: r.u8() * BLIP_Y });
         h.blips(list);
         break;
       }
@@ -275,8 +274,9 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const seed = r.u32();
         const hashes = new Uint32Array(CHUNK_COUNT);
         for (let i = 0; i < CHUNK_COUNT; i++) hashes[i] = r.u32();
-        // Same generator, same seed: the new map is made here rather than downloaded.
-        generateWorld(terrain, seed);
+        // The handler makes the map from the seed (same generator as the
+        // server) before any later record touches the terrain; headless
+        // decoders that don't keep terrain can skip it.
         h.wave(seed, hashes);
         break;
       }

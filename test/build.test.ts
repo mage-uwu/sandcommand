@@ -86,6 +86,7 @@ function setup(): { world: World; p: Player; frames: Uint8Array[] } {
   const frames: Uint8Array[] = [];
   const world = new World(31);
   flat(world.terrain);
+  world.terrainReplaced();
   const p = world.addPlayer('engineer', { send: (d) => frames.push(d) })!;
   deliverAll(world, [p]);
   for (let k = 0; k < 90; k++) world.step();

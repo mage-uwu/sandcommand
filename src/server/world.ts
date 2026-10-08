@@ -47,6 +47,8 @@ import {
   ACTOR_H,
   ACTOR_MAX_HP,
   ACTOR_W,
+  BLIP_X,
+  BLIP_Y,
   CHUNK,
   CHUNK_BYTES_PER_TICK,
   CHUNK_COUNT,
@@ -154,6 +156,8 @@ export class Player {
   reloadLeft = 0;
   /** Item in hand last tick (switching cancels a reload). */
   heldItem: InvItem | null = null;
+  /** Hasn't been sent the map seed yet (newcomer). */
+  needsMap = true;
   /** Server-side bot brain (null for humans). */
   bot: BotBrain | null = null;
   /** FFA: waves won; in this wave; waiting for its drop rocket; who it's watching while out (255 none). */
@@ -283,6 +287,33 @@ export class World {
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
     generateWorld(this.terrain, this.mapSeed);
+    this.sealMap();
+  }
+
+  /** Chunk versions when the current map was generated (a chunk still at it is untouched). */
+  private readonly pristine = new Uint32Array(CHUNK_COUNT);
+  /** R_WAVE for the current map: its seed and every chunk's hash as generated. */
+  private mapRecord: Uint8Array | null = null;
+
+  /**
+   * The terrain was rewritten wholesale outside the replication path (tests
+   * building an arena): every chunk is stale for every client, and newcomers
+   * can't make this map from a seed, so they download it until the next wave.
+   */
+  terrainReplaced(): void {
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) this.chunkVersion[ci]++;
+    for (const p of this.players) p?.known.fill(-1);
+    this.mapRecord = null;
+  }
+
+  /** Remember the freshly generated map, so newcomers can make it themselves instead of downloading it. */
+  private sealMap(): void {
+    this.pristine.set(this.chunkVersion);
+    const w = new Writer(8 + CHUNK_COUNT * 4);
+    w.u8(R_WAVE);
+    w.u32(this.mapSeed);
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) w.u32(this.terrain.chunkHash(ci));
+    this.mapRecord = w.finish();
   }
 
   get playerCount(): number {
@@ -432,11 +463,8 @@ export class World {
       // The client regenerates this map itself (and asks again for any chunk whose hash differs).
       for (let ci = 0; ci < CHUNK_COUNT; ci++) p.known[ci] = this.chunkVersion[ci];
     }
-    const w = new Writer(8 + CHUNK_COUNT * 4);
-    w.u8(R_WAVE);
-    w.u32(this.mapSeed);
-    for (let ci = 0; ci < CHUNK_COUNT; ci++) w.u32(this.terrain.chunkHash(ci));
-    this.waveRecord = w.finish();
+    this.sealMap();
+    this.waveRecord = this.mapRecord;
   }
 
   /**
@@ -1662,6 +1690,13 @@ export class World {
       w.u16(p.ack & 0xffff);
       // A new wave's map comes first: every record after it applies to the new terrain.
       if (this.waveRecord) w.bytes(this.waveRecord);
+      else if (p.needsMap && this.mapRecord) {
+        // A newcomer generates the map from its seed: it holds every chunk
+        // nobody has touched since, and is sent only the ones that changed.
+        w.bytes(this.mapRecord);
+        for (let ci = 0; ci < CHUNK_COUNT; ci++) if (this.chunkVersion[ci] === this.pristine[ci]) p.known[ci] = this.chunkVersion[ci];
+      }
+      p.needsMap = false;
       if (this.mode === 'ffa') {
         w.u8(R_ROUND);
         w.u8(this.phase);
@@ -1750,8 +1785,8 @@ export class World {
         w.u8(far.length);
         for (const o of far) {
           w.u8(o.id);
-          w.u8(Math.max(0, Math.min(255, o.cx >> 3)));
-          w.u8(Math.max(0, Math.min(255, o.cy >> 3)));
+          w.u8(Math.max(0, Math.min(255, Math.floor(o.cx / BLIP_X))));
+          w.u8(Math.max(0, Math.min(255, Math.floor(o.cy / BLIP_Y))));
         }
       }
 

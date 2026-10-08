@@ -18,6 +18,7 @@ function range(link: { send(d: Uint8Array): void } = { send() {} }): { world: Wo
     for (let y = 0; y < 400; y++) if (t.get(x, y) !== Mat.Air) t.set(x, y, Mat.Air);
     for (let y = 400; y < 420; y++) t.set(x, y, Mat.Bedrock);
   }
+  world.terrainReplaced();
   const p = world.addPlayer('gunner', link)!;
   deliverAll(world, [p]);
   for (let k = 0; k < 60; k++) world.step(); // let the rocket leave and the clone settle

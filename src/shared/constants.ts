@@ -1,21 +1,21 @@
 // World geometry. Every terrain cell is one "pixel" of sand.
-export const WORLD_W = 2048;
+export const WORLD_W = 4096;
 export const WORLD_H = 1024;
 
 // Bitplane layout: one bit per cell, 32 cells per Uint32 word.
 export const WORD_BITS = 32;
-export const WORDS_PER_ROW = WORLD_W / WORD_BITS; // 64
+export const WORDS_PER_ROW = WORLD_W / WORD_BITS; // 128
 
 // Chunking. Chunks are the unit of terrain replication and interest management.
 export const CHUNK_SHIFT = 6;
 export const CHUNK = 1 << CHUNK_SHIFT; // 64 cells
-export const CHUNKS_X = WORLD_W >> CHUNK_SHIFT; // 32
+export const CHUNKS_X = WORLD_W >> CHUNK_SHIFT; // 64
 export const CHUNKS_Y = WORLD_H >> CHUNK_SHIFT; // 16
-export const CHUNK_COUNT = CHUNKS_X * CHUNKS_Y; // 512
+export const CHUNK_COUNT = CHUNKS_X * CHUNKS_Y; // 1024
 
 // Distance-field dirty tracking granularity: 16x16-cell tiles.
 export const TILE_SHIFT = 4;
-export const TILES_X = WORLD_W >> TILE_SHIFT; // 128
+export const TILES_X = WORLD_W >> TILE_SHIFT; // 256
 export const TILES_Y = WORLD_H >> TILE_SHIFT; // 64
 
 // Simulation clock.
@@ -58,3 +58,7 @@ export const RESPAWN_TICKS = TICK_RATE * 3;
 // Network quantization.
 export const POS_SCALE = 16; // 1/16 cell precision for remote actors
 export const VEL_SCALE = 8;
+
+/** Radar blips pack each coordinate into a byte: x in 16-cell steps, y in 8-cell steps. */
+export const BLIP_X = WORLD_W / 256;
+export const BLIP_Y = WORLD_H / 128;

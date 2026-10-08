@@ -10,6 +10,7 @@ import { F_ALIVE, F_FIRING, F_GROUND, F_JET, classOfFlags } from '../shared/prot
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
+import { generateWorld } from '../shared/worldgen.ts';
 import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
@@ -594,7 +595,8 @@ export class Game implements FrameHandler {
    * Clear everything left from the last one, rebuild what derives from the
    * terrain, and flag any chunk that didn't come out identical to the server's.
    */
-  wave(_seed: number, hashes: Uint32Array): void {
+  wave(seed: number, hashes: Uint32Array): void {
+    generateWorld(this.terrain, seed);
     this.particles.n = 0;
     this.projectiles.n = 0;
     this.stain.fill(0);

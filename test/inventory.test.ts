@@ -17,6 +17,7 @@ function arena(): World {
     for (let y = 0; y < 400; y++) if (t.get(x, y) !== Mat.Air) t.set(x, y, Mat.Air);
     for (let y = 400; y < 420; y++) t.set(x, y, Mat.Bedrock);
   }
+  world.terrainReplaced();
   return world;
 }
 

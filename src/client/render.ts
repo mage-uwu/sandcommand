@@ -13,7 +13,8 @@ import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE } from './sprites.ts';
 
-const MINI_SCALE = 8;
+/** World cells per minimap pixel: the minimap is 256 pixels wide whatever the world's width. */
+const MINI_SCALE = WORLD_W / 256;
 
 /** Precomputed RGBA (little-endian u32) palette: 4 shade variants per material, plus a lit variant. */
 const PALETTE = new Uint32Array(MAT_COLOR.length * 8);
@@ -845,8 +846,8 @@ export class Renderer {
       this.miniCtx.putImageData(this.miniImage, 0, 0);
       this.miniDirty = false;
     }
-    const mw = this.mini.width * s * 0.75;
-    const mh = this.mini.height * s * 0.75;
+    const mw = this.mini.width * s;
+    const mh = this.mini.height * s;
     const mx = W - mw - 14 * s;
     const my = H - mh - 14 * s;
     ctx.globalAlpha = 0.85;

@@ -2,7 +2,7 @@
 
 A Cloudflare-native multiplayer shooter inspired by **Cortex Command**: up to
 **64 clones per room** fight free-for-all waves in one fully destructible
-2048×1024-cell world, with bots in every seat no human has taken.
+4096×1024-cell world, with bots in every seat no human has taken.
 Every explosion carves terrain, throws debris, and the debris settles back as
 rubble. All of it is simulated on one authoritative Durable Object and
 streamed to every player at 30 Hz.
@@ -71,6 +71,17 @@ chunk's hash. A client that comes out different on a chunk asks for that
 chunk again. The wave record opens the frame, so every record after it
 applies to the new terrain. Round state rides in a small per-frame
 `R_ROUND` record.
+
+**Joining works the same way.** A newcomer's first frame carries the
+current map's seed and hashes. The server remembers each chunk's version
+when the map was generated. Any chunk nobody has touched since counts as
+already held, so only chunks that changed are downloaded. On the 4096-wide
+map, a client has all 1024 chunks about 1.5 s after joining.
+
+Generating the map takes about 0.4 s. Each octave of the noise caches its
+lattice-corner hashes along a row, and each cell stops at the first material
+that applies (caves, then gold, rock, sand lenses), which gives bit-identical
+terrain in less than half the time.
 
 ## Architecture
 
@@ -264,7 +275,7 @@ set of cells the kernel *read*, not just the ones it changed.
 
 ### Replication: chunks, versions and event streaming
 
-The world is cut into 512 chunks of 64×64 cells. Terrain is **never streamed
+The world is cut into 1024 chunks of 64×64 cells. Terrain is **never streamed
 as state while you watch it change**. Clients receive *operations* and
 re-run them locally:
 
@@ -541,17 +552,17 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.81 ms  p99 4.4 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
-replicate avg 0.97 ms  p99 3.3 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 33.0 KB/s; room egress 2.06 MB/s
+sim       avg 0.87 ms  p99 5.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
+replicate avg 0.87 ms  p99 3.3 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 18.9 KB/s; room egress 1.18 MB/s
 ```
 
 `npm run bench:ffa` (one human, 63 server-side bots, free-for-all waves for
 two minutes, map resets included):
 
 ```
-sim       avg 0.68 ms  p99 3.3 ms      (bot AI and rounds included)
-downstream to the human: 29.7 KB/s
+sim       avg 0.53 ms  p99 3.1 ms      (bot AI and rounds included)
+downstream to the human: 22.1 KB/s
 ```
 
 `npm run bench:physics`:

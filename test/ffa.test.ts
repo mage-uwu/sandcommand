@@ -52,11 +52,12 @@ describe('free for all', () => {
     const [a, b] = ['a', 'b'].map((n) => world.addPlayer(n, { send() {} })!);
     until(world, () => a.alive && b.alive);
     const seed0 = world.mapSeed;
-    const h0 = world.terrain.chunkHash(200);
+    const h0 = Array.from({ length: CHUNK_COUNT }, (_, ci) => world.terrain.chunkHash(ci));
     kill(world, b, a);
     until(world, () => world.phase === Phase.Countdown && world.wave === 1);
     expect(world.mapSeed).not.toBe(seed0);
-    expect(world.terrain.chunkHash(200)).not.toBe(h0);
+    const changed = h0.filter((h, ci) => world.terrain.chunkHash(ci) !== h).length;
+    expect(changed).toBeGreaterThan(CHUNK_COUNT / 4); // a different landscape, not just a few dents
     expect(world.items.length).toBe(0); // b's dropped kit went with the old map
     until(world, () => world.wave === 2 && a.alive && b.alive);
     expect(a.alive && b.alive).toBe(true);
