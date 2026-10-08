@@ -22,6 +22,14 @@ export class InputState {
   /** True while the chat box has focus; game keys are ignored. */
   typing = false;
   onChatKey: (() => void) | null = null;
+  /** Playing on a touch screen (touch controls showing). */
+  touch = false;
+  /** Buttons held on the touch controls (see touch.ts), OR'ed with the keyboard's. */
+  touchButtons = 0;
+  /** Scope toggled on from the touch controls. */
+  touchScope = false;
+  /** Set once a touch has come in: mouse events the browser synthesises from it are ignored. */
+  private lastTouch = -1e9;
 
   constructor(target: HTMLElement) {
     addEventListener('keydown', (e) => {
@@ -56,10 +64,12 @@ export class InputState {
       this.scopeDown = false;
     });
     target.addEventListener('mousemove', (e) => {
+      if (this.fromTouch()) return;
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
     });
     target.addEventListener('mousedown', (e) => {
+      if (this.fromTouch()) return;
       if (e.button === 0) {
         this.mouseDown = true;
         this.clicks++;
@@ -69,6 +79,7 @@ export class InputState {
       this.mouseY = e.clientY;
     });
     addEventListener('mouseup', (e) => {
+      if (this.fromTouch()) return;
       if (e.button === 0) this.mouseDown = false;
       if (e.button === 2) this.scopeDown = false;
     });
@@ -84,6 +95,36 @@ export class InputState {
       },
       { passive: false },
     );
+  }
+
+  private fromTouch(): boolean {
+    return performance.now() - this.lastTouch < 1000;
+  }
+
+  // Touch controls feed the same state the mouse and keyboard do.
+
+  /** A finger aiming (and firing) at screen point x, y. */
+  touchAim(x: number, y: number, press: boolean): void {
+    this.lastTouch = performance.now();
+    this.mouseX = x;
+    this.mouseY = y;
+    if (press) {
+      this.mouseDown = true;
+      this.clicks++;
+    }
+  }
+  touchRelease(): void {
+    this.lastTouch = performance.now();
+    this.mouseDown = false;
+  }
+  cycleBy(d: number): void {
+    this.cyclePresses += d;
+  }
+  pressPickup(): void {
+    this.pickups++;
+  }
+  pressDrop(): void {
+    this.drops++;
   }
 
   private down(...codes: string[]): boolean {
@@ -117,7 +158,7 @@ export class InputState {
 
   /** Aiming down the scope (right mouse or Shift). */
   get scoping(): boolean {
-    return !this.typing && (this.scopeDown || this.down('ShiftLeft', 'ShiftRight'));
+    return !this.typing && (this.scopeDown || this.touchScope || this.down('ShiftLeft', 'ShiftRight'));
   }
 
   buttons(): number {
@@ -129,7 +170,8 @@ export class InputState {
       (this.down('KeyS', 'ArrowDown') ? BTN_DOWN : 0) |
       (this.mouseDown ? BTN_FIRE : 0) |
       (this.scoping ? BTN_SCOPE : 0) |
-      (this.down('KeyR') ? BTN_RELOAD : 0)
+      (this.down('KeyR') ? BTN_RELOAD : 0) |
+      this.touchButtons
     );
   }
 }

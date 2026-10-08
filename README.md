@@ -25,6 +25,24 @@ drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer 
 on the menu picks a fortification and a click builds it. Dig gold with the Digger. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
+**On phones and tablets** (`src/client/touch.ts`) touch controls switch on
+by themselves the first time a finger touches the screen, or straight away
+on a touch-first device.
+- **Joystick (bottom-left).** It's a floating stick: it appears wherever
+  your thumb lands. Push left or right to run, up to jump and jetpack, down
+  to crouch. In a drop rocket the same stick steers, burns and cuts the
+  engine.
+- **Tap anywhere else.** You aim at that spot and shoot. Hold to keep firing
+  and drag to walk your aim. With the Materializer out, a tap builds. Taps
+  on its menu pick the piece. Once you're out of the wave, a tap moves to
+  the next clone to watch.
+- **Buttons (right edge).** ⇄ swaps weapon, ▲ jets, ↻ reloads, ◎ toggles
+  the scope, ⬆ / ⬇ pick up and drop.
+- **Top-left.** ☰ shows the scoreboard, 💬 opens chat.
+- **Screen layout.** The HUD shrinks on small screens. The minimap moves to
+  the top-right so the buttons have the corner. Deploy goes fullscreen and
+  locks landscape where the browser allows it.
+
 ## Free for all
 
 Every room plays free-for-all waves (`stepRound` in `src/server/world.ts`):

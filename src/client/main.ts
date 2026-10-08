@@ -8,6 +8,7 @@ import { Game } from './game.ts';
 import { InputState } from './input.ts';
 import { Net } from './net.ts';
 import { Renderer } from './render.ts';
+import { TouchControls } from './touch.ts';
 
 const snapAt = { x: 0, y: 0 };
 
@@ -25,6 +26,7 @@ const chatInput = $<HTMLInputElement>('chat');
 
 const input = new InputState(canvas);
 const renderer = new Renderer(canvas);
+const touch = new TouchControls(canvas, input, { chat: () => input.onChatKey?.(), overUi: (x, y) => renderer.menuHit(x, y) >= 0 });
 let game: Game | null = null;
 let net: Net | null = null;
 
@@ -59,6 +61,11 @@ async function refreshRooms(): Promise<void> {
 refreshRooms();
 
 async function join(): Promise<void> {
+  if (touch.enabled) {
+    // Phones: play fullscreen and sideways where the browser allows it.
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.('landscape').catch(() => {});
+  }
   const name = nameInput.value.trim().slice(0, 16);
   storageSet('sc.name', name);
   playBtn.disabled = true;
@@ -106,12 +113,13 @@ async function join(): Promise<void> {
           g.carved(x, y, r, 1, 0, removed, detached);
           return detached.length / 3;
         };
-        (window as unknown as { sc: unknown }).sc = { game: g, renderer, carve };
+        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve };
       }
       g.myId = w.id;
       g.room = w.room;
       game = g;
       overlay.classList.add('hidden');
+      touch.setVisible(true);
       const q = new URLSearchParams(location.search);
       q.set('room', w.room);
       history.replaceState(null, '', `?${q}`);
@@ -144,6 +152,7 @@ async function join(): Promise<void> {
 
 function showOverlay(msg: string): void {
   overlay.classList.remove('hidden');
+  touch.setVisible(false);
   statusEl.textContent = msg;
   playBtn.disabled = false;
   refreshRooms();

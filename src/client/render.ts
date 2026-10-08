@@ -312,7 +312,7 @@ export class Renderer {
     if (near && WEAPONS[near.weapon]) {
       const d = WEAPONS[near.weapon];
       ctx.font = `${Math.max(4, Math.round(11 / z))}px ui-monospace, monospace`;
-      const label = `[3] ${d.name}${d.clip > 0 ? ` ${near.ammo}/${d.clip}` : ''}`;
+      const label = `${input.touch ? '⬆' : '[3]'} ${d.name}${d.clip > 0 ? ` ${near.ammo}/${d.clip}` : ''}`;
       const tw = ctx.measureText(label).width;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(near.x - tw / 2 - 1, near.y - 13, tw + 2, 6);
@@ -745,7 +745,9 @@ export class Renderer {
 
   private drawHud(game: Game, input: InputState, net: Net, views: RemoteView[], dpr: number, W: number, H: number): void {
     const ctx = this.ctx;
-    const s = dpr;
+    // HUD scale: device pixels per CSS pixel, shrunk on small (phone) screens.
+    const s = dpr * Math.min(1, innerHeight / 560, innerWidth / 1000);
+    const touch = input.touch;
     ctx.textAlign = 'left';
     ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
 
@@ -785,7 +787,7 @@ export class Renderer {
       ctx.fillStyle = sel ? '#000' : '#ddd';
       ctx.fillText(d ? (d.clip > 0 ? `${d.name} ${it.ammo}` : d.name) : '?', x + 10 * s, H - 18 * s);
     }
-    if (game.alive) {
+    if (game.alive && !touch) {
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.textAlign = 'center';
       ctx.fillText(game.inv.length ? '1/2 switch   3 pick up   4 drop' : 'empty-handed: 3 picks up a weapon', W / 2, H - 42 * s);
@@ -818,16 +820,24 @@ export class Renderer {
       `tick ${game.lastServerTick}  fps ${Math.round(this.fps)}`,
       `chunks ${countLoaded(game)}/${CHUNK_COUNT} known  particles ${game.particles.n} (drawn ${this.particleLayer.drawn})`,
     ];
-    lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (20 + i * 15) * s));
+    // On touch screens the bottom-right belongs to the buttons: the minimap
+    // moves to the top-right, the kill feed under it, and the net stats go.
+    const mw = this.mini.width * s;
+    const mh = this.mini.height * s;
+    const mx = W - mw - 14 * s;
+    const my = touch ? 10 * s : H - mh - 14 * s;
+    if (!touch) lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (20 + i * 15) * s));
 
     // Kill feed.
     const now = performance.now();
-    game.feed.forEach((f, i) => {
+    const feedY = touch ? my + mh + 16 * s : 100 * s;
+    const feed = touch ? game.feed.slice(-3) : game.feed;
+    feed.forEach((f, i) => {
       const a = Math.max(0, Math.min(1, (8000 - (now - f.at)) / 1000));
       if (a <= 0) return;
       ctx.globalAlpha = a;
       ctx.fillStyle = f.color;
-      ctx.fillText(f.text, W - 14 * s, (100 + i * 16) * s);
+      ctx.fillText(f.text, W - 14 * s, feedY + i * 16 * s);
     });
     ctx.globalAlpha = 1;
 
@@ -847,10 +857,6 @@ export class Renderer {
       this.miniCtx.putImageData(this.miniImage, 0, 0);
       this.miniDirty = false;
     }
-    const mw = this.mini.width * s;
-    const mh = this.mini.height * s;
-    const mx = W - mw - 14 * s;
-    const my = H - mh - 14 * s;
     ctx.globalAlpha = 0.85;
     ctx.drawImage(this.mini, mx, my, mw, mh);
     ctx.globalAlpha = 1;
