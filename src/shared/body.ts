@@ -47,8 +47,9 @@ export interface PartDef {
 export const PARTS: readonly PartDef[] = [
   { name: 'head', integrity: 25, limit: 30, flesh: true, vital: true, armorOf: -1, rx0: 1, ry0: 0, rx1: 6, ry1: 2 },
   { name: 'torso', integrity: 40, limit: 75, flesh: true, vital: true, armorOf: -1, rx0: 2, ry0: 3, rx1: 7, ry1: 8 },
-  { name: 'gun arm', integrity: 30, limit: 22, flesh: true, vital: false, armorOf: -1, rx0: 6, ry0: 3, rx1: 7, ry1: 6 },
-  { name: 'off arm', integrity: 30, limit: 22, flesh: true, vital: false, armorOf: -1, rx0: 2, ry0: 4, rx1: 3, ry1: 7 },
+  // Arms hold on twice as hard as they used to (limit 44): losing your gun arm should be rare.
+  { name: 'gun arm', integrity: 30, limit: 44, flesh: true, vital: false, armorOf: -1, rx0: 6, ry0: 3, rx1: 7, ry1: 6 },
+  { name: 'off arm', integrity: 30, limit: 44, flesh: true, vital: false, armorOf: -1, rx0: 2, ry0: 4, rx1: 3, ry1: 7 },
   { name: 'leg', integrity: 30, limit: 26, flesh: true, vital: false, armorOf: -1, rx0: 0, ry0: 9, rx1: 3, ry1: 13 },
   { name: 'leg', integrity: 30, limit: 26, flesh: true, vital: false, armorOf: -1, rx0: 4, ry0: 9, rx1: 7, ry1: 13 },
   { name: 'helmet', integrity: 140, limit: 45, flesh: false, vital: false, armorOf: Part.Head, rx0: 1, ry0: 0, rx1: 6, ry1: 2 },

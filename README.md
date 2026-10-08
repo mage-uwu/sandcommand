@@ -272,6 +272,8 @@ spare bits of the actor flags, and movement scaling lives in the shared
 A part whose wounds reach its limit is **torn off**. The server broadcasts an
 `R_DETACH` record, and every client throws that part as a gib with a blood
 fountain. Losing the head or torso kills; the kill feed marks headshots.
+Arm joints are built strong (a 44-wound limit, double the original), so it
+takes about three rifle rounds to shoot the gun out of a clone's hands.
 Otherwise the clone fights on, crippled, and both server and client
 prediction use the same `mobility()`:
 

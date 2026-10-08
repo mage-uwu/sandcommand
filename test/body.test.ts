@@ -195,3 +195,17 @@ describe('clone classes', () => {
     expect(fly(ClassId.Medium)).toBeGreaterThan(fly(ClassId.Heavy));
   });
 });
+
+describe('arm joints', () => {
+  it('an arm takes three rifle rounds to come off (twice the old joint strength)', () => {
+    const RIFLE_E = PROJ[ProjKind.Bullet].mass * PROJ[ProjKind.Bullet].sharp * 880;
+    const s = newBodyState(ClassId.Medium);
+    const r = newStrike();
+    strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
+    strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
+    expect(has(s.mask, Part.GunArm)).toBe(true); // two hits: still holding the gun
+    expect(mobility(s.mask, { legs: 0, jet: false, canFire: false, oneHanded: false }).canFire).toBe(true);
+    strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
+    expect(has(s.mask, Part.GunArm)).toBe(false);
+  });
+});
