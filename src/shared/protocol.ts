@@ -70,6 +70,8 @@ export const R_SHIP_PART = 30;
 export const R_SHIP_BOOM = 31;
 /** Extraction: which booby traps (mines) have gone off, as a bitset by trap id (sent when it changes). */
 export const R_TRAPS = 32;
+/** A laser beam fired: from, to, power (0..255) and who fired it. */
+export const R_BEAM = 33;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -87,7 +89,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 /** Last Man Standing round phases. */
 export const Phase = {

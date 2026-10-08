@@ -233,6 +233,54 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 8,
   },
+  {
+    // Shotgun: a heavy military pump gun, tube magazine under the barrel
+    grid: [
+      '....KKKKKKKKKKKK.',
+      'KAAKMMMMMMMMMMMMK',
+      'KAAKmmKKgggKKKK..',
+      '.KKKmK..KKK......',
+    ],
+    px: 1,
+    py: 1,
+  },
+  {
+    // GL: a stubby launcher with a fat revolving drum
+    grid: [
+      '.....KKKKKKKKKK.',
+      'KAAKKOOOOOOOOOOK',
+      'KAAKMNNNNMOOOOOK',
+      '.KKKMNnnNMKKKKK.',
+      '....KKKKKK......',
+    ],
+    px: 1,
+    py: 1,
+  },
+  {
+    // Gatling: a cluster of barrels off a heavy receiver, a belt feeding it
+    grid: [
+      '...KKKKKK...........',
+      '..KMMMMMMKKKKKKKKKKK',
+      'KAAKMGGMMDDDDDDDDDDK',
+      'KAAKMMMMMKKKKKKKKKKK',
+      '..KMMMMMMDDDDDDDDDDK',
+      '...KKyyKKKKKKKKKKKK.',
+    ],
+    px: 1,
+    py: 2,
+  },
+  {
+    // Laser: a sleek white emitter, its coil glowing cyan
+    grid: [
+      '.....KKKKKKKK....',
+      'KAAKKLLLLLLLLKKK.',
+      'KAAKHVVVVVHLLLLLK',
+      '.KKKHHKKKKKHKKKK.',
+      '....KK...........',
+    ],
+    px: 1,
+    py: 1,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.

@@ -1,4 +1,4 @@
-import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
+import { BTN_FIRE, type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, applyFrameRecords } from '../shared/frame.ts';
@@ -7,7 +7,7 @@ import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts'
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -15,10 +15,10 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { generateWorld, lastDungeon } from '../shared/worldgen.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
-import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
+import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -211,6 +211,25 @@ export class Game implements FrameHandler {
 
   /** Beams to fade out: materializer (builder muzzle to piece centre) and sniper tracers (muzzle to impact). */
   readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number; tracer?: boolean }[] = [];
+  /** Laser beams to draw, fading (power 0..1), and the last few beam ids seen. */
+  readonly laserBeams: { x0: number; y0: number; x1: number; y1: number; power: number; at: number }[] = [];
+  private beamSeen: number[] = [];
+  /** Our own laser's charge (ticks held), tracked locally for the charge meter and muzzle glow. */
+  laserCharge = 0;
+
+  beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number): void {
+    if (this.beamSeen.includes(seq)) return;
+    this.beamSeen.push(seq);
+    if (this.beamSeen.length > 16) this.beamSeen.shift();
+    this.laserBeams.push({ x0, y0, x1, y1, power, at: performance.now() });
+    if (this.laserBeams.length > 12) this.laserBeams.shift();
+    laserHit(this.particles, x1, y1, (x1 - x0) / (Math.hypot(x1 - x0, y1 - y0) || 1), (y1 - y0) / (Math.hypot(x1 - x0, y1 - y0) || 1), power);
+    if (owner < 64) this.kicks.set(owner, { at: performance.now(), k: 0.3 + power * 0.7 });
+    const me = this.body;
+    const d = Math.min(Math.hypot(me.x - x0, me.y - y0), Math.hypot(me.x - x1, me.y - y1));
+    this.shake = Math.max(this.shake, (owner === this.myId ? 1 + power * 9 : 0) + Math.max(0, 1 - d / 300) * power * 6);
+  }
+
   /** Recent shots by clone id (when, how hard), for the gun kicking back in their hands. */
   readonly kicks = new Map<number, { at: number; k: number }>();
   /** How far a clone's gun is kicked back right now (0..1). */
@@ -288,6 +307,9 @@ export class Game implements FrameHandler {
     // respawned us and will apply it.
     this.pending.push({ seq: this.seq, buttons });
     if (this.pending.length > 90) this.pending.shift();
+    // The laser's charge, as the server counts it (for the meter and the glow).
+    const charging = this.alive && !this.drive && this.weapon === WeaponId.Laser && (buttons & BTN_FIRE) !== 0 && this.reloadLeft === 0 && this.ammo > 0;
+    this.laserCharge = charging ? Math.min(LASER_MAX, this.laserCharge + 1) : 0;
     if (this.alive && this.drive) {
       stepTank(this.drive, this.terrain, DT, buttons);
       this.seat(this.drive);
@@ -892,6 +914,7 @@ export class Game implements FrameHandler {
     const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
+    else if (weapon === W_LASER && killer !== victim) text = `${kn} [Laser] ${vn}`;
     else if (killer === 255 && weapon === W_TRAP) text = `${vn} was impaled on the spikes`;
     else if (killer === 255 && weapon === ProjKind.Dart) text = `${vn} took a poisoned dart`;
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;

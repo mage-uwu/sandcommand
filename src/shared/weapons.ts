@@ -22,6 +22,12 @@ export const ProjKind = {
   Dart: 9,
   /** A booby-trap pressure plate going off. */
   Mine: 10,
+  /** A shotgun pellet (nine to a shell). */
+  Pellet: 11,
+  /** A grenade-launcher bomblet: bounces, goes off on its fuse; a third of a hand grenade. */
+  Bomblet: 12,
+  /** A Gatling round: a heavy machine-gun bullet. */
+  Heavy: 13,
 } as const;
 
 export interface ProjDef {
@@ -69,6 +75,13 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.05, life: 40, damage: 22, mass: 0.45, sharp: 0.95, carveR: 1, coreR: 0, splashR: 0, splashDamage: 0, debris: 1, bounce: 0, ballistic: true },
   // Booby-trap mine: a grenade's worth of blast under your feet (it goes off the tick it's stepped on).
   { gravity: 1, life: 2, damage: 0, mass: 0.6, sharp: 0.1, carveR: 22, coreR: 10, splashR: 40, splashDamage: 95, debris: 60, bounce: 0, ballistic: false },
+  // Shotgun pellet: short-lived (it's a close-quarters gun); nine to a shell. Each shoves only a little
+  // (a whole shell shoves hard), so the first pellets don't knock the target clear of the rest.
+  { gravity: 0.25, life: 11, damage: 15, mass: 1, sharp: 0.9, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 0.3 },
+  // Grenade-launcher bomblet: bounces about, pops on a short fuse; a third of a hand grenade.
+  { gravity: 1, life: 50, damage: 0, mass: 0.4, sharp: 0.1, carveR: 13, coreR: 5, splashR: 26, splashDamage: 30, debris: 22, bounce: 0.5, ballistic: false },
+  // Gatling round: heavier than a rifle round, hits harder.
+  { gravity: 0.12, life: 40, damage: 24, mass: 0.7, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.3 },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -81,6 +94,14 @@ export const PROJ_RADIO = -3;
 export const PROJ_REPAIR = -4;
 /** WeaponDef.proj for the golden idol (Extraction): carried, never fired. */
 export const PROJ_IDOL = -5;
+/** WeaponDef.proj for the laser: no projectile; hold to charge, release to fire an instant beam (see laser*). */
+export const PROJ_LASER = -6;
+/** Laser: ticks to a full charge (8 s); the least charge that fires; and the beam at a given charge (0..1). */
+export const LASER_MAX = 30 * 8;
+export const LASER_MIN = 3;
+export const laserWidth = (power: number) => 0.6 + 3.4 * power;
+export const laserWound = (power: number) => 24 + 156 * power;
+export const laserEnergy = (power: number) => 420 + 2600 * power;
 /** How far the repair kit's nanobot spray reaches (cells), and how much it mends per tick of spraying. */
 export const REPAIR_REACH = 30;
 export const REPAIR_HP = 1.5;
@@ -101,6 +122,14 @@ export const WeaponId = {
   RepairKit: 7,
   /** Extraction's golden idol: the prize. Carried in the inventory like a weapon (and spilled on death); does nothing. */
   Idol: 8,
+  /** Heavy combat shotgun: a spread of pellets, a big shove, six shells. */
+  Shotgun: 9,
+  /** Grenade launcher: six small bouncing bomblets lobbed on an arc. */
+  GrenadeLauncher: 10,
+  /** Gatling: spins up, then a hundred heavy rounds, hard-hitting but wild. */
+  Gatling: 11,
+  /** Laser: hold to charge (up to 8 s), release to fire a beam through every soldier in its way. */
+  Laser: 12,
 } as const;
 
 /**
@@ -134,6 +163,10 @@ export interface WeaponDef {
   climb?: number;
   /** Scope lock-on: half-angle (radians) of the cone around the aim within which a scoped enemy is locked onto (0/absent: no lock). */
   lockCone?: number;
+  /** Projectiles per shot, each with its own spread (a shotgun's pellets). */
+  pellets?: number;
+  /** Ticks the trigger must be held for the barrels to spin up before it fires (Gatling). */
+  spinUp?: number;
 }
 
 export const WEAPONS: readonly WeaponDef[] = [
@@ -147,6 +180,10 @@ export const WEAPONS: readonly WeaponDef[] = [
   // Sprays every tick; a canister lasts 4 s of spraying and takes 5 s to brew more nanobots.
   { name: 'Repair Kit', proj: PROJ_REPAIR, muzzle: 11, rpm: 1800, auto: true, speed: 0, spread: 0, clip: 120, reload: 150, scope: 40 },
   { name: 'Golden Idol', proj: PROJ_IDOL, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
+  { name: 'Shotgun', proj: ProjKind.Pellet, muzzle: 14, rpm: 75, auto: false, speed: 900, spread: 0.13, clip: 6, reload: 100, scope: 80, kick: 50, climb: 0.09, lockCone: 0.08, pellets: 9 },
+  { name: 'GL', proj: ProjKind.Bomblet, muzzle: 13, rpm: 150, auto: false, speed: 340, spread: 0.03, clip: 6, reload: 105, scope: 110, kick: 16, climb: 0.04 },
+  { name: 'Gatling', proj: ProjKind.Heavy, muzzle: 17, rpm: 1100, auto: true, speed: 960, spread: 0.08, clip: 100, reload: 150, scope: 120, kick: 3.5, climb: 0.012, lockCone: 0.06, spinUp: 14 },
+  { name: 'Laser', proj: PROJ_LASER, muzzle: 15, rpm: 120, auto: false, speed: 0, spread: 0, clip: 8, reload: 120, scope: 220, kick: 10, climb: 0, lockCone: 0.12 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
@@ -168,6 +205,7 @@ export function projName(kind: number): string {
   if (kind === ProjKind.Engine) return 'Runaway Engine';
   if (kind === ProjKind.Dart) return 'Dart Trap';
   if (kind === ProjKind.Mine) return 'Booby Trap';
+  if (kind === ProjKind.Bomblet) return 'GL';
   return weaponOfProj(kind)?.name ?? '';
 }
 

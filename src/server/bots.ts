@@ -4,7 +4,7 @@ import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
 import { Evac, Team, quantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
-import { PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -28,6 +28,10 @@ const RANGE: Record<number, number> = {
   [WeaponId.Grenade]: 110,
   [WeaponId.Sniper]: 280,
   [WeaponId.Digger]: 0,
+  [WeaponId.Shotgun]: 55,
+  [WeaponId.GrenadeLauncher]: 150,
+  [WeaponId.Gatling]: 140,
+  [WeaponId.Laser]: 230,
 };
 const MAX_SHOT = 340; // won't shoot at anything further than this
 
@@ -73,6 +77,8 @@ export class BotBrain {
   private navDist: Int16Array | null = null;
   private navKey = '';
   private navAt = -1e9;
+  /** How long to charge the laser before letting go (ticks). */
+  private laserGoal = 30;
   /** Extraction: resting on a ledge to refill the jetpack before the next climb. */
   private resting = false;
 
@@ -178,8 +184,10 @@ export class BotBrain {
     if (nadeSlot >= 0 && dist < 150 && t > this.nadeUntil + 90 && rng.next() < 0.01) this.nadeUntil = t + 30;
     if (t < this.nadeUntil && nadeSlot >= 0) want = nadeSlot;
     // Up close with a launcher: a gun that won't blow us up too, if we carry one.
-    if (dist < 70 && p.inv[want]?.weapon === WeaponId.Bazooka) {
-      const gun = p.inv.findIndex((it) => it.weapon === WeaponId.Rifle || it.weapon === WeaponId.Sniper);
+    const splashy = p.inv[want]?.weapon === WeaponId.Bazooka || p.inv[want]?.weapon === WeaponId.GrenadeLauncher;
+    if (dist < 70 && splashy) {
+      const safe: number[] = [WeaponId.Shotgun, WeaponId.Gatling, WeaponId.Rifle, WeaponId.Laser, WeaponId.Sniper];
+      const gun = p.inv.findIndex((it) => safe.includes(it.weapon));
       if (gun >= 0) want = gun;
     }
     // Out of sight but close, or straight above/below (a roof or floor away,
@@ -277,14 +285,18 @@ export class BotBrain {
 
     // Fire: with a clear line (or digging), in range; semi-auto weapons get a fresh press each shot.
     // No point-blank blasts, unless cornered with nothing else.
-    const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade ? 50 : 0;
+    const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade || weapon === WeaponId.GrenadeLauncher ? 50 : 0;
     const shoot =
       weapon === WeaponId.RepairKit
         ? healing
         : weapon === WeaponId.Digger
         ? digging
         : tgt !== null && t >= this.holdFire && this.seeTarget && dist < MAX_SHOT && dist > minRange && (weapon !== WeaponId.Grenade || dist < 220);
-    if (shoot) {
+    if (weapon === WeaponId.Laser) {
+      // Laser: hold to charge (longer the further off they are), then let go to fire.
+      if (shoot && p.charge < this.laserGoal) buttons |= BTN_FIRE;
+      else if (p.charge === 0) this.laserGoal = Math.min(LASER_MAX, 12 + Math.floor(dist / 3) + rng.int(40));
+    } else if (shoot) {
       this.trigger = def?.auto ? true : !this.trigger;
       if (this.trigger) buttons |= BTN_FIRE;
     } else this.trigger = false;

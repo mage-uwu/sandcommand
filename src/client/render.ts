@@ -5,7 +5,7 @@ import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
-import { PROJ, PROJ_BUILD, REPAIR_REACH, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MAX, PROJ, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
@@ -328,6 +328,11 @@ export class Renderer {
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
       this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now));
+      // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
+      if (v.weapon === WeaponId.Laser && v.flags & F_FIRING) {
+        const sh = shoulderAt(v.x, v.y, v.stance, Math.cos(aimR) < 0, this.shPt);
+        this.drawLaserCharge(ctx, sh.x + Math.cos(aimR) * WEAPONS[WeaponId.Laser].muzzle, sh.y + Math.sin(aimR) * WEAPONS[WeaponId.Laser].muzzle, 0.35 + 0.25 * Math.sin(now / 120), now);
+      }
     }
     // Scoped: the line a shot would take, to the wall it would hit or the
     // first clone in its way (bracketed): only what you can actually hit.
@@ -350,6 +355,10 @@ export class Renderer {
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now));
+      if (game.laserCharge > 0) {
+        const m = WEAPONS[WeaponId.Laser].muzzle;
+        this.drawLaserCharge(ctx, mySh.x + Math.cos(myAim) * m, mySh.y + Math.sin(myAim) * m, game.laserCharge / LASER_MAX, now);
+      }
     }
 
     // Every particle the field engine owns (grains, sparks, flames, smoke,
@@ -470,6 +479,34 @@ export class Renderer {
       }
     }
 
+    // Laser beams: a hot magenta glow around a white core, wider the stronger
+    // the charge, fading out (a strong beam lingers longer).
+    for (let i = game.laserBeams.length - 1; i >= 0; i--) {
+      const bm = game.laserBeams[i];
+      const life = 220 + 520 * bm.power;
+      const t = (now - bm.at) / life;
+      if (t >= 1) {
+        game.laserBeams.splice(i, 1);
+        continue;
+      }
+      const w = laserWidth(bm.power) * 2 * (1 - t * 0.6);
+      const a = 1 - t;
+      ctx.lineCap = 'round';
+      for (const [k, col] of [
+        [2.2, `rgba(255,40,140,${0.25 * a})`],
+        [1.2, `rgba(255,90,190,${0.6 * a})`],
+        [0.45, `rgba(255,240,255,${a})`],
+      ] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(0.5, w * k);
+        ctx.beginPath();
+        ctx.moveTo(bm.x0, bm.y0);
+        ctx.lineTo(bm.x1, bm.y1);
+        ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+    }
+
     // Explosion flashes.
     for (let i = game.flashes.length - 1; i >= 0; i--) {
       const fl = game.flashes[i];
@@ -563,6 +600,27 @@ export class Renderer {
       ctx.stroke();
     }
 
+    if (game.laserCharge > 0) {
+      // The laser's charge: a ring filling round the crosshair, and how full.
+      const f = game.laserCharge / LASER_MAX;
+      const mx = input.mouseX * dpr;
+      const my = input.mouseY * dpr;
+      const r = 16 * dpr;
+      ctx.lineWidth = 3 * dpr;
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();
+      ctx.arc(mx, my, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = f >= 1 ? '#ffffff' : '#ff5ab4';
+      ctx.beginPath();
+      ctx.arc(mx, my, r, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+      ctx.stroke();
+      ctx.font = `bold ${Math.round(10 * dpr)}px ui-monospace, monospace`;
+      ctx.fillStyle = '#ffd0ec';
+      ctx.textAlign = 'center';
+      ctx.fillText(f >= 1 ? 'MAX' : `${Math.round(f * 100)}%`, mx, my + r + 12 * dpr);
+      ctx.textAlign = 'left';
+    }
     if (this.scoped) {
       // Scope: dark vignette around the mouse, a fine reticle on it.
       const mx = input.mouseX * dpr;
@@ -1114,6 +1172,17 @@ export class Renderer {
       ctx.fillText('LOCK', hit.x + ACTOR_W / 2, y0 - 2);
       ctx.textAlign = 'left';
     }
+  }
+
+  /** A laser gathering its charge at the muzzle: a flickering magenta-white ball, bigger the fuller it is. */
+  private drawLaserCharge(ctx: CanvasRenderingContext2D, x: number, y: number, f: number, now: number): void {
+    const r = 1 + f * 3.5 + Math.sin(now / 45) * 0.4;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
+    g.addColorStop(0, 'rgba(255,255,255,0.95)');
+    g.addColorStop(0.35, `rgba(255,110,200,${0.45 + f * 0.4})`);
+    g.addColorStop(1, 'rgba(255,40,140,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r * 2, y - r * 2, r * 4, r * 4);
   }
 
   /** A soft golden halo around the idol, pulsing, so it can be spotted in the dark of the labyrinth. */

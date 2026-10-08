@@ -775,6 +775,33 @@ exists everywhere.
 | Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
 | Radio | calls support (see below) | 6 | – | click | ∞ | – | 60 |
 | Repair Kit | nanobots (see below) | 11 | every tick | auto | 120 | 5 s | 40 |
+| Shotgun | 9 pellets, 900 | 14 | 75 rpm | semi | 6 | 3.3 s | 80 |
+| GL | bomblet, 340 | 13 | 150 rpm | semi | 6 | 3.5 s | 110 |
+| Gatling | heavy round, 960 | 17 | 1100 rpm (after spin-up) | auto | 100 | 5 s | 120 |
+| Laser | instant beam (see below) | 15 | hold, release | charge | 8 | 4 s | 220 |
+
+Four heavier guns are in the spawn pool too:
+- **Shotgun:** a military combat shotgun. Each shell is a spread of nine
+  heavy pellets that die out at close range. Point-blank it kills a scout
+  or medium outright and tears a heavy's armour apart. Each pellet shoves
+  only a little, so the first ones don't knock the target clear of the
+  rest; a whole shell shoves hard. Six shells, a slow reload, a big kick.
+- **GL:** a grenade launcher that lobs six small bomblets on an arc. They
+  bounce about and pop on a 1.7 s fuse, each a third of a hand grenade
+  (splash 30 against 90).
+- **Gatling:** the barrels spin up for half a second before it fires (and
+  spin down when you let go). Then it pours out 100 heavy rounds (24
+  wounds each, against the rifle's 16), loose (spread 0.08 against 0.035),
+  with steady recoil.
+- **Laser:** hold the trigger to charge, up to 8 s (a ring round the
+  crosshair fills, and the muzzle glows); let go to fire. The beam is
+  instant and **goes straight through every soldier in its way at full
+  strength**. It stops at terrain or a vehicle, which it hits.
+  - Charge sets width and power: a quick tap is a narrow sliver
+    (24 wounds), a full charge a thick, devastating beam (180 wounds, wide
+    enough to cut through the body whatever it hits first).
+  - A strong beam burns a crater where it lands, and kicks you back.
+  - Beams go out as `R_BEAM` records and kills show as Laser in the feed.
 
 The **sniper** is near instant: its slug flies 800 cells a tick and crosses
 the whole map in about five ticks, so you point and click. It's light for

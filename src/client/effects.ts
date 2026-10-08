@@ -112,6 +112,17 @@ export function slugImpact(p: Particles, x: number, y: number, dx: number, dy: n
   p.blast(x, y, 14, 180);
 }
 
+/** Where a laser beam lands: a spray of white-hot sparks and a puff of smoke, more the stronger the beam. */
+export function laserHit(p: Particles, x: number, y: number, dx: number, dy: number, power: number): void {
+  const n = 6 + Math.round(power * 30);
+  for (let k = 0; k < n; k++) {
+    const s = rnd(60, 260 + power * 300);
+    p.spawn(PK.Spark, x, y, -dx * s * 0.6 + rnd(-160, 160), -dy * s * 0.6 + rnd(-160, 160), rnd(5, 12 + power * 10));
+  }
+  burst(p, PK.Smoke, x, y, 2 + Math.round(power * 10), 40, 50);
+  if (power > 0.3) burst(p, PK.Flame, x, y, Math.round(power * 14), 120, 8);
+}
+
 /** Rocket exhaust trail. */
 export function rocketTrail(p: Particles, x: number, y: number): void {
   p.spawn(PK.Flame, x, y, rnd(-20, 20), rnd(-20, 20), rnd(3, 5));

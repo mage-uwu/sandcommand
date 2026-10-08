@@ -134,6 +134,7 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_LASER = 248; // laser beams
 export const W_TRAP = 249; // spike pits
 export const W_SHIP = 250; // dropship crashes and explosions
 export const W_TANK = 251; // tank crushes and explosions
@@ -1000,6 +1001,9 @@ const FRAGMENTS: readonly FragmentDef[] = [
   { shrapnel: 50, speed: 800, embers: 34 }, // runaway engine
   { shrapnel: 0, speed: 0, embers: 0 }, // dart
   { shrapnel: 48, speed: 760, embers: 22 }, // mine
+  { shrapnel: 0, speed: 0, embers: 0 }, // pellet
+  { shrapnel: 14, speed: 620, embers: 8 }, // bomblet
+  { shrapnel: 0, speed: 0, embers: 0 }, // gatling round
 ];
 
 /**

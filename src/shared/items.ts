@@ -26,7 +26,15 @@ export const MAX_ITEMS = 160;
 export const NO_WEAPON = 255;
 
 /** Weapons a clone may spawn with as its primary. */
-export const PRIMARIES: readonly number[] = [WeaponId.Rifle, WeaponId.Sniper, WeaponId.Bazooka];
+export const PRIMARIES: readonly number[] = [
+  WeaponId.Rifle,
+  WeaponId.Sniper,
+  WeaponId.Bazooka,
+  WeaponId.Shotgun,
+  WeaponId.GrenadeLauncher,
+  WeaponId.Gatling,
+  WeaponId.Laser,
+];
 
 export interface InvItem {
   weapon: number; // WeaponId

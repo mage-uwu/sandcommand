@@ -28,6 +28,7 @@ import {
   R_ROUND,
   R_TEAMS,
   R_TRAPS,
+  R_BEAM,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -232,6 +233,8 @@ export interface FrameHandler {
   scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void;
   /** FFA round state, every frame. */
   round(s: RoundState): void;
+  /** A laser beam fired (seq: to drop the copy sent for its other end). */
+  beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number): void;
   /** Extraction: which traps have gone off (bit per trap id). */
   traps(spent: Uint8Array): void;
   /** Every slot's team (Team.*), whenever it changes. */
@@ -403,6 +406,16 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           s.evac = { state, x: ex, y: ey, eta: r.u16() };
         }
         h.round(s);
+        break;
+      }
+      case R_BEAM: {
+        const seq = r.u16();
+        const x0 = r.u16();
+        const y0 = r.u16() - Y_BIAS;
+        const x1 = r.u16();
+        const y1 = r.u16() - Y_BIAS;
+        const power = r.u8() / 255;
+        h.beam(seq, x0, y0, x1, y1, power, r.u8());
         break;
       }
       case R_TRAPS: {
@@ -678,6 +691,7 @@ export const nullHandler: FrameHandler = {
   chunkLoaded() {},
   round() {},
   traps() {},
+  beam() {},
   teams() {},
   wave() {},
   items() {},

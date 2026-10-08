@@ -120,7 +120,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -136,6 +136,7 @@ import {
   R_BUILD,
   R_ROUND,
   R_TRAPS,
+  R_BEAM,
   R_WAVE,
   R_TEAMS,
   R_TANKS,
@@ -176,7 +177,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
@@ -244,6 +245,9 @@ export class Player {
   regrow = 0;
   /** Muzzle climb from recent shots (radians), settling back each tick. */
   climb = 0;
+  /** Laser charge (ticks held), and how far the Gatling's barrels have spun up. */
+  charge = 0;
+  spin = 0;
   /** Extraction: the trap revision this client last got, and ticks until a spike pit can bite again. */
   trapsSeen = -1;
   spikeCd = 0;
@@ -1219,13 +1223,15 @@ export class World {
 
   /** First actor box entered by a swept segment, via the actor spatial hash. */
   private segmentActor = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }, kind = -1): number => {
+    // (A laser beam passes through clones: only vehicles stop it.)
+    const players = kind !== LASER_VEHICLES_ONLY;
     const dx = x1 - x0;
     const dy = y1 - y0;
     let best = -1;
     let bestT = 2;
     forChunksInRect(Math.floor(Math.min(x0, x1)), Math.floor(Math.min(y0, y1)), Math.floor(Math.max(x0, x1)), Math.floor(Math.max(y0, y1)), (ci) => {
       const bucket = this.grid[ci];
-      for (let k = 0; k < bucket.length; k++) {
+      for (let k = 0; k < bucket.length && players; k++) {
         const id = bucket[k];
         if (id === owner) continue;
         const o = this.players[id]!;
@@ -1510,6 +1516,8 @@ export class World {
     if (item !== p.heldItem) {
       p.heldItem = item ?? null;
       p.reloadLeft = 0;
+      p.charge = 0;
+      p.spin = 0;
     }
     if (!item) {
       p.cooldown = Math.max(0, p.cooldown - 1);
@@ -1524,9 +1532,32 @@ export class World {
       const asked = p.buttons & BTN_RELOAD && !(prev & BTN_RELOAD) && item.ammo < def.clip;
       if (asked || (item.ammo === 0 && pressed)) this.startReload(p);
     }
+    if (def.proj === PROJ_LASER) {
+      // Laser: hold to charge (up to LASER_MAX), release to fire.
+      p.cooldown = Math.max(0, p.cooldown - 1);
+      const ready = p.mob.canFire && p.reloadLeft === 0 && item.ammo > 0 && p.cooldown <= 0;
+      if (pressed && ready) {
+        p.charge = Math.min(LASER_MAX, p.charge + 1);
+        p.firing = true;
+      } else if (!pressed && p.charge > 0) {
+        if (p.charge >= LASER_MIN && ready) {
+          this.fireLaser(p, p.charge / LASER_MAX);
+          p.cooldown = fireInterval(def);
+          if (--item.ammo === 0) this.startReload(p);
+        }
+        p.charge = 0;
+      }
+      return;
+    }
+    // Gatling: the barrels have to spin up before it fires (and spin down when you let go).
+    let spun = true;
+    if (def.spinUp) {
+      p.spin = pressed && p.reloadLeft === 0 ? Math.min(def.spinUp + 10, p.spin + 1) : Math.max(0, p.spin - 2);
+      spun = p.spin >= def.spinUp;
+    }
     p.cooldown -= 1;
     // The repair kit works off either hand (so it can regrow a lost gun arm).
-    const want = def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && def.proj !== PROJ_IDOL && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
+    const want = spun && def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && def.proj !== PROJ_IDOL && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
     if (want && p.cooldown <= 0) {
       this.fire(p, def);
       p.firing = true;
@@ -1639,7 +1670,12 @@ export class World {
   equip(p: Player, weapon: number): number {
     let i = p.inv.findIndex((it) => it.weapon === weapon);
     if (i < 0) {
-      if (p.inv.length >= INV_MAX) p.inv.pop();
+      if (p.inv.length >= INV_MAX) {
+        // Full: make room by dropping something other than what's in hand.
+        const k = p.slot === 0 ? 1 : 0;
+        p.inv.splice(k, 1);
+        if (k < p.slot) p.slot--;
+      }
       p.inv.push(newItem(weapon));
       i = p.inv.length - 1;
     }
@@ -1810,16 +1846,13 @@ export class World {
     const scoped = p.buttons & BTN_SCOPE ? 0.5 : 1;
     // Recoil: the muzzle climbs with each shot (up, whichever way it faces)...
     const up = cos < 0 ? 1 : -1;
-    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * scoped * (p.mob.oneHanded ? 3 : 1) + up * p.climb;
+    const climbed = up * p.climb;
     p.climb += def.climb ?? 0;
     // ...and the shot shoves the shooter back (braced less in a crouch, least lying prone).
     const brace = RECOIL_BRACE[p.body.stance] ?? 1;
     const kick = (def.kick ?? 0) * brace * (p.mob.oneHanded ? 1.4 : 1);
     p.body.vx -= cos * kick;
     p.body.vy -= sin * kick * 0.6;
-    const vx = Math.cos(a) * def.speed + p.body.vx * 0.25;
-    const vy = Math.sin(a) * def.speed + p.body.vy * 0.25;
-    const id = this.nextProjId++;
     // Leave from the muzzle, unless the barrel is pushed into a wall: then
     // from the first solid cell along it (no shooting through walls).
     const m = muzzlePoint(def, ox, oy, aim, this.muzzleAt);
@@ -1834,8 +1867,84 @@ export class World {
         break;
       }
     }
-    this.spawnProj(id, def.proj, p.id, sx, sy, vx, vy);
+    // One projectile, or a shotgun's spread of pellets (each its own spread and a little speed scatter).
+    const n = def.pellets ?? 1;
+    for (let k = 0; k < n; k++) {
+      const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * scoped * (p.mob.oneHanded ? 3 : 1) + climbed;
+      const speed = def.speed * (n > 1 ? 0.9 + this.rng.next() * 0.2 : 1);
+      this.spawnProj(this.nextProjId++, def.proj, p.id, sx, sy, Math.cos(a) * speed + p.body.vx * 0.25, Math.sin(a) * speed + p.body.vy * 0.25);
+    }
   }
+
+  /**
+   * The laser fires (`power` 0..1, from how long it was charged): an instant
+   * beam from the muzzle along the aim. It goes straight through every
+   * soldier in its way at full strength (wider and deadlier the longer the
+   * charge), and stops at terrain or a vehicle, which it hits; a strong beam
+   * burns a crater where it lands.
+   */
+  private fireLaser(p: Player, power: number): void {
+    const def = WEAPONS[WeaponId.Laser];
+    const aim = dequantizeAim(p.aimQ);
+    const cos = Math.cos(aim);
+    const sin = Math.sin(aim);
+    const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
+    const x0 = sh.x + cos * def.muzzle;
+    const y0 = sh.y + sin * def.muzzle;
+    // Out to the first solid cell (or a vehicle, which takes the hit and stops it).
+    let len = sightLine(this.terrain, x0, y0, aim, 2400);
+    const vehicle = this.segmentActor(x0, y0, x0 + cos * len, y0 + sin * len, p.id, this.laserQ, LASER_VEHICLES_ONLY);
+    if (vehicle >= 0) len *= this.laserQ.t;
+    const x1 = x0 + cos * len;
+    const y1 = y0 + sin * len;
+    const w = laserWidth(power);
+    const energy = laserEnergy(power);
+    const wound = laserWound(power);
+    // Every soldier along it, no matter how many.
+    for (const v of this.players) {
+      if (!v || !v.alive || v === p || v.tank >= 0) continue;
+      const b = v.body;
+      const t = segmentBox(x0, y0, x1 - x0, y1 - y0, b.x - w, v.top - w, b.x + ACTOR_W + w, b.y + ACTOR_H + w);
+      if (t < 0) continue;
+      const hx = x0 + (x1 - x0) * t + cos * (w + 2);
+      const hy = y0 + (y1 - y0) * t + sin * (w + 2);
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      if (!this.friendly(p.id, v)) {
+        strike(v.parts, this.partHit(v, hx - b.x, hy - v.top), energy, wound, res);
+        // A wide beam cuts through the body too, whatever it went in by.
+        if (power > 0.45 && v.parts.mask & (1 << Part.Torso)) strike(v.parts, Part.Torso, energy, wound * 0.6, res);
+      }
+      b.vx += cos * 70 * power;
+      b.vy += sin * 70 * power - 20 * power;
+      this.applyStrike(v, res, p.id, W_LASER, hx, hy);
+    }
+    if (vehicle >= SHIP_ID_BASE) this.hitShip(vehicle - SHIP_ID_BASE, x1, y1, cos, sin, energy, wound * 2, p.id);
+    else if (vehicle >= TANK_ID_BASE) this.hitTank(vehicle - TANK_ID_BASE, x1, y1, cos, sin, energy, wound * 2, p.id);
+    else if (vehicle >= CRAFT_ID_BASE) this.hitCraft(vehicle - CRAFT_ID_BASE, x1, y1, cos, sin, energy, wound * 2, p.id);
+    else if (power >= 0.1 && len < 2400) this.carve(x1 + cos * 2, y1 + sin * 2, Math.round(2 + 10 * power), Math.round(1 + 6 * power), Math.round(8 + 50 * power), p.id);
+    // Its kick, the stronger the charge.
+    const brace = RECOIL_BRACE[p.body.stance] ?? 1;
+    p.body.vx -= cos * (10 + 110 * power) * brace;
+    p.body.vy -= sin * (10 + 110 * power) * brace * 0.6;
+    // Every client near either end sees the beam.
+    const w2 = this.tmp.reset();
+    w2.u8(R_BEAM);
+    w2.u16(this.beamSeq = (this.beamSeq + 1) & 0xffff);
+    w2.u16(clampU16(x0));
+    w2.u16(clampU16(y0 + Y_BIAS));
+    w2.u16(clampU16(x1));
+    w2.u16(clampU16(y1 + Y_BIAS));
+    w2.u8(Math.round(power * 255));
+    w2.u8(p.id);
+    const bytes = w2.finish();
+    this.hits.push({ bytes, id: 0, x: x0, y: y0 });
+    if (len > 300) this.hits.push({ bytes, id: 0, x: x1, y: y1 });
+  }
+  private readonly laserQ = { t: 0 };
+  private beamSeq = 0;
 
   /**
    * One tick of the repair kit's nanobot spray: on the teammate it's aimed
@@ -3461,6 +3570,8 @@ const CALL_COOLDOWN = 30 * 30;
 const BOARD_REACH = 10;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less
 /** Base parts (armour is reached through them) and their share of blast overpressure. */
+/** segmentActor `kind` for a laser beam: test vehicles only. */
+const LASER_VEHICLES_ONLY = -2;
 /** How much recoil a clone feels, by stance: standing, crouched, prone. */
 const RECOIL_BRACE = [1, 0.55, 0.3];
 /** What nanobots can grow back, in order. */
