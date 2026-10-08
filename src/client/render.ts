@@ -11,7 +11,7 @@ import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
-import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_PARTS, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
@@ -710,23 +710,23 @@ export class Renderer {
     ctx.fillRect(x0, y0, 460 * s, 44 * s);
     ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
     ctx.textAlign = 'left';
-    const names = ['HULL', 'CANNON', 'SMG', 'ARMOUR'];
-    for (let part = 0; part < 4; part++) {
-      const x = x0 + 8 * s + part * 113 * s;
+    const names = ['HULL', 'CANNON', 'SMG', 'ARMOUR', 'SHIELD'];
+    for (let part = 0; part < TANK_PARTS; part++) {
+      const x = x0 + 8 * s + part * 90 * s;
       const on = hasTankPart(st.parts, part);
       const f = Math.max(0, Math.min(1, st.partHp[part] / TANK_PART_HP[part]));
       ctx.fillStyle = on ? '#e8e0c8' : '#a05040';
       ctx.fillText(on ? names[part] : `${names[part]} LOST`, x, y0 + 16 * s);
       ctx.fillStyle = 'rgba(255,255,255,0.15)';
-      ctx.fillRect(x, y0 + 22 * s, 100 * s, 6 * s);
+      ctx.fillRect(x, y0 + 22 * s, 80 * s, 6 * s);
       ctx.fillStyle = !on ? '#553' : f > 0.5 ? '#8fd060' : f > 0.25 ? '#e0c040' : '#e05040';
-      ctx.fillRect(x, y0 + 22 * s, 100 * s * f, 6 * s);
+      ctx.fillRect(x, y0 + 22 * s, 80 * s * f, 6 * s);
     }
     // Cannon load.
     if (hasTankPart(st.parts, TankPart.Cannon)) {
       const load = 1 - Math.min(1, st.cannonCd / (CANNON_INTERVAL * TICK_RATE));
       ctx.fillStyle = load >= 1 ? '#ffd34a' : 'rgba(255,211,74,0.5)';
-      ctx.fillRect(x0 + 8 * s + 113 * s, y0 + 32 * s, 100 * s * load, 3 * s);
+      ctx.fillRect(x0 + 8 * s + 90 * s, y0 + 32 * s, 80 * s * load, 3 * s);
     }
     ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.65)';
@@ -805,8 +805,9 @@ export class Renderer {
     // Tank-local x (as drawn facing right) to world, mirrored when facing left.
     const wx = (lx: number, w = 0) => (faceLeft ? x + TANK_W - lx - w : x + lx);
     if (t.chute) ctx.drawImage(sp.tankChute(), x - 8, ty - 34);
-    if (t.pilot !== 255) {
-      // The driver, head and shoulders out of the hatch.
+    const shield = hasTankPart(t.parts, TankPart.Shield);
+    if (t.pilot !== 255 && !shield) {
+      // Shield blown off: the driver's head and shoulders, out in the open.
       const rgb = game.players.get(t.pilot)?.rgb ?? 0x7a8a50;
       ctx.fillStyle = '#141012';
       ctx.fillRect(wx(11, 6), y - 5, 6, 5);
@@ -826,6 +827,8 @@ export class Renderer {
       ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
     }
     ctx.drawImage(sp.tankHull(faceLeft), x, y);
+    // The steel cupola over the hatch (12 wide, its foot on the hatch rim).
+    if (shield) ctx.drawImage(sp.tankShield(faceLeft), wx(9, 12), y - 4);
     // Tracks: one frame per two cells rolled.
     ctx.drawImage(sp.tankTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft), x, y + 18);
     if (hasTankPart(t.parts, TankPart.Armor)) ctx.drawImage(sp.tankArmor(faceLeft), x, y);

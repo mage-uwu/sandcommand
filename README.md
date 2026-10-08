@@ -198,18 +198,22 @@ come down by parachute** at spread-out spots and land empty.
   way round. **Right mouse / Shift** (touch: hold ◎) fires the cannon: a
   heavy lobbed shell with a big blast, aimed out the front (25° down to 72°
   up), with recoil. A tank's own rounds never hit it.
-- **Tough.** The hull holds 15× a clone's health (1500). Penetrating hits
+- **Tough.** The hull holds 75× a clone's health (7500), and every part
+  is just as hardened. Penetrating hits
   wound the part they strike; weak shrapnel only scratches. Explosives do
   1.5× against it.
-- **Parts that blow off.** The **cannon**, the **SMG** and the **external
-  armour plate** can each be blown off. The plate covers the nose and roof
+- **Parts that blow off.** The **cannon**, the **SMG**, the **external
+  armour plate** and the **hatch shield** can each be blown off. The plate covers the nose and roof
   and soaks half of every blast while it lasts. A lost gun can't fire.
   Every part flies off as real scrap fragments.
 - **When the hull goes** the tank explodes (crater, fragments, a blast that
   hurts clones, rockets and other tanks) and kills its driver, credited to
   whoever did it.
-- **Safe inside.** The driver can't be hit directly: bullets, blasts and
-  shrapnel hit the tank. Teammates' fire doesn't hurt a team tank. A tank
+- **Safe inside.** A hard steel **shield** (a cupola with a vision slit)
+  covers the hatch. While it holds, the driver can't be hit at all: bullets,
+  blasts and shrapnel hit the tank. Blow the shield off and the driver's
+  head and shoulders stick out of the hatch, where he can be shot like any
+  clone. Teammates' fire doesn't hurt a team tank. A tank
   landing on a clone crushes it, and it shoves clones out of its way.
 - **Bots.** About half the bots go for a nearby empty tank. They drive at
   cannon range, hose targets with the vulcan, and shell their way through

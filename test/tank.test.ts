@@ -141,14 +141,14 @@ describe('tanks', () => {
     expect(tank.hp).toBe(TANK_HP);
   });
 
-  it('has fifteen clones of durability: rifle fire chips at it, it does not die to a magazine', () => {
+  it('has seventy-five clones of durability: a magazine of rifle fire barely scratches it', () => {
     const { world, b, tank } = setup(36);
-    expect(TANK_HP).toBe(15 * ACTOR_MAX_HP);
+    expect(TANK_HP).toBe(75 * ACTOR_MAX_HP);
     // Thirty rifle rounds into the hull side (below the armour, away from the guns).
     for (let k = 0; k < 30; k++) internals(world).hitTank(0, tank.x + 2, tank.y + 14, 1, 0, 400, 16, b.id);
     expect(world.tanks[0]).toBe(tank);
     expect(tank.hp).toBeLessThan(TANK_HP);
-    expect(tank.hp).toBeGreaterThan(TANK_HP * 0.6);
+    expect(tank.hp).toBeGreaterThan(TANK_HP * 0.9);
   });
 
   it('the cannon, the SMG and the armour plate can each be blown off', () => {
@@ -157,7 +157,7 @@ describe('tanks', () => {
     tank.faceLeft = false;
     const at = (part: number) => [tank.x + TANK_PART_CENTER[part][0], tank.y + TANK_PART_CENTER[part][1]] as const;
     // The cannon: shoot at the turret front until it goes.
-    for (let k = 0; k < 40 && hasTankPart(tank.parts, TankPart.Cannon); k++) {
+    for (let k = 0; k < 200 && hasTankPart(tank.parts, TankPart.Cannon); k++) {
       const [x, y] = at(TankPart.Cannon);
       internals(world).hitTank(0, x - 2, y, 1, 0, 400, 38, b.id);
     }
@@ -167,15 +167,43 @@ describe('tanks', () => {
     send(world, a, BTN_SCOPE, false, 0);
     world.step();
     expect(Array.from({ length: world.projectiles.n }, (_, i) => world.projectiles.kind[i])).not.toContain(ProjKind.Shell);
-    for (let k = 0; k < 40 && hasTankPart(tank.parts, TankPart.Smg); k++) {
+    for (let k = 0; k < 200 && hasTankPart(tank.parts, TankPart.Smg); k++) {
       const [x, y] = at(TankPart.Smg);
       internals(world).hitTank(0, x - 2, y, 1, 0, 400, 38, b.id);
     }
     expect(hasTankPart(tank.parts, TankPart.Smg)).toBe(false);
     // The plate soaks blasts until it is blown away.
-    for (let k = 0; k < 20 && hasTankPart(tank.parts, TankPart.Armor); k++) internals(world).splashTanks(tank.x + TANK_W + 6, tank.y + 8, 40, 90, b.id);
+    for (let k = 0; k < 400 && hasTankPart(tank.parts, TankPart.Armor); k++) internals(world).splashTanks(tank.x + TANK_W + 6, tank.y + 8, 40, 90, b.id);
     expect(hasTankPart(tank.parts, TankPart.Armor)).toBe(false);
     expect(world.tanks[0]).toBe(tank); // still running on its hull
+  });
+
+  it("a hard shield covers the driver's head; only once it's blown off can he be shot", () => {
+    const { world, a, b, tank } = setup(41);
+    tapPickup(world, a);
+    expect(hasTankPart(tank.parts, TankPart.Shield)).toBe(true);
+    // Rifle rounds straight down onto the hatch: they hit the shield, not the driver.
+    const hatchX = () => tank.x + (tank.faceLeft ? TANK_W - 13.5 : 13.5);
+    let id = 8000;
+    const volley = (n: number) => {
+      for (let k = 0; k < n; k++) {
+        world.projectiles.spawn(id++, ProjKind.Bullet, b.id, hatchX(), tank.y - 30, 0, 880);
+        send(world, a, 0);
+        world.step();
+      }
+    };
+    const hp0 = a.hp;
+    volley(10);
+    expect(a.hp).toBe(hp0);
+    expect(tank.partHp[TankPart.Shield]).toBeLessThan(1800);
+    // Blow it off: now the head is out of the hatch, and a round from above finds it.
+    internals(world).hurtTankPart(0, TankPart.Shield, 5000, b.id);
+    expect(hasTankPart(tank.parts, TankPart.Shield)).toBe(false);
+    send(world, a, 0);
+    world.step();
+    expect(a.body.y).toBeLessThan(tank.y); // head and shoulders above the dome
+    volley(10);
+    expect(a.alive && a.hp === hp0).toBe(false);
   });
 
   it('when the hull goes it explodes and kills its driver, credited to whoever did it', () => {

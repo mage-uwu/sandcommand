@@ -11,6 +11,8 @@ import {
   TANK_PARTS,
   TANK_PART_CENTER,
   TANK_W,
+  EXPOSED_H,
+  EXPOSED_SEAT_Y,
   type Tank,
   TankPart,
   hasTankPart,
@@ -894,7 +896,7 @@ export class World {
     for (const ci of this.gridUsed) this.grid[ci].length = 0;
     this.gridUsed.length = 0;
     for (const p of this.players) {
-      if (!p || !p.alive || p.tank >= 0) continue; // drivers are inside their tank's armour
+      if (!p || !p.alive || this.shielded(p)) continue; // drivers are inside their tank's armour
       const x0 = Math.floor(p.body.x);
       const y0 = Math.floor(p.body.y);
       forChunksInRect(x0, y0, x0 + ACTOR_W - 1, y0 + ACTOR_H - 1, (ci) => {
@@ -915,8 +917,10 @@ export class World {
       for (let k = 0; k < bucket.length; k++) {
         const id = bucket[k];
         if (id === owner) continue;
-        const b = this.players[id]!.body;
-        const t = segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + ACTOR_H);
+        const o = this.players[id]!;
+        const b = o.body;
+        // A driver whose shield is gone: only the head and shoulders stick out.
+        const t = segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + (o.tank >= 0 ? EXPOSED_H : ACTOR_H));
         if (t >= 0 && t < bestT) {
           bestT = t;
           best = id;
@@ -1110,7 +1114,7 @@ export class World {
         this.splashTanks(x, y, def.splashR, def.splashDamage, owner);
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
-          if (!p || !p.alive || p.tank >= 0 || this.friendly(owner, p)) continue;
+          if (!p || !p.alive || this.shielded(p) || this.friendly(owner, p)) continue;
           const dx = p.cx - x;
           const dy = p.cy - y;
           const d = Math.sqrt(dx * dx + dy * dy);
@@ -1749,7 +1753,7 @@ export class World {
     this.splashTanks(cx, cy, 36, 60, owner);
     for (const p of this.players) {
       // The rider is thrown clear by the blast; its fragments can still find them.
-      if (!p || !p.alive || p.tank >= 0 || p.id === rider || this.friendly(owner, p)) continue;
+      if (!p || !p.alive || this.shielded(p) || p.id === rider || this.friendly(owner, p)) continue;
       const dx = p.cx - cx;
       const dy = p.cy - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
@@ -1878,8 +1882,10 @@ export class World {
   /** The driver rides inside: its clone (and its view) go wherever the tank goes. */
   private syncPilot(p: Player, t: Tank): void {
     const b = p.body;
-    b.x = t.x + TANK_W / 2 - ACTOR_W / 2;
-    b.y = t.y + 2;
+    // Under the shield, inside; with it blown off, head and shoulders out of the hatch.
+    const exposed = !hasTankPart(t.parts, TankPart.Shield);
+    b.x = exposed ? t.x + (t.faceLeft ? TANK_W - 13.5 : 13.5) - ACTOR_W / 2 : t.x + TANK_W / 2 - ACTOR_W / 2;
+    b.y = t.y + (exposed ? EXPOSED_SEAT_Y : 2);
     b.vx = t.vx;
     b.vy = t.vy;
     b.onGround = t.onGround;
@@ -1968,6 +1974,13 @@ export class World {
     }
   }
 
+  /** A driver under an intact shield: nothing can reach him but the tank. */
+  private shielded(p: Player): boolean {
+    if (p.tank < 0) return false;
+    const t = this.tanks[p.tank];
+    return !t || hasTankPart(t.parts, TankPart.Shield);
+  }
+
   /** Is a hit by `by` on this tank friendly fire (its driver is a teammate)? */
   private friendlyTank(by: number, t: Tank): boolean {
     const d = t.pilot !== 255 ? this.players[t.pilot] : null;
@@ -2011,7 +2024,7 @@ export class World {
       const d = Math.hypot(nx - x, ny - y);
       if (d >= r) continue;
       const amt = dmg * 1.5 * (1 - d / r);
-      for (const part of [TankPart.Cannon, TankPart.Smg]) {
+      for (const part of [TankPart.Cannon, TankPart.Smg, TankPart.Shield]) {
         if (!hasTankPart(t.parts, part)) continue;
         tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], pt);
         const dp = Math.hypot(pt.x - x, pt.y - y);
@@ -2192,7 +2205,11 @@ export class World {
     this.projectiles.step(this.collider, DT, this.segmentActor, this.onProjEnd);
     const actors = this.actors;
     actors.clear();
-    for (const p of this.players) if (p && p.alive && p.tank < 0) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    for (const p of this.players) {
+      if (!p || !p.alive || this.shielded(p)) continue;
+      if (p.tank >= 0) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy, ACTOR_W, EXPOSED_H);
+      else actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    }
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
       // Immune to its own jet flames and shell fragments.

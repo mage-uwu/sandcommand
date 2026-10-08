@@ -23,8 +23,8 @@ import type { Terrain } from './terrain.ts';
  */
 export const TANK_W = 32;
 export const TANK_H = 22;
-/** Fifteen times a clone's health. */
-export const TANK_HP = 15 * ACTOR_MAX_HP;
+/** Seventy-five times a clone's health: a fortress on tracks. */
+export const TANK_HP = 75 * ACTOR_MAX_HP;
 /** Hits below this penetration energy only scratch the armour. */
 export const TANK_INTEGRITY = 120;
 export const MAX_TANKS = 4;
@@ -45,20 +45,28 @@ export const TankPart = {
   Cannon: 1,
   Smg: 2,
   Armor: 3,
+  /** The steel cupola over the hatch: while it holds, the driver can't be touched. */
+  Shield: 4,
 } as const;
-export const TANK_PARTS = 4;
+export const TANK_PARTS = 5;
 export const ALL_TANK_PARTS = (1 << TANK_PARTS) - 1;
-export const TANK_PART_HP = [TANK_HP, 320, 220, 520];
-export const TANK_PART_NAMES = ['hull', 'cannon', 'SMG', 'armour'];
+export const TANK_PART_HP = [TANK_HP, 1600, 1100, 2600, 1800];
+export const TANK_PART_NAMES = ['hull', 'cannon', 'SMG', 'armour', 'shield'];
 /** Part centres, tank-local (facing right, from the top-left corner). */
 export const TANK_PART_CENTER: readonly (readonly [number, number])[] = [
   [16, 12],
   [21, 3],
   [27, 11],
   [14, 6],
+  [13, -1],
 ];
 
 export const hasTankPart = (mask: number, part: number) => (mask & (1 << part)) !== 0;
+
+/** How high a driver's head sits out of the hatch (clone top, from the tank's top) once the shield is gone. */
+export const EXPOSED_SEAT_Y = -8;
+/** Rows of an exposed driver's body that stick out and can be hit (head and shoulders). */
+export const EXPOSED_H = 6;
 
 /** Turret pivot, cannon barrel length, and the cannon's elevation limits (radians above horizontal). */
 export const CANNON_PIVOT = [15, 3] as const;
@@ -136,7 +144,8 @@ export function tankPartAt(t: Tank, lx: number, ly: number): number {
   let p: number = TankPart.Hull;
   // Matches the sprite (client/sprites.ts): cannon out of the dome front,
   // vulcan housing on the nose, the plate over the roof and the glacis.
-  if (fx >= 17 && ly < 6 && hasTankPart(t.parts, TankPart.Cannon)) p = TankPart.Cannon;
+  if (fx >= 9 && fx <= 18 && ly < 2 && hasTankPart(t.parts, TankPart.Shield)) p = TankPart.Shield;
+  else if (fx >= 17 && ly < 6 && hasTankPart(t.parts, TankPart.Cannon)) p = TankPart.Cannon;
   else if (fx >= 24 && ly >= 9 && ly <= 13 && hasTankPart(t.parts, TankPart.Smg)) p = TankPart.Smg;
   else if ((fx >= 25 || ly < 8) && hasTankPart(t.parts, TankPart.Armor)) p = TankPart.Armor;
   return p;

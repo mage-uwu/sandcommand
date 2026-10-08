@@ -498,6 +498,10 @@ export class SpriteCache {
   tankArmor(left: boolean): HTMLCanvasElement {
     return this.tankSprite(`armor${left ? 1 : 0}`, () => bake(TANK_ARMOR, TANK_PAL, left));
   }
+  /** The steel cupola over the hatch. */
+  tankShield(left: boolean): HTMLCanvasElement {
+    return this.tankSprite(`shield${left ? 1 : 0}`, () => bake(TANK_SHIELD, TANK_PAL, left));
+  }
   /** The tracks, animation frame chosen by how far the tank has rolled. */
   tankTread(frame: number, left: boolean): HTMLCanvasElement {
     const f = ((frame % TREAD_FRAMES) + TREAD_FRAMES) % TREAD_FRAMES;
@@ -677,6 +681,20 @@ const TANK_VULCAN: Grid = [
   'KmmKKKKKKKKKK',
   'KKKK.........',
 ];
+/**
+ * The hatch shield: a hard steel cupola over the driver's head, a vision
+ * slit across it. Drawn with its left edge at hull column 9, bottom on the
+ * hatch rim (hull row 2).
+ */
+const TANK_SHIELD: Grid = [
+  '...KKKKKK...',
+  '..KSSsssmK..',
+  '.KSsssmmmgK.',
+  '.KseeeeeegK.',
+  'KsmmmmmmmmgK',
+  'KmKmmmmmmKgK',
+  'KKKKKKKKKKKK',
+];
 const TREAD_FRAMES = 4;
 
 /** The track under the hull: links that crawl and road wheels whose spoke turns, by frame. */
@@ -747,7 +765,7 @@ function bakeChute(): HTMLCanvasElement {
 }
 
 export function spriteGridsAreRectangular(): boolean {
-  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT, TANK_HULL, TANK_ARMOR, TANK_CANNON, TANK_VULCAN, tankTread(0)];
+  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT, TANK_HULL, TANK_ARMOR, TANK_CANNON, TANK_VULCAN, TANK_SHIELD, tankTread(0)];
   return all.every((g) => g.every((row) => row.length === g[0].length)) &&
     Object.values(BODY).every((g) => g.length === BODY_H && g[0].length === BODY_W);
 }
