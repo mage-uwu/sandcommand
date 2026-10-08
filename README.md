@@ -170,6 +170,21 @@ lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then gold, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
+## Scenery
+
+Behind the battlefield, over the sky gradient, sit pixel-art parallax
+layers in the Cortex Command / Metal Slug style (`src/client/backdrop.ts`):
+- **Clouds:** puffy pixel cumulus drifting on their own.
+- **Far mountains:** blue ranges with faceted faces, lit toward the light
+  and shaded on the far side, split from each summit. Their crags and snow
+  caps fade into the base colour with ordered 4×4 Bayer dithering.
+- **Mid range:** a darker violet range in front of them.
+- **Mesas:** sandstone mesas and buttes on talus slopes, banded with strata.
+
+Each layer is baked once into a seamless 1024-cell tile, one pixel per
+world cell, and drawn scaled up with no smoothing. The join screen pans
+slowly across the same scene.
+
 ## Bunker look
 
 Bunkers are drawn like a Cortex Command or Metal Slug bunker from around

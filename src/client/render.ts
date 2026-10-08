@@ -15,6 +15,7 @@ import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../s
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_HP, TANK_PARTS, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor } from './texture.ts';
+import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
 /** Most terrain chunks re-rasterized per frame (the rest wait for the next). */
@@ -59,6 +60,7 @@ export class Renderer {
   private miniImage: ImageData;
   private miniPixels: Uint32Array;
   readonly sprites = new SpriteCache();
+  private readonly backdrop = new Backdrop();
   /** Aiming down the scope this frame (camera pushed out, overlay drawn). */
   private scoped = false;
   private readonly particleLayer = new ParticleLayer();
@@ -246,7 +248,9 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
-    this.drawParallax(ctx, W, H, offX, offY, z);
+    // Clouds, blue ranges and mesas in parallax over the sky.
+    this.backdrop.draw(ctx, W, H, (W / 2 - offX) / z, (H / 2 - offY) / z, z, now);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     ctx.setTransform(z, 0, 0, z, offX, offY);
     ctx.imageSmoothingEnabled = false;
@@ -529,37 +533,19 @@ export class Renderer {
     const W = this.canvas.width;
     const H = this.canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#2b3a5c');
-    g.addColorStop(0.6, '#c9a27a');
-    g.addColorStop(0.61, '#5a3f2a');
-    g.addColorStop(1, '#120d0b');
+    // The game's sky and scenery, panning slowly, behind the join screen.
+    const z = Math.max(2, Math.round(H / 260));
+    const camY = 300;
+    const offY = H / 2 - camY * z;
+    const g = ctx.createLinearGradient(0, offY + -300 * z, 0, offY + 500 * z);
+    g.addColorStop(0, '#1d2a48');
+    g.addColorStop(0.45, '#6d7fa8');
+    g.addColorStop(0.8, '#d8ab7c');
+    g.addColorStop(1, '#e6b98a');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
-  }
-
-  private drawParallax(ctx: CanvasRenderingContext2D, W: number, H: number, offX: number, offY: number, z: number): void {
-    // Two distant ridge lines; parallax factor < 1 so they drift slowly.
-    const layers = [
-      { f: 0.25, base: 330, amp: 60, color: 'rgba(60,70,100,0.55)' },
-      { f: 0.5, base: 360, amp: 45, color: 'rgba(70,60,70,0.6)' },
-    ];
-    for (const L of layers) {
-      ctx.fillStyle = L.color;
-      ctx.beginPath();
-      ctx.moveTo(0, H);
-      const camX = (W / 2 - offX) / z;
-      for (let sx = 0; sx <= W; sx += 8) {
-        const wx = camX * L.f + (sx - W / 2) / z;
-        const wy = L.base + Math.sin(wx * 0.013) * L.amp * 0.6 + Math.sin(wx * 0.031 + 1.7) * L.amp * 0.4;
-        const camY = (H / 2 - offY) / z;
-        const sy = H / 2 + (wy - camY * L.f - 300 * (1 - L.f)) * z;
-        ctx.lineTo(sx, sy);
-      }
-      ctx.lineTo(W, H);
-      ctx.closePath();
-      ctx.fill();
-    }
+    const now = performance.now();
+    this.backdrop.draw(ctx, W, H, 2048 + now / 60, camY, z, now);
   }
 
   private drawActor(
