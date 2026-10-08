@@ -17,8 +17,9 @@ npm run deploy       # wrangler deploy (needs a Cloudflare account)
 ```
 
 Controls: **A/D** run, **W/Space** jump (hold for jetpack), **mouse** aim and
-fire, **1–4 / Q/E / wheel** switch weapon (Rifle, Bazooka, Grenade, Digger),
-**Tab** scoreboard, **Enter** chat. Dig gold with the Digger. Clones gib on
+fire, **right mouse / Shift** scope, **R** reload, **1–5 / Q/E / wheel**
+switch weapon (Rifle, Bazooka, Grenade, Sniper, Digger), **Tab** scoreboard,
+**Enter** chat. Dig gold with the Digger. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
 ## Architecture
@@ -150,6 +151,7 @@ hard landings don't need to penetrate: they go into the outermost layer
 | Hit | Energy | Result |
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |
+| Sniper slug (1.1 × 0.95 × 1500) | ~1570 | Through any armour with energy to spare; 38 wounds per layer, so one headshot kills |
 | Shrapnel (0.4 × 1.0 × ~400) | ~160 | Stopped by armour; cuts limbs (integrity 30), so four fragments take a leg |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
 
@@ -276,6 +278,48 @@ cosmetic, but the gold a clone spills is real. The server throws it from the
 seed and deposits it as terrain, and every client throws the same shower from
 the same seed. Explosive and high-overkill deaths scatter harder.
 
+### Weapons
+
+Every weapon is one row of `WEAPONS` in `src/shared/weapons.ts`, and that
+row drives everything: the server's trigger, magazine and projectile spawn,
+the client's sprite, muzzle flash, HUD and camera. Add a row and the weapon
+exists everywhere.
+
+| Weapon | Fires | Muzzle | Rate | Mode | Clip | Reload | Scope |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Rifle | bullet, 880 cells/s | 13 | 450 rpm | auto | 30 | 1.8 s | 110 |
+| Bazooka | rocket, 380 | 14 | 60 rpm | semi | 1 | 2.2 s | 140 |
+| Grenade | grenade, 330 | 6 | 70 rpm | semi | 3 | 2.5 s | 90 |
+| Sniper | slug, 1500 | 17 | 50 rpm | semi | 5 | 2.8 s | 300 |
+| Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
+
+How each field works:
+
+- **Muzzle offset** is measured in cells along the barrel from the shoulder
+  pivot (`SHOULDER_X/Y`). Aim is measured from the same pivot, and the gun
+  sprite rotates about it. Shots spawn at the muzzle, and the client draws
+  the flash in the same place. If the barrel is pushed into a wall, the
+  shot starts at the wall: no shooting through it.
+- **Rate of fire** is in rounds per minute. The server keeps a fractional
+  cooldown and adds the interval on each shot, so 70 rpm averages exactly
+  70, not 30 ticks / 26 ticks rounded.
+- **Semi-auto** weapons need a fresh press per shot.
+- **Projectile type** is a `ProjKind` row in `PROJ`: mass, sharpness and
+  damage for direct hits, plus carve, splash, fragments and fuse.
+  `ballistic` rounds chip terrain and puff dust. Kills are credited by
+  projectile and named by the weapon that fires it.
+- **Clip** counts per weapon and survives switching weapons (CC style). An
+  empty clip reloads itself, and **R** reloads early. Switching weapons
+  cancels a reload. The magazine count and reload timer ride in the
+  client's own `R_SELF` record for the HUD. Other players see the
+  reloading pose through an `F_RELOAD` actor flag.
+- **Scope distance:** holding right mouse or Shift pushes the view that far
+  down the barrel and halves spread. The server moves that client's
+  interest area by the same offset, so it is sent the chunks and players
+  it is now looking at.
+- **Losing the off arm** makes firing 1.6× slower, reloading 1.5× slower,
+  and triples spread.
+
 ### Drop rockets
 
 Every clone arrives by drop rocket, including your first spawn and every
@@ -357,9 +401,9 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 1.07 ms  p99 4.3 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
-replicate avg 0.71 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 32.1 KB/s; room egress 2.01 MB/s
+sim       avg 0.79 ms  p99 3.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
+replicate avg 0.61 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 30.5 KB/s; room egress 1.90 MB/s
 ```
 
 `npm run bench:physics`:

@@ -1,4 +1,4 @@
-import { BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../shared/actor.ts';
+import { BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
 import { WEAPONS } from '../shared/weapons.ts';
 
 export class InputState {
@@ -6,6 +6,8 @@ export class InputState {
   mouseX = 0;
   mouseY = 0;
   mouseDown = false;
+  /** Right mouse held: aiming down the scope. */
+  scopeDown = false;
   weapon = 0;
   scoreboard = false;
   /** True while the chat box has focus; game keys are ignored. */
@@ -41,6 +43,7 @@ export class InputState {
     addEventListener('blur', () => {
       this.keys.clear();
       this.mouseDown = false;
+      this.scopeDown = false;
     });
     target.addEventListener('mousemove', (e) => {
       this.mouseX = e.clientX;
@@ -48,11 +51,13 @@ export class InputState {
     });
     target.addEventListener('mousedown', (e) => {
       if (e.button === 0) this.mouseDown = true;
+      if (e.button === 2) this.scopeDown = true;
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
     });
     addEventListener('mouseup', (e) => {
       if (e.button === 0) this.mouseDown = false;
+      if (e.button === 2) this.scopeDown = false;
     });
     target.addEventListener('contextmenu', (e) => e.preventDefault());
     target.addEventListener(
@@ -71,6 +76,11 @@ export class InputState {
     return false;
   }
 
+  /** Aiming down the scope (right mouse or Shift). */
+  get scoping(): boolean {
+    return !this.typing && (this.scopeDown || this.down('ShiftLeft', 'ShiftRight'));
+  }
+
   buttons(): number {
     if (this.typing) return 0;
     return (
@@ -78,7 +88,9 @@ export class InputState {
       (this.down('KeyD', 'ArrowRight') ? BTN_RIGHT : 0) |
       (this.down('KeyW', 'ArrowUp', 'Space') ? BTN_UP : 0) |
       (this.down('KeyS', 'ArrowDown') ? BTN_DOWN : 0) |
-      (this.mouseDown ? BTN_FIRE : 0)
+      (this.mouseDown ? BTN_FIRE : 0) |
+      (this.scoping ? BTN_SCOPE : 0) |
+      (this.down('KeyR') ? BTN_RELOAD : 0)
     );
   }
 }

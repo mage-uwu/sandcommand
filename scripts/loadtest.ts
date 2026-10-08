@@ -6,6 +6,7 @@
  *   BOTS=64 SECONDS=30 URL=http://127.0.0.1:8787 npm run loadtest
  */
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
+import { WEAPONS } from '../src/shared/weapons.ts';
 import { Reader, Writer } from '../src/shared/codec.ts';
 import { applyFrameRecords, nullHandler } from '../src/shared/frame.ts';
 import { C_INPUT, C_PING, S_FRAME, S_PONG, S_REJECT, S_WELCOME, quantizeAim } from '../src/shared/protocol.ts';
@@ -37,7 +38,7 @@ async function runBot(i: number): Promise<Bot> {
   let seq = 0;
   let buttons = 0;
   let aim = 0;
-  let weapon = i % 4;
+  let weapon = i % WEAPONS.length;
   ws.addEventListener('message', (ev: MessageEvent) => {
     const buf = new Uint8Array(ev.data as ArrayBuffer);
     const r = new Reader(buf);
@@ -70,7 +71,7 @@ async function runBot(i: number): Promise<Bot> {
   const inputTimer = setInterval(() => {
     if (Math.random() < 0.05) buttons = (Math.random() < 0.5 ? BTN_LEFT : BTN_RIGHT) | (Math.random() < 0.4 ? BTN_UP : 0);
     if (Math.random() < 0.1) aim = Math.random() * Math.PI * 2;
-    if (Math.random() < 0.01) weapon = Math.floor(Math.random() * 4);
+    if (Math.random() < 0.01) weapon = Math.floor(Math.random() * WEAPONS.length);
     const fire = Math.random() < 0.5 ? BTN_FIRE : 0;
     w.reset();
     w.u8(C_INPUT);

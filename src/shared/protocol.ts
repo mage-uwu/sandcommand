@@ -44,9 +44,10 @@ export const F_GROUND = 2;
 export const F_JET = 4;
 export const F_FIRING = 8;
 export const F_FACE_LEFT = 16;
+export const F_RELOAD = 32;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

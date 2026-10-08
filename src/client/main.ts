@@ -1,6 +1,7 @@
 import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
+import { SHOULDER_X, SHOULDER_Y } from '../shared/weapons.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
 import { Net } from './net.ts';
@@ -182,7 +183,7 @@ function frame(now: number): void {
       const dpr = canvas.width / innerWidth;
       const wx = renderer.camX + (input.mouseX * dpr - canvas.width / 2) / renderer.zoom;
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
-      const aim = Math.atan2(wy - (g.body.y + 5), wx - (g.body.x + ACTOR_W / 2));
+      const aim = Math.atan2(wy - (g.body.y + SHOULDER_Y), wx - (g.body.x + SHOULDER_X));
       const buttons = input.buttons();
       const weapon = input.weapon;
       const n = net;

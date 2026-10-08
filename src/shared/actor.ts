@@ -21,6 +21,9 @@ export const BTN_RIGHT = 2;
 export const BTN_UP = 4;
 export const BTN_DOWN = 8;
 export const BTN_FIRE = 16;
+/** Hold to aim down the scope: the view pushes out along the barrel. */
+export const BTN_SCOPE = 32;
+export const BTN_RELOAD = 64;
 
 /** The part of an actor that client-side prediction replays. */
 export interface Body {

@@ -1,4 +1,4 @@
-import { type Body, BTN_FIRE, newBody, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, newBody, stepBody } from '../shared/actor.ts';
 import {
   CRAFT_H,
   CRAFT_INERTIA,
@@ -70,6 +70,7 @@ import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
   F_FACE_LEFT,
+  F_RELOAD,
   F_FIRING,
   F_GROUND,
   F_JET,
@@ -98,7 +99,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_DIG, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { generateWorld } from '../shared/worldgen.ts';
 
 export interface ClientLink {
@@ -126,7 +127,16 @@ export class Player {
   hp = ACTOR_MAX_HP;
   aimQ = 0;
   weapon = 0;
+  /** Ticks until the next shot may leave (fractional: rate of fire is exact on average). */
   cooldown = 0;
+  /** Rounds left in each weapon's magazine (kept when switching, CC style). */
+  readonly ammo = Uint8Array.from(WEAPONS, (w) => w.clip);
+  /** Ticks left on the current weapon's reload, 0 = not reloading. */
+  reloadLeft = 0;
+  /** Weapon in hand last tick (switching cancels a reload). */
+  held = 0;
+  /** Buttons last tick, for semi-auto triggers and the reload key. */
+  prevButtons = 0;
   respawn = 1;
   firing = false;
   kills = 0;
@@ -557,7 +567,7 @@ export class World {
     }
     const seed = this.rng.nextU32();
     if (detonate) {
-      if (def.carveR > 0 && (actor < 0 || kind !== ProjKind.Bullet)) {
+      if (def.carveR > 0 && (actor < 0 || !def.ballistic)) {
         this.carve(x, y, def.carveR, def.coreR, def.debris, owner);
       }
       if (def.splashR > 0) {
@@ -601,25 +611,76 @@ export class World {
     this.projEnds.push({ bytes: w.finish(), id: pr.id[i], x, y });
   };
 
-  private fire(p: Player): void {
+  /**
+   * The trigger, magazine and reload for one clone this tick, all from its
+   * weapon's row in WEAPONS: rate of fire (fractional cooldown), semi or
+   * full auto, clip size and reload time. Switching weapons cancels a
+   * reload; an empty magazine reloads itself; R reloads early.
+   */
+  private handleWeapon(p: Player, prev: number): void {
     const def = WEAPONS[p.weapon];
+    if (p.weapon !== p.held) {
+      p.held = p.weapon;
+      p.reloadLeft = 0;
+    }
+    const pressed = (p.buttons & BTN_FIRE) !== 0;
+    const fresh = pressed && !(prev & BTN_FIRE);
+    if (p.reloadLeft > 0 && --p.reloadLeft === 0) p.ammo[p.weapon] = def.clip;
+    if (def.clip > 0 && p.reloadLeft === 0) {
+      const asked = p.buttons & BTN_RELOAD && !(prev & BTN_RELOAD) && p.ammo[p.weapon] < def.clip;
+      if (asked || (p.ammo[p.weapon] === 0 && pressed)) this.startReload(p);
+    }
+    p.cooldown -= 1;
+    const want = p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || p.ammo[p.weapon] > 0);
+    if (want && p.cooldown <= 0) {
+      this.fire(p, def);
+      p.firing = true;
+      // One-handed (off arm gone): slower to recover.
+      p.cooldown += fireInterval(def) * (p.mob.oneHanded ? 1.6 : 1);
+      if (def.clip > 0 && --p.ammo[p.weapon] === 0) this.startReload(p);
+    }
+    // Only carry the fractional remainder while the trigger keeps firing.
+    if (p.cooldown < 0 && !want) p.cooldown = 0;
+  }
+
+  private startReload(p: Player): void {
+    // One hand: fumbling the magazine takes longer.
+    p.reloadLeft = Math.ceil(WEAPONS[p.weapon].reload * (p.mob.oneHanded ? 1.5 : 1));
+  }
+
+  private readonly muzzleAt = { x: 0, y: 0 };
+
+  private fire(p: Player, def: (typeof WEAPONS)[number]): void {
     const aim = dequantizeAim(p.aimQ);
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
-    const ox = p.cx;
-    const oy = p.body.y + 5;
-    if (def.proj < 0) {
+    const ox = p.body.x + SHOULDER_X;
+    const oy = p.body.y + SHOULDER_Y;
+    if (def.proj === PROJ_DIG) {
       // Digger: vacuum terrain in front of the clone, banking any gold.
       this.carve(ox + cos * DIGGER_REACH, oy + sin * DIGGER_REACH, DIGGER_R, DIGGER_CORE, 0, p.id);
       p.gold += this.terrain.removedByMat[Mat.Gold];
       return;
     }
-    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * (p.mob.oneHanded ? 3 : 1);
+    const scoped = p.buttons & BTN_SCOPE ? 0.5 : 1;
+    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * scoped * (p.mob.oneHanded ? 3 : 1);
     const vx = Math.cos(a) * def.speed + p.body.vx * 0.25;
     const vy = Math.sin(a) * def.speed + p.body.vy * 0.25;
     const id = this.nextProjId++;
-    const sx = ox + cos * 6;
-    const sy = oy + sin * 6;
+    // Leave from the muzzle, unless the barrel is pushed into a wall: then
+    // from the first solid cell along it (no shooting through walls).
+    const m = muzzlePoint(def, p.body.x, p.body.y, aim, this.muzzleAt);
+    let sx = m.x;
+    let sy = m.y;
+    for (let d = 0.5; d < def.muzzle; d += 0.5) {
+      const tx = ox + cos * d;
+      const ty = oy + sin * d;
+      if (this.terrain.isSolid(Math.floor(tx), Math.floor(ty))) {
+        sx = tx;
+        sy = ty;
+        break;
+      }
+    }
     if (this.projectiles.spawn(id, def.proj, p.id, sx, sy, vx, vy) < 0) return;
     const i = this.projectiles.n - 1;
     const w = this.tmp.reset();
@@ -652,6 +713,8 @@ export class World {
     p.hp = ACTOR_MAX_HP;
     p.alive = true;
     p.cooldown = 10;
+    p.reloadLeft = 0;
+    for (let k = 0; k < WEAPONS.length; k++) p.ammo[k] = WEAPONS[k].clip;
     p.delivering = -1;
   }
 
@@ -943,6 +1006,8 @@ export class World {
         p.ack = cmd.seq;
       }
       p.firing = false;
+      const prev = p.prevButtons;
+      p.prevButtons = p.buttons;
       if (!p.alive) {
         // Every clone arrives by drop rocket.
         if (p.delivering < 0 && --p.respawn <= 0) this.launchCraft(p);
@@ -975,16 +1040,17 @@ export class World {
       const n = stumps(p.parts.mask);
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
-      if (p.cooldown > 0) p.cooldown--;
-      // No gun arm, no shooting (or digging).
-      if (p.alive && p.mob.canFire && p.buttons & BTN_FIRE && p.cooldown === 0) {
-        this.fire(p);
-        p.firing = true;
-        // One-handed (off arm gone): slower to recover.
-        p.cooldown = Math.ceil(WEAPONS[p.weapon].cooldown * (p.mob.oneHanded ? 1.6 : 1));
-      }
+      this.handleWeapon(p, prev);
+      // The view this client sees (and so its interest area): pushed down the
+      // barrel by the weapon's scope distance while scoping.
       p.camX = p.cx;
       p.camY = p.cy;
+      if (p.buttons & BTN_SCOPE) {
+        const aim = dequantizeAim(p.aimQ);
+        const reach = WEAPONS[p.weapon].scope;
+        p.camX += Math.cos(aim) * reach;
+        p.camY += Math.sin(aim) * reach;
+      }
     }
 
     this.stepCrafts();
@@ -1081,6 +1147,7 @@ export class World {
       (p.body.onGround ? F_GROUND : 0) |
       (p.body.jetting ? F_JET : 0) |
       (p.firing ? F_FIRING : 0) |
+      (p.alive && p.reloadLeft > 0 ? F_RELOAD : 0) |
       (Math.cos(aim) < 0 ? F_FACE_LEFT : 0)
     );
   }
@@ -1126,7 +1193,9 @@ export class World {
       w.f64(b.fuel);
       w.u8(Math.max(0, Math.ceil(p.hp)));
       w.u8(p.weapon);
-      w.u8(p.cooldown);
+      w.u8(Math.ceil(p.cooldown));
+      w.u8(p.ammo[p.weapon]);
+      w.u8(Math.min(255, p.reloadLeft));
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));

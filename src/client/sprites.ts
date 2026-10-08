@@ -109,12 +109,12 @@ export const BODY_H = 16;
 export type BodyFrame = keyof typeof BODY;
 export const WALK_CYCLE: BodyFrame[] = ['strideA', 'pass', 'strideB', 'pass'];
 
-// Weapons: pointing right, pivot (shoulder) at the given cell. Arm + glove included.
+// Weapons, indexed like WEAPONS: pointing right, pivot (shoulder) at the given
+// cell, arm + glove included. Barrel length matches each WeaponDef's muzzle offset.
 interface GunDef {
   grid: Grid;
   px: number;
   py: number;
-  muzzle: number; // distance from pivot to muzzle along the barrel
 }
 const GUNS: GunDef[] = [
   {
@@ -127,7 +127,6 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 1,
-    muzzle: 13,
   },
   {
     // Bazooka
@@ -140,7 +139,6 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 1,
-    muzzle: 14,
   },
   {
     // Grenade in hand
@@ -152,7 +150,18 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 1,
-    muzzle: 6,
+  },
+  {
+    // Sniper rifle: long barrel, scope on top
+    grid: [
+      '......KKKKK........',
+      '.....KMVVvMK.......',
+      'KAAKKMMMMMMMMMMMMMK',
+      'KAAKmmmKKKKKKKKKKK.',
+      '.KK.KmK............',
+    ],
+    px: 1,
+    py: 2,
   },
   {
     // Digger
@@ -165,13 +174,9 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 2,
-    muzzle: 11,
   },
 ];
 
-export function gunMuzzle(weapon: number): number {
-  return GUNS[weapon]?.muzzle ?? 8;
-}
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
 const GIBS: Grid[] = [

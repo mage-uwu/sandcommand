@@ -10,7 +10,7 @@ import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, PROJ, ProjKind, WeaponId, weaponOfProj } from '../shared/weapons.ts';
 import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
@@ -142,6 +142,9 @@ export class Game implements FrameHandler {
   respawnTicks = 0;
   weapon = 0;
   cooldown = 0;
+  /** Rounds in the current weapon's magazine, and ticks left reloading it (server truth). */
+  ammo = 0;
+  reloadLeft = 0;
   smoothX = 0;
   smoothY = 0;
   /** Prediction errors larger than 0.01 cells seen during reconciliation. */
@@ -209,7 +212,7 @@ export class Game implements FrameHandler {
     // Field first: chunk snapshots and ops applied since the last tick.
     this.field.update();
     this.projectiles.step(this.collider, DT, null, (i, x, y, _a, _d) => {
-      if (this.projectiles.kind[i] === ProjKind.Bullet) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
+      if (PROJ[this.projectiles.kind[i]].ballistic) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
     });
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket) rocketTrail(this.particles, pr.x[i], pr.y[i]);
@@ -326,6 +329,8 @@ export class Game implements FrameHandler {
     this.parts = s.parts;
     this.partHp = s.partHp;
     this.cooldown = s.cooldown;
+    this.ammo = s.ammo;
+    this.reloadLeft = s.reload;
     const b = this.body;
     const ack = this.ack;
     this.pending = this.pending.filter((p) => seqNewer(p.seq, ack));
@@ -462,7 +467,7 @@ export class Game implements FrameHandler {
     const i = this.projectiles.indexOf(id);
     if (i >= 0) this.projectiles.removeAt(i);
     if (!detonate) return;
-    if (kind === ProjKind.Bullet) {
+    if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
       return;
     }
@@ -480,7 +485,8 @@ export class Game implements FrameHandler {
     const { killer, victim, weapon } = k;
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
-    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : (WEAPONS[weapon]?.name ?? '');
+    // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
+    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : (weaponOfProj(weapon)?.name ?? '');
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
@@ -495,7 +501,7 @@ export class Game implements FrameHandler {
     const camDx = k.x - this.body.x;
     const camDy = k.y - this.body.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
-    const explosive = weapon === WeaponId.Bazooka || weapon === WeaponId.Grenade;
+    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts);
     // Same seed as the server, so the gold shower matches what will settle.

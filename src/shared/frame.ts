@@ -37,6 +37,8 @@ export interface SelfState {
   hp: number;
   weapon: number;
   cooldown: number;
+  ammo: number; // rounds in the current weapon's magazine
+  reload: number; // ticks left reloading, 0 = not
   respawn: number;
   parts: number; // attached-part mask (body.ts)
   partHp: number[]; // 0..100 per part, 0 = gone
@@ -154,6 +156,8 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           hp: r.u8(),
           weapon: r.u8(),
           cooldown: r.u8(),
+          ammo: r.u8(),
+          reload: r.u8(),
           respawn: r.u16(),
           parts: r.u16(),
           partHp: Array.from({ length: PART_COUNT }, () => r.u8()),

@@ -1,15 +1,15 @@
 import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET, dequantizeAim } from '../shared/protocol.ts';
+import { F_ALIVE, F_FIRING, F_GROUND, F_JET, F_RELOAD, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
-import { WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import type { CraftView, Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { type BodyFrame, SpriteCache, WALK_CYCLE, gunMuzzle } from './sprites.ts';
+import { type BodyFrame, SpriteCache, WALK_CYCLE } from './sprites.ts';
 
 const MINI_SCALE = 8;
 
@@ -49,6 +49,8 @@ export class Renderer {
   private miniImage: ImageData;
   private miniPixels: Uint32Array;
   readonly sprites = new SpriteCache();
+  /** Aiming down the scope this frame (camera pushed out, overlay drawn). */
+  private scoped = false;
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
   camX = WORLD_W / 2;
@@ -161,7 +163,17 @@ export class Renderer {
     game.smoothY *= 0.85;
     const selfX = pb.x + (b.x - pb.x) * alpha + game.smoothX;
     const selfY = pb.y + (b.y - pb.y) * alpha + game.smoothY;
-    if (game.alive) {
+    this.scoped = game.alive && input.scoping;
+    if (this.scoped) {
+      // Scoping: push the view out along the barrel by the weapon's scope
+      // distance (the server moves this client's interest area the same way).
+      const mx = this.camX + (input.mouseX * (W / innerWidth) - W / 2) / z;
+      const my = this.camY + (input.mouseY * (H / innerHeight) - H / 2) / z;
+      const aim = Math.atan2(my - (selfY + SHOULDER_Y), mx - (selfX + SHOULDER_X));
+      const reach = WEAPONS[game.weapon]?.scope ?? 0;
+      this.camX += (selfX + SHOULDER_X + Math.cos(aim) * reach - this.camX) * 0.12;
+      this.camY += (selfY + SHOULDER_Y + Math.sin(aim) * reach - this.camY) * 0.12;
+    } else if (game.alive) {
       // Look ahead toward the mouse a little, like CC's aim-follow camera.
       const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;
       const lookY = (input.mouseY * (H / innerHeight) - H / 2) / z;
@@ -253,8 +265,11 @@ export class Renderer {
     if (game.alive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
-      const myAim = Math.atan2(wy - (selfY + 5), wx - (selfX + ACTOR_W / 2));
-      const flags = F_ALIVE | (b.onGround ? F_GROUND : 0) | (b.jetting ? F_JET : 0) | (input.mouseDown ? F_FIRING : 0);
+      const myAim = Math.atan2(wy - (selfY + SHOULDER_Y), wx - (selfX + SHOULDER_X));
+      const reloading = game.reloadLeft > 0;
+      const dry = WEAPONS[game.weapon].clip > 0 && game.ammo === 0;
+      const flags =
+        F_ALIVE | (b.onGround ? F_GROUND : 0) | (b.jetting ? F_JET : 0) | (input.mouseDown && !reloading && !dry ? F_FIRING : 0) | (reloading ? F_RELOAD : 0);
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts);
     }
 
@@ -344,6 +359,30 @@ export class Renderer {
       ctx.stroke();
     }
 
+    if (this.scoped) {
+      // Scope: dark vignette around the mouse, a fine reticle on it.
+      const mx = input.mouseX * dpr;
+      const my = input.mouseY * dpr;
+      const r = Math.min(W, H) * 0.42;
+      const v = ctx.createRadialGradient(mx, my, r * 0.75, mx, my, r * 1.6);
+      v.addColorStop(0, 'rgba(0,0,0,0)');
+      v.addColorStop(1, 'rgba(0,0,0,0.78)');
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(160,255,160,0.55)';
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.beginPath();
+      ctx.moveTo(mx - r * 0.3, my);
+      ctx.lineTo(mx - 6 * dpr, my);
+      ctx.moveTo(mx + 6 * dpr, my);
+      ctx.lineTo(mx + r * 0.3, my);
+      ctx.moveTo(mx, my - r * 0.3);
+      ctx.lineTo(mx, my - 6 * dpr);
+      ctx.moveTo(mx, my + 6 * dpr);
+      ctx.lineTo(mx, my + r * 0.3);
+      ctx.stroke();
+    }
+
     if (game.hurtFlash > 0.02) {
       ctx.fillStyle = `rgba(160,0,0,${game.hurtFlash * 0.35})`;
       ctx.fillRect(0, 0, W, H);
@@ -424,18 +463,26 @@ export class Renderer {
     }
 
     // Arm + weapon, pre-rotated onto the pixel grid, pivoting at the shoulder.
-    const sx = ix + 4;
-    const sy = iy + 4;
+    const sx = ix + SHOULDER_X;
+    const sy = iy + SHOULDER_Y;
     if (!has(parts, Part.GunArm)) {
       // Arm (and the gun with it) gone: a bloody stump at the shoulder.
       ctx.fillStyle = '#a01818';
       ctx.fillRect(left ? sx - 1 : sx, sy, 2, 2);
       return;
     }
+    if (flags & F_RELOAD) {
+      // Reloading: gun tipped down in front, bobbing as the magazine goes in.
+      const down = 1.05 + Math.sin(now / 90) * 0.12;
+      const g = this.sprites.gun(weapon, left ? Math.PI - down : down);
+      ctx.drawImage(g.c, sx - g.r, sy - g.r);
+      return;
+    }
     const g = this.sprites.gun(weapon, aim);
     ctx.drawImage(g.c, sx - g.r, sy - g.r);
     if (flags & F_FIRING) {
-      const m = gunMuzzle(weapon) + 1;
+      // Flash at the weapon's muzzle offset (where the server spawns its shots).
+      const m = (WEAPONS[weapon]?.muzzle ?? 8) + 1;
       const mx = Math.round(sx + Math.cos(aim) * m);
       const my = Math.round(sy + Math.sin(aim) * m);
       if (weapon === WeaponId.Digger) {
@@ -544,6 +591,23 @@ export class Renderer {
       ctx.fillRect(x + 2 * s, H - 34 * s, slotW - 4 * s, 24 * s);
       ctx.fillStyle = sel ? '#000' : '#ddd';
       ctx.fillText(`${i + 1} ${WEAPONS[i].name}`, x + 10 * s, H - 18 * s);
+    }
+    // Magazine and reload for the weapon in hand.
+    const def = WEAPONS[game.weapon];
+    if (game.alive && def && def.clip > 0) {
+      const ax = sx0 + total + 8 * s;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(ax, H - 34 * s, 120 * s, 24 * s);
+      if (game.reloadLeft > 0) {
+        const t = 1 - game.reloadLeft / def.reload;
+        ctx.fillStyle = 'rgba(255,210,80,0.8)';
+        ctx.fillRect(ax, H - 34 * s, 120 * s * Math.max(0, Math.min(1, t)), 24 * s);
+        ctx.fillStyle = '#000';
+        ctx.fillText('RELOADING', ax + 10 * s, H - 18 * s);
+      } else {
+        ctx.fillStyle = game.ammo === 0 ? '#ff7060' : game.ammo <= def.clip / 4 ? '#ffc060' : '#fff';
+        ctx.fillText(`${game.ammo} / ${def.clip}`, ax + 10 * s, H - 18 * s);
+      }
     }
 
     // Net stats.
