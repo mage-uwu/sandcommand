@@ -6,6 +6,7 @@ import { applyFrameRecords, nullHandler } from '../src/shared/frame.ts';
 import { S_FRAME, quantizeAim } from '../src/shared/protocol.ts';
 import { Rng } from '../src/shared/rng.ts';
 import { Terrain } from '../src/shared/terrain.ts';
+import { generateWorld } from '../src/shared/worldgen.ts';
 import { World } from '../src/server/world.ts';
 
 interface FakeClient {
@@ -27,13 +28,29 @@ function connect(world: World, name: string): FakeClient {
   return c;
 }
 
+/** Maps by seed, generated once and copied into each replica (as a real client would generate it). */
+const maps = new Map<number, Terrain>();
+function makeMap(into: Terrain, seed: number): void {
+  let m = maps.get(seed);
+  if (!m) {
+    m = new Terrain();
+    generateWorld(m, seed);
+    maps.set(seed, m);
+  }
+  into.mat.set(m.mat);
+  into.solid.set(m.solid);
+  into.hard.set(m.hard);
+  into.fixed.set(m.fixed);
+  into.loose.set(m.loose);
+}
+
 function drain(c: FakeClient): void {
   for (const msg of c.inbox) {
     const r = new Reader(msg);
     expect(r.u8()).toBe(S_FRAME);
     r.u32();
     r.u16();
-    applyFrameRecords(r, c.replica, nullHandler);
+    applyFrameRecords(r, c.replica, { ...nullHandler, wave: (seed) => makeMap(c.replica, seed) });
   }
   c.inbox.length = 0;
 }
@@ -57,7 +74,7 @@ describe('chunked terrain replication', () => {
         const r = rng.next();
         const buttons =
           (r < 0.4 ? BTN_RIGHT : r < 0.8 ? BTN_LEFT : 0) | (rng.next() < 0.3 ? BTN_UP : 0) | (rng.next() < 0.5 ? BTN_FIRE : 0);
-        world.input(c.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(rng.range(0, Math.PI * 2)), weapon: rng.int(4) });
+        world.input(c.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(rng.range(0, Math.PI * 2)), inv: 0 });
         // Teleport occasionally so interest sets sweep the whole map.
         const p = world.players[c.id]!;
         if (p.alive && rng.next() < 0.02) {
@@ -99,7 +116,7 @@ describe('chunked terrain replication', () => {
     let seq = 0;
     // Warm-up: initial chunk download.
     for (let t = 0; t < 60; t++) {
-      for (const c of clients) world.input(c.id, { seq: ++seq, buttons: 0, aim: 0, weapon: 0 });
+      for (const c of clients) world.input(c.id, { seq: ++seq, buttons: 0, aim: 0, inv: 0 });
       world.step();
       for (const c of clients) drain(c);
     }
@@ -108,7 +125,7 @@ describe('chunked terrain replication', () => {
     for (let t = 0; t < ticks; t++) {
       for (const c of clients) {
         const buttons = (rng.next() < 0.5 ? BTN_RIGHT : BTN_LEFT) | (rng.next() < 0.3 ? BTN_UP : 0) | BTN_FIRE;
-        world.input(c.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(rng.range(0, Math.PI * 2)), weapon: rng.int(4) });
+        world.input(c.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(rng.range(0, Math.PI * 2)), inv: 0 });
       }
       world.step();
       for (const c of clients) drain(c);

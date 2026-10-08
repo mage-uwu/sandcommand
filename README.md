@@ -1,7 +1,8 @@
 # SandCommand
 
-A Cloudflare-native multiplayer sandbox shooter inspired by **Cortex Command**:
-up to **64 clones per room** share one fully destructible 2048×1024-cell world.
+A Cloudflare-native multiplayer shooter inspired by **Cortex Command**: up to
+**64 clones per room** fight waves of Last Man Standing and Last Team Standing in one fully destructible
+4096×1024-cell world, with bots in every seat no human has taken.
 Every explosion carves terrain, throws debris, and the debris settles back as
 rubble. All of it is simulated on one authoritative Durable Object and
 streamed to every player at 30 Hz.
@@ -11,15 +12,237 @@ npm install
 npm run dev          # builds the client and runs wrangler dev on :8787
 npm test             # terrain, codec, replication and prediction tests
 npm run bench        # headless 64-player server benchmark
+npm run bench:ffa    # one human + 63 bots playing Last Man Standing waves for 2 minutes
 npm run bench:physics # particle/field scaling, collider probes, big collapse
 npm run loadtest     # 64 real WebSocket bots against a running server
 npm run deploy       # wrangler deploy (needs a Cloudflare account)
 ```
 
 Controls: **A/D** run, **W/Space** jump (hold for jetpack), **mouse** aim and
-fire, **1–4 / Q/E / wheel** switch weapon (Rifle, Bazooka, Grenade, Digger),
-**Tab** scoreboard, **Enter** chat. Dig gold with the Digger. Clones gib on
+fire, **right mouse / Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
+through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
+drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
+on the menu picks a fortification and a click builds it. Dig gold with the Digger. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
+
+**On phones and tablets** (`src/client/touch.ts`) touch controls switch on
+by themselves the first time a finger touches the screen, or straight away
+on a touch-first device.
+- **Joystick (bottom-left).** It's a floating stick: it appears wherever
+  your thumb lands. Push left or right to run, up to jump and jetpack, down
+  to crouch. In a drop rocket the same stick steers, burns and cuts the
+  engine.
+- **Aim stick (anywhere else).** Put a thumb down and drag. The clone aims
+  along the drag, and pushed past halfway it fires; the ring turns red.
+  Semi-automatic weapons keep firing as fast as they cycle while you hold.
+- **Aim assist.** When the stick, a tap or a hold points within about 11°
+  of an enemy in sight and in range, the aim settles on it
+  (`src/client/aim.ts`). Teammates are ignored, and mouse aim is never
+  assisted.
+- **Quick tap.** Shoots once at that spot. With the Materializer out, a tap
+  builds there, and taps on its menu pick the piece. Once you're out of the
+  wave, a tap moves to the next clone to watch. A finger held still fires
+  at its spot until you lift it.
+- **Buttons (right edge).** ⇄ swaps weapon, ▲ jets, ↻ reloads, ◎ toggles
+  the scope (in a tank: hold to fire the cannon), ⬆ / ⬇ pick up and drop.
+- **Top-left.** ☰ shows the scoreboard, 💬 opens chat.
+- **Screen layout.** The HUD shrinks on small screens. The minimap moves to
+  the top-right so the buttons have the corner. Deploy goes fullscreen and
+  locks landscape where the browser allows it.
+
+## Last Man Standing
+
+Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
+
+1. **Countdown.** Once there are two clones, a 4-second countdown starts.
+2. **The wave.** Everyone in the room is in it. Drop rockets bring them in
+   over a couple of seconds, each landing as far as it can from clones and
+   other incoming rockets.
+3. **One life.** Nobody respawns. When you die you spectate your killer
+   (click for the next clone), and the server moves what it sends you to
+   whoever you're watching. Players who join mid-wave watch it and play in
+   the next one.
+4. **Last clone standing wins.** The winner gets a win on the scoreboard
+   (Tab: wins, kills, deaths) and a 7-second victory lap. A wave has a
+   4-minute clock (top of the screen). If time runs out, the survivor with
+   the most kills that wave wins, so nobody wins by hiding in a bunker.
+   Big messages (WAVE 3 IN 2, FRAGGED, HAWKINS WINS) are retro console
+   banners in block letters (`src/client/banner.ts`).
+5. **A new wave on a fresh map.** The next wave gets a new seed: new
+   terrain, with nothing carried over (rockets, dropped weapons, debris in
+   flight).
+
+## Last Team Standing
+
+Waves alternate between Last Man Standing and **Last Team Standing**: odd waves
+LMS, even waves LTS (`rotation` in the `World` options; `modeOfWave`).
+The countdown banner says which one is coming.
+
+- **Even teams.** When an LTS wave starts, everyone is dealt into **red** and
+  **green** (`drawTeams`). Humans are dealt first, so two humans end up on
+  opposite sides, then bots even up the numbers.
+- **Opposite sides.** Red's rockets come down on the left 40% of the map,
+  green's on the right 40%.
+- **No friendly fire.** Teammates can't hurt each other with bullets,
+  blasts, shrapnel, debris or rocket crashes (`World.friendly`). Your own
+  blasts still hurt you.
+- **Fight to the last clone.** One life each, as in Last Man Standing. The last team with
+  a clone standing wins, and every member scores the win, the fallen
+  included. If the clock runs out, the team with more clones left wins,
+  then the team with more kills that wave.
+- **Bots** only hunt the other team.
+- **Spectating.** When you're out you watch your own side while any of it
+  stands.
+- **On screen.** Clones, name tags and the minimap wear team colours. The
+  top bar shows `RED 12 v 9 GREEN`, with your side marked. Banners announce
+  RED WINS or GREEN WINS.
+- **Wire.** The team table goes out as `R_TEAMS`, only when it changes, and
+  to newcomers. `R_ROUND` carries the wave's mode and each team's clones
+  left.
+
+**Bots fill every seat no human has**, up to 64. When a human joins a full
+room, a bot gives up its seat, a dead one if there is one.
+- **Same rules as humans.** A bot is a `BotBrain` in `src/server/bots.ts`:
+  it reads the world directly and emits the same input command a client
+  sends. So it plays by exactly the same rules: rate of fire, magazines,
+  inventory, rockets, classes.
+- **What it does.** It picks the nearest living clone, closes to its
+  weapon's fighting range, then strafes. It jumps or jets over walls and up
+  to targets, and leads its shots by flight time, lifting lobbed ones.
+- **Weapon use.** It throws grenades up close now and then, and fetches a
+  gun from the ground if it lost its own. Up close with a launcher it
+  switches to a gun if it has one.
+- **Getting unstuck.** It jumps or jets over walls with headroom, digs
+  straight through anything else (sweeping the beam so the hole is
+  clone-sized), and digs straight at a target hiding the other side of a
+  floor or wall, or straight above or below, however high. When boxed in, it clears the nearest leftover
+  pixels.
+- **Fairness.** Bots get a beat to look around after landing, a reaction
+  delay on each new target, per-bot aim error, and no point-blank bazooka
+  shots.
+
+Thinking is cheap and staggered: targets twice a second, line of sight
+every 4 ticks, steering and aim every tick. A room of one human and 63 bots
+costs about 0.7 ms a tick (`npm run bench:ffa`), and a full 64-clone wave
+usually lasts 20–75 s, bunkers and all.
+
+**New maps cost almost no bandwidth.** The map generator is shared code, so
+the server sends the seed (`R_WAVE`) and each client generates the same
+terrain itself. The generator uses floating-point trig, which different
+JavaScript engines may round differently, so the record also carries every
+chunk's hash. A client that comes out different on a chunk asks for that
+chunk again. The wave record opens the frame, so every record after it
+applies to the new terrain. Round state rides in a small per-frame
+`R_ROUND` record.
+
+**Joining works the same way.** A newcomer's first frame carries the
+current map's seed and hashes. The server remembers each chunk's version
+when the map was generated. Any chunk nobody has touched since counts as
+already held, so only chunks that changed are downloaded. On the 4096-wide
+map, a client has all 1024 chunks about 1.5 s after joining.
+
+Generating the map takes about 0.4 s. Each octave of the noise caches its
+lattice-corner hashes along a row, and each cell stops at the first material
+that applies (caves, then gold, rock, sand lenses), which gives bit-identical
+terrain in less than half the time.
+
+## Regicide
+
+The third mode in the rotation (waves go Last Man Standing → Last Team
+Standing → Regicide; `rotation` in the `World` options).
+- **Two fortresses.** A Regicide map always has two large fortresses built
+  into it, one per team: red's in the west, green's in the east, about
+  1500 cells apart. Each is six modules wide, with two- and three-storey
+  towers and battlements on every roof. It has steel facing on its outer
+  walls, gates at both ends, and three basement levels. Ordinary bunkers
+  fill the rest of the map but keep clear of the fortresses. The generator
+  builds them from the seed (`placeStructures(…, fortresses)` in
+  `src/shared/structures.ts`). `R_WAVE` carries a flag, so every client
+  builds the same map.
+- **The king.** One clone per team is crowned and starts as a heavy, deep
+  in his fortress's **king's vault**. The vault is a steel-lined room at the
+  bottom of the deepest basement, reached only by a shaft from the floor
+  above. Kings wear a crown, their name tags carry ♛, and the minimap rings
+  them in gold. The top bar shows both kings.
+- **Soldiers.** Soldiers start already at their posts: in the fortress's
+  rooms and on its roofs, with no drop rockets. When one dies, he comes
+  back after **10 seconds** by drop rocket, landing at his own fortress.
+  Players who join mid-wave are dealt to the smaller side and drop in the
+  same way.
+- **Winning.** The king never respawns. When a king dies, the other team
+  wins the wave, and every member scores. A king who leaves the game hands
+  the crown to a living teammate. Waves run six minutes; if both kings are
+  still alive at the end, the side with more kills takes it.
+- **Bots.** About half the bots assault: they go straight for the enemy king
+  and dig through whatever is in the way. The rest fight whoever is
+  nearest. A bot king holds his vault and shoots whatever comes into view.
+
+## Tanks
+
+Metal Slug style tanks (`src/shared/tank.ts`). Each wave, **one or two
+come down by parachute** at spread-out spots and land empty.
+- **Getting in and out.** Walk up to an empty tank and press **3 / F**
+  (touch: ⬆) to climb in. The same key climbs back out through the roof
+  hatch. Your clone rides inside; you can see its head poking out of the
+  hatch.
+- **Driving.** **A/D** drive the treads, which climb 6-cell steps. **W**
+  fires the lift jets (their own fuel, weaker than a jetpack). **S** drops
+  you faster while airborne.
+- **Two guns.** **Left mouse** fires the vulcan SMG, which swivels all the
+  way round. **Right mouse / Shift** (touch: hold ◎) fires the cannon: a
+  heavy lobbed shell with a big blast, aimed out the front (25° down to 72°
+  up), with recoil. A tank's own rounds never hit it.
+- **Tough.** The hull holds 15× a clone's health (1500). Penetrating hits
+  wound the part they strike; weak shrapnel only scratches. Explosives do
+  1.5× against it.
+- **Parts that blow off.** The **cannon**, the **SMG** and the **external
+  armour plate** can each be blown off. The plate covers the nose and roof
+  and soaks half of every blast while it lasts. A lost gun can't fire.
+  Every part flies off as real scrap fragments.
+- **When the hull goes** the tank explodes (crater, fragments, a blast that
+  hurts clones, rockets and other tanks) and kills its driver, credited to
+  whoever did it.
+- **Safe inside.** The driver can't be hit directly: bullets, blasts and
+  shrapnel hit the tank. Teammates' fire doesn't hurt a team tank. A tank
+  landing on a clone crushes it, and it shoves clones out of its way.
+- **Bots.** About half the bots go for a nearby empty tank. They drive at
+  cannon range, hose targets with the vulcan, and shell their way through
+  walls, or through floors when the target is hidden. A tank that stays
+  stuck gets abandoned.
+- **Networking.** Tanks go out every frame (`R_TANKS`; there are only a
+  few). The driver's client predicts its own tank from a full-precision
+  `R_TANK_SELF`, the same way it predicts its clone and its drop rocket.
+  Parts blown off and explosions go out as seeded records (`R_TANK_PART`,
+  `R_TANK_BOOM`), so every client throws the same scrap.
+
+## Bunkers
+
+Every map has bunker complexes on the surface (`src/shared/structures.ts`),
+built on a modular grid of 64×48-cell modules as part of map generation.
+Walls and floor slabs are 6 cells thick, and doorways are 34 cells tall
+against a 14-cell clone. Everything is built at twice the clone's scale
+(`SCALE` in `structures.ts`), so rooms feel like rooms.
+Clients build identical ones from the seed. Between 15% and 60% of the
+surface is built on (random per map), in complexes of 2–7 modules with open
+ground between them. Each complex is assembled like this:
+
+- **Levelled site.** It stands on a concrete foundation, cutting a notch
+  into a hillside or filling a dip down to solid ground.
+- **Rooms and towers.** Ground-floor rooms have metal roofs, and some
+  modules rise into towers 2–3 storeys high.
+- **Ways through.** Doorways join neighbouring rooms, holes in the floor
+  slabs join storeys (jet up, drop down), and doors at the ends lead
+  outside. Firing slits look out where a tower overlooks a lower roof.
+- **Underground.** Basements below are reached by shafts, with doorways
+  between neighbouring basements. Sometimes a lined escape tunnel runs out
+  under the open ground and climbs to a hatch.
+- **Battle damage.** Some modules come pre-shot.
+
+Everything is concrete and metal plate, so small arms barely scratch it.
+Explosion cores and diggers get through. The digger bites at the first
+solid cell along its aim, so a wall you're pressed against gets dug.
+Building uses only integer arithmetic and the seeded RNG, so every engine
+produces the same complexes.
 
 ## Architecture
 
@@ -150,12 +373,29 @@ hard landings don't need to penetrate: they go into the outermost layer
 | Hit | Energy | Result |
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |
-| Shrapnel (0.4 × 1.0 × ~400) | ~160 | Stopped by armour; cuts limbs (integrity 30), so four fragments take a leg |
+| Sniper slug (1.1 × 0.95 × 1500) | ~1570 | Through any armour with energy to spare; 38 wounds per layer, so one headshot kills |
+| Shrapnel (0.5 × 0.85 × ~460–760) | ~200–320 | Bullet-grade: through a helmet or vest, 12 wounds a layer. A grenade throws 56 fragments, a rocket 36, as tracers |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
+
+**Classes.** Every clone rolls one at spawn (35% scout, 40% medium, 25%
+heavy), shown on the sprite and in the HUD:
+
+| Class | Armour | Jetpack | Run |
+| --- | --- | --- | --- |
+| Scout | green army helmet, no vest; armour 0.7× as hard | 1.15× thrust, 0.8× fuel use | 1.12× |
+| Medium | helmet and vest (the standard clone) | 1× | 1× |
+| Heavy | metal plate over everything: armour 3× as hard, every part takes 2.5× the wounds, blasts, fire and falls do 0.4× | 0.6× thrust (it still lifts, slowly), 1.5× fuel use | 0.85× |
+
+A rifle round stops at a heavy's plate, two shots to a medium's head kill,
+and shrapnel goes straight through a scout's helmet. Class rides in two
+spare bits of the actor flags, and movement scaling lives in the shared
+`stepBody`, so prediction stays exact.
 
 A part whose wounds reach its limit is **torn off**. The server broadcasts an
 `R_DETACH` record, and every client throws that part as a gib with a blood
 fountain. Losing the head or torso kills; the kill feed marks headshots.
+Arm joints are built strong (a 44-wound limit, double the original), so it
+takes about three rifle rounds to shoot the gun out of a clone's hands.
 Otherwise the clone fights on, crippled, and both server and client
 prediction use the same `mobility()`:
 
@@ -198,7 +438,7 @@ set of cells the kernel *read*, not just the ones it changed.
 
 ### Replication: chunks, versions and event streaming
 
-The world is cut into 512 chunks of 64×64 cells. Terrain is **never streamed
+The world is cut into 1024 chunks of 64×64 cells. Terrain is **never streamed
 as state while you watch it change**. Clients receive *operations* and
 re-run them locally:
 
@@ -276,38 +516,197 @@ cosmetic, but the gold a clone spills is real. The server throws it from the
 seed and deposits it as terrain, and every client throws the same shower from
 the same seed. Explosive and high-overkill deaths scatter harder.
 
+### Weapons
+
+Every weapon is one row of `WEAPONS` in `src/shared/weapons.ts`, and that
+row drives everything: the server's trigger, magazine and projectile spawn,
+the client's sprite, muzzle flash, HUD and camera. Add a row and the weapon
+exists everywhere.
+
+| Weapon | Fires | Muzzle | Rate | Mode | Clip | Reload | Scope |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Rifle | bullet, 880 cells/s | 13 | 450 rpm | auto | 30 | 1.8 s | 110 |
+| Bazooka | rocket, 380 | 14 | 60 rpm | semi | 1 | 2.2 s | 140 |
+| Grenade | grenade, 330 | 6 | 70 rpm | semi | 3 | 2.5 s | 90 |
+| Sniper | slug, 1500 | 17 | 50 rpm | semi | 5 | 2.8 s | 300 |
+| Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
+| Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
+
+How each field works:
+
+- **Muzzle offset** is measured in cells along the barrel from the shoulder
+  pivot (`SHOULDER_X/Y`). Aim is measured from the same pivot, and the gun
+  sprite rotates about it. Shots spawn at the muzzle, and the client draws
+  the flash in the same place. If the barrel is pushed into a wall, the
+  shot starts at the wall: no shooting through it.
+- **Rate of fire** is in rounds per minute. The server keeps a fractional
+  cooldown and adds the interval on each shot, so 70 rpm averages exactly
+  70, not 30 ticks / 26 ticks rounded.
+- **Semi-auto** weapons need a fresh press per shot.
+- **Projectile type** is a `ProjKind` row in `PROJ`: mass, sharpness and
+  damage for direct hits, plus carve, splash, fragments and fuse.
+  `ballistic` rounds chip terrain and puff dust. Kills are credited by
+  projectile and named by the weapon that fires it.
+- **Clip** belongs to the item: each weapon you carry (or find on the
+  ground) keeps its own magazine. An
+  empty clip reloads itself, and **R** reloads early. Switching weapons
+  cancels a reload. The magazine count and reload timer ride in the
+  client's own `R_SELF` record for the HUD. Other players see the
+  reloading pose through an `F_RELOAD` actor flag.
+- **Scope distance:** holding right mouse or Shift pushes the view that far
+  down the barrel and halves spread. The server moves that client's
+  interest area by the same offset, so it is sent the chunks and players
+  it is now looking at.
+- **Losing the off arm** makes firing 1.6× slower, reloading 1.5× slower,
+  and triples spread.
+
+### Inventory and weapons on the ground
+
+You don't carry every weapon. Each clone spawns with a random kit
+(`spawnLoadout` in `src/shared/items.ts`): always a primary (rifle, sniper or
+bazooka), a digger and a materializer. It often has grenades too, and
+sometimes a second gun. You carry up to five items, each with its own
+magazine. **1/2** cycle through them, **4** throws the one in hand, and **3**
+picks up the nearest weapon in reach. With full hands, picking up swaps the
+held weapon for the new one. Dying spills the whole kit where you fell, so
+the dead sniper's rifle is there for the taking. Dropped weapons are cleared
+away after 90 s.
+
+- **Ground items are physical.** They fly, bounce, settle and get thrown
+  around by blasts. `stepItem` is shared: the server sends an item's full
+  state once, when a client first sees it, and again only when something
+  changes it (it lands, a blast kicks it, someone takes it). In between,
+  the client simulates the same physics, so a gun lying on the ground costs
+  no bandwidth.
+- **Selection is instant.** Your client applies a weapon switch at once and
+  sends the selected slot in each input command, tagged with the
+  inventory's version. When the server changes your inventory (a pick-up,
+  drop, death or respawn), the version moves on. The server then ignores
+  selections made against the old inventory, and the client adopts the
+  server's slot.
+- **Pick up and drop** are held in that same byte for a few ticks, and the
+  server acts on the rising edge, so a tap shorter than a tick still
+  counts.
+
+### Fortifications: the materializer
+
+The Materializer turns gold into terrain (`src/shared/build.ts`). Pick a
+piece from the menu (click it, or use the mouse wheel). A ghost snaps to a
+4-cell grid under the cursor, green where the server will accept it and red
+with the reason where it won't. Click to build. New players join with 60
+gold, enough for one bunker. After that, you dig gold up or take it off the
+dead.
+
+| Piece | Size (cells) | Material | Cost |
+| --- | --- | --- | --- |
+| Block | 8 × 8 | concrete | 8 |
+| Wall | 4 × 20 | concrete | 10 |
+| Floor | 20 × 4 | concrete | 10 |
+| Ramp (either way) | 16 × 16 | concrete | 12 |
+| Plate | 8 × 8 | metal | 20 |
+| Bunker | 28 × 20 | concrete walls, metal roof, firing slit, doorway | 60 |
+
+**Placement rules** live in one shared function, `canBuild`. The server
+validates every request with it, and the client's ghost previews with the
+same function, so green means it will build. A piece must:
+
+- sit on the grid, inside the map, and within reach (80 cells of the
+  shoulder);
+- be affordable;
+- not cover anyone's body or a rocket, though a bunker can go up around
+  someone standing inside it;
+- be at least half open space, since a piece fills open cells and leaves
+  existing terrain alone, so it can be set into a hillside;
+- touch something to anchor to.
+
+The build rate comes from the weapon row (100 pieces a minute).
+
+**Built cells are terrain.** Concrete is a new hard material, as is metal:
+rifle rounds barely scratch it, and only explosion cores and diggers get
+through. It joins the distance field, collisions and the collapse rules, and
+crumbles into rubble when blown apart.
+
+**Networking.** A build is a 7-byte `R_BUILD` op (piece, builder, grid
+position). It goes through the same chunk-version bookkeeping as carves.
+Every client replays `applyBuild` against its own terrain, so a whole bunker
+costs less bandwidth than a rifle burst. Clients add a cyan materialize
+shimmer and a beam from the builder. Your exact gold rides in your own
+`R_SELF` record, so the HUD and the ghost's cost check never wait for the
+once-a-second scoreboard.
+
 ### Drop rockets
 
 Every clone arrives by drop rocket, including your first spawn and every
-respawn (`src/shared/craft.ts`). The rocket falls in from above the sky line
-at terminal speed. Its autopilot then fires a late retro burn: the target
-descent speed is the speed from which a planned deceleration stops exactly at
-hover height. It hovers a few cells off the ground, drops the clone out of
-the side hatch, and burns back up out of the world. Up to 64 can be in the
-air at once.
+respawn (`src/shared/craft.ts`). Up to 64 can be in the air at once.
 
-Rockets are physical bodies in the same engine as everything else:
+**A rocket is a rigid body.** It has a position, velocity, angle and spin.
+Gravity, the main engine (which pushes along the nose), attitude torque and
+quadratic air drag act on it. It collides with terrain through impulses at
+points around its hull outline:
 
-- **Thrust.** The exhaust spawns real flame particles, which burn whoever
-  stands under the nozzle, and writes a downward jet into the air field. That
-  jet blows sand, gibs and clones away from the landing spot.
-- **Hits.** Rockets are splatted into the actor field alongside clones (mass
-  60, so particles shove them far less). Bullets, shrapnel, debris and blasts
-  damage the hull. Hits below the hull's integrity only scratch it.
-- **Crushing.** A rocket hitting a clone hard crushes it, credited to the
-  rocket's passenger.
-- **Crashes.** A rocket that is shot up enough, or hits the ground faster than
-  its crash speed, blows apart. That carves a crater, sends a blast wave, and
-  throws heavy `Hull` fragments plus flames into the particle engine. Anyone
-  aboard is blown out of the nose cone into the debris.
+- The solver runs sequential impulses with accumulated, clamped totals per
+  contact, plus Coulomb friction and moment of inertia.
+- Penetration is measured along the occupancy-gradient normal (bisected to
+  the surface) and pushed out.
+- Substeps scale with speed, so nothing tunnels.
 
-Hull fragments are ordinary field-engine particles. They maim like shrapnel,
-push sand, and settle as **scrap metal** terrain (a hard material), so a
-battlefield fills up with wreckage. The destruction travels as one 14-byte
-`R_CRAFT_BOOM` record carrying a seed, and clients reproduce the same
-fragment shower from that seed. Rocket state streams as a per-client
-`R_CRAFTS` record (14 B per rocket in range), and the camera rides your
-rocket down.
+So a rocket can land on its fins, tip over, cartwheel down a slope,
+nose-dive, or come to rest lying on its side. A touchdown faster than the
+crash speed destroys it outright. Softer impacts break the part that hit.
+
+**You fly it.** While riding in, A/D steer, W burns, S cuts the engine, and
+a click bails out. With no stick input, a fly-by-wire autopilot takes over:
+
+- It falls at terminal speed, then fires a late retro burn. The target speed
+  is the one from which a planned deceleration stops exactly at hover
+  height, with that deceleration fed forward so the burn tracks the curve.
+- It leans toward its drop point, refusing to burn far off vertical, so it
+  rights itself first.
+- It hovers, drops you out of a side hatch, and flies home.
+
+If it tips over with you aboard, it opens the hatch after a couple of
+seconds. An empty rocket that can't get home scuttles itself.
+
+**It gibs.** A rocket is built from five parts: nose cone, hull, two fins and
+engine. Each has its own hit points, and every hit lands on the part it
+entered. Hits are tested against the rotated hull, in the rocket's own frame.
+What each loss does:
+
+- **Engine:** no thrust. It falls like a stone, so bail out.
+- **One fin:** lopsided drag twists it under power.
+- **Both fins:** less steering.
+- **Nose cone:** the hull behind it is exposed.
+- **Hull:** the end.
+
+A part that comes off flies away with the velocity of where it was on the
+spinning hull, as heavy `Hull` fragments in the particle engine plus a
+tumbling sprite gib, and the recoil spins the rocket.
+
+**Everything composes with the field engine:**
+
+- **Exhaust:** real flame particles, plus a jet written into the air field
+  along the engine axis that blows sand, gibs and clones away.
+- **Particle hits:** rockets sit in the actor field (as the AABB of the
+  rotated hull, mass 60). Shrapnel, debris and grains hit and hurt them.
+- **Blasts:** they damage every part in reach, and the shove spins the
+  rocket.
+- **Crushing:** a rocket hitting a clone hard crushes it, credited to its
+  passenger.
+- **Destruction:** a crater, a blast wave, and a shower of `Hull` fragments.
+
+Those fragments maim like shrapnel, push the sand, and settle as **scrap
+metal** terrain, so the battlefield fills with wreckage. A rocket is immune
+to its own exhaust and isn't dragged by its own jet.
+
+**Networking.** `stepCraft` is pure and shared. The server runs it
+authoritatively. The passenger's client gets its rocket at full precision
+(`R_CRAFT_SELF`), so it predicts the rocket exactly as it predicts its own
+clone: rebase on the server state, replay unacknowledged inputs, ease out
+corrections. Tests check that the replay matches the server exactly at
+66 ms and 198 ms of latency. Other rockets stream as `R_CRAFTS` (16 B each,
+angle and part mask included) and are interpolated, angle included. Losing a
+part and blowing up are one seeded record each (`R_CRAFT_PART`,
+`R_CRAFT_BOOM`), from which every client mirrors the same fragment shower.
 
 ## Measured numbers
 
@@ -316,9 +715,17 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 1.20 ms  p99 6.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
-replicate avg 0.87 ms  p99 3.6 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 36.2 KB/s; room egress 2.26 MB/s
+sim       avg 0.85 ms  p99 4.7 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
+replicate avg 0.87 ms  p99 2.6 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 18.2 KB/s; room egress 1.14 MB/s
+```
+
+`npm run bench:ffa` (one human, 63 server-side bots, Last Man Standing waves for
+two minutes, map resets included):
+
+```
+sim       avg 0.57 ms  p99 4.0 ms      (bot AI and rounds included)
+downstream to the human: 22.9 KB/s
 ```
 
 `npm run bench:physics`:
@@ -382,8 +789,8 @@ match's sockets pin to it.
 
 ## Not done yet
 
-- Teams, brains, buying bodies and drop ships, which are the Cortex Command
-  meta-game.
+- Brains, buying bodies and drop ships, which are the Cortex Command
+  meta-game. Last Man Standing and Last Team Standing are the only modes so far.
 - Delta-compressing actor records against the last acknowledged frame.
 - Running the kernels in a WASM SIMD module. They are already laid out for it.
 - A learned (neural) surrogate for dense granular flow. The field formulation

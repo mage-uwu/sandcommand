@@ -5,6 +5,8 @@
  * gun at any angle still lands on the world's pixel grid.
  */
 
+import { ALL_CRAFT_PARTS, craftPartAt } from '../shared/craft.ts';
+
 type Grid = readonly string[];
 
 // Body: 10x16, facing right. The 8x14 hitbox maps to columns 1..8, rows 2..15.
@@ -107,12 +109,12 @@ export const BODY_H = 16;
 export type BodyFrame = keyof typeof BODY;
 export const WALK_CYCLE: BodyFrame[] = ['strideA', 'pass', 'strideB', 'pass'];
 
-// Weapons: pointing right, pivot (shoulder) at the given cell. Arm + glove included.
+// Weapons, indexed like WEAPONS: pointing right, pivot (shoulder) at the given
+// cell, arm + glove included. Barrel length matches each WeaponDef's muzzle offset.
 interface GunDef {
   grid: Grid;
   px: number;
   py: number;
-  muzzle: number; // distance from pivot to muzzle along the barrel
 }
 const GUNS: GunDef[] = [
   {
@@ -125,7 +127,6 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 1,
-    muzzle: 13,
   },
   {
     // Bazooka
@@ -138,7 +139,6 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 1,
-    muzzle: 14,
   },
   {
     // Grenade in hand
@@ -150,7 +150,18 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 1,
-    muzzle: 6,
+  },
+  {
+    // Sniper rifle: long barrel, scope on top
+    grid: [
+      '......KKKKK........',
+      '.....KMVVvMK.......',
+      'KAAKKMMMMMMMMMMMMMK',
+      'KAAKmmmKKKKKKKKKKK.',
+      '.KK.KmK............',
+    ],
+    px: 1,
+    py: 2,
   },
   {
     // Digger
@@ -163,13 +174,19 @@ const GUNS: GunDef[] = [
     ],
     px: 1,
     py: 2,
-    muzzle: 11,
+  },
+  {
+    // Materializer: a boxy projector with a cyan emitter
+    grid: [
+      '...KKKKKK.',
+      'KAAKGGgGVK',
+      'KAAKGGGGvK',
+      '.KKKKKKKK.',
+    ],
+    px: 1,
+    py: 1,
   },
 ];
-
-export function gunMuzzle(weapon: number): number {
-  return GUNS[weapon]?.muzzle ?? 8;
-}
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
 const GIBS: Grid[] = [
@@ -191,7 +208,10 @@ const GIBS: Grid[] = [
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
 ];
 
-// Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin).
+// Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin), centred on
+// the rocket's centre of mass.
+const CRAFT_SPRITE_W = 14;
+const CRAFT_SPRITE_H = 28;
 const CRAFT: Grid = [
   '......KK......',
   '.....KLLK.....',
@@ -232,6 +252,17 @@ function shade(rgb: number, k: number): number {
 function lighten(rgb: number, t: number): number {
   const f = (c: number) => Math.round(c + (255 - c) * t);
   return (f((rgb >> 16) & 255) << 16) | (f((rgb >> 8) & 255) << 8) | f(rgb & 255);
+}
+
+/**
+ * Class looks over a team palette: scouts wear a green army helmet; heavies
+ * are plated in grey metal (helmet, vest, greaves, sleeves) with an amber
+ * visor. Mediums are the base palette.
+ */
+function classPalette(base: Record<string, number>, cls: number): Record<string, number> {
+  if (cls === 0) return { ...base, L: 0x8c9a58, H: 0x56652e, V: 0x3a3226, v: 0x241e16 };
+  if (cls === 2) return { ...base, L: 0xa4acb4, H: 0x5c636c, V: 0xffb040, v: 0xa86a20, P: 0x646a72, B: 0x30343a, O: 0x8a9198, o: 0x5c636a, g: 0x6e747a, G: 0x3c4146, A: 0x737a82 };
+  return base;
 }
 
 /** Palette char -> 0xRRGGBB, or -1 for transparent. */
@@ -386,6 +417,40 @@ function bakeRotated(def: GunDef, pal: Record<string, number>, angle: number, fl
   return { c, r };
 }
 
+/** Rotate any grid about a (fractional) pivot onto a square canvas, nearest-neighbour. */
+function bakeRotatedGrid(g: Grid, pal: Record<string, number>, angle: number, px: number, py: number): { c: HTMLCanvasElement; r: number } {
+  const h = g.length;
+  const w = g[0].length;
+  let r = 0;
+  for (const [cx, cy] of [[0, 0], [w, 0], [0, h], [w, h]]) r = Math.max(r, Math.hypot(cx - px, cy - py));
+  r = Math.ceil(r);
+  const size = r * 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(size, size);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  for (let ty = 0; ty < size; ty++) {
+    for (let tx = 0; tx < size; tx++) {
+      const dx = tx + 0.5 - r;
+      const dy = ty + 0.5 - r;
+      const sx = Math.floor(cos * dx + sin * dy + px);
+      const sy = Math.floor(-sin * dx + cos * dy + py);
+      if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+      const rgb = pal[g[sy][sx]];
+      if (rgb === undefined) continue;
+      const o = (ty * size + tx) * 4;
+      img.data[o] = (rgb >> 16) & 255;
+      img.data[o + 1] = (rgb >> 8) & 255;
+      img.data[o + 2] = rgb & 255;
+      img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return { c, r };
+}
+
 export const ANGLE_STEPS = 64;
 const NEUTRAL = paletteFor(0x808080);
 
@@ -401,11 +466,11 @@ export class SpriteCache {
     return p;
   }
 
-  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff): HTMLCanvasElement {
+  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff, cls = 1): HTMLCanvasElement {
     const mask = parts & BODY_RENDER_PARTS;
-    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}`;
+    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}|${cls}`;
     let c = this.bodies.get(key);
-    if (!c) this.bodies.set(key, (c = bakeBody(BODY[frame], this.pal(team), left, mask)));
+    if (!c) this.bodies.set(key, (c = bakeBody(BODY[frame], classPalette(this.pal(team), cls), left, mask)));
     return c;
   }
 
@@ -424,13 +489,25 @@ export class SpriteCache {
 
   private gibData = new Map<string, { w: number; h: number; data: Uint32Array }>();
 
-  private crafts = new Map<number, HTMLCanvasElement>();
+  private crafts = new Map<string, { c: HTMLCanvasElement; r: number }>();
 
-  /** Drop rocket in its passenger's team colour (grey when empty). */
-  craft(team: number): HTMLCanvasElement {
-    let c = this.crafts.get(team);
-    if (!c) this.crafts.set(team, (c = bake(CRAFT, this.pal(team))));
-    return c;
+  /**
+   * Drop rocket in its passenger's team colour (grey when empty), with only
+   * its attached parts, rotated to `angle` about its centre (64 steps,
+   * nearest-neighbour). Draw at centre - r.
+   */
+  craft(team: number, parts: number, angle: number): { c: HTMLCanvasElement; r: number } {
+    const step = ((Math.round((angle / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
+    const key = `${team}|${parts}|${step}`;
+    let g = this.crafts.get(key);
+    if (!g) {
+      const grid = CRAFT.map((row, sy) =>
+        [...row].map((ch, sx) => (craftPartAt(parts, sx + 0.5 - CRAFT_SPRITE_W / 2, sy + 0.5 - CRAFT_SPRITE_H / 2) === craftPartAt(ALL_CRAFT_PARTS, sx + 0.5 - CRAFT_SPRITE_W / 2, sy + 0.5 - CRAFT_SPRITE_H / 2) ? ch : '.')).join(''),
+      );
+      g = bakeRotatedGrid(grid, this.pal(team), (step / ANGLE_STEPS) * Math.PI * 2, CRAFT_SPRITE_W / 2, CRAFT_SPRITE_H / 2);
+      this.crafts.set(key, g);
+    }
+    return g;
   }
 
   /** Raw ABGR pixels of a gib piece, for blitting into the particle buffer. */

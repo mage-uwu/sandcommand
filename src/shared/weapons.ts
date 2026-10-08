@@ -1,7 +1,14 @@
+import { TICK_RATE } from './constants.ts';
+
 export const ProjKind = {
   Bullet: 0,
   Rocket: 1,
   Grenade: 2,
+  Slug: 3,
+  /** Tank cannon shell. */
+  Shell: 4,
+  /** Tank vulcan round. */
+  TankBullet: 5,
 } as const;
 
 export interface ProjDef {
@@ -16,35 +23,99 @@ export interface ProjDef {
   splashDamage: number;
   debris: number; // max debris particles thrown
   bounce: number; // >0 bounces off terrain (restitution) and detonates on fuse
+  /** Small-arms round: chips terrain only (not bodies it hits), puffs dust, no trail. */
+  ballistic: boolean;
 }
 
 export const PROJ: readonly ProjDef[] = [
-  { gravity: 0.15, life: 40, damage: 16, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0 },
-  { gravity: 0.2, life: 120, damage: 30, mass: 2, sharp: 0.6, carveR: 20, coreR: 9, splashR: 34, splashDamage: 70, debris: 48, bounce: 0 },
-  { gravity: 1, life: 66, damage: 0, mass: 0.6, sharp: 0.1, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45 },
+  { gravity: 0.15, life: 40, damage: 16, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
+  { gravity: 0.2, life: 120, damage: 30, mass: 2, sharp: 0.6, carveR: 20, coreR: 9, splashR: 34, splashDamage: 70, debris: 48, bounce: 0, ballistic: false },
+  { gravity: 1, life: 66, damage: 0, mass: 0.6, sharp: 0.1, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45, ballistic: false },
+  // Heavy sniper slug: flat, fast, punches through armour.
+  { gravity: 0.04, life: 30, damage: 38, mass: 1.1, sharp: 0.95, carveR: 3, coreR: 1, splashR: 0, splashDamage: 0, debris: 3, bounce: 0, ballistic: true },
+  // Tank cannon shell: a heavy lobbed high-explosive round.
+  { gravity: 0.35, life: 120, damage: 50, mass: 3, sharp: 0.6, carveR: 24, coreR: 11, splashR: 40, splashDamage: 90, debris: 56, bounce: 0, ballistic: false },
+  // Tank vulcan: a rifle round, a touch lighter.
+  { gravity: 0.15, life: 40, damage: 14, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
 ];
+
+/** WeaponDef.proj for tools that carve instead of shooting. */
+export const PROJ_DIG = -1;
+/** WeaponDef.proj for the materializer, which builds fortifications (see build.ts) instead of shooting. */
+export const PROJ_BUILD = -2;
 
 export const WeaponId = {
   Rifle: 0,
   Bazooka: 1,
   Grenade: 2,
-  Digger: 3,
+  Sniper: 3,
+  Digger: 4,
+  Materializer: 5,
 } as const;
 
+/**
+ * One table drives every weapon, on the server (firing, ammo, reloads, who
+ * the camera's interest follows) and on the client (sprites, muzzle flash,
+ * HUD, camera). Add a row and the weapon exists everywhere.
+ */
 export interface WeaponDef {
   name: string;
-  cooldown: number; // ticks between shots
-  proj: number; // ProjKind, or -1 for the digger
+  /** ProjKind fired, PROJ_DIG for the digger, or PROJ_BUILD for the materializer. */
+  proj: number;
+  /** Muzzle offset: cells from the shoulder pivot along the barrel to where shots leave (and the flash shows). */
+  muzzle: number;
+  /** Rate of fire, rounds per minute (the materializer: pieces per minute). */
+  rpm: number;
+  /** Hold to keep firing (true) or one shot per press (false). */
+  auto: boolean;
+  /** Projectile launch speed, cells/s. */
   speed: number;
-  spread: number; // radians
+  /** Half-angle of random spread, radians (scoped aim halves it). */
+  spread: number;
+  /** Rounds per magazine; 0 = never needs reloading. */
+  clip: number;
+  /** Reload time, ticks. */
+  reload: number;
+  /** How far the view can be pushed down the barrel while scoping (right mouse), cells. */
+  scope: number;
 }
 
 export const WEAPONS: readonly WeaponDef[] = [
-  { name: 'Rifle', cooldown: 4, proj: ProjKind.Bullet, speed: 880, spread: 0.035 },
-  { name: 'Bazooka', cooldown: 34, proj: ProjKind.Rocket, speed: 380, spread: 0.01 },
-  { name: 'Grenade', cooldown: 26, proj: ProjKind.Grenade, speed: 330, spread: 0 },
-  { name: 'Digger', cooldown: 2, proj: -1, speed: 0, spread: 0 },
+  { name: 'Rifle', proj: ProjKind.Bullet, muzzle: 13, rpm: 450, auto: true, speed: 880, spread: 0.035, clip: 30, reload: 54, scope: 110 },
+  { name: 'Bazooka', proj: ProjKind.Rocket, muzzle: 14, rpm: 60, auto: false, speed: 380, spread: 0.01, clip: 1, reload: 66, scope: 140 },
+  { name: 'Grenade', proj: ProjKind.Grenade, muzzle: 6, rpm: 70, auto: false, speed: 330, spread: 0, clip: 3, reload: 75, scope: 90 },
+  { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 1500, spread: 0.004, clip: 5, reload: 84, scope: 300 },
+  { name: 'Digger', proj: PROJ_DIG, muzzle: 11, rpm: 900, auto: true, speed: 0, spread: 0, clip: 0, reload: 0, scope: 40 },
+  { name: 'Materializer', proj: PROJ_BUILD, muzzle: 9, rpm: 100, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
 ];
+
+/** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
+export function fireInterval(def: WeaponDef): number {
+  return (60 * TICK_RATE) / def.rpm;
+}
+
+/** The weapon that fires a projectile kind (kill feed names hits by projectile). */
+export function weaponOfProj(kind: number): WeaponDef | undefined {
+  return WEAPONS.find((w) => w.proj === kind);
+}
+
+/** Name of what fired a projectile kind: a hand weapon, or a tank's guns. */
+export function projName(kind: number): string {
+  if (kind === ProjKind.Shell) return 'Tank Cannon';
+  if (kind === ProjKind.TankBullet) return 'Tank SMG';
+  return weaponOfProj(kind)?.name ?? '';
+}
+
+/** Shoulder pivot (where the gun arm turns and aim is measured from), relative to the hitbox's top-left. */
+export const SHOULDER_X = 4;
+export const SHOULDER_Y = 4;
+
+/** World position of a weapon's muzzle for a clone at (x, y) aiming at `aim`. */
+export function muzzlePoint(def: WeaponDef, x: number, y: number, aim: number, out: { x: number; y: number }): { x: number; y: number } {
+  out.x = x + SHOULDER_X + Math.cos(aim) * def.muzzle;
+  out.y = y + SHOULDER_Y + Math.sin(aim) * def.muzzle;
+  return out;
+}
 
 export const DIGGER_REACH = 13;
 export const DIGGER_R = 5;

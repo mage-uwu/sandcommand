@@ -1,8 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
 import { Reader, Writer } from '../shared/codec.ts';
-import { TICK_RATE } from '../shared/constants.ts';
+import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import {
   C_CHAT,
+  C_BUILD,
   C_INPUT,
   C_PING,
   C_RESYNC,
@@ -57,7 +58,8 @@ export class GameRoom extends DurableObject<Env> {
     // input path must stay synchronous so commands keep their order.
     (server as unknown as { binaryType: string }).binaryType = 'arraybuffer';
 
-    this.world ??= new World(seedFromName(this.roomName));
+    // Last Man Standing, with bots in every slot no human has.
+    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS });
     const world = this.world;
     const player = world.addPlayer(name, {
       send(data) {
@@ -106,7 +108,7 @@ export class GameRoom extends DurableObject<Env> {
       const r = new Reader(new Uint8Array(data));
       switch (r.u8()) {
         case C_INPUT:
-          world.input(id, { seq: r.u16(), buttons: r.u8(), aim: r.u16(), weapon: r.u8() });
+          world.input(id, { seq: r.u16(), buttons: r.u8(), aim: r.u16(), inv: r.u8() });
           break;
         case C_RESYNC:
           while (r.remaining >= 2) world.resync(id, r.u16());
@@ -121,6 +123,9 @@ export class GameRoom extends DurableObject<Env> {
         }
         case C_CHAT:
           world.chat(id, r.str());
+          break;
+        case C_BUILD:
+          world.build(id, r.u8(), r.u16(), r.u16());
           break;
       }
     } catch {

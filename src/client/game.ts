@@ -1,17 +1,21 @@
 import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type TankState, applyFrameRecords } from '../shared/frame.ts';
+import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
-import { CRAFT_H, CRAFT_W } from '../shared/craft.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_TANK, releaseCarve, spillGold } from '../shared/particles.ts';
+import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
+import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
+import { generateWorld } from '../shared/worldgen.ts';
+import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName } from '../shared/weapons.ts';
+import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
+import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -24,6 +28,8 @@ export interface PlayerInfo {
   kills: number;
   deaths: number;
   gold: number;
+  wins: number;
+  bot: boolean;
   color: string;
   rgb: number;
 }
@@ -54,6 +60,13 @@ export interface RemoteView {
 }
 
 export interface CraftView extends CraftState {}
+export interface TankView extends TankState {}
+
+/** Where a driver's clone sits inside its tank (top-left of the clone, from the tank's). */
+const SEAT_X = TANK_W / 2 - ACTOR_W / 2;
+const SEAT_Y = 2;
+
+const wrapAngle = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.PI * 2));
 
 export interface FeedItem {
   text: string;
@@ -90,6 +103,12 @@ function playerColor(id: number): { css: string; rgb: number } {
   const b = Math.round(f(4) * 255);
   return { css: `rgb(${r},${g},${b})`, rgb: (r << 16) | (g << 8) | b };
 }
+
+/** Last Team Standing colours: red and green fatigues (Team.Red, Team.Green). */
+export const TEAM_COLORS = [
+  { css: 'rgb(222,64,56)', rgb: 0xde4038 },
+  { css: 'rgb(76,190,72)', rgb: 0x4cbe48 },
+] as const;
 
 export class Game implements FrameHandler {
   readonly terrain = new Terrain();
@@ -138,8 +157,31 @@ export class Game implements FrameHandler {
   partHp: number[] = new Array(PART_COUNT).fill(100);
   private readonly mob: Mobility = { legs: 2, jet: true, canFire: true, oneHanded: false };
   respawnTicks = 0;
-  weapon = 0;
+  /**
+   * What we carry (server truth: weapon and rounds in its magazine) and the
+   * slot in hand. The selection is ours, applied at once and sent each tick;
+   * when the server changes the inventory (pick-up, drop, death) its version
+   * moves on and we take its slot.
+   */
+  inv: { weapon: number; ammo: number }[] = [];
+  slot = 0;
+  invVersion = -1;
+  private pickupHold = 0;
+  private dropHold = 0;
+  /** Last Man Standing round state (null in sandbox rooms), and who we watch while out. */
+  roundState: RoundState | null = null;
+  spectate = 255;
+  /** Chunks whose regenerated contents didn't match the server's hash: ask for them. */
+  readonly resyncWanted: number[] = [];
+  /** Weapons lying on the ground near us, simulated like the server does. */
+  readonly groundItems = new Map<number, GroundItem>();
   cooldown = 0;
+  /** Ticks left reloading the weapon in hand (server truth). */
+  reloadLeft = 0;
+  /** Own gold, exact (from our own record, not the once-a-second scoreboard). */
+  gold = 0;
+  /** Materializer beams to fade out: builder muzzle to piece centre. */
+  readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number }[] = [];
   smoothX = 0;
   smoothY = 0;
   /** Prediction errors larger than 0.01 cells seen during reconciliation. */
@@ -153,6 +195,37 @@ export class Game implements FrameHandler {
   private snaps = new Map<number, Snap[]>();
   // Drop rockets, interpolated like actors.
   private craftSnaps = new Map<number, (CraftState & { tick: number })[]>();
+  /**
+   * The rocket we are riding in, predicted like our clone: rebased on the
+   * server's full-precision state each frame, then stepped over unacked inputs.
+   */
+  ride: Craft | null = null;
+  rideSlot = -1;
+  private readonly ridePrev = { x: 0, y: 0, a: 0 };
+  rideSmoothX = 0;
+  rideSmoothY = 0;
+  rideSmoothA = 0;
+  /** Rocket prediction errors larger than 0.01 cells seen during reconciliation. */
+  craftCorrections = 0;
+  private lastSelfCraft: SelfCraftState | null = null;
+  // Tanks, interpolated like actors.
+  private tankSnaps = new Map<number, (TankState & { tick: number })[]>();
+  /** Clones driving a tank right now (they ride hidden inside it). */
+  readonly tankPilots = new Set<number>();
+  /**
+   * The tank we drive, predicted like our clone: rebased on the server's
+   * full-precision state each frame, then stepped over unacked inputs. Our
+   * clone's body rides in its seat, so the camera and smoothing just work.
+   */
+  drive: Tank | null = null;
+  driveSlot = -1;
+  /** Our tank's damage and cannon (HUD), from the latest frame. */
+  myTankState: SelfTankState | null = null;
+  private lastSelfTank: SelfTankState | null = null;
+  /** Tank prediction errors larger than 0.01 cells seen during reconciliation. */
+  tankCorrections = 0;
+  private readonly rideStep = newCraftStep();
+  private readonly ext = { x: 0, y: 0 };
   private clockOffset = NaN; // serverTick - now/TICK_MS
   lastServerTick = 0;
   /** Tick of the frame currently being applied. */
@@ -163,7 +236,7 @@ export class Game implements FrameHandler {
   // ------------------------------------------------------------ local tick
 
   /** One fixed 30 Hz client tick: predict own clone, advance local kernels. */
-  localTick(buttons: number, aimQ: number, weapon: number, send: (seq: number) => void): void {
+  localTick(buttons: number, aimQ: number, send: (seq: number) => void): void {
     this.seq = (this.seq + 1) & 0xffff;
     send(this.seq);
     copyBody(this.prevBody, this.body);
@@ -171,7 +244,11 @@ export class Game implements FrameHandler {
     // respawned us and will apply it.
     this.pending.push({ seq: this.seq, buttons });
     if (this.pending.length > 90) this.pending.shift();
-    if (this.alive) {
+    if (this.alive && this.drive) {
+      stepTank(this.drive, this.terrain, DT, buttons);
+      this.seat(this.drive);
+      if (this.drive.jetting) tankJets(this.particles, this.drive.x, this.drive.y, this.drive.vx, this.drive.vy);
+    } else if (this.alive) {
       stepBody(this.body, buttons, this.terrain, DT);
       if (this.body.jetting) {
         const b = this.body;
@@ -179,18 +256,31 @@ export class Game implements FrameHandler {
         for (let k = 0; k < 3; k++) jetExhaust(this.particles, b.x + (left ? 7 : 0), b.y + ACTOR_H - 5, b.vx, b.vy);
       }
     }
-    this.weapon = weapon;
+    if (this.ride && !this.alive) {
+      const r = this.ride;
+      this.ridePrev.x = r.x;
+      this.ridePrev.y = r.y;
+      this.ridePrev.a = r.a;
+      stepCraft(r, this.terrain, DT, this.rideStep, buttons);
+      // Bailed out or dropped off: the server takes it from here.
+      if (this.rideStep.release) r.passenger = 255;
+    }
+    for (const [, it] of this.groundItems) stepItem(it, this.terrain, DT);
     // Field first: chunk snapshots and ops applied since the last tick.
     this.field.update();
     this.projectiles.step(this.collider, DT, null, (i, x, y, _a, _d) => {
-      if (this.projectiles.kind[i] === ProjKind.Bullet) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
+      if (PROJ[this.projectiles.kind[i]].ballistic) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
     });
     const pr = this.projectiles;
-    for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+    for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket || pr.kind[i] === ProjKind.Shell) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+    for (const [slot, ts] of this.tankSnaps) {
+      const t = ts[ts.length - 1];
+      if (t && t.jetting && slot !== this.driveSlot) tankJets(this.particles, t.x, t.y, t.vx, t.vy);
+    }
     // Drop-rocket exhaust (latest known state; cosmetic plume + local air jet).
-    for (const [, cs] of this.craftSnaps) {
-      const c = cs[cs.length - 1];
-      if (c && c.thrust > 0.12) craftExhaust(this.particles, c.x + CRAFT_W / 2, c.y + CRAFT_H, c.vx, c.vy, c.thrust);
+    for (const [slot, cs] of this.craftSnaps) {
+      const c = slot === this.rideSlot && this.ride ? this.ride : cs[cs.length - 1];
+      if (c && c.thrust > 0.12) craftExhaust(this.particles, c.x, c.y, c.a, c.vx, c.vy, c.thrust);
     }
     // Remote jetpacks, and stumps dripping on maimed clones.
     for (const [, s] of this.snaps) {
@@ -210,8 +300,14 @@ export class Game implements FrameHandler {
       if (last && last.flags & F_ALIVE && actors.n < MAX_ACTORS) actors.add(id, last.x, last.y, last.vx, last.vy);
     }
     for (const [slot, cs] of this.craftSnaps) {
-      const c = cs[cs.length - 1];
-      if (c && actors.n < MAX_ACTORS) actors.add(128 + slot, c.x, c.y, c.vx, c.vy, CRAFT_W, CRAFT_H, 60);
+      const c = slot === this.rideSlot && this.ride ? this.ride : cs[cs.length - 1];
+      if (!c || actors.n >= MAX_ACTORS) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      actors.add(128 + slot, c.x - e.x, c.y - e.y, c.vx, c.vy, 2 * e.x, 2 * e.y, 60, 255, 0);
+    }
+    for (const [slot, ts] of this.tankSnaps) {
+      const t = slot === this.driveSlot && this.drive ? this.drive : ts[ts.length - 1];
+      if (t && actors.n < MAX_ACTORS) actors.add(192 + slot, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H, 200, 255, 0.3);
     }
     this.particles.step(this.collider, DT, this.particleHooks, actors);
     this.shake *= 0.85;
@@ -224,7 +320,13 @@ export class Game implements FrameHandler {
     this.ack = ack;
     this.frameTick = tick;
     this.lastSelf = null;
+    this.lastSelfCraft = null;
+    this.lastSelfTank = null;
     applyFrameRecords(r, this.terrain, this);
+    if (this.tanksSeenTick !== tick) {
+      this.tankSnaps.clear();
+      this.tankPilots.clear();
+    }
     // No rocket record in this frame means no drop rockets near us.
     if (this.craftsSeenTick !== tick) this.craftSnaps.clear();
     this.lastServerTick = tick;
@@ -233,6 +335,113 @@ export class Game implements FrameHandler {
     else this.clockOffset = this.clockOffset * 0.95 + est * 0.05;
     // Reconcile after the whole frame so replay sees this tick's terrain.
     if (this.lastSelf) this.reconcile(this.lastSelf);
+    this.myTankState = this.alive ? this.lastSelfTank : null;
+    if (this.lastSelfTank && this.alive) this.reconcileTank(this.lastSelfTank);
+    else {
+      this.drive = null;
+      this.driveSlot = -1;
+    }
+    if (this.lastSelfCraft && !this.alive) this.reconcileCraft(this.lastSelfCraft);
+    else {
+      this.ride = null;
+      this.rideSlot = -1;
+    }
+  }
+
+  /** Put our clone in the driver's seat. */
+  private seat(t: Tank): void {
+    const b = this.body;
+    b.x = t.x + SEAT_X;
+    b.y = t.y + SEAT_Y;
+    b.vx = t.vx;
+    b.vy = t.vy;
+    b.onGround = t.onGround;
+    b.jetting = false;
+  }
+
+  /** Rebase the predicted tank on the server's state and replay unacked inputs. */
+  private reconcileTank(s: SelfTankState): void {
+    const fresh = !this.drive || this.driveSlot !== s.slot;
+    if (!this.drive || fresh) this.drive = newTank(s.x, s.y);
+    const d = this.drive;
+    this.driveSlot = s.slot;
+    const b = this.body;
+    const rawX = d.x;
+    const rawY = d.y;
+    const oldX = b.x + this.smoothX;
+    const oldY = b.y + this.smoothY;
+    d.x = s.x;
+    d.y = s.y;
+    d.vx = s.vx;
+    d.vy = s.vy;
+    d.fuel = s.fuel;
+    d.chute = s.chute;
+    d.onGround = s.onGround;
+    d.jetting = s.jetting;
+    d.parts = s.parts;
+    d.pilot = this.myId;
+    // pending was already trimmed to unacked commands by reconcile().
+    for (const p of this.pending) stepTank(d, this.terrain, DT, p.buttons);
+    this.seat(d);
+    if (!fresh && Math.abs(rawX - d.x) + Math.abs(rawY - d.y) > 0.01) this.tankCorrections++;
+    const ex = oldX - b.x;
+    const ey = oldY - b.y;
+    if (!fresh && ex * ex + ey * ey < 48 * 48) {
+      this.smoothX = ex;
+      this.smoothY = ey;
+    } else {
+      this.smoothX = this.smoothY = 0;
+      copyBody(this.prevBody, b);
+    }
+  }
+
+  /** Rebase the predicted rocket on the server's state and replay unacked inputs. */
+  private reconcileCraft(s: SelfCraftState): void {
+    const fresh = !this.ride || this.rideSlot !== s.slot;
+    if (!this.ride || fresh) this.ride = newCraft(s.x, this.myId);
+    const r = this.ride;
+    this.rideSlot = s.slot;
+    const rawX = r.x;
+    const rawY = r.y;
+    const oldX = r.x + this.rideSmoothX;
+    const oldY = r.y + this.rideSmoothY;
+    const oldA = r.a + this.rideSmoothA;
+    r.x = s.x;
+    r.y = s.y;
+    r.vx = s.vx;
+    r.vy = s.vy;
+    r.a = s.a;
+    r.w = s.w;
+    r.targetX = s.targetX;
+    r.timer = s.timer;
+    r.phase = s.phase;
+    r.parts = s.parts;
+    r.prevButtons = s.prevButtons;
+    for (let i = 0; i < s.partHp.length; i++) r.partHp[i] = s.partHp[i];
+    r.hp = s.partHp[0];
+    r.passenger = this.myId;
+    r.delivered = 255;
+    // pending was already trimmed to unacked commands by reconcile().
+    for (const p of this.pending) {
+      stepCraft(r, this.terrain, DT, this.rideStep, p.buttons);
+      if (this.rideStep.release) {
+        r.passenger = 255;
+        break;
+      }
+    }
+    const ex = oldX - r.x;
+    const ey = oldY - r.y;
+    if (!fresh && Math.abs(rawX - r.x) + Math.abs(rawY - r.y) > 0.01) this.craftCorrections++;
+    if (!fresh && ex * ex + ey * ey < 48 * 48) {
+      this.rideSmoothX = ex;
+      this.rideSmoothY = ey;
+      this.rideSmoothA = wrapAngle(oldA - r.a);
+    } else {
+      this.rideSmoothX = this.rideSmoothY = this.rideSmoothA = 0;
+      this.ridePrev.x = r.x;
+      this.ridePrev.y = r.y;
+      this.ridePrev.a = r.a;
+    }
   }
 
   private reconcile(s: SelfState): void {
@@ -243,6 +452,15 @@ export class Game implements FrameHandler {
     this.parts = s.parts;
     this.partHp = s.partHp;
     this.cooldown = s.cooldown;
+    this.inv = s.inv;
+    this.spectate = s.spectate;
+    if (s.invVersion !== this.invVersion) {
+      this.invVersion = s.invVersion;
+      this.slot = s.slot;
+    }
+    if (this.slot >= this.inv.length) this.slot = Math.max(0, this.inv.length - 1);
+    this.reloadLeft = s.reload;
+    this.gold = s.gold;
     const b = this.body;
     const ack = this.ack;
     this.pending = this.pending.filter((p) => seqNewer(p.seq, ack));
@@ -261,9 +479,16 @@ export class Game implements FrameHandler {
     mobility(s.parts, this.mob);
     b.legs = this.mob.legs;
     b.jet = this.mob.jet;
+    b.cls = classOfFlags(s.flags);
     if (!this.alive) {
       copyBody(this.prevBody, b);
       this.smoothX = this.smoothY = 0;
+      return;
+    }
+    if (this.lastSelfTank) {
+      // Driving: the clone rides in the seat; reconcileTank rebases the tank.
+      b.x = rawX;
+      b.y = rawY;
       return;
     }
     for (const p of this.pending) stepBody(b, p.buttons, this.terrain, DT);
@@ -357,6 +582,165 @@ export class Game implements FrameHandler {
     }
   }
 
+  built(piece: number, builder: number, gx: number, gy: number, placed: number[]): void {
+    materialize(this.particles, placed);
+    const p = PIECES[piece];
+    if (!p) return;
+    // Beam from whoever built it (if we can see them).
+    let bx = NaN;
+    let by = NaN;
+    if (builder === this.myId && this.alive) {
+      bx = this.body.x + SHOULDER_X;
+      by = this.body.y + SHOULDER_Y;
+    } else {
+      const s = this.snaps.get(builder);
+      const last = s?.[s.length - 1];
+      if (last) {
+        bx = last.x + SHOULDER_X;
+        by = last.y + SHOULDER_Y;
+      }
+    }
+    if (!Number.isNaN(bx)) this.beams.push({ x0: bx, y0: by, x1: gx + p.w / 2, y1: gy + p.h / 2, at: performance.now() });
+    if (this.beams.length > 16) this.beams.shift();
+  }
+
+  private readonly blockers: BuildBlocker[] = [];
+
+  /**
+   * Would the server accept this piece here? The same canBuild the server
+   * runs, against our copy of the terrain and the bodies we can see, so the
+   * ghost preview is honest.
+   */
+  canBuildHere(piece: number, gx: number, gy: number): number {
+    const bl = this.blockers;
+    bl.length = 0;
+    if (this.alive) bl.push({ x: this.body.x, y: this.body.y, w: ACTOR_W, h: ACTOR_H });
+    for (const [, s] of this.snaps) {
+      const last = s[s.length - 1];
+      if (last && last.flags & F_ALIVE) bl.push({ x: last.x, y: last.y, w: ACTOR_W, h: ACTOR_H });
+    }
+    for (const [, cs] of this.craftSnaps) {
+      const c = cs[cs.length - 1];
+      if (!c) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      bl.push({ x: c.x - e.x, y: c.y - e.y, w: 2 * e.x, h: 2 * e.y });
+    }
+    return canBuild(this.terrain, piece, gx, gy, this.body.x + SHOULDER_X, this.body.y + SHOULDER_Y, this.gold, bl);
+  }
+
+  /** Weapon in hand (WeaponId), NO_WEAPON with empty hands. */
+  get weapon(): number {
+    return this.inv[this.slot]?.weapon ?? NO_WEAPON;
+  }
+
+  /** Rounds in the magazine of the weapon in hand. */
+  get ammo(): number {
+    return this.inv[this.slot]?.ammo ?? 0;
+  }
+
+  /** Rotate through what we carry (1/2, Q/E, wheel). */
+  cycle(d: number): void {
+    const n = this.inv.length;
+    if (n > 0 && d !== 0) this.slot = (((this.slot + d) % n) + n) % n;
+  }
+
+  /** Pick up / drop: held in the inventory byte for a few ticks; the server acts on the edge. */
+  pickUp(): void {
+    this.pickupHold = 3;
+  }
+  drop(): void {
+    this.dropHold = 3;
+  }
+
+  /** This tick's inventory byte for the input command. */
+  invByte(): number {
+    const b = invByte(this.slot, this.invVersion, this.pickupHold > 0, this.dropHold > 0);
+    if (this.pickupHold > 0) this.pickupHold--;
+    if (this.dropHold > 0) this.dropHold--;
+    return b;
+  }
+
+  /** The ground item we'd pick up right now, if any. */
+  nearestItem(): GroundItem | null {
+    if (!this.alive) return null;
+    const cx = this.body.x + ACTOR_W / 2;
+    const cy = this.body.y + ACTOR_H / 2;
+    let best: GroundItem | null = null;
+    let bestD = PICKUP_R * PICKUP_R;
+    for (const [, it] of this.groundItems) {
+      const d = (it.x - cx) ** 2 + (it.y - cy) ** 2;
+      if (d <= bestD) {
+        bestD = d;
+        best = it;
+      }
+    }
+    return best;
+  }
+
+  items(list: GroundItem[]): void {
+    for (const it of list) this.groundItems.set(it.id, it);
+  }
+
+  /** Holding the materializer? */
+  get building(): boolean {
+    return this.alive && !this.drive && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
+  }
+
+  itemsGone(ids: number[]): void {
+    for (const id of ids) this.groundItems.delete(id);
+  }
+
+  round(s: RoundState): void {
+    this.roundState = s;
+  }
+
+  /** Every slot's team this wave (Team.None outside Last Team Standing). */
+  teamOf: Uint8Array = new Uint8Array(64).fill(Team.None);
+
+  teams(teams: Uint8Array): void {
+    this.teamOf = teams;
+    // Clones wear their team's colour; without a team, their own.
+    for (const p of this.players.values()) {
+      const c = TEAM_COLORS[teams[p.id]] ?? playerColor(p.id);
+      p.color = c.css;
+      p.rgb = c.rgb;
+    }
+  }
+
+  /** Is this player a king right now (Regicide)? */
+  isKing(id: number): boolean {
+    const rs = this.roundState;
+    return !!rs && rs.mode === GameMode.Regicide && (rs.phase === Phase.Live || rs.phase === Phase.Victory) && (rs.kings[0] === id || rs.kings[1] === id) && id !== 255;
+  }
+
+  /** Our team this wave, Team.None if we have none. */
+  get myTeam(): number {
+    return this.myId >= 0 ? this.teamOf[this.myId] : Team.None;
+  }
+
+  /**
+   * A new wave: the decoder has just regenerated the terrain from the seed.
+   * Clear everything left from the last one, rebuild what derives from the
+   * terrain, and flag any chunk that didn't come out identical to the server's.
+   */
+  wave(seed: number, hashes: Uint32Array, fortresses: boolean): void {
+    generateWorld(this.terrain, seed, fortresses);
+    this.particles.n = 0;
+    this.projectiles.n = 0;
+    this.stain.fill(0);
+    this.groundItems.clear();
+    this.craftSnaps.clear();
+    this.ride = null;
+    this.rideSlot = -1;
+    this.beams.length = 0;
+    this.flashes.length = 0;
+    this.skyline.fill(WORLD_H);
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) {
+      this.chunkLoaded(ci);
+      if (this.terrain.chunkHash(ci) !== hashes[ci]) this.resyncWanted.push(ci);
+    }
+  }
+
   chunkLoaded(ci: number): void {
     this.loaded[ci] = 1;
     const ox = (ci % CHUNKS_X) << CHUNK_SHIFT;
@@ -372,14 +756,14 @@ export class Game implements FrameHandler {
     if (this.projectiles.indexOf(id) >= 0) return;
     this.projectiles.spawn(id, kind, owner, x, y, vx, vy);
     const sp = Math.hypot(vx, vy) || 1;
-    muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket);
+    muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell);
   }
 
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void {
     const i = this.projectiles.indexOf(id);
     if (i >= 0) this.projectiles.removeAt(i);
     if (!detonate) return;
-    if (kind === ProjKind.Bullet) {
+    if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
       return;
     }
@@ -397,7 +781,8 @@ export class Game implements FrameHandler {
     const { killer, victim, weapon } = k;
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
-    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : (WEAPONS[weapon]?.name ?? '');
+    // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
+    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
@@ -409,10 +794,15 @@ export class Game implements FrameHandler {
     if (this.feed.length > 6) this.feed.shift();
 
     // Gib it. Skip the work for deaths far off-screen.
-    const camDx = k.x - this.body.x;
-    const camDy = k.y - this.body.y;
+    // Measured from where we are this frame (our own record comes first; the
+    // body itself is only rebased after the whole frame).
+    // While spectating, from whoever we're watching.
+    const watched = !this.alive && this.spectate !== 255 ? this.snaps.get(this.spectate)?.at(-1) : undefined;
+    const me = watched ?? this.lastSelf ?? this.body;
+    const camDx = k.x - me.x;
+    const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
-    const explosive = weapon === WeaponId.Bazooka || weapon === WeaponId.Grenade;
+    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === W_TANK;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts);
     // Same seed as the server, so the gold shower matches what will settle.
@@ -426,17 +816,18 @@ export class Game implements FrameHandler {
       this.snaps.delete(id);
       return;
     }
-    const c = playerColor(id);
-    this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, color: c.css, rgb: c.rgb });
+    const c = TEAM_COLORS[this.teamOf[id]] ?? playerColor(id);
+    this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, wins: 0, bot: name.startsWith('BOT '), color: c.css, rgb: c.rgb });
   }
 
-  scores(list: { id: number; kills: number; deaths: number; gold: number }[]): void {
+  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void {
     for (const s of list) {
       const p = this.players.get(s.id);
       if (p) {
         p.kills = s.kills;
         p.deaths = s.deaths;
         p.gold = s.gold;
+        p.wins = s.wins;
       }
     }
   }
@@ -466,12 +857,102 @@ export class Game implements FrameHandler {
   }
   private craftsSeenTick = 0;
 
+  selfCraft(s: SelfCraftState): void {
+    this.lastSelfCraft = s;
+  }
+
+  craftPart(_slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    craftPartOff(this.particles, part, x, y, vx, vy, seed);
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 300) * 4);
+  }
+
   craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void {
     this.craftSnaps.delete(slot);
+    if (slot === this.rideSlot) {
+      this.ride = null;
+      this.rideSlot = -1;
+    }
     craftDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE);
     this.flashes.push({ x, y, r: 40, at: performance.now() });
     const d = Math.hypot(this.body.x - x, this.body.y - y);
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 500) * 12);
+  }
+
+  tanks(list: TankState[]): void {
+    const seen = new Set<number>();
+    this.tankPilots.clear();
+    for (const t of list) {
+      seen.add(t.slot);
+      if (t.pilot !== 255) this.tankPilots.add(t.pilot);
+      let s = this.tankSnaps.get(t.slot);
+      if (!s) this.tankSnaps.set(t.slot, (s = []));
+      s.push({ ...t, tick: this.frameTick });
+      if (s.length > 12) s.shift();
+    }
+    this.tanksSeenTick = this.frameTick;
+    for (const slot of this.tankSnaps.keys()) if (!seen.has(slot)) this.tankSnaps.delete(slot);
+  }
+  private tanksSeenTick = 0;
+
+  selfTank(s: SelfTankState): void {
+    this.lastSelfTank = s;
+  }
+
+  tankPart(_slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    tankPartOff(this.particles, part, x, y, vx, vy, seed);
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 300) * 5);
+  }
+
+  tankBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    this.tankSnaps.delete(slot);
+    tankDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE);
+    this.flashes.push({ x, y, r: 56, at: performance.now() });
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 600) * 16);
+  }
+
+  /** Tanks at the render time, interpolated between snapshots (ours from prediction). */
+  tankViews(alpha = 1): TankView[] {
+    const rt = this.renderTick();
+    const out: TankView[] = [];
+    for (const [slot, s] of this.tankSnaps) {
+      const b = s[s.length - 1];
+      if (slot === this.driveSlot && this.drive && this.alive) {
+        // Ours: wherever our seat is this frame.
+        const pb = this.prevBody;
+        const me = this.body;
+        out.push({ ...b, x: pb.x + (me.x - pb.x) * alpha + this.smoothX - SEAT_X, y: pb.y + (me.y - pb.y) * alpha + this.smoothY - SEAT_Y, parts: this.drive.parts, chute: false, jetting: this.drive.jetting });
+        continue;
+      }
+      let a = s[0];
+      let c = s[0];
+      for (let i = s.length - 1; i >= 0; i--) {
+        if (s[i].tick <= rt) {
+          a = s[i];
+          c = s[Math.min(i + 1, s.length - 1)];
+          break;
+        }
+      }
+      const t = a === c ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (c.tick - a.tick)));
+      out.push({ ...c, firedSmg: b.firedSmg, firedCannon: b.firedCannon, x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t });
+    }
+    return out;
+  }
+
+  /** The empty, landed tank we could climb into right now, if any. */
+  boardableTank(): TankView | null {
+    if (!this.alive || this.drive) return null;
+    const b = this.body;
+    for (const [, s] of this.tankSnaps) {
+      const t = s[s.length - 1];
+      if (t.pilot !== 255 || t.chute) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + TANK_W));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + TANK_H));
+      if (dx <= 10 && dy <= 10) return t;
+    }
+    return null;
   }
 
   /** Drop rockets at the render time, interpolated between snapshots. */
@@ -488,15 +969,33 @@ export class Game implements FrameHandler {
           break;
         }
       }
+      if (b.slot === this.rideSlot && this.ride) continue; // drawn from prediction
       const t = a === b ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (b.tick - a.tick)));
-      out.push({ ...b, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      out.push({ ...b, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, a: wrapAngle(a.a + wrapAngle(b.a - a.a) * t) });
     }
     return out;
   }
 
-  /** The drop rocket carrying this player in, if any. */
-  myCraft(): CraftView | null {
+  /** The drop rocket carrying this player in, if any: predicted, interpolated by `alpha`. */
+  myCraft(alpha = 1): CraftView | null {
     if (this.alive) return null;
+    const r = this.ride;
+    if (r) {
+      const p = this.ridePrev;
+      return {
+        slot: this.rideSlot,
+        x: p.x + (r.x - p.x) * alpha + this.rideSmoothX,
+        y: p.y + (r.y - p.y) * alpha + this.rideSmoothY,
+        vx: r.vx,
+        vy: r.vy,
+        a: p.a + wrapAngle(r.a - p.a) * alpha + this.rideSmoothA,
+        thrust: r.thrust,
+        hp: r.hp,
+        passenger: this.myId,
+        phase: r.phase,
+        parts: r.parts,
+      };
+    }
     for (const c of this.craftViews()) if (c.passenger === this.myId) return c;
     return null;
   }

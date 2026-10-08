@@ -6,8 +6,9 @@
  *   BOTS=64 SECONDS=30 URL=http://127.0.0.1:8787 npm run loadtest
  */
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
+import { invByte } from '../src/shared/items.ts';
 import { Reader, Writer } from '../src/shared/codec.ts';
-import { applyFrameRecords, nullHandler } from '../src/shared/frame.ts';
+import { type SelfState, applyFrameRecords, nullHandler } from '../src/shared/frame.ts';
 import { C_INPUT, C_PING, S_FRAME, S_PONG, S_REJECT, S_WELCOME, quantizeAim } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 
@@ -37,7 +38,9 @@ async function runBot(i: number): Promise<Bot> {
   let seq = 0;
   let buttons = 0;
   let aim = 0;
-  let weapon = i % 4;
+  let slot = 0;
+  let invVersion = 0;
+  const handler = { ...nullHandler, self: (s: SelfState) => (invVersion = s.invVersion) };
   ws.addEventListener('message', (ev: MessageEvent) => {
     const buf = new Uint8Array(ev.data as ArrayBuffer);
     const r = new Reader(buf);
@@ -51,7 +54,7 @@ async function runBot(i: number): Promise<Bot> {
       r.u32();
       r.u16();
       try {
-        applyFrameRecords(r, terrain, nullHandler);
+        applyFrameRecords(r, terrain, handler);
       } catch {
         bot.errors++;
       }
@@ -70,14 +73,14 @@ async function runBot(i: number): Promise<Bot> {
   const inputTimer = setInterval(() => {
     if (Math.random() < 0.05) buttons = (Math.random() < 0.5 ? BTN_LEFT : BTN_RIGHT) | (Math.random() < 0.4 ? BTN_UP : 0);
     if (Math.random() < 0.1) aim = Math.random() * Math.PI * 2;
-    if (Math.random() < 0.01) weapon = Math.floor(Math.random() * 4);
+    if (Math.random() < 0.01) slot = Math.floor(Math.random() * 4);
     const fire = Math.random() < 0.5 ? BTN_FIRE : 0;
     w.reset();
     w.u8(C_INPUT);
     w.u16(++seq & 0xffff);
     w.u8(buttons | fire);
     w.u16(quantizeAim(aim));
-    w.u8(weapon);
+    w.u8(invByte(slot, invVersion, Math.random() < 0.01));
     if (ws.readyState === WebSocket.OPEN) ws.send(w.finish());
   }, 1000 / 30);
   const pingTimer = setInterval(() => {

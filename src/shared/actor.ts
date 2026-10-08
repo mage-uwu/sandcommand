@@ -15,12 +15,16 @@ import {
   GRAVITY,
 } from './constants.ts';
 import type { Terrain } from './terrain.ts';
+import { CLASSES, ClassId } from './body.ts';
 
 export const BTN_LEFT = 1;
 export const BTN_RIGHT = 2;
 export const BTN_UP = 4;
 export const BTN_DOWN = 8;
 export const BTN_FIRE = 16;
+/** Hold to aim down the scope: the view pushes out along the barrel. */
+export const BTN_SCOPE = 32;
+export const BTN_RELOAD = 64;
 
 /** The part of an actor that client-side prediction replays. */
 export interface Body {
@@ -35,10 +39,12 @@ export interface Body {
   legs: number;
   /** Jetpack still attached. */
   jet: boolean;
+  /** Clone class (body.ts): scales run speed, jetpack thrust and fuel use. */
+  cls: number;
 }
 
 export function newBody(x: number, y: number): Body {
-  return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false, legs: 2, jet: true };
+  return { x, y, vx: 0, vy: 0, fuel: ACTOR_MAX_FUEL, onGround: false, jetting: false, legs: 2, jet: true, cls: ClassId.Medium };
 }
 
 export function copyBody(dst: Body, src: Body): void {
@@ -51,6 +57,7 @@ export function copyBody(dst: Body, src: Body): void {
   dst.jetting = src.jetting;
   dst.legs = src.legs;
   dst.jet = src.jet;
+  dst.cls = src.cls;
 }
 
 /** Run speed and jump strength by legs attached (0, 1, 2). */
@@ -80,10 +87,11 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
     }
   }
 
+  const cls = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
   const dir = (buttons & BTN_RIGHT ? 1 : 0) - (buttons & BTN_LEFT ? 1 : 0);
   if (dir !== 0 || b.onGround) {
     const accel = (b.onGround ? ACTOR_GROUND_ACCEL : ACTOR_AIR_ACCEL) * dt;
-    const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] - b.vx;
+    const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] * cls.run - b.vx;
     b.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   }
 
@@ -93,8 +101,8 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
       b.vy = -ACTOR_JUMP_SPEED * LEG_JUMP[b.legs];
       b.onGround = false;
     } else if (b.jet && b.fuel > 0) {
-      b.vy -= ACTOR_JET_ACCEL * dt;
-      b.fuel = Math.max(0, b.fuel - ACTOR_FUEL_BURN * dt);
+      b.vy -= ACTOR_JET_ACCEL * cls.jet * dt;
+      b.fuel = Math.max(0, b.fuel - ACTOR_FUEL_BURN * cls.fuel * dt);
       b.jetting = true;
     }
   } else if (b.onGround) {

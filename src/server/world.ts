@@ -1,12 +1,44 @@
-import { type Body, BTN_FIRE, newBody, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, newBody, stepBody } from '../shared/actor.ts';
+import {
+  CANNON_INTERVAL,
+  CANNON_SPEED,
+  MAX_TANKS,
+  SMG_INTERVAL,
+  SMG_SPEED,
+  SMG_SPREAD,
+  TANK_H,
+  TANK_INTEGRITY,
+  TANK_PARTS,
+  TANK_PART_CENTER,
+  TANK_W,
+  type Tank,
+  TankPart,
+  hasTankPart,
+  newTank,
+  stepTank,
+  tankMuzzle,
+  tankPartAt,
+  tankPoint,
+} from '../shared/tank.ts';
 import {
   CRAFT_H,
+  CRAFT_INERTIA,
   CRAFT_INTEGRITY,
+  CRAFT_PARTS,
+  CRAFT_PART_CENTER,
   CRAFT_W,
   type Craft,
-  type CraftStep,
+  CraftPart,
+  CraftPhase,
+  IMPACT_HARM_SPEED,
   MAX_CRAFTS,
+  craftHalfExtents,
+  craftPartAt,
+  craftToLocal,
+  craftToWorld,
+  hasCraftPart,
   newCraft,
+  newCraftStep,
   stepCraft,
 } from '../shared/craft.ts';
 import {
@@ -24,14 +56,20 @@ import {
   partAt,
   partHealth,
   resetBody,
+  rollClass,
   strike,
   stumps,
 } from '../shared/body.ts';
 import { Writer, rleEncode } from '../shared/codec.ts';
+import { BotBrain, botName } from './bots.ts';
+import { type GroundItem, INV_DROP, INV_MAX, INV_PICKUP, type InvItem, ITEM_LIFE, MAX_ITEMS, NO_WEAPON, PICKUP_R, invByte, invSlot, invVersionBits, newItem, spawnLoadout, stepItem } from '../shared/items.ts';
+import { BuildResult, type BuildBlocker, PIECES, applyBuild, canBuild } from '../shared/build.ts';
 import {
   ACTOR_H,
   ACTOR_MAX_HP,
   ACTOR_W,
+  BLIP_X,
+  BLIP_Y,
   CHUNK,
   CHUNK_BYTES_PER_TICK,
   CHUNK_COUNT,
@@ -46,6 +84,7 @@ import {
   MAX_PLAYERS,
   POS_SCALE,
   RESPAWN_TICKS,
+  TICK_RATE,
   VEL_SCALE,
   VIEW_HALF_H,
   VIEW_HALF_W,
@@ -54,21 +93,38 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, applyCarve, carveExtent, craftFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_TANK, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
   F_FACE_LEFT,
+  F_RELOAD,
+  Phase,
+  F_CLASS_SHIFT,
   F_FIRING,
   F_GROUND,
   F_JET,
   R_ACTORS,
   R_BLIPS,
+  R_BUILD,
+  R_ROUND,
+  R_WAVE,
+  R_TEAMS,
+  R_TANKS,
+  R_TANK_SELF,
+  R_TANK_PART,
+  R_TANK_BOOM,
+  GameMode,
+  Team,
+  R_ITEMS,
+  R_ITEMS_GONE,
   R_CARVE,
   R_CHAT,
   R_CHUNK,
   R_CRAFTS,
   R_CRAFT_BOOM,
+  R_CRAFT_PART,
+  R_CRAFT_SELF,
   R_DETACH,
   R_HIT,
   R_KILL,
@@ -81,11 +137,14 @@ import {
   S_FRAME,
   Y_BIAS,
   dequantizeAim,
+  quantizeAim,
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { generateWorld } from '../shared/worldgen.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { generateWorld, lastComplexes } from '../shared/worldgen.ts';
+import type { Fortress } from '../shared/structures.ts';
+import { ClassId } from '../shared/body.ts';
 
 export interface ClientLink {
   send(data: Uint8Array): void;
@@ -95,7 +154,8 @@ export interface InputCmd {
   seq: number;
   buttons: number;
   aim: number; // quantized u16
-  weapon: number;
+  /** Inventory selection and pick-up/drop keys (see invByte in items.ts). */
+  inv: number;
 }
 
 export class Player {
@@ -111,13 +171,48 @@ export class Player {
   alive = false;
   hp = ACTOR_MAX_HP;
   aimQ = 0;
-  weapon = 0;
+  /** Weapon in hand (WeaponId of inv[slot]), NO_WEAPON with empty hands. */
+  weapon = NO_WEAPON;
+  /** What this clone carries: each weapon with its own magazine. */
+  inv: InvItem[] = [];
+  slot = 0;
+  /** Bumped whenever the inventory changes under the client (pick-up, drop, death, respawn). */
+  invVersion = 0;
+  /** Latest inventory byte from the client, and the one before (for key edges). */
+  invCmd = 0;
+  prevInv = 0;
+  /** Ticks until the next shot may leave (fractional: rate of fire is exact on average). */
   cooldown = 0;
+  /** Ticks left on the current weapon's reload, 0 = not reloading. */
+  reloadLeft = 0;
+  /** Item in hand last tick (switching cancels a reload). */
+  heldItem: InvItem | null = null;
+  /** Hasn't been sent the map seed yet (newcomer). */
+  needsMap = true;
+  /** Server-side bot brain (null for humans). */
+  bot: BotBrain | null = null;
+  /** FFA: waves won; in this wave; waiting for its drop rocket; who it's watching while out (255 none). */
+  wins = 0;
+  waveKills = 0;
+  inWave = false;
+  pendingSpawn = false;
+  spectate = 255;
+  /** Last Team Standing: Team.Red / Team.Green for this wave, Team.None outside one. */
+  team: number = Team.None;
+  /** Tank slot this clone is driving, -1 on foot. */
+  tank = -1;
+  /** Last team table this client was sent (World.teamsRev). */
+  teamsSeen = -1;
+  /** Latest materializer request, applied on this player's next tick. */
+  buildReq: { piece: number; gx: number; gy: number } | null = null;
+  /** Buttons last tick, for semi-auto triggers and the reload key. */
+  prevButtons = 0;
   respawn = 1;
   firing = false;
   kills = 0;
   deaths = 0;
-  gold = 0;
+  /** Gold banked: dug up, picked from the dead, spent on fortifications. Starts with enough for a bunker. */
+  gold = STARTING_GOLD;
   inputs: InputCmd[] = [];
   buttons = 0;
   ack = 0;
@@ -129,6 +224,8 @@ export class Player {
   lastChat = 0;
   /** Projectile ids this client was told about (for end events). */
   readonly seenProj = new Set<number>();
+  /** Ground items this client knows about, and the revision it was last sent. */
+  readonly knownItems = new Map<number, number>();
 
   constructor(
     readonly id: number,
@@ -174,8 +271,14 @@ export class World {
   readonly actors = new ActorField(ACTOR_W, ACTOR_H);
   /** Drop rockets in flight, by slot. */
   readonly crafts: (Craft | null)[] = new Array(MAX_CRAFTS).fill(null);
-  private readonly craftStep: CraftStep = { crashed: false, release: false, gone: false };
-  private craftRecords: ProjRecord[] = [];
+  /** Tanks: dropped by parachute, driven by whoever climbs in. */
+  readonly tanks: (Tank | null)[] = new Array(MAX_TANKS).fill(null);
+  /** Drop tanks into each wave (round rooms; sandbox rooms only on request). */
+  readonly tankDrops: boolean;
+  private readonly tankMz = { x: 0, y: 0, a: 0 };
+  private readonly craftStep = newCraftStep();
+  private readonly pt = { x: 0, y: 0 };
+  private readonly ext = { x: 0, y: 0 };
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
   readonly projectiles = new Projectiles(4096);
@@ -207,9 +310,73 @@ export class World {
   lastStepMs = 0;
   lastReplicateMs = 0;
 
-  constructor(seed = 1337) {
+  /** Game mode: 'sandbox' (respawn forever) or 'ffa' (one life per wave, last one standing wins). */
+  readonly mode: 'sandbox' | 'ffa';
+  /** Wave modes the round room cycles through (wave 1 plays the first). */
+  readonly rotation: readonly number[];
+  /** Bumped whenever the team table changes (clients are re-sent it). */
+  teamsRev = 0;
+  /** This map has the two Regicide fortresses (clients build them too). */
+  mapFortresses = false;
+  /** Regicide: each team's fortress (by team), and each team's king (player id, 255 none). */
+  fortresses: Fortress[] = [];
+  readonly kings = [255, 255];
+  /** FFA: fill the room with bots up to this many clones (humans count first). */
+  readonly botFill: number;
+  /** Seed of the current map (each wave gets a new one). */
+  mapSeed: number;
+  /** FFA round state. */
+  phase: number = Phase.Waiting;
+  phaseTimer = 0;
+  wave = 0;
+  winner = 255;
+  /** Pre-encoded R_WAVE record to open every frame of the tick a new wave's map is made. */
+  private waveRecord: Uint8Array | null = null;
+
+  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[]; tanks?: boolean } = {}) {
     this.rng = new Rng(seed ^ 0x9e3779b9);
-    generateWorld(this.terrain, seed);
+    this.mode = opts.mode ?? 'sandbox';
+    this.tankDrops = opts.tanks ?? this.mode === 'ffa';
+    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts, GameMode.Regicide];
+    this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
+    this.mapSeed = seed >>> 0;
+    this.makeMap(this.mode === 'ffa' && this.modeOfWave(1) === GameMode.Regicide);
+    this.sealMap();
+  }
+
+  /** Chunk versions when the current map was generated (a chunk still at it is untouched). */
+  private readonly pristine = new Uint32Array(CHUNK_COUNT);
+  /** R_WAVE for the current map: its seed and every chunk's hash as generated. */
+  private mapRecord: Uint8Array | null = null;
+
+  /**
+   * The terrain was rewritten wholesale outside the replication path (tests
+   * building an arena): every chunk is stale for every client, and newcomers
+   * can't make this map from a seed, so they download it until the next wave.
+   */
+  terrainReplaced(): void {
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) this.chunkVersion[ci]++;
+    for (const p of this.players) p?.known.fill(-1);
+    this.mapRecord = null;
+  }
+
+  /** Generate the map for `mapSeed` (with the Regicide fortresses if asked) and note the fortresses. */
+  private makeMap(fortresses: boolean): void {
+    this.mapFortresses = fortresses;
+    generateWorld(this.terrain, this.mapSeed, fortresses);
+    this.fortresses = [];
+    for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
+  }
+
+  /** Remember the freshly generated map, so newcomers can make it themselves instead of downloading it. */
+  private sealMap(): void {
+    this.pristine.set(this.chunkVersion);
+    const w = new Writer(8 + CHUNK_COUNT * 4);
+    w.u8(R_WAVE);
+    w.u32(this.mapSeed);
+    w.u8(this.mapFortresses ? 1 : 0);
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) w.u32(this.terrain.chunkHash(ci));
+    this.mapRecord = w.finish();
   }
 
   get playerCount(): number {
@@ -219,12 +386,51 @@ export class World {
   }
 
   addPlayer(name: string, link: ClientLink): Player | null {
+    let id = this.players.indexOf(null);
+    if (id < 0) {
+      // Full of bots: a human takes a bot's place (a dead one if possible).
+      const bot = this.players.find((o) => o?.bot && !o.alive) ?? this.players.find((o) => o?.bot);
+      if (!bot) return null;
+      this.removePlayer(bot.id);
+      id = bot.id;
+    }
+    const clean = name.replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 16) || `Clone${id}`;
+    return this.join(id, clean, link, null);
+  }
+
+  /** A server-side bot takes a free slot (FFA fills empty slots with them). */
+  addBot(): Player | null {
     const id = this.players.indexOf(null);
     if (id < 0) return null;
-    const clean = name.replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 16) || `Clone${id}`;
+    return this.join(id, botName(this.rng), { send() {} }, new BotBrain(this.rng.nextU32()));
+  }
+
+  get humanCount(): number {
+    let n = 0;
+    for (const p of this.players) if (p && !p.bot) n++;
+    return n;
+  }
+
+  private join(id: number, clean: string, link: ClientLink, bot: BotBrain | null): Player {
     const p = new Player(id, clean, link);
+    p.bot = bot;
+    // In FFA you join between waves (spectating until the next one starts).
+    if (this.mode === 'ffa') p.respawn = 0;
     this.players[id] = p;
+    if (this.regicideLive) {
+      // Regicide has reinforcements: join the smaller side and drop in.
+      let red = 0;
+      let green = 0;
+      for (const o of this.players) if (o && o !== p && o.team === Team.Red) red++;
+      else if (o && o !== p && o.team === Team.Green) green++;
+      p.team = red <= green ? Team.Red : Team.Green;
+      p.inWave = true;
+      p.pendingSpawn = true;
+      p.respawn = REGICIDE_RESPAWN_TICKS;
+    }
+    this.teamsRev++; // whoever had this slot before may have had a team
     this.writeRoster(this.broadcast, p, true);
+    if (bot) return p;
     // The newcomer needs the whole roster; it gets it in its first frame.
     const w = this.tmp.reset();
     for (const o of this.players) if (o && o !== p) this.writeRoster(w, o, true);
@@ -232,13 +438,332 @@ export class World {
     return p;
   }
 
+  // ---------------------------------------------------------------- Last Man Standing
+
+  /** Clones still in the wave: alive, riding in, or waiting for their rocket. */
+  remaining(team = -1): number {
+    let n = 0;
+    for (const p of this.players) if (p && this.inPlay(p) && (team < 0 || p.team === team)) n++;
+    return n;
+  }
+
+  private inPlay(p: Player): boolean {
+    return p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn);
+  }
+
+  /** Mode of wave `n` (1-based). */
+  modeOfWave(n: number): number {
+    return this.rotation[(Math.max(1, n) - 1) % this.rotation.length];
+  }
+
+  /** Mode of the wave being played, or (between waves) of the next one. */
+  get waveMode(): number {
+    if (this.mode !== 'ffa') return GameMode.Lms;
+    return this.modeOfWave(this.phase === Phase.Live || this.phase === Phase.Victory ? this.wave : this.wave + 1);
+  }
+
+  /** Teammates can't hurt each other (your own blasts still hurt you). */
+  friendly(by: number, victim: Player): boolean {
+    if (victim.team === Team.None || by === victim.id) return false;
+    const a = by >= 0 && by < MAX_PLAYERS ? this.players[by] : null;
+    return !!a && a.team === victim.team;
+  }
+
+  /**
+   * One life each, last one standing wins:
+   * waiting (fewer than two clones) -> countdown -> live -> victory -> a new
+   * wave on a fresh map. Empty slots are filled with bots between waves.
+   */
+  private stepRound(): void {
+    if (this.phase === Phase.Waiting || this.phase === Phase.Victory) this.fillBots();
+    switch (this.phase) {
+      case Phase.Waiting:
+        if (this.humanCount > 0 && this.playerCount >= 2) this.setPhase(Phase.Countdown, COUNTDOWN_TICKS);
+        break;
+      case Phase.Countdown:
+        if (this.playerCount < 2) this.setPhase(Phase.Waiting, 0);
+        else if (--this.phaseTimer <= 0) this.startWave();
+        break;
+      case Phase.Live: {
+        // Last one standing; or, when time runs out, the survivor with the
+        // most kills this wave (so nobody can win by hiding in a bunker).
+        const timeUp = --this.phaseTimer <= 0;
+        if (this.modeOfWave(this.wave) === GameMode.Lts) {
+          this.stepTeamRound(timeUp);
+          break;
+        }
+        if (this.modeOfWave(this.wave) === GameMode.Regicide) {
+          this.stepRegicide(timeUp);
+          break;
+        }
+        if (this.remaining() <= 1 || timeUp) {
+          let best: Player | null = null;
+          for (const p of this.players) {
+            if (!p || !p.inWave || !(p.alive || p.delivering >= 0 || p.pendingSpawn)) continue;
+            if (!best || p.waveKills > best.waveKills || (p.waveKills === best.waveKills && p.hp > best.hp)) best = p;
+          }
+          this.winner = best ? best.id : 255;
+          if (best) best.wins++;
+          this.setPhase(Phase.Victory, VICTORY_TICKS);
+        }
+        break;
+      }
+      case Phase.Victory:
+        if (--this.phaseTimer <= 0) {
+          this.newMap();
+          this.setPhase(this.playerCount >= 2 ? Phase.Countdown : Phase.Waiting, COUNTDOWN_TICKS);
+        }
+        break;
+    }
+  }
+
+  /**
+   * Last Team Standing: the last team with a clone standing wins, every member
+   * scoring the win (the fallen too). When time runs out, the team with
+   * more clones left; then the one with more kills this wave.
+   */
+  private stepTeamRound(timeUp: boolean): void {
+    const red = this.remaining(Team.Red);
+    const green = this.remaining(Team.Green);
+    if (red > 0 && green > 0 && !timeUp) return;
+    let winner = 255;
+    if (red !== green) winner = red > green ? Team.Red : Team.Green;
+    else if (red > 0) {
+      const kills = [0, 0];
+      for (const p of this.players) if (p && p.inWave && p.team !== Team.None) kills[p.team] += p.waveKills;
+      if (kills[0] !== kills[1]) winner = kills[0] > kills[1] ? Team.Red : Team.Green;
+    }
+    this.winner = winner;
+    if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /**
+   * Regicide: a king falls, the other side wins (every member scores). A
+   * king who leaves the game hands the crown to a living teammate. When time
+   * runs out, the side with more kills this wave takes it.
+   */
+  private stepRegicide(timeUp: boolean): void {
+    for (const team of [Team.Red, Team.Green]) {
+      const k = this.kings[team];
+      if (k !== 255 && this.players[k]) continue;
+      // Abdicated (left the game): crown someone else, where they stand.
+      const heir = this.players.find((p) => p && p.team === team && p.alive);
+      this.kings[team] = heir ? heir.id : 255;
+    }
+    let winner = 255;
+    let fallen = false;
+    for (const team of [Team.Red, Team.Green]) {
+      const k = this.kings[team];
+      const king = k !== 255 ? this.players[k] : null;
+      if (!king || !king.alive) {
+        winner = team === Team.Red ? Team.Green : Team.Red;
+        fallen = true;
+      }
+    }
+    if (!fallen && !timeUp) return;
+    if (!fallen || (!this.kingAlive(Team.Red) && !this.kingAlive(Team.Green))) {
+      const kills = [0, 0];
+      for (const p of this.players) if (p && p.inWave && p.team !== Team.None) kills[p.team] += p.waveKills;
+      winner = kills[0] === kills[1] ? 255 : kills[0] > kills[1] ? Team.Red : Team.Green;
+    }
+    this.winner = winner;
+    if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  private kingAlive(team: number): boolean {
+    const k = this.kings[team];
+    return k !== 255 && !!this.players[k]?.alive;
+  }
+
+  /** A Regicide wave is being fought right now. */
+  get regicideLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Regicide;
+  }
+
+  /** Is this clone a king (this wave)? */
+  isKing(p: Player): boolean {
+    return p.team !== Team.None && this.kings[p.team] === p.id;
+  }
+
+  /**
+   * Regicide opening: a king for each side (a heavy, deep in its vault), and
+   * every soldier already at their posts in and around the fortress. Only
+   * reinforcements come by drop rocket.
+   */
+  private startRegicide(): void {
+    const forts = this.fortresses;
+    for (const team of [Team.Red, Team.Green]) {
+      const side = this.players.filter((p): p is Player => !!p && p.team === team);
+      const king = side.length ? side[this.rng.int(side.length)] : null;
+      this.kings[team] = king ? king.id : 255;
+      const fort = forts[team];
+      for (const p of side) {
+        p.pendingSpawn = false;
+        if (!fort) {
+          p.pendingSpawn = true; // no fortress (can't happen): drop in instead
+          continue;
+        }
+        const spot = p === king ? fort.king : this.freeSpot(fort);
+        this.placeClone(p, spot.x - ACTOR_W / 2 + (p === king ? 0 : this.rng.range(-3, 3)), spot.y - ACTOR_H, 0, 0);
+        if (p === king) {
+          resetBody(p.parts, ClassId.Heavy);
+          p.body.cls = p.parts.cls;
+        }
+      }
+    }
+    this.teamsRev++;
+  }
+
+  /** A fortress spawn spot with room for a clone. */
+  private freeSpot(fort: Fortress): { x: number; y: number } {
+    for (let n = 0; n < 12; n++) {
+      const s = fort.spawns[this.rng.int(fort.spawns.length)];
+      const x = Math.floor(s.x - ACTOR_W / 2);
+      const y = Math.floor(s.y - ACTOR_H);
+      if (!this.terrain.rectSolid(x, y, x + ACTOR_W - 1, y + ACTOR_H - 1)) return s;
+    }
+    return fort.spawns[0];
+  }
+
+  /**
+   * Split everyone into two even teams: humans dealt out first (so people
+   * end up on both sides), then bots evening up the numbers.
+   */
+  private drawTeams(tdm: boolean): void {
+    const order: Player[] = [];
+    for (const p of this.players) if (p) order.push(p);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = this.rng.int(i + 1);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    order.sort((a, b) => (a.bot ? 1 : 0) - (b.bot ? 1 : 0));
+    const first = this.rng.int(2);
+    order.forEach((p, i) => (p.team = tdm ? (first + i) & 1 : Team.None));
+    this.teamsRev++;
+  }
+
+  private setPhase(phase: number, ticks: number): void {
+    this.phase = phase;
+    this.phaseTimer = ticks;
+  }
+
+  /** Bots take every slot no human has (while there is a human to play with). */
+  private fillBots(): void {
+    if (this.botFill === 0 || this.humanCount === 0) return;
+    while (this.playerCount < this.botFill && this.addBot()) {
+      // keep filling
+    }
+  }
+
+  /** Everyone present is in; rockets come in staggered over a couple of seconds. */
+  private startWave(): void {
+    this.wave++;
+    this.winner = 255;
+    const mode = this.modeOfWave(this.wave);
+    this.drawTeams(mode === GameMode.Lts || mode === GameMode.Regicide);
+    this.kings[0] = this.kings[1] = 255;
+    for (const p of this.players) {
+      if (!p) continue;
+      p.inWave = true;
+      p.pendingSpawn = true;
+      p.respawn = 1 + this.rng.int(60);
+      p.spectate = 255;
+      p.waveKills = 0;
+    }
+    // One or two tanks come down by parachute for whoever gets to them first.
+    if (this.tankDrops) this.dropTanks(1 + this.rng.int(2));
+    if (mode === GameMode.Regicide) this.startRegicide();
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : WAVE_TICKS);
+  }
+
+  /**
+   * A fresh battlefield for the next wave: new terrain from a new seed, and
+   * nothing left over (rockets, dropped weapons, debris in flight). Clients
+   * regenerate the same map from the seed; every chunk's hash rides along so
+   * any chunk that comes out different (engines may round trig differently)
+   * is simply re-sent.
+   */
+  private newMap(): void {
+    this.mapSeed = this.rng.nextU32();
+    // A Regicide wave is fought over two fortresses built into the map.
+    this.makeMap(this.modeOfWave(this.wave + 1) === GameMode.Regicide);
+    this.kings[0] = this.kings[1] = 255;
+    this.crafts.fill(null);
+    this.tanks.fill(null);
+    this.items.length = 0;
+    this.grains.n = 0;
+    this.projectiles.n = 0;
+    this.pendingPixels.clear();
+    for (let ci = 0; ci < CHUNK_COUNT; ci++) this.chunkVersion[ci]++;
+    for (const p of this.players) {
+      if (!p) continue;
+      p.alive = false;
+      p.inWave = false;
+      p.team = Team.None;
+      p.tank = -1;
+      p.pendingSpawn = false;
+      p.delivering = -1;
+      p.inv = [];
+      this.invChanged(p);
+      p.gold = STARTING_GOLD;
+      p.spectate = 255;
+      p.knownItems.clear();
+      p.seenProj.clear();
+      // The client regenerates this map itself (and asks again for any chunk whose hash differs).
+      for (let ci = 0; ci < CHUNK_COUNT; ci++) p.known[ci] = this.chunkVersion[ci];
+    }
+    this.teamsRev++;
+    this.sealMap();
+    this.waveRecord = this.mapRecord;
+  }
+
+  /**
+   * Out of the wave: watch someone still in it (its killer first). A fresh
+   * click moves on to the next clone; the view, and so what this client is
+   * sent, follows whoever it's watching.
+   */
+  private spectateFrom(p: Player, prev: number): void {
+    let t = p.spectate !== 255 ? this.players[p.spectate] : null;
+    const next = p.buttons & BTN_FIRE && !(prev & BTN_FIRE);
+    if (!t || !t.alive || next) {
+      p.spectate = 255;
+      // On a team, follow your own side while any of it stands.
+      for (let pass = p.team === Team.None ? 1 : 0; pass < 2 && p.spectate === 255; pass++) {
+        for (let k = 1; k <= MAX_PLAYERS; k++) {
+          const o = this.players[(Math.max(0, t ? t.id : p.id) + k) % MAX_PLAYERS];
+          if (o && o.alive && o !== p && (pass === 1 || o.team === p.team)) {
+            p.spectate = o.id;
+            break;
+          }
+        }
+      }
+      t = p.spectate !== 255 ? this.players[p.spectate] : null;
+    }
+    if (t) {
+      p.camX = t.cx;
+      p.camY = t.cy;
+    }
+  }
+
   private readonly pendingRoster = new Map<number, Uint8Array>();
 
   removePlayer(id: number): void {
     const p = this.players[id];
     if (!p) return;
+    if (p.alive) this.dropAll(p); // a deserter's kit stays behind
+    this.leaveTank(p, false);
     this.players[id] = null;
     this.pendingRoster.delete(id);
+    // An empty rocket flies itself home.
+    for (const c of this.crafts) {
+      if (c && c.passenger === id) {
+        c.passenger = 255;
+        c.phase = CraftPhase.Ascend;
+      }
+      if (c && c.delivered === id) c.delivered = 255;
+    }
     this.writeRoster(this.broadcast, p, false);
   }
 
@@ -254,6 +779,12 @@ export class World {
     if (!p) return;
     p.inputs.push(cmd);
     if (p.inputs.length > 12) p.inputs.shift();
+  }
+
+  /** A client asked to materialize a fortification piece (validated on its next tick). */
+  build(id: number, piece: number, gx: number, gy: number): void {
+    const p = this.players[id];
+    if (p) p.buildReq = { piece, gx, gy };
   }
 
   resync(id: number, ci: number): void {
@@ -363,7 +894,7 @@ export class World {
     for (const ci of this.gridUsed) this.grid[ci].length = 0;
     this.gridUsed.length = 0;
     for (const p of this.players) {
-      if (!p || !p.alive) continue;
+      if (!p || !p.alive || p.tank >= 0) continue; // drivers are inside their tank's armour
       const x0 = Math.floor(p.body.x);
       const y0 = Math.floor(p.body.y);
       forChunksInRect(x0, y0, x0 + ACTOR_W - 1, y0 + ACTOR_H - 1, (ci) => {
@@ -396,16 +927,31 @@ export class World {
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
-      const t = segmentBox(x0, y0, dx, dy, c.x, c.y, c.x + CRAFT_W, c.y + CRAFT_H);
+      // In the rocket's own frame the hull is an axis-aligned box.
+      const a = craftToLocal(c, x0, y0, this.segA);
+      const b = craftToLocal(c, x1, y1, this.segB);
+      const t = segmentBox(a.x, a.y, b.x - a.x, b.y - a.y, -CRAFT_W / 2, -CRAFT_H / 2, CRAFT_W / 2, CRAFT_H / 2);
       if (t >= 0 && t < bestT) {
         bestT = t;
         best = CRAFT_ID_BASE + k;
+      }
+    }
+    // Tanks: axis-aligned boxes. A tank's own guns never hit it.
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || (owner === t.pilot && owner !== 255)) continue;
+      const tt = segmentBox(x0, y0, dx, dy, t.x, t.y, t.x + TANK_W, t.y + TANK_H);
+      if (tt >= 0 && tt < bestT) {
+        bestT = tt;
+        best = TANK_ID_BASE + k;
       }
     }
     out.t = bestT;
     return best;
   };
 
+  private readonly segA = { x: 0, y: 0 };
+  private readonly segB = { x: 0, y: 0 };
   private readonly strikeScratch: StrikeResult = newStrike();
 
   private facingLeft(p: Player): boolean {
@@ -468,9 +1014,22 @@ export class World {
     victim.alive = false;
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
+    this.leaveTank(victim, false);
+    // Regicide: soldiers come back by drop rocket after a while; the king never does.
+    if (this.regicideLive && victim.inWave && !this.isKing(victim)) {
+      victim.pendingSpawn = true;
+      victim.respawn = REGICIDE_RESPAWN_TICKS;
+    }
+    // Everything it carried spills where it fell, for anyone to take.
+    this.dropAll(victim);
+    // Out of the wave: watch whoever did it.
+    if (this.mode === 'ffa') victim.spectate = attacker !== victim.id && this.players[attacker]?.alive ? attacker : 255;
     victim.deaths++;
     const killer = this.players[attacker];
-    if (killer && killer !== victim) killer.kills++;
+    if (killer && killer !== victim) {
+      killer.kills++;
+      killer.waveKills++;
+    }
     // The clone gibs. Gibs are cosmetic and simulated by each client from this
     // record; the gold it spills is real terrain, thrown from `seed` so clients
     // can mirror the shower without it being streamed.
@@ -499,14 +1058,23 @@ export class World {
     const kind = pr.kind[i];
     const owner = pr.owner[i];
     const def = PROJ[kind];
-    if (actor >= CRAFT_ID_BASE) {
+    if (actor >= TANK_ID_BASE) {
+      const t = this.tanks[actor - TANK_ID_BASE];
+      if (t) {
+        const rvx = pr.vx[i] - t.vx;
+        const rvy = pr.vy[i] - t.vy;
+        const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
+        this.hitTank(actor - TANK_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
+      }
+    } else if (actor >= CRAFT_ID_BASE) {
       const c = this.crafts[actor - CRAFT_ID_BASE];
       if (c) {
         const rvx = pr.vx[i] - c.vx;
         const rvy = pr.vy[i] - c.vy;
-        this.hurtCraft(actor - CRAFT_ID_BASE, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
-        c.vx += (rvx * def.mass) / CRAFT_MASS;
-        c.vy += (rvy * def.mass) / CRAFT_MASS;
+        const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
+        // Off-centre hits spin it.
+        this.pushCraft(c, x, y, (rvx * def.mass) / CRAFT_MASS, (rvy * def.mass) / CRAFT_MASS);
+        this.hitCraft(actor - CRAFT_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
       }
     } else if (actor >= 0) {
       // Direct hit: penetrate whichever part the projectile entered.
@@ -521,14 +1089,14 @@ export class World {
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
-      strike(v.parts, part, energy, def.damage, res);
+      if (!this.friendly(owner, v)) strike(v.parts, part, energy, def.damage, res);
       v.body.vx += (rvx * def.mass) / 8;
       v.body.vy += (rvy * def.mass) / 8;
       this.applyStrike(v, res, owner, kind, x, y);
     }
     const seed = this.rng.nextU32();
     if (detonate) {
-      if (def.carveR > 0 && (actor < 0 || kind !== ProjKind.Bullet)) {
+      if (def.carveR > 0 && (actor < 0 || !def.ballistic)) {
         this.carve(x, y, def.carveR, def.coreR, def.debris, owner);
       }
       if (def.splashR > 0) {
@@ -539,8 +1107,10 @@ export class World {
         this.grains.blast(x, y, def.splashR * 1.6, BLAST_IMPULSE);
         explosionFragments(this.grains, x, y, kind, owner, new Rng(seed));
         this.splashCrafts(x, y, def.splashR, def.splashDamage, owner);
+        this.splashTanks(x, y, def.splashR, def.splashDamage, owner);
+        this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
-          if (!p || !p.alive) continue;
+          if (!p || !p.alive || p.tank >= 0 || this.friendly(owner, p)) continue;
           const dx = p.cx - x;
           const dy = p.cy - y;
           const d = Math.sqrt(dx * dx + dy * dy);
@@ -572,32 +1142,338 @@ export class World {
     this.projEnds.push({ bytes: w.finish(), id: pr.id[i], x, y });
   };
 
-  private fire(p: Player): void {
+  /**
+   * The trigger, magazine and reload for one clone this tick, all from its
+   * weapon's row in WEAPONS: rate of fire (fractional cooldown), semi or
+   * full auto, clip size and reload time. Switching weapons cancels a
+   * reload; an empty magazine reloads itself; R reloads early.
+   */
+  private handleWeapon(p: Player, prev: number): void {
+    const item = p.inv[p.slot];
+    if (item !== p.heldItem) {
+      p.heldItem = item ?? null;
+      p.reloadLeft = 0;
+    }
+    if (!item) {
+      p.cooldown = Math.max(0, p.cooldown - 1);
+      return;
+    }
+    const def = WEAPONS[item.weapon];
+    const pressed = (p.buttons & BTN_FIRE) !== 0;
+    const fresh = pressed && !(prev & BTN_FIRE);
+    if (p.reloadLeft > 0 && --p.reloadLeft === 0) item.ammo = def.clip;
+    if (def.clip > 0 && p.reloadLeft === 0) {
+      const asked = p.buttons & BTN_RELOAD && !(prev & BTN_RELOAD) && item.ammo < def.clip;
+      if (asked || (item.ammo === 0 && pressed)) this.startReload(p);
+    }
+    p.cooldown -= 1;
+    const want = def.proj !== PROJ_BUILD && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
+    if (want && p.cooldown <= 0) {
+      this.fire(p, def);
+      p.firing = true;
+      // One-handed (off arm gone): slower to recover.
+      p.cooldown += fireInterval(def) * (p.mob.oneHanded ? 1.6 : 1);
+      if (def.clip > 0 && --item.ammo === 0) this.startReload(p);
+    }
+    // Only carry the fractional remainder while the trigger keeps firing.
+    if (p.cooldown < 0 && !want) p.cooldown = 0;
+  }
+
+  // ------------------------------------------------------------ inventory
+
+  /**
+   * Ground items for one client: an item's full state when it comes into
+   * view or changes (it lands, a blast kicks it), and a gone notice when it
+   * is taken, expires or drifts far out of view. In between, the client
+   * simulates it with the same stepItem, so a resting gun costs nothing.
+   */
+  private replicateItems(p: Player, w: Writer, vx0: number, vy0: number, vx1: number, vy1: number): void {
+    const known = p.knownItems;
+    const gone = this.goneScratch;
+    gone.length = 0;
+    for (const id of this.itemsGone) if (known.delete(id)) gone.push(id);
+    let n = 0;
+    let nAt = -1;
+    const M = 120; // send a little before it's on screen
+    for (const it of this.items) {
+      const sent = known.get(it.id);
+      const near = it.x >= vx0 - M && it.x <= vx1 + M && it.y >= vy0 - M && it.y <= vy1 + M;
+      if (!near) {
+        // Well out of view: let the client forget it (it is resent on return).
+        if (sent !== undefined && (it.x < vx0 - 3 * M || it.x > vx1 + 3 * M || it.y < vy0 - 3 * M || it.y > vy1 + 3 * M)) {
+          known.delete(it.id);
+          gone.push(it.id);
+        }
+        continue;
+      }
+      if (sent === it.rev || n === 255) continue;
+      if (n === 0) {
+        w.u8(R_ITEMS);
+        nAt = w.pos;
+        w.u8(0);
+      }
+      n++;
+      known.set(it.id, it.rev);
+      w.u16(it.id);
+      w.u8(it.weapon);
+      w.u8(it.ammo);
+      w.u8((it.rest ? 1 : 0) | (it.left ? 2 : 0));
+      w.f64(it.x);
+      w.f64(it.y);
+      w.f64(it.vx);
+      w.f64(it.vy);
+    }
+    if (n > 0) w.buf[nAt] = n;
+    for (let i = 0; i < gone.length; i += 255) {
+      const k = Math.min(255, gone.length - i);
+      w.u8(R_ITEMS_GONE);
+      w.u8(k);
+      for (let j = 0; j < k; j++) w.u16(gone[i + j]);
+    }
+  }
+
+  private readonly goneScratch: number[] = [];
+
+
+  /** Ground items: dropped weapons, lying around (and bouncing) for anyone to take. */
+  readonly items: (GroundItem & { age: number; rev: number })[] = [];
+  private nextItemId = 1;
+  /** Ids of items removed this tick (picked up, expired), for replication. */
+  private readonly itemsGone: number[] = [];
+
+  /** Re-derive what's in hand after the inventory or slot changed. */
+  private syncHeld(p: Player): void {
+    if (p.slot >= p.inv.length) p.slot = Math.max(0, p.inv.length - 1);
+    p.weapon = p.inv[p.slot]?.weapon ?? NO_WEAPON;
+  }
+
+  /** The inventory changed under the client: bump the version so stale selections are ignored. */
+  private invChanged(p: Player): void {
+    p.invVersion = (p.invVersion + 1) & 255;
+    this.syncHeld(p);
+  }
+
+  /**
+   * Apply the client's inventory byte: the selected slot (if chosen from the
+   * current inventory version), and the rising edges of pick-up and drop.
+   */
+  private handleInventory(p: Player): void {
+    const b = p.invCmd;
+    const prev = p.prevInv;
+    p.prevInv = b;
+    if (invVersionBits(b) === (p.invVersion & 3) && invSlot(b) < p.inv.length && invSlot(b) !== p.slot) {
+      p.slot = invSlot(b);
+      this.syncHeld(p);
+    }
+    // The pick-up key also climbs into an empty tank, and back out.
+    if (b & INV_PICKUP && !(prev & INV_PICKUP)) {
+      if (p.tank >= 0) this.leaveTank(p, true);
+      else if (!this.boardTank(p)) this.pickUp(p);
+    }
+    if (b & INV_DROP && !(prev & INV_DROP) && p.tank < 0) this.dropHeld(p);
+  }
+
+  /**
+   * Give a clone a weapon and put it in its hand (tests, and handy for admin
+   * tools). Returns the inventory byte a client would now send for it.
+   */
+  equip(p: Player, weapon: number): number {
+    let i = p.inv.findIndex((it) => it.weapon === weapon);
+    if (i < 0) {
+      if (p.inv.length >= INV_MAX) p.inv.pop();
+      p.inv.push(newItem(weapon));
+      i = p.inv.length - 1;
+    }
+    if (i !== p.slot || p.weapon !== weapon) {
+      p.slot = i;
+      this.invChanged(p);
+    }
+    return invByte(p.slot, p.invVersion);
+  }
+
+  private spawnItem(weapon: number, ammo: number, x: number, y: number, vx: number, vy: number): void {
+    // Never inside terrain: back up to the nearest open cell above.
+    for (let k = 0; k < 16 && this.terrain.isSolid(Math.floor(x), Math.floor(y)); k++) y -= 1;
+    this.items.push({ id: this.nextItemId, weapon, ammo, x, y, vx, vy, rest: false, left: vx < 0, age: 0, rev: 0 });
+    this.nextItemId = (this.nextItemId % 65535) + 1;
+    if (this.items.length > MAX_ITEMS) this.removeItem(0); // the oldest goes
+  }
+
+  private removeItem(i: number): void {
+    this.itemsGone.push(this.items[i].id);
+    this.items.splice(i, 1);
+  }
+
+  /** Throw the weapon in hand away, along the aim. */
+  private dropHeld(p: Player): void {
+    const it = p.inv[p.slot];
+    if (!it) return;
+    p.inv.splice(p.slot, 1);
+    const aim = dequantizeAim(p.aimQ);
+    this.spawnItem(it.weapon, it.ammo, p.body.x + SHOULDER_X, p.body.y + SHOULDER_Y, p.body.vx * 0.5 + Math.cos(aim) * 140, p.body.vy * 0.5 + Math.sin(aim) * 140 - 60);
+    this.invChanged(p);
+  }
+
+  /** Pick up the nearest weapon in reach; with full hands, swap the one held for it. */
+  private pickUp(p: Player): void {
+    let best = -1;
+    let bestD = PICKUP_R * PICKUP_R;
+    for (let i = 0; i < this.items.length; i++) {
+      const it = this.items[i];
+      const d = (it.x - p.cx) ** 2 + (it.y - p.cy) ** 2;
+      if (d <= bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best < 0) return;
+    const it = this.items[best];
+    this.removeItem(best);
+    if (p.inv.length >= INV_MAX) {
+      const held = p.inv.splice(p.slot, 1)[0];
+      this.spawnItem(held.weapon, held.ammo, it.x, it.y - 2, 0, -40);
+    }
+    p.inv.push({ weapon: it.weapon, ammo: it.ammo });
+    p.slot = p.inv.length - 1;
+    this.invChanged(p);
+  }
+
+  /** Death (or leaving): the whole kit spills where the clone was. */
+  private dropAll(p: Player): void {
+    for (const it of p.inv) {
+      this.spawnItem(it.weapon, it.ammo, p.cx, p.cy, p.body.vx * 0.5 + this.rng.range(-110, 110), p.body.vy * 0.5 - this.rng.range(60, 200));
+    }
+    p.inv = [];
+    this.invChanged(p);
+  }
+
+  private stepItems(): void {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i];
+      if (++it.age > ITEM_LIFE) {
+        this.removeItem(i);
+        continue;
+      }
+      const wasRest = it.rest;
+      stepItem(it, this.terrain, DT);
+      // Landing is where client and server could have drifted apart: resend.
+      if (it.rest !== wasRest) it.rev++;
+    }
+  }
+
+  /** A blast throws nearby weapons around. */
+  private kickItems(x: number, y: number, r: number): void {
+    for (const it of this.items) {
+      const dx = it.x - x;
+      const dy = it.y - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d >= r) continue;
+      const s = 260 * (1 - d / r);
+      it.vx += (dx / (d + 1e-6)) * s;
+      it.vy += (dy / (d + 1e-6)) * s - 60;
+      it.rest = false;
+      it.rev++;
+    }
+  }
+
+  private readonly placedScratch: number[] = [];
+  private readonly blockers: BuildBlocker[] = [];
+
+  /**
+   * Materializer: turn gold into a fortification piece if the server agrees
+   * it fits (the same canBuild the client previews with), then log it as an
+   * R_BUILD op that every client replays on its own terrain.
+   */
+  private tryBuild(p: Player): number {
+    const req = p.buildReq!;
+    p.buildReq = null;
     const def = WEAPONS[p.weapon];
+    if (!def || def.proj !== PROJ_BUILD || !p.mob.canFire || p.cooldown > 0) return -1;
+    const bl = this.blockers;
+    bl.length = 0;
+    for (const o of this.players) if (o && o.alive) bl.push({ x: o.body.x, y: o.body.y, w: ACTOR_W, h: ACTOR_H });
+    for (const t of this.tanks) if (t) bl.push({ x: t.x, y: t.y, w: TANK_W, h: TANK_H });
+    for (const c of this.crafts) {
+      if (!c) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      bl.push({ x: c.x - e.x, y: c.y - e.y, w: 2 * e.x, h: 2 * e.y });
+    }
+    const res = canBuild(this.terrain, req.piece, req.gx, req.gy, p.body.x + SHOULDER_X, p.body.y + SHOULDER_Y, p.gold, bl);
+    if (res !== BuildResult.Ok) return res;
+    const piece = PIECES[req.piece];
+    if (applyBuild(this.terrain, req.piece, req.gx, req.gy, this.placedScratch) === 0) return BuildResult.Room;
+    p.gold -= piece.cost;
+    p.cooldown = fireInterval(def);
+    p.firing = true;
+    const w = this.tmp.reset();
+    w.u8(R_BUILD);
+    w.u8(req.piece);
+    w.u8(p.id);
+    w.u16(req.gx);
+    w.u16(req.gy);
+    this.logOp(w.finish(), req.gx, req.gy, req.gx + piece.w - 1, req.gy + piece.h - 1);
+    return BuildResult.Ok;
+  }
+
+  private startReload(p: Player): void {
+    // One hand: fumbling the magazine takes longer.
+    p.reloadLeft = Math.ceil(WEAPONS[p.weapon].reload * (p.mob.oneHanded ? 1.5 : 1));
+  }
+
+  private readonly muzzleAt = { x: 0, y: 0 };
+
+  private fire(p: Player, def: (typeof WEAPONS)[number]): void {
     const aim = dequantizeAim(p.aimQ);
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
-    const ox = p.cx;
-    const oy = p.body.y + 5;
-    if (def.proj < 0) {
-      // Digger: vacuum terrain in front of the clone, banking any gold.
-      this.carve(ox + cos * DIGGER_REACH, oy + sin * DIGGER_REACH, DIGGER_R, DIGGER_CORE, 0, p.id);
+    const ox = p.body.x + SHOULDER_X;
+    const oy = p.body.y + SHOULDER_Y;
+    if (def.proj === PROJ_DIG) {
+      // Digger: vacuum terrain in front of the clone, banking any gold. It
+      // bites at the first solid cell along the aim (so a wall you're
+      // pressed against gets dug), up to its reach.
+      let d = DIGGER_REACH;
+      for (let r = 2; r < DIGGER_REACH; r++) {
+        if (this.terrain.isSolid(Math.floor(ox + cos * r), Math.floor(oy + sin * r))) {
+          d = Math.min(DIGGER_REACH, r + 1); // the core (radius DIGGER_CORE) still covers that cell
+          break;
+        }
+      }
+      this.carve(ox + cos * d, oy + sin * d, DIGGER_R, DIGGER_CORE, 0, p.id);
       p.gold += this.terrain.removedByMat[Mat.Gold];
       return;
     }
-    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * (p.mob.oneHanded ? 3 : 1);
+    const scoped = p.buttons & BTN_SCOPE ? 0.5 : 1;
+    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * scoped * (p.mob.oneHanded ? 3 : 1);
     const vx = Math.cos(a) * def.speed + p.body.vx * 0.25;
     const vy = Math.sin(a) * def.speed + p.body.vy * 0.25;
     const id = this.nextProjId++;
-    const sx = ox + cos * 6;
-    const sy = oy + sin * 6;
-    if (this.projectiles.spawn(id, def.proj, p.id, sx, sy, vx, vy) < 0) return;
+    // Leave from the muzzle, unless the barrel is pushed into a wall: then
+    // from the first solid cell along it (no shooting through walls).
+    const m = muzzlePoint(def, p.body.x, p.body.y, aim, this.muzzleAt);
+    let sx = m.x;
+    let sy = m.y;
+    for (let d = 0.5; d < def.muzzle; d += 0.5) {
+      const tx = ox + cos * d;
+      const ty = oy + sin * d;
+      if (this.terrain.isSolid(Math.floor(tx), Math.floor(ty))) {
+        sx = tx;
+        sy = ty;
+        break;
+      }
+    }
+    this.spawnProj(id, def.proj, p.id, sx, sy, vx, vy);
+  }
+
+  /** Launch a projectile and tell the clients that will see it. */
+  private spawnProj(id: number, kind: number, owner: number, sx: number, sy: number, vx: number, vy: number): void {
+    if (this.projectiles.spawn(id, kind, owner, sx, sy, vx, vy) < 0) return;
     const i = this.projectiles.n - 1;
     const w = this.tmp.reset();
     w.u8(R_PROJ_SPAWN);
     w.u32(id);
-    w.u8(def.proj);
-    w.u8(p.id);
+    w.u8(kind);
+    w.u8(owner);
     // Send the float32-rounded state the server will simulate from.
     w.f32(this.projectiles.x[i]);
     w.f32(this.projectiles.y[i]);
@@ -614,7 +1490,9 @@ export class World {
     b.vx = vx;
     b.vy = vy;
     b.fuel = 100;
-    resetBody(p.parts);
+    // Every clone rolls a class: scout, medium or heavy.
+    resetBody(p.parts, rollClass(this.rng.next()));
+    b.cls = p.parts.cls;
     mobility(p.parts.mask, p.mob);
     b.legs = p.mob.legs;
     b.jet = p.mob.jet;
@@ -623,6 +1501,11 @@ export class World {
     p.hp = ACTOR_MAX_HP;
     p.alive = true;
     p.cooldown = 10;
+    p.reloadLeft = 0;
+    // A fresh, random kit (always a primary, a digger and a materializer).
+    p.inv = spawnLoadout(this.rng);
+    p.slot = 0;
+    this.invChanged(p);
     p.delivering = -1;
   }
 
@@ -632,14 +1515,41 @@ export class World {
   private launchCraft(p: Player): void {
     const slot = this.crafts.indexOf(null);
     if (slot < 0) return; // sky is full; try again next tick
-    let x = 48 + this.rng.int(WORLD_W - 96 - CRAFT_W);
-    for (let attempt = 0; attempt < 16; attempt++) {
-      const top = this.terrain.surfaceY(x + CRAFT_W / 2);
-      if (top > 60 && top < WORLD_H - 40) break; // land somewhere with sky above and ground below
-      x = 48 + this.rng.int(WORLD_W - 96 - CRAFT_W);
+    // Teams come down on opposite sides of the map: red the left, green the right.
+    let lo = 48 + CRAFT_W / 2;
+    let span = WORLD_W - 96 - CRAFT_W;
+    const fort = this.regicideLive && p.team !== Team.None ? this.fortresses[p.team] : undefined;
+    if (fort) {
+      // Reinforcements land at their own fortress.
+      const spots = fort.spawns;
+      const xs = spots.map((s) => s.x);
+      lo = Math.max(48 + CRAFT_W / 2, Math.min(...xs) - 120);
+      span = Math.max(1, Math.min(WORLD_W - 48 - CRAFT_W / 2, Math.max(...xs) + 120) - lo);
+    } else if (p.team !== Team.None) {
+      span = Math.floor(span * 0.4);
+      if (p.team === Team.Green) lo = WORLD_W - 48 - CRAFT_W / 2 - span;
+    }
+    const pick = () => lo + this.rng.int(span);
+    // Of a handful of candidate spots with sky above and ground below, take
+    // the one furthest from live clones and other incoming rockets, so a
+    // full room doesn't land on top of itself.
+    let x = pick();
+    let bestGap = -1;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const cx = pick();
+      const top = this.terrain.surfaceY(Math.floor(cx));
+      if (top <= 60 || top >= WORLD_H - 40) continue;
+      let gap = Infinity;
+      for (const o of this.players) if (o && o.alive && (o.team === Team.None || o.team !== p.team)) gap = Math.min(gap, Math.abs(o.cx - cx));
+      for (const c of this.crafts) if (c) gap = Math.min(gap, Math.abs(c.x - cx));
+      if (gap > bestGap) {
+        bestGap = gap;
+        x = cx;
+      }
     }
     this.crafts[slot] = newCraft(x, p.id);
     p.delivering = slot;
+    p.pendingSpawn = false;
   }
 
   private stepCrafts(): void {
@@ -647,34 +1557,45 @@ export class World {
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
-      stepCraft(c, this.terrain, DT, out);
+      // The passenger flies it; the autopilot covers whenever they let go.
+      const pilot = c.passenger !== 255 ? this.players[c.passenger] : null;
+      stepCraft(c, this.terrain, DT, out, pilot ? pilot.buttons : 0);
       if (c.thrust > 0.12) this.exhaust(c);
       if (out.release) this.releasePassenger(k, false);
       if (out.crashed) {
         this.destroyCraft(k, c.passenger !== 255 ? c.passenger : c.lastHitBy);
         continue;
       }
+      if (out.impact > IMPACT_HARM_SPEED) {
+        // A hard landing breaks whatever hit first: fins, engine bell, nose.
+        this.hurtCraftPart(k, craftPartAt(c.parts, out.impactU, out.impactV), (out.impact - IMPACT_HARM_SPEED) * 1.2, NO_OWNER);
+        if (!this.crafts[k]) continue;
+      }
       if (out.gone) {
         this.crafts[k] = null;
         continue;
       }
-      this.crush(c, k);
+      this.crush(c);
     }
   }
 
   /**
    * Rocket exhaust is part of the particle engine: real flames that burn
-   * whoever stands under the nozzle, and a jet written into the air field that
-   * blows clones and loose particles away from the landing spot.
+   * whoever is behind the nozzle, and a jet written into the air field along
+   * the engine axis that blows clones and loose particles away.
    */
   private exhaust(c: Craft): void {
-    const nx = c.x + CRAFT_W / 2;
-    const ny = c.y + CRAFT_H;
-    const n = Math.ceil(c.thrust * 3);
-    for (let i = 0; i < n; i++) {
-      this.grains.spawn(PK.Flame, nx + this.rng.range(-2, 2), ny + 1, c.vx * 0.5 + this.rng.range(-40, 40), c.vy + 180 + 140 * c.thrust * this.rng.next(), 10 + this.rng.int(8), 0, 0, c.passenger !== 255 ? c.passenger : c.delivered !== 255 ? c.delivered : NO_OWNER);
+    const n = craftToWorld(c, 0, CRAFT_H / 2 + 1, this.pt);
+    const dx = -Math.sin(c.a);
+    const dy = Math.cos(c.a);
+    const count = Math.ceil(c.thrust * 3);
+    const owner = exhaustOwner(c);
+    for (let i = 0; i < count; i++) {
+      const s = 180 + 140 * c.thrust * this.rng.next();
+      const j = this.rng.range(-40, 40);
+      this.grains.spawn(PK.Flame, n.x + dy * this.rng.range(-2, 2), n.y - dx * this.rng.range(-2, 2), c.vx * 0.5 + dx * s + dy * j, c.vy * 0.5 + dy * s - dx * j, 10 + this.rng.int(8), 0, 0, owner);
     }
-    this.grains.wind(nx, ny + 16, 26, 0, 320 * c.thrust);
+    this.grains.wind(n.x + dx * 16, n.y + dy * 16, 26, dx * 320 * c.thrust, dy * 320 * c.thrust);
   }
 
   /** Drop the passenger out of the hatch (or throw them out of a dying rocket). */
@@ -685,42 +1606,124 @@ export class World {
     c.delivered = c.passenger;
     c.passenger = 255;
     if (!p || p.delivering !== slot) return;
-    const y = c.y + CRAFT_H - ACTOR_H;
+    const pt = this.pt;
     if (violent) {
-      // Blown out of the nose cone, away from the crater the wreck digs below.
-      this.placeClone(p, c.x + CRAFT_W / 2 - ACTOR_W / 2, c.y - ACTOR_H, c.vx + this.rng.range(-160, 160), Math.min(0, c.vy) - this.rng.range(120, 220));
+      // Blown out of the nose cone, away from the crater the wreck digs.
+      craftToWorld(c, 0, -CRAFT_H / 2 - ACTOR_H / 2, pt);
+      this.placeClone(p, pt.x - ACTOR_W / 2, pt.y - ACTOR_H / 2, c.vx + this.rng.range(-160, 160), Math.min(0, c.vy) - this.rng.range(120, 220));
       return;
     }
-    // Step out of the side hatch, clear of the nozzle, then the rocket lifts off.
-    let x = c.x + CRAFT_W + 1;
-    if (this.terrain.rectSolid(Math.floor(x), Math.floor(y), Math.floor(x) + ACTOR_W - 1, Math.floor(y) + ACTOR_H - 1)) x = c.x - ACTOR_W - 1;
-    if (this.terrain.rectSolid(Math.floor(x), Math.floor(y), Math.floor(x) + ACTOR_W - 1, Math.floor(y) + ACTOR_H - 1)) x = c.x + CRAFT_W / 2 - ACTOR_W / 2;
-    this.placeClone(p, x, y, c.vx, Math.max(0, c.vy));
+    // Step out of a side hatch, clear of the nozzle, keeping the rocket's motion.
+    for (const side of [1, -1]) {
+      craftToWorld(c, side * (CRAFT_W / 2 + ACTOR_W / 2 + 1), CRAFT_H / 2 - ACTOR_H / 2, pt);
+      const x = Math.floor(pt.x - ACTOR_W / 2);
+      const y = Math.floor(pt.y - ACTOR_H / 2);
+      if (!this.terrain.rectSolid(x, y, x + ACTOR_W - 1, y + ACTOR_H - 1)) {
+        this.placeClone(p, pt.x - ACTOR_W / 2, pt.y - ACTOR_H / 2, c.vx, c.vy);
+        return;
+      }
+    }
+    this.placeClone(p, c.x - ACTOR_W / 2, c.y - ACTOR_H / 2, c.vx, c.vy);
   }
 
-  /** Damage a rocket. Energy below the hull's integrity only scratches it. */
-  private hurtCraft(slot: number, energy: number, wound: number, by: number): void {
+  /** Shove a rocket at a world point: linear and angular. */
+  private pushCraft(c: Craft, wx: number, wy: number, dvx: number, dvy: number): void {
+    c.vx += dvx;
+    c.vy += dvy;
+    c.w += ((wx - c.x) * dvy - (wy - c.y) * dvx) / CRAFT_INERTIA;
+  }
+
+  /**
+   * A penetrating hit at world (wx, wy) travelling along (dx, dy): it damages
+   * the part it entered. Energy below the integrity only scratches.
+   */
+  private hitCraft(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
     const c = this.crafts[slot];
     if (!c) return;
-    const dmg = energy > CRAFT_INTEGRITY ? wound : wound * 0.15;
-    if (dmg <= 0) return;
-    c.hp -= dmg;
-    if (by !== NO_OWNER) c.lastHitBy = by;
+    const l = craftToLocal(c, wx + dx * 2, wy + dy * 2, this.pt);
+    const part = craftPartAt(c.parts, l.x, l.y);
+    let dmg = energy > CRAFT_INTEGRITY ? wound : wound * 0.15;
+    // No nose cone: the hull behind it is exposed.
+    if (part === CraftPart.Hull && !hasCraftPart(c.parts, CraftPart.Nose)) dmg *= 1.3;
+    this.hurtCraftPart(slot, part, dmg, by);
+  }
+
+  /** Damage one part; a part out of hit points is torn off, the hull going is the end. */
+  private hurtCraftPart(slot: number, part: number, dmg: number, by: number): void {
+    const c = this.crafts[slot];
+    if (!c || dmg <= 0) return;
+    if (by !== NO_OWNER && by !== 255) c.lastHitBy = by;
+    if (part === CraftPart.Hull) c.hp -= dmg;
+    else {
+      c.hp -= Math.min(dmg, Math.max(0, c.partHp[part])) * 0.2; // shock through the frame
+      c.partHp[part] -= dmg;
+      if (c.partHp[part] <= 0 && hasCraftPart(c.parts, part)) this.detachCraftPart(slot, part);
+    }
+    c.partHp[CraftPart.Hull] = Math.max(0, c.hp);
     if (c.hp <= 0) this.destroyCraft(slot, c.lastHitBy);
   }
 
+  /**
+   * A part comes off: it flies away with the velocity of where it was on the
+   * spinning hull, as heavy fragments in the particle engine (they maim and
+   * settle as scrap), and the recoil spins the rocket.
+   */
+  private detachCraftPart(slot: number, part: number): void {
+    const c = this.crafts[slot]!;
+    c.parts &= ~(1 << part);
+    c.partHp[part] = 0;
+    const [u, v] = CRAFT_PART_CENTER[part];
+    const pt = craftToWorld(c, u, v, this.pt);
+    const rx = pt.x - c.x;
+    const ry = pt.y - c.y;
+    const d = Math.sqrt(rx * rx + ry * ry) + 1e-6;
+    const vx = c.vx - c.w * ry + (rx / d) * 90;
+    const vy = c.vy + c.w * rx + (ry / d) * 90 - 30;
+    const x = pt.x;
+    const y = pt.y;
+    const seed = this.rng.nextU32();
+    craftPartFragments(this.grains, x, y, vx, vy, c.lastHitBy === 255 ? NO_OWNER : c.lastHitBy, new Rng(seed));
+    this.pushCraft(c, x, y, -(rx / d) * 25, -(ry / d) * 25);
+    c.w += u > 0 ? -1.5 : u < 0 ? 1.5 : 0;
+    const w = this.tmp.reset();
+    w.u8(R_CRAFT_PART);
+    w.u8(slot);
+    w.u8(part);
+    w.u16(clampU16(x));
+    w.u16(clampU16(y + Y_BIAS));
+    w.i16(clampI16(vx * VEL_SCALE));
+    w.i16(clampI16(vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x, y });
+  }
+
+  /** Blast overpressure: every part in reach takes damage, and the shove spins it. */
   private splashCrafts(x: number, y: number, r: number, dmg: number, owner: number): void {
+    const pt = this.pt;
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
-      const dx = c.x + CRAFT_W / 2 - x;
-      const dy = c.y + CRAFT_H / 2 - y;
-      const d = Math.sqrt(dx * dx + dy * dy) - CRAFT_W / 2;
-      if (d < r) {
-        c.hp -= dmg * (1 - Math.max(0, d) / r);
-        if (owner !== NO_OWNER) c.lastHitBy = owner;
-        if (c.hp <= 0) this.destroyCraft(k, c.lastHitBy);
+      if (Math.abs(c.x - x) > r + CRAFT_H || Math.abs(c.y - y) > r + CRAFT_H) continue;
+      let nearest = Infinity;
+      let nx = c.x;
+      let ny = c.y;
+      for (let part = 0; part < CRAFT_PARTS && this.crafts[k] === c; part++) {
+        if (!hasCraftPart(c.parts, part)) continue;
+        craftToWorld(c, CRAFT_PART_CENTER[part][0], CRAFT_PART_CENTER[part][1], pt);
+        const d = Math.sqrt((pt.x - x) ** 2 + (pt.y - y) ** 2) - 3;
+        if (d < nearest) {
+          nearest = d;
+          nx = pt.x;
+          ny = pt.y;
+        }
+        if (d < r) this.hurtCraftPart(k, part, dmg * (1 - Math.max(0, d) / r) * (part === CraftPart.Hull ? 1 : 0.8), owner);
       }
+      if (this.crafts[k] !== c || nearest >= r) continue;
+      const dx = nx - x;
+      const dy = ny - y;
+      const dl = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+      const s = 50 * (1 - Math.max(0, nearest) / r);
+      this.pushCraft(c, nx, ny, (dx / dl) * s, (dy / dl) * s);
     }
   }
 
@@ -733,18 +1736,20 @@ export class World {
     const c = this.crafts[slot];
     if (!c) return;
     const owner = by === 255 ? NO_OWNER : by;
-    const cx = c.x + CRAFT_W / 2;
-    const cy = c.y + CRAFT_H / 2;
+    const cx = c.x;
+    const cy = c.y;
     const rider = c.passenger;
     this.releasePassenger(slot, true);
     this.crafts[slot] = null;
     const seed = this.rng.nextU32();
-    this.carve(cx, cy + CRAFT_H / 3, 12, 5, 30, owner);
+    const base = craftToWorld(c, 0, CRAFT_H / 3, this.pt);
+    this.carve(base.x, base.y, 12, 5, 30, owner);
     this.grains.blast(cx, cy, 70, BLAST_IMPULSE * 1.3);
     craftFragments(this.grains, cx, cy, c.vx, c.vy, owner, new Rng(seed));
+    this.splashTanks(cx, cy, 36, 60, owner);
     for (const p of this.players) {
       // The rider is thrown clear by the blast; its fragments can still find them.
-      if (!p || !p.alive || p.id === rider) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.id === rider || this.friendly(owner, p)) continue;
       const dx = p.cx - cx;
       const dy = p.cy - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
@@ -772,28 +1777,330 @@ export class World {
   }
 
   /** A rocket slamming into a clone crushes it, credited to the rocket's passenger. */
-  private crush(c: Craft, slot: number): void {
+  private crush(c: Craft): void {
     for (const p of this.players) {
-      if (!p || !p.alive || p.id === c.passenger || p.id === c.delivered) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.id === c.passenger || p.id === c.delivered) continue;
       const b = p.body;
-      if (b.x + ACTOR_W <= c.x || b.x >= c.x + CRAFT_W || b.y + ACTOR_H <= c.y || b.y >= c.y + CRAFT_H) continue;
-      const rvx = c.vx - b.vx;
-      const rvy = c.vy - b.vy;
+      const l = craftToLocal(c, p.cx, p.cy, this.pt);
+      if (Math.abs(l.x) >= (CRAFT_W + ACTOR_W) / 2 || Math.abs(l.y) >= (CRAFT_H + ACTOR_H) / 2) continue;
+      // Velocity of the hull where it meets the clone (spin included).
+      const rx = p.cx - c.x;
+      const ry = p.cy - c.y;
+      const rvx = c.vx - c.w * ry - b.vx;
+      const rvy = c.vy + c.w * rx - b.vy;
       const rs = Math.sqrt(rvx * rvx + rvy * rvy);
       // Shove out of the way either way; hurt when it hits hard.
-      b.vx += (b.x + ACTOR_W / 2 < c.x + CRAFT_W / 2 ? -1 : 1) * 60 + rvx * 0.5;
+      b.vx += (rx < 0 ? -1 : 1) * 60 + rvx * 0.5;
       b.vy += rvy * 0.5;
       if (rs < 90) continue;
+      const by = c.passenger !== 255 ? c.passenger : c.lastHitBy !== 255 ? c.lastHitBy : p.id;
+      if (this.friendly(by, p)) continue;
       const res = this.strikeScratch;
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
       harm(p.parts, Part.Head, rs * 0.12, res);
       harm(p.parts, Part.Torso, rs * 0.18, res);
-      const by = c.passenger !== 255 ? c.passenger : c.lastHitBy !== 255 ? c.lastHitBy : p.id;
       this.applyStrike(p, res, by, W_CRAFT, p.cx, b.y);
     }
-    void slot;
+  }
+
+  // ---------------------------------------------------------------- tanks
+
+  /** Drop `n` tanks by parachute at spread-out spots across the map. */
+  dropTanks(n: number): void {
+    for (let i = 0; i < n; i++) {
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0) return;
+      let x = 120;
+      let bestGap = -1;
+      for (let a = 0; a < 16; a++) {
+        const cx = 120 + this.rng.int(WORLD_W - 240 - TANK_W);
+        let gap = Infinity;
+        for (const t of this.tanks) if (t) gap = Math.min(gap, Math.abs(t.x - cx));
+        if (gap > bestGap) {
+          bestGap = gap;
+          x = cx;
+        }
+      }
+      this.tanks[slot] = newTank(x, -TANK_H - 40 - this.rng.int(160));
+    }
+  }
+
+  /** Climb into an empty, landed tank within reach. */
+  private boardTank(p: Player): boolean {
+    const b = p.body;
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || t.pilot !== 255 || t.chute) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + TANK_W));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + TANK_H));
+      if (dx > BOARD_REACH || dy > BOARD_REACH) continue;
+      t.pilot = p.id;
+      p.tank = k;
+      p.reloadLeft = 0;
+      this.syncPilot(p, t);
+      return true;
+    }
+    return false;
+  }
+
+  /** Out of the tank: through the roof hatch (or beside it) when climbing out; just gone when killed. */
+  private leaveTank(p: Player, climbOut: boolean): void {
+    const t = p.tank >= 0 ? this.tanks[p.tank] : null;
+    p.tank = -1;
+    if (!t) return;
+    if (t.pilot === p.id) t.pilot = 255;
+    if (!climbOut) return;
+    const spots = [
+      [t.x + TANK_W / 2 - ACTOR_W / 2, t.y - ACTOR_H - 1],
+      [t.x - ACTOR_W - 1, t.y + TANK_H - ACTOR_H - 1],
+      [t.x + TANK_W + 1, t.y + TANK_H - ACTOR_H - 1],
+    ];
+    let [x, y] = spots[0];
+    for (const [sx, sy] of spots) {
+      const ix = Math.floor(sx);
+      const iy = Math.floor(sy);
+      if (!this.terrain.rectSolid(ix, iy, ix + ACTOR_W - 1, iy + ACTOR_H - 1)) {
+        x = sx;
+        y = sy;
+        break;
+      }
+    }
+    const b = p.body;
+    b.x = x;
+    b.y = y;
+    b.vx = t.vx;
+    b.vy = Math.min(0, t.vy) - 140;
+    b.onGround = false;
+  }
+
+  /** The driver rides inside: its clone (and its view) go wherever the tank goes. */
+  private syncPilot(p: Player, t: Tank): void {
+    const b = p.body;
+    b.x = t.x + TANK_W / 2 - ACTOR_W / 2;
+    b.y = t.y + 2;
+    b.vx = t.vx;
+    b.vy = t.vy;
+    b.onGround = t.onGround;
+    p.camX = t.x + TANK_W / 2;
+    p.camY = t.y + TANK_H / 2;
+  }
+
+  private stepTanks(): void {
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t) continue;
+      let pilot = t.pilot !== 255 ? this.players[t.pilot] : null;
+      if (pilot && (!pilot.alive || pilot.tank !== k)) {
+        t.pilot = 255;
+        pilot = null;
+      }
+      const buttons = pilot ? pilot.buttons : 0;
+      const impact = stepTank(t, this.terrain, DT, buttons);
+      if (t.y > WORLD_H) {
+        this.destroyTank(k, t.lastHitBy);
+        continue;
+      }
+      if (pilot) {
+        t.aim = dequantizeAim(pilot.aimQ);
+        t.faceLeft = Math.cos(t.aim) < 0;
+      }
+      // Guns: the vulcan on fire, the cannon on right mouse / Shift.
+      // Cooldowns carry fractions so the rates are exact on average.
+      t.firedSmg = t.firedCannon = false;
+      t.smgCd -= DT;
+      t.cannonCd -= DT;
+      if (pilot && buttons & BTN_FIRE && hasTankPart(t.parts, TankPart.Smg)) {
+        while (t.smgCd <= 0) {
+          this.tankShot(t, pilot.id, false);
+          t.smgCd += SMG_INTERVAL;
+        }
+      }
+      if (pilot && buttons & BTN_SCOPE && hasTankPart(t.parts, TankPart.Cannon) && t.cannonCd <= 0) {
+        this.tankShot(t, pilot.id, true);
+        t.cannonCd += CANNON_INTERVAL;
+      }
+      t.smgCd = Math.max(0, t.smgCd);
+      t.cannonCd = Math.max(0, t.cannonCd);
+      if (t.jetting) this.tankJets(t);
+      this.tankCrush(t, impact, pilot ? pilot.id : t.lastHitBy);
+      if (pilot) this.syncPilot(pilot, t);
+    }
+  }
+
+  private tankShot(t: Tank, owner: number, cannon: boolean): void {
+    const m = tankMuzzle(t, cannon, t.aim, this.tankMz);
+    const a = m.a + (this.rng.next() - 0.5) * 2 * (cannon ? 0.01 : SMG_SPREAD);
+    const speed = cannon ? CANNON_SPEED : SMG_SPEED;
+    this.spawnProj(this.nextProjId++, cannon ? ProjKind.Shell : ProjKind.TankBullet, owner, m.x, m.y, Math.cos(a) * speed + t.vx * 0.25, Math.sin(a) * speed + t.vy * 0.25);
+    if (cannon) {
+      t.vx -= Math.cos(a) * 30; // recoil
+      t.firedCannon = true;
+    } else t.firedSmg = true;
+  }
+
+  /** Lift-jet flames under the hull (they burn whoever is beneath) and a downdraft. */
+  private tankJets(t: Tank): void {
+    const owner = t.pilot !== 255 ? t.pilot : NO_OWNER;
+    for (const lx of [7, TANK_W - 7]) {
+      const x = t.x + lx;
+      const y = t.y + TANK_H + 1;
+      for (let i = 0; i < 2; i++) {
+        this.grains.spawn(PK.Flame, x + this.rng.range(-2, 2), y, t.vx * 0.5 + this.rng.range(-30, 30), t.vy * 0.5 + 200 + this.rng.range(0, 120), 8 + this.rng.int(6), 0, 0, owner);
+      }
+    }
+    this.grains.wind(t.x + TANK_W / 2, t.y + TANK_H + 14, 24, 0, 260);
+  }
+
+  /** Clones in the tank's way are shoved aside; one it lands on is crushed. */
+  private tankCrush(t: Tank, impact: number, by: number): void {
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0) continue;
+      const b = p.body;
+      if (b.x + ACTOR_W < t.x - 1 || b.x > t.x + TANK_W + 1 || b.y + ACTOR_H < t.y - 1 || b.y > t.y + TANK_H + 1) continue;
+      const side = p.cx < t.x + TANK_W / 2 ? -1 : 1;
+      b.vx += side * 70 + t.vx * 0.5;
+      if (impact > 90 && p.cy > t.y + TANK_H / 2) {
+        const who = by === 255 ? p.id : by;
+        if (!this.friendly(who, p)) this.damage(p, (impact - 60) * 0.9, who, W_TANK);
+      }
+    }
+  }
+
+  /** Is a hit by `by` on this tank friendly fire (its driver is a teammate)? */
+  private friendlyTank(by: number, t: Tank): boolean {
+    const d = t.pilot !== 255 ? this.players[t.pilot] : null;
+    return !!d && this.friendly(by, d);
+  }
+
+  /**
+   * A penetrating hit at world (wx, wy) travelling along (dx, dy): it damages
+   * the part it struck. Energy below the integrity only scratches the paint.
+   */
+  private hitTank(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
+    const t = this.tanks[slot];
+    if (!t || this.friendlyTank(by, t)) return;
+    const part = tankPartAt(t, wx + dx * 2 - t.x, wy + dy * 2 - t.y);
+    this.hurtTankPart(slot, part, energy > TANK_INTEGRITY ? wound : wound * 0.2, by);
+  }
+
+  /** Damage one part; a part out of hit points is blown off, the hull going is the end. */
+  private hurtTankPart(slot: number, part: number, dmg: number, by: number): void {
+    const t = this.tanks[slot];
+    if (!t || dmg <= 0) return;
+    if (by !== NO_OWNER && by !== 255) t.lastHitBy = by;
+    if (part === TankPart.Hull) t.hp -= dmg;
+    else {
+      t.hp -= dmg * 0.1; // shock through the frame
+      t.partHp[part] -= dmg;
+      if (t.partHp[part] <= 0 && hasTankPart(t.parts, part)) this.detachTankPart(slot, part);
+    }
+    t.partHp[TankPart.Hull] = Math.max(0, t.hp);
+    if (t.hp <= 0) this.destroyTank(slot, t.lastHitBy);
+  }
+
+  /** Blast overpressure: explosives are what armour fears. The plate takes half while it lasts. */
+  private splashTanks(x: number, y: number, r: number, dmg: number, owner: number): void {
+    const pt = this.pt;
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || this.friendlyTank(owner, t)) continue;
+      const nx = Math.max(t.x, Math.min(x, t.x + TANK_W));
+      const ny = Math.max(t.y, Math.min(y, t.y + TANK_H));
+      const d = Math.hypot(nx - x, ny - y);
+      if (d >= r) continue;
+      const amt = dmg * 1.5 * (1 - d / r);
+      for (const part of [TankPart.Cannon, TankPart.Smg]) {
+        if (!hasTankPart(t.parts, part)) continue;
+        tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], pt);
+        const dp = Math.hypot(pt.x - x, pt.y - y);
+        if (dp < r) this.hurtTankPart(k, part, dmg * (1 - dp / r), owner);
+        if (this.tanks[k] !== t) break;
+      }
+      if (this.tanks[k] !== t) continue;
+      if (hasTankPart(t.parts, TankPart.Armor)) {
+        this.hurtTankPart(k, TankPart.Armor, amt * 0.5, owner);
+        this.hurtTankPart(k, TankPart.Hull, amt * 0.5, owner);
+      } else this.hurtTankPart(k, TankPart.Hull, amt, owner);
+      if (this.tanks[k] !== t) continue;
+      const dl = d + 1e-6;
+      const s = 40 * (1 - d / r);
+      t.vx += ((nx - x) / dl) * s;
+      t.vy += ((ny - y) / dl) * s;
+    }
+  }
+
+  /** A part flies off as heavy scrap (real fragments in the particle engine). */
+  private detachTankPart(slot: number, part: number): void {
+    const t = this.tanks[slot]!;
+    t.parts &= ~(1 << part);
+    t.partHp[part] = 0;
+    const pt = tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], this.pt);
+    const x = pt.x;
+    const y = pt.y;
+    const out = (x - (t.x + TANK_W / 2)) >= 0 ? 1 : -1;
+    const vx = t.vx + out * (60 + this.rng.range(0, 60));
+    const vy = t.vy - 120 - this.rng.range(0, 60);
+    const seed = this.rng.nextU32();
+    craftPartFragments(this.grains, x, y, vx, vy, t.lastHitBy === 255 ? NO_OWNER : t.lastHitBy, new Rng(seed));
+    const w = this.tmp.reset();
+    w.u8(R_TANK_PART);
+    w.u8(slot);
+    w.u8(part);
+    w.u16(clampU16(x));
+    w.u16(clampU16(y + Y_BIAS));
+    w.i16(clampI16(vx * VEL_SCALE));
+    w.i16(clampI16(vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x, y });
+  }
+
+  /** The hull gives: the tank explodes, and its driver goes with it. */
+  private destroyTank(slot: number, by: number): void {
+    const t = this.tanks[slot];
+    if (!t) return;
+    this.tanks[slot] = null;
+    const owner = by === 255 ? NO_OWNER : by;
+    const cx = t.x + TANK_W / 2;
+    const cy = t.y + TANK_H / 2;
+    const driver = t.pilot !== 255 ? this.players[t.pilot] : null;
+    t.pilot = 255;
+    if (driver) {
+      driver.tank = -1;
+      this.damage(driver, 999, by === 255 ? driver.id : by, W_TANK, false, true);
+    }
+    const seed = this.rng.nextU32();
+    this.carve(cx, cy + TANK_H / 3, 18, 8, 40, owner);
+    this.grains.blast(cx, cy, 90, BLAST_IMPULSE * 1.5);
+    const rng = new Rng(seed);
+    craftFragments(this.grains, cx, cy, t.vx, t.vy, owner, rng);
+    craftFragments(this.grains, cx, cy, t.vx, t.vy, owner, rng);
+    this.splashCrafts(cx, cy, 48, 80, owner);
+    this.splashTanks(cx, cy, 48, 80, owner);
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0 || this.friendly(owner, p)) continue;
+      const d = Math.hypot(p.cx - cx, p.cy - cy);
+      if (d >= 48) continue;
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      const amt = 80 * (1 - d / 48);
+      for (let part = 0; part < PART_COUNT; part++) {
+        if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+      }
+      this.applyStrike(p, res, owner === NO_OWNER ? p.id : owner, W_TANK, cx, cy);
+    }
+    const w = this.tmp.reset();
+    w.u8(R_TANK_BOOM);
+    w.u8(slot);
+    w.u16(clampU16(cx));
+    w.u16(clampU16(cy + Y_BIAS));
+    w.i16(clampI16(t.vx * VEL_SCALE));
+    w.i16(clampI16(t.vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x: cx, y: cy });
   }
 
   // ---------------------------------------------------------------- tick
@@ -801,7 +2108,10 @@ export class World {
   step(): void {
     const t0 = performance.now();
     this.tick++;
+    if (this.mode === 'ffa') this.stepRound();
     const terrain = this.terrain;
+    // Bots decide this tick's input the way a client would send it.
+    for (const p of this.players) if (p?.bot) this.input(p.id, p.bot.think(this, p));
 
     for (const p of this.players) {
       if (!p) continue;
@@ -812,23 +2122,26 @@ export class World {
       if (cmd) {
         p.buttons = cmd.buttons;
         p.aimQ = cmd.aim;
-        if (cmd.weapon < WEAPONS.length) p.weapon = cmd.weapon;
+        p.invCmd = cmd.inv;
         p.ack = cmd.seq;
       }
       p.firing = false;
+      const prev = p.prevButtons;
+      p.prevButtons = p.buttons;
       if (!p.alive) {
-        // Every clone arrives by drop rocket.
-        if (p.delivering < 0 && --p.respawn <= 0) this.launchCraft(p);
+        // Every clone arrives by drop rocket; in FFA only once per wave.
+        if (p.delivering < 0 && (this.mode !== 'ffa' || p.pendingSpawn) && --p.respawn <= 0) this.launchCraft(p);
+        else if (this.mode === 'ffa' && p.delivering < 0) this.spectateFrom(p, prev);
         if (p.delivering >= 0) {
           const c = this.crafts[p.delivering];
           if (c) {
-            p.camX = c.x + CRAFT_W / 2;
-            p.camY = c.y + CRAFT_H / 2;
+            p.camX = c.x;
+            p.camY = c.y;
           }
         }
         continue;
       }
-      const impact = stepBody(p.body, p.buttons, terrain, DT);
+      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -843,24 +2156,34 @@ export class World {
         this.applyStrike(p, res, p.id, 255, p.cx, p.body.y + 12);
       }
       if (!p.alive) continue;
+      if (p.tank >= 0) {
+        // Driving: the tank moves and shoots (stepTanks); the clone rides inside.
+        this.handleInventory(p);
+        continue;
+      }
       if (p.body.y > WORLD_H) this.damage(p, 999, p.id, 255);
       // Open stumps bleed; bleeding out credits whoever did it.
       const n = stumps(p.parts.mask);
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
-      if (p.cooldown > 0) p.cooldown--;
-      // No gun arm, no shooting (or digging).
-      if (p.alive && p.mob.canFire && p.buttons & BTN_FIRE && p.cooldown === 0) {
-        this.fire(p);
-        p.firing = true;
-        // One-handed (off arm gone): slower to recover.
-        p.cooldown = Math.ceil(WEAPONS[p.weapon].cooldown * (p.mob.oneHanded ? 1.6 : 1));
-      }
+      this.handleInventory(p);
+      this.handleWeapon(p, prev);
+      if (p.buildReq) this.tryBuild(p);
+      // The view this client sees (and so its interest area): pushed down the
+      // barrel by the weapon's scope distance while scoping.
       p.camX = p.cx;
       p.camY = p.cy;
+      if (p.buttons & BTN_SCOPE) {
+        const aim = dequantizeAim(p.aimQ);
+        const reach = WEAPONS[p.weapon]?.scope ?? 0;
+        p.camX += Math.cos(aim) * reach;
+        p.camY += Math.sin(aim) * reach;
+      }
     }
 
     this.stepCrafts();
+    this.stepTanks();
+    this.stepItems();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
     // the chunks that changed). Removals later in the tick only increase true
@@ -869,15 +2192,31 @@ export class World {
     this.projectiles.step(this.collider, DT, this.segmentActor, this.onProjEnd);
     const actors = this.actors;
     actors.clear();
-    for (const p of this.players) if (p && p.alive) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    for (const p of this.players) if (p && p.alive && p.tank < 0) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      // Immune to its own jet flames and shell fragments.
+      if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H, TANK_MASS, t.pilot !== 255 ? t.pilot : NO_OWNER, 0.3);
+    }
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
-      if (c) actors.add(CRAFT_ID_BASE + k, c.x, c.y, c.vx, c.vy, CRAFT_W, CRAFT_H, CRAFT_MASS);
+      if (!c) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      // Immune to its own exhaust flames, and not dragged by its own air jet.
+      actors.add(CRAFT_ID_BASE + k, c.x - e.x, c.y - e.y, c.vx, c.vy, 2 * e.x, 2 * e.y, CRAFT_MASS, exhaustOwner(c), 0);
     }
     this.grains.step(this.collider, DT, this.hooks, actors);
     // Apply what particles and fields did to bodies this tick.
     for (let a = 0; a < actors.n; a++) {
       const id = actors.id[a];
+      if (id >= TANK_ID_BASE) {
+        const t = this.tanks[id - TANK_ID_BASE];
+        if (t) {
+          t.vx += actors.dvx[a];
+          t.vy += actors.dvy[a];
+        }
+        continue;
+      }
       if (id >= CRAFT_ID_BASE) {
         const c = this.crafts[id - CRAFT_ID_BASE];
         if (c) {
@@ -894,13 +2233,23 @@ export class World {
     // Resolve every particle impact against the part of the body it struck.
     for (let h = 0; h < actors.hitN; h++) {
       const hid = actors.id[actors.hitSlot[h]];
+      if (hid >= TANK_ID_BASE) {
+        const t = this.tanks[hid - TANK_ID_BASE];
+        if (t) this.hitTank(hid - TANK_ID_BASE, t.x + actors.hitLx[h], t.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        continue;
+      }
       if (hid >= CRAFT_ID_BASE) {
-        this.hurtCraft(hid - CRAFT_ID_BASE, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        const c = this.crafts[hid - CRAFT_ID_BASE];
+        if (!c) continue;
+        // Hit points are relative to the box the rocket was entered with.
+        const e = craftHalfExtents(c.a, this.ext);
+        this.hitCraft(hid - CRAFT_ID_BASE, c.x - e.x + actors.hitLx[h], c.y - e.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
         continue;
       }
       const p = this.players[hid];
       if (!p || !p.alive) continue;
       const by = actors.hitOwner[h] === NO_OWNER ? p.id : actors.hitOwner[h];
+      if (this.friendly(by, p)) continue;
       const self = by === p.id ? 0.5 : 1; // your own fragments hurt less
       const part = partAt(p.parts.mask, actors.hitLx[h], actors.hitLy[h], this.facingLeft(p));
       const res = this.strikeScratch;
@@ -947,7 +2296,9 @@ export class World {
       (p.body.onGround ? F_GROUND : 0) |
       (p.body.jetting ? F_JET : 0) |
       (p.firing ? F_FIRING : 0) |
-      (Math.cos(aim) < 0 ? F_FACE_LEFT : 0)
+      (p.alive && p.reloadLeft > 0 ? F_RELOAD : 0) |
+      (Math.cos(aim) < 0 ? F_FACE_LEFT : 0) |
+      (p.parts.cls << F_CLASS_SHIFT)
     );
   }
 
@@ -968,16 +2319,46 @@ export class World {
         w.u16(p.kills);
         w.u16(p.deaths);
         w.u16(Math.min(65535, p.gold));
+        w.u16(p.wins);
       }
       scores = w.finish();
     }
 
     for (const p of this.players) {
-      if (!p) continue;
+      if (!p || p.bot) continue; // bots read the world directly
       const w = this.frame.reset();
       w.u8(S_FRAME);
       w.u32(this.tick);
       w.u16(p.ack & 0xffff);
+      // A new wave's map comes first: every record after it applies to the new terrain.
+      if (this.waveRecord) w.bytes(this.waveRecord);
+      else if (p.needsMap && this.mapRecord) {
+        // A newcomer generates the map from its seed: it holds every chunk
+        // nobody has touched since, and is sent only the ones that changed.
+        w.bytes(this.mapRecord);
+        for (let ci = 0; ci < CHUNK_COUNT; ci++) if (this.chunkVersion[ci] === this.pristine[ci]) p.known[ci] = this.chunkVersion[ci];
+      }
+      p.needsMap = false;
+      if (this.mode === 'ffa') {
+        w.u8(R_ROUND);
+        w.u8(this.phase);
+        w.u16(this.wave);
+        w.u16(Math.min(65535, this.phaseTimer));
+        w.u8(this.winner);
+        w.u8(this.remaining());
+        // 0 not in this wave, 1 in it (alive, riding in, or waiting for a rocket), 2 out.
+        w.u8(!p.inWave ? 0 : this.inPlay(p) ? 1 : 2);
+        w.u8(this.waveMode);
+        w.u8(this.remaining(Team.Red));
+        w.u8(this.remaining(Team.Green));
+        w.u8(this.kings[0]);
+        w.u8(this.kings[1]);
+        if (p.teamsSeen !== this.teamsRev) {
+          p.teamsSeen = this.teamsRev;
+          w.u8(R_TEAMS);
+          for (let id = 0; id < MAX_PLAYERS; id++) w.u8(this.players[id]?.team ?? Team.None);
+        }
+      }
 
       // Own state at full float64 precision: the client's predictor rebases on
       // it and replays unacked inputs, so any rounding here would show up as
@@ -992,10 +2373,57 @@ export class World {
       w.f64(b.fuel);
       w.u8(Math.max(0, Math.ceil(p.hp)));
       w.u8(p.weapon);
-      w.u8(p.cooldown);
+      w.u8(Math.ceil(p.cooldown));
+      w.u8(Math.min(255, p.reloadLeft));
+      w.u16(Math.min(65535, p.gold));
+      // The whole inventory (it's small) and which slot is in hand.
+      w.u8(p.inv.length);
+      for (const it of p.inv) {
+        w.u8(it.weapon);
+        w.u8(it.ammo);
+      }
+      w.u8(p.slot);
+      w.u8(p.invVersion);
+      w.u8(p.spectate);
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
+
+      // Riding in: the rocket at full precision too, since the client
+      // predicts it from this state the same way it predicts its clone.
+      const ride = !p.alive && p.delivering >= 0 ? this.crafts[p.delivering] : null;
+      if (ride && ride.passenger === p.id) {
+        w.u8(R_CRAFT_SELF);
+        w.u8(p.delivering);
+        w.f64(ride.x);
+        w.f64(ride.y);
+        w.f64(ride.vx);
+        w.f64(ride.vy);
+        w.f64(ride.a);
+        w.f64(ride.w);
+        w.f64(ride.targetX);
+        w.u16(Math.min(65535, ride.timer));
+        w.u8(ride.phase);
+        w.u8(ride.parts);
+        w.u8(ride.prevButtons);
+        for (let part = 0; part < CRAFT_PARTS; part++) w.u8(Math.max(0, Math.min(255, Math.ceil(ride.partHp[part]))));
+      }
+
+      // Driving: the tank at full precision, for the client's predictor.
+      const drive = p.alive && p.tank >= 0 ? this.tanks[p.tank] : null;
+      if (drive && drive.pilot === p.id) {
+        w.u8(R_TANK_SELF);
+        w.u8(p.tank);
+        w.f64(drive.x);
+        w.f64(drive.y);
+        w.f64(drive.vx);
+        w.f64(drive.vy);
+        w.f64(drive.fuel);
+        w.u8((drive.chute ? 1 : 0) | (drive.onGround ? 2 : 0) | (drive.jetting ? 4 : 0));
+        w.u8(drive.parts);
+        for (let part = 0; part < TANK_PARTS; part++) w.u16(Math.max(0, Math.ceil(drive.partHp[part])));
+        w.u8(Math.min(255, Math.ceil(drive.cannonCd * TICK_RATE)));
+      }
 
       // Entity interest: full-rate inside the view rect, radar blips outside.
       const vx0 = p.camX - VIEW_HALF_W - ENTITY_INTEREST_MARGIN;
@@ -1026,8 +2454,8 @@ export class World {
         w.u8(far.length);
         for (const o of far) {
           w.u8(o.id);
-          w.u8(Math.max(0, Math.min(255, o.cx >> 3)));
-          w.u8(Math.max(0, Math.min(255, o.cy >> 3)));
+          w.u8(Math.max(0, Math.min(255, Math.floor(o.cx / BLIP_X))));
+          w.u8(Math.max(0, Math.min(255, Math.floor(o.cy / BLIP_Y))));
         }
       }
 
@@ -1058,8 +2486,7 @@ export class World {
       for (let k = 0; k < MAX_CRAFTS; k++) {
         const c = this.crafts[k];
         if (!c) continue;
-        const ccx = c.x + CRAFT_W / 2;
-        if (ccx < vx0 - 200 || ccx > vx1 + 200 || c.y > vy1 + 100 || c.y + CRAFT_H < vy0 - 500) continue;
+        if (c.x < vx0 - 200 || c.x > vx1 + 200 || c.y > vy1 + 120 || c.y < vy0 - 500) continue;
         if (nCraft === 0) {
           w.u8(R_CRAFTS);
           w.u8(0);
@@ -1070,12 +2497,38 @@ export class World {
         w.u16(clampU16((c.y + Y_BIAS) * POS_SCALE));
         w.i16(clampI16(c.vx * VEL_SCALE));
         w.i16(clampI16(c.vy * VEL_SCALE));
+        w.u16(quantizeAim(c.a));
         w.u8(Math.round(c.thrust * 255));
         w.u8(Math.max(0, Math.min(255, Math.ceil(c.hp))));
         w.u8(c.passenger);
         w.u8(c.phase);
+        w.u8(c.parts);
       }
       if (nCraft > 0) w.buf[craftAt] = nCraft;
+
+      // Tanks: only a handful, so every one of them, every frame (they matter from afar).
+      let nTank = 0;
+      for (const t of this.tanks) if (t) nTank++;
+      if (nTank > 0) {
+        w.u8(R_TANKS);
+        w.u8(nTank);
+        for (let k = 0; k < MAX_TANKS; k++) {
+          const t = this.tanks[k];
+          if (!t) continue;
+          w.u8(k);
+          w.u16(clampU16(t.x * POS_SCALE));
+          w.u16(clampU16((t.y + Y_BIAS) * POS_SCALE));
+          w.i16(clampI16(t.vx * VEL_SCALE));
+          w.i16(clampI16(t.vy * VEL_SCALE));
+          w.u16(quantizeAim(t.aim));
+          w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0));
+          w.u8(t.parts);
+          w.u16(Math.max(0, Math.ceil(t.hp)));
+          w.u8(t.pilot);
+        }
+      }
+
+      this.replicateItems(p, w, vx0, vy0, vx1, vy1);
 
       const roster = this.pendingRoster.get(p.id);
       if (roster) {
@@ -1091,6 +2544,8 @@ export class World {
     }
 
     this.ops.length = 0;
+    this.waveRecord = null;
+    this.itemsGone.length = 0;
     this.projSpawns.length = 0;
     this.projEnds.length = 0;
     this.hits.length = 0;
@@ -1174,8 +2629,28 @@ export class World {
 }
 
 const TICKS_PER_SCORE = 30;
+const COUNTDOWN_TICKS = 30 * 4;
+const VICTORY_TICKS = 30 * 7;
+/** A wave's time limit. */
+const WAVE_TICKS = 30 * 60 * 4;
+/** Regicide waves run longer: fortresses take a while to crack. */
+const REGICIDE_TICKS = 30 * 60 * 6;
+/** Regicide reinforcements: dead soldiers drop back in after this long. */
+const REGICIDE_RESPAWN_TICKS = 30 * 10;
+/** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
+const STARTING_GOLD = 60;
+/** Who a rocket's exhaust flames are credited to (and so who it is immune to). */
+function exhaustOwner(c: Craft): number {
+  return c.passenger !== 255 ? c.passenger : c.delivered !== 255 ? c.delivered : NO_OWNER;
+}
+
 /** Actor-field ids for drop rockets: CRAFT_ID_BASE + craft slot. */
 const CRAFT_ID_BASE = 128;
+/** Actor-field ids for tanks: TANK_ID_BASE + tank slot (above every rocket's). */
+const TANK_ID_BASE = CRAFT_ID_BASE + MAX_CRAFTS;
+const TANK_MASS = 200;
+/** How close (cells, box to box) a clone must be to climb into a tank. */
+const BOARD_REACH = 10;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less
 /** Base parts (armour is reached through them) and their share of blast overpressure. */
 const PARTS_BASE = [true, true, true, true, true, true, false, false, true];

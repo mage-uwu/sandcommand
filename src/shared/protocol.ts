@@ -11,6 +11,8 @@ export const C_INPUT = 0x02;
 export const C_RESYNC = 0x03;
 export const C_PING = 0x04;
 export const C_CHAT = 0x05;
+/** Materializer: build piece u8 at grid top-left gx u16, gy u16. */
+export const C_BUILD = 0x06;
 
 // Server -> client
 export const S_WELCOME = 0x81;
@@ -35,6 +37,25 @@ export const R_CHAT = 13;
 export const R_DETACH = 14;
 export const R_CRAFTS = 15;
 export const R_CRAFT_BOOM = 16;
+export const R_CRAFT_SELF = 17;
+export const R_CRAFT_PART = 18;
+export const R_BUILD = 19;
+export const R_ITEMS = 20;
+export const R_ITEMS_GONE = 21;
+/** FFA round state (every frame): phase, wave, timer, winner, clones left, whether you're in it. */
+export const R_ROUND = 22;
+/** A new wave's map: seed plus every chunk's hash (clients regenerate it locally and check). */
+export const R_WAVE = 23;
+/** Team of every slot (MAX_PLAYERS bytes, Team.None for none): sent when teams are drawn, and to newcomers. */
+export const R_TEAMS = 24;
+/** Every tank (few, so all of them, every frame): position, aim, parts, driver. */
+export const R_TANKS = 25;
+/** The tank this client drives, at full precision (prediction rebases on it). */
+export const R_TANK_SELF = 26;
+/** A part blown off a tank: slot, part, where, how fast, fragment seed. */
+export const R_TANK_PART = 27;
+/** A tank exploding. */
+export const R_TANK_BOOM = 28;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -42,8 +63,35 @@ export const F_GROUND = 2;
 export const F_JET = 4;
 export const F_FIRING = 8;
 export const F_FACE_LEFT = 16;
+export const F_RELOAD = 32;
+/** Bits 6-7 of the actor flags: the clone's class (body.ts ClassId). */
+export const F_CLASS_SHIFT = 6;
+export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
 
-export const PROTOCOL_VERSION = 1;
+/** Bump whenever records change; clients on another version reload. */
+export const PROTOCOL_VERSION = 11;
+
+/** Last Man Standing round phases. */
+export const Phase = {
+  Waiting: 0, // not enough clones to fight
+  Countdown: 1,
+  Live: 2,
+  Victory: 3,
+} as const;
+
+/** What a wave is played as (round rooms alternate them). */
+export const GameMode = {
+  Lms: 0, // Last Man Standing: every clone for itself, last one alive wins
+  Lts: 1, // Last Team Standing: red vs green, last team with a clone alive wins
+  Regicide: 2, // two fortresses, a king in each: kill theirs, keep yours (everyone else respawns)
+} as const;
+
+export const Team = {
+  Red: 0,
+  Green: 1,
+  None: 255,
+} as const;
+export const TEAM_NAMES = ['RED', 'GREEN'] as const;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

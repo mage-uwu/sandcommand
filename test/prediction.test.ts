@@ -37,7 +37,10 @@ describe('client-side prediction', () => {
           buttons = (r < 0.4 ? BTN_RIGHT : r < 0.8 ? BTN_LEFT : 0) | (rng.next() < 0.4 ? BTN_UP : 0);
         }
         const aim = quantizeAim(0);
-        game.localTick(buttons, aim, 0, (seq) => toServer.push({ at: now + latencyTicks, cmd: { seq, buttons, aim, weapon: 0 } }));
+        // Hands off the stick while riding in (piloting has its own test in
+        // craft.test.ts): the autopilot lands, and we measure the clone.
+        if (!p.alive) buttons = 0;
+        game.localTick(buttons, aim, (seq) => toServer.push({ at: now + latencyTicks, cmd: { seq, buttons, aim, inv: 0 } }));
         while (toServer.length && toServer[0].at <= now) world.input(p.id, toServer.shift()!.cmd);
         world.step();
         // Measure steady state: from when the clone is down and its drop

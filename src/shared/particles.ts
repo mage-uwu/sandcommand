@@ -83,7 +83,8 @@ export const KINDS: readonly KindDef[] = [
   /* Dust     */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
   /* Blood    */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
   /* Gib      */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID, pmass: 0.3, sharp: 0.1, wound: 0, burn: 0, onActor: A_BOUNCE },
-  /* Shrapnel */ { gravity: 0.35, drag: 0.99, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.05, contact: C_SPENT, pmass: 0.4, sharp: 1.0, wound: 7, burn: 0, onActor: A_EMBED },
+  // Shrapnel flies like a bullet and hits like one: flat, fast, armour-piercing at full speed.
+  /* Shrapnel */ { gravity: 0.15, drag: 0.996, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.02, contact: C_SPENT, pmass: 0.5, sharp: 0.85, wound: 12, burn: 0, onActor: A_EMBED },
   /* Hull     */ { gravity: 1, drag: 0.997, e: 0.25, mu: 0.6, mass: true, advect: 0, air: 0.04, contact: C_SETTLE, pmass: 1.2, sharp: 0.35, wound: 12, burn: 0, onActor: A_BOUNCE },
 ];
 const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
@@ -133,6 +134,7 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_TANK = 251; // tank crushes and explosions
 export const W_CRAFT = 252; // drop-rocket crashes, crushes and explosions
 export const W_DEBRIS = 253;
 export const W_BURN = 254;
@@ -516,7 +518,7 @@ export class Particles {
       if (actors && actors.n > 0 && K_TOUCHES[kd]) {
         // Did the free part of this tick's path cross a body? A handful of
         // field-cell lookups along the segment find the candidates.
-        const a = actors.segment(px, py, hit.x, hit.y, aq);
+        const a = actors.segment(px, py, hit.x, hit.y, aq, this.owner[i]);
         if (a >= 0) {
           const ex = px + (hit.x - px) * aq.t;
           const ey = py + (hit.y - py) * aq.t;
@@ -761,7 +763,7 @@ const SAND_MIN = 6; // grains overlapping a body before a flow can drag it
 const SAND_DRAG = 0.012; // per grain, capped by SAND_DRAG_MAX
 const SAND_DRAG_MAX = 0.35;
 const AIR_ACTOR = 0.35; // per-tick blend toward the blast wind
-export const MAX_ACTORS = 128; // 64 clones + 64 drop rockets
+export const MAX_ACTORS = 136; // 64 clones + 64 drop rockets + tanks
 
 /**
  * Actors (players) as seen by the particle engine. Each tick the world loads
@@ -788,6 +790,10 @@ export class ActorField {
   readonly h = new Float32Array(MAX_ACTORS);
   /** Mass per slot (impacts and field forces divide by it). */
   readonly mass = new Float32Array(MAX_ACTORS);
+  /** Particle owner this body ignores (a rocket and its own exhaust), 255 = none. */
+  readonly immune = new Uint8Array(MAX_ACTORS);
+  /** How strongly the blast/air field drags this body (rockets: their own jet would). */
+  readonly airScale = new Float32Array(MAX_ACTORS);
   readonly dvx = new Float32Array(MAX_ACTORS);
   readonly dvy = new Float32Array(MAX_ACTORS);
   // Hit records (struct of arrays, grown as needed).
@@ -823,9 +829,11 @@ export class ActorField {
   }
 
   /** Add a body; returns its slot. Size and mass default to a clone's. */
-  add(id: number, x: number, y: number, vx: number, vy: number, w = this.bodyW, h = this.bodyH, mass = ACTOR_MASS): number {
+  add(id: number, x: number, y: number, vx: number, vy: number, w = this.bodyW, h = this.bodyH, mass = ACTOR_MASS, immune = 255, airScale = 1): number {
     if (this.n >= MAX_ACTORS) return -1;
     const a = this.n++;
+    this.immune[a] = immune;
+    this.airScale[a] = airScale;
     this.w[a] = w;
     this.h[a] = h;
     this.mass[a] = mass;
@@ -857,7 +865,7 @@ export class ActorField {
    * cell with an exact slab test, keep the earliest entry. Writes the entry
    * fraction to `out.t`.
    */
-  segment(x0: number, y0: number, x1: number, y1: number, out: { t: number }): number {
+  segment(x0: number, y0: number, x1: number, y1: number, out: { t: number }, owner = 255): number {
     const dx = x1 - x0;
     const dy = y1 - y0;
     const len = Math.sqrt(dx * dx + dy * dy);
@@ -873,6 +881,7 @@ export class ActorField {
         if (a < 0) break;
         if (tested[a >> 5] & (1 << (a & 31))) continue;
         tested[a >> 5] |= 1 << (a & 31);
+        if (owner !== 255 && this.immune[a] === owner) continue;
         const t = segmentBox(x0, y0, dx, dy, this.x[a], this.y[a], this.x[a] + this.w[a], this.y[a] + this.h[a]);
         if (t >= 0 && t < bestT) {
           bestT = t;
@@ -964,8 +973,8 @@ export class ActorField {
         this.dvy[a] += (my / d - this.vy[a]) * k;
       }
       if (an > 0) {
-        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR * heavy;
-        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR * heavy;
+        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR * heavy * this.airScale[a];
+        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR * heavy * this.airScale[a];
       }
     }
   }
@@ -979,8 +988,11 @@ interface FragmentDef {
 /** Explosion fragments by projectile kind (bullet, rocket, grenade). */
 const FRAGMENTS: readonly FragmentDef[] = [
   { shrapnel: 0, speed: 0, embers: 0 },
-  { shrapnel: 24, speed: 360, embers: 18 },
-  { shrapnel: 40, speed: 420, embers: 24 },
+  { shrapnel: 36, speed: 820, embers: 18 }, // rocket
+  { shrapnel: 56, speed: 760, embers: 24 }, // grenade
+  { shrapnel: 0, speed: 0, embers: 0 },
+  { shrapnel: 44, speed: 820, embers: 20 }, // tank shell
+  { shrapnel: 0, speed: 0, embers: 0 },
 ];
 
 /**
@@ -998,8 +1010,8 @@ export function explosionFragments(p: Particles, x: number, y: number, projKind:
     const d = Math.sqrt(dx * dx + dy * dy) + 1e-6;
     dx /= d;
     dy /= d;
-    const s = def.speed * rng.range(0.55, 1);
-    p.spawn(PK.Shrapnel, x, y, dx * s, dy * s, rng.range(18, 30), projKind, 0, owner);
+    const s = def.speed * rng.range(0.6, 1);
+    p.spawn(PK.Shrapnel, x, y, dx * s, dy * s, rng.range(14, 24), projKind, 0, owner);
   }
   for (let k = 0; k < def.embers; k++) {
     let dx = rng.range(-1, 1);
@@ -1037,4 +1049,21 @@ export function craftFragments(p: Particles, x: number, y: number, vx: number, v
     p.spawn(PK.Flame, x, y, vx * 0.3 + dx * rng.range(40, 160), vy * 0.3 + dy * rng.range(40, 160) - 40, rng.range(12, 22), 0, 0, owner);
   }
   explosionFragments(p, x, y, 1, owner, rng); // rocket-grade shrapnel
+}
+
+/**
+ * A drop-rocket part shot off at (x, y): a few heavy hull fragments (they
+ * hurt, and settle as scrap metal) plus sparks. Seeded so clients mirror it.
+ */
+export function craftPartFragments(p: Particles, x: number, y: number, vx: number, vy: number, owner: number, rng: Rng): void {
+  for (let k = 0; k < 8; k++) {
+    const a = rng.range(0, Math.PI * 2);
+    const s = rng.range(50, 170);
+    p.spawn(PK.Hull, x, y, vx + Math.cos(a) * s, vy + Math.sin(a) * s - 40, rng.range(300, 420), Mat.Metal, 0, owner);
+  }
+  for (let k = 0; k < 10; k++) {
+    const a = rng.range(0, Math.PI * 2);
+    const s = rng.range(80, 260);
+    p.spawn(PK.Spark, x, y, vx + Math.cos(a) * s, vy + Math.sin(a) * s, rng.range(6, 14), 0, 0, owner);
+  }
 }

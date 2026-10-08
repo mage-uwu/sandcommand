@@ -1,4 +1,5 @@
-import { GIB_INORGANIC, NO_OWNER, PK, type Particles, craftFragments, explosionFragments } from '../shared/particles.ts';
+import { GIB_INORGANIC, NO_OWNER, PK, type Particles, craftFragments, craftPartFragments, explosionFragments } from '../shared/particles.ts';
+import { CRAFT_H } from '../shared/craft.ts';
 import { Rng } from '../shared/rng.ts';
 import { Part, has } from '../shared/body.ts';
 
@@ -172,14 +173,40 @@ export const GIB_NOZZLE = 15;
 
 /**
  * Drop-rocket exhaust on this client: the plume (flames and billowing smoke)
- * plus the same jet into the local air field the server writes, so smoke and
- * loose particles under a landing rocket blow away on screen too.
+ * along the engine axis, plus the same jet into the local air field the
+ * server writes, so smoke and loose particles behind the nozzle blow away
+ * on screen too. (cx, cy) is the rocket's centre, `a` its angle.
  */
-export function craftExhaust(p: Particles, nx: number, ny: number, vx: number, vy: number, thrust: number): void {
+export function craftExhaust(p: Particles, cx: number, cy: number, a: number, vx: number, vy: number, thrust: number): void {
+  const dx = -Math.sin(a);
+  const dy = Math.cos(a);
+  const nx = cx + dx * (CRAFT_H / 2 + 1);
+  const ny = cy + dy * (CRAFT_H / 2 + 1);
   const n = Math.ceil(thrust * 4);
-  for (let k = 0; k < n; k++) p.spawn(PK.Flame, nx + rnd(-2, 2), ny + 1, vx * 0.5 + rnd(-40, 40), vy + 180 + 160 * thrust * Math.random(), rnd(8, 16));
-  if (Math.random() < thrust) p.spawn(PK.Smoke, nx + rnd(-3, 3), ny + 4, rnd(-60, 60), rnd(20, 80), rnd(40, 80));
-  p.wind(nx, ny + 16, 26, 0, 320 * thrust);
+  for (let k = 0; k < n; k++) {
+    const s = 180 + 160 * thrust * Math.random();
+    const j = rnd(-40, 40);
+    p.spawn(PK.Flame, nx + dy * rnd(-2, 2), ny - dx * rnd(-2, 2), vx * 0.5 + dx * s + dy * j, vy * 0.5 + dy * s - dx * j, rnd(8, 16));
+  }
+  if (Math.random() < thrust) p.spawn(PK.Smoke, nx + dx * 4 + rnd(-3, 3), ny + dy * 4, dx * 50 + rnd(-60, 60), dy * 50 + rnd(-20, 20), rnd(40, 80));
+  p.wind(nx + dx * 16, ny + dy * 16, 26, dx * 320 * thrust, dy * 320 * thrust);
+}
+
+const CRAFT_PART_GIB = [GIB_PLATE, GIB_NOSE, GIB_FIN, GIB_FIN, GIB_NOZZLE];
+
+/**
+ * A part shot off a drop rocket: mirror the server's hull fragments from the
+ * seed (they hurt and settle as scrap), plus the part itself tumbling away.
+ */
+export function craftPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+  craftPartFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
+  const i = p.n;
+  if (p.spawn(PK.Gib, x, y, vx, vy, rnd(600, 750), (CRAFT_PART_GIB[part] ?? GIB_PLATE) | GIB_INORGANIC, 0x8a9096)) {
+    p.spin[i] = Math.floor(Math.random() * 4);
+    p.spinRate[i] = (Math.random() - 0.5) * 0.15;
+  }
+  burst(p, PK.Flame, x, y, 8, 120, 12, 0, vx * 0.5, vy * 0.5);
+  burst(p, PK.Smoke, x, y, 10, 50, 60);
 }
 
 /**
@@ -203,4 +230,66 @@ export function craftDebris(p: Particles, x: number, y: number, vx: number, vy: 
   burst(p, PK.Flame, x, y, 60, 240, 16);
   burst(p, PK.Spark, x, y, 40, 300, 22);
   burst(p, PK.Smoke, x, y, 60, 90, 90);
+}
+
+/**
+ * Materializer: the new cells shimmer in, a haze of cyan dust and sparks over
+ * the piece. `placed` holds x, y, mat triples.
+ */
+export function materialize(p: Particles, placed: number[]): void {
+  const n = placed.length / 3;
+  const step = Math.max(1, Math.floor(n / 70));
+  for (let i = 0; i < n; i += step) {
+    const x = placed[i * 3] + 0.5;
+    const y = placed[i * 3 + 1] + 0.5;
+    p.spawn(PK.Dust, x, y, rnd(-12, 12), rnd(-30, -5), rnd(16, 30), 0, 0x8ae8ff);
+    if (Math.random() < 0.3) p.spawn(PK.Spark, x, y, rnd(-60, 60), rnd(-90, 10), rnd(6, 12));
+  }
+}
+
+/** Olive drab: the tank's paint, on its scrap. */
+const TANK_SCRAP = 0x6f7a3c;
+const TANK_PART_GIB = [GIB_PLATE, GIB_NOZZLE, GIB_NOZZLE, GIB_PLATE];
+
+/** A part blown off a tank: the server's fragments from the seed, and the piece itself flying. */
+export function tankPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+  craftPartFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
+  for (let k = 0; k < (part === 3 ? 3 : 1); k++) {
+    const i = p.n;
+    if (p.spawn(PK.Gib, x + rnd(-3, 3), y + rnd(-3, 3), vx + rnd(-40, 40), vy + rnd(-40, 20), rnd(600, 750), (TANK_PART_GIB[part] ?? GIB_PLATE) | GIB_INORGANIC, part === 3 ? 0x9aa0a6 : TANK_SCRAP)) {
+      p.spin[i] = Math.floor(Math.random() * 4);
+      p.spinRate[i] = (Math.random() - 0.5) * 0.15;
+    }
+  }
+  burst(p, PK.Flame, x, y, 10, 140, 12, 0, vx * 0.5, vy * 0.5);
+  burst(p, PK.Spark, x, y, 16, 220, 14);
+  burst(p, PK.Smoke, x, y, 14, 50, 70);
+}
+
+/** A tank exploding: the server's two hull-fragment showers from the seed, big scrap, fire and smoke. */
+export function tankDebris(p: Particles, x: number, y: number, vx: number, vy: number, seed: number, blastStrength: number): void {
+  p.blast(x, y, 90, blastStrength * 1.5);
+  const rng = new Rng(seed);
+  craftFragments(p, x, y, vx, vy, NO_OWNER, rng);
+  craftFragments(p, x, y, vx, vy, NO_OWNER, rng);
+  for (let k = 0; k < 10; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = rnd(80, 280);
+    const i = p.n;
+    if (p.spawn(PK.Gib, x + rnd(-10, 10), y + rnd(-6, 6), vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 90, rnd(600, 750), (k % 3 === 0 ? GIB_NOZZLE : GIB_PLATE) | GIB_INORGANIC, TANK_SCRAP)) {
+      p.spin[i] = Math.floor(Math.random() * 4);
+      p.spinRate[i] = (Math.random() - 0.5) * 0.12;
+    }
+  }
+  burst(p, PK.Flame, x, y, 90, 260, 18);
+  burst(p, PK.Spark, x, y, 60, 320, 22);
+  burst(p, PK.Smoke, x, y, 90, 100, 100);
+}
+
+/** A tank's lift jets: flame and smoke out of the two nozzles under its hull. */
+export function tankJets(p: Particles, x: number, y: number, vx: number, vy: number): void {
+  for (const nx of [7, 25]) {
+    for (let k = 0; k < 2; k++) p.spawn(PK.Flame, x + nx + rnd(-2, 2), y + 23, vx * 0.5 + rnd(-30, 30), vy * 0.5 + rnd(180, 300), rnd(6, 11));
+    if (Math.random() < 0.5) p.spawn(PK.Smoke, x + nx, y + 26, vx * 0.3 + rnd(-20, 20), rnd(40, 90), rnd(30, 50));
+  }
 }
