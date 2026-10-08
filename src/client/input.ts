@@ -1,14 +1,19 @@
 import { BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
-import { WEAPONS } from '../shared/weapons.ts';
+import { PROJ_BUILD, WEAPONS } from '../shared/weapons.ts';
+import { PIECES } from '../shared/build.ts';
 
 export class InputState {
   private keys = new Set<string>();
   mouseX = 0;
   mouseY = 0;
   mouseDown = false;
+  /** Left clicks since the last takeClick(), so a click shorter than a tick still counts. */
+  private clicks = 0;
   /** Right mouse held: aiming down the scope. */
   scopeDown = false;
   weapon = 0;
+  /** Selected materializer piece (index into PIECES). */
+  piece = 0;
   scoreboard = false;
   /** True while the chat box has focus; game keys are ignored. */
   typing = false;
@@ -50,7 +55,10 @@ export class InputState {
       this.mouseY = e.clientY;
     });
     target.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.clicks++;
+      }
       if (e.button === 2) this.scopeDown = true;
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
@@ -64,7 +72,9 @@ export class InputState {
       'wheel',
       (e) => {
         const d = Math.sign(e.deltaY);
-        this.weapon = (this.weapon + d + WEAPONS.length) % WEAPONS.length;
+        // With the materializer out, the wheel picks what to build.
+        if (WEAPONS[this.weapon].proj === PROJ_BUILD) this.piece = (this.piece + d + PIECES.length) % PIECES.length;
+        else this.weapon = (this.weapon + d + WEAPONS.length) % WEAPONS.length;
         e.preventDefault();
       },
       { passive: false },
@@ -74,6 +84,13 @@ export class InputState {
   private down(...codes: string[]): boolean {
     for (const c of codes) if (this.keys.has(c)) return true;
     return false;
+  }
+
+  /** Consume one pending left click (materializer placement and menu picks). */
+  takeClick(): boolean {
+    if (this.clicks === 0) return false;
+    this.clicks = 0;
+    return true;
   }
 
   /** Aiming down the scope (right mouse or Shift). */

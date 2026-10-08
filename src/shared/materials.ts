@@ -6,22 +6,23 @@ export const Mat = {
   Gold: 4,
   Bedrock: 5,
   Rubble: 6,
-  Metal: 7, // scrap from destroyed drop rockets
+  Metal: 7, // scrap from destroyed drop rockets, and materialized armour plate
+  Concrete: 8, // materialized fortifications
 } as const;
 
-export const MAT_COUNT = 8;
+export const MAT_COUNT = 9;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false];
 
 /** Base RGB colors; the renderer adds per-cell hashed variation. */
 export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
@@ -33,6 +34,7 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [44, 40, 48],
   [140, 104, 72],
   [150, 158, 170],
+  [170, 166, 156],
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete'];

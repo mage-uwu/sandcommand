@@ -231,3 +231,18 @@ export function craftDebris(p: Particles, x: number, y: number, vx: number, vy: 
   burst(p, PK.Spark, x, y, 40, 300, 22);
   burst(p, PK.Smoke, x, y, 60, 90, 90);
 }
+
+/**
+ * Materializer: the new cells shimmer in, a haze of cyan dust and sparks over
+ * the piece. `placed` holds x, y, mat triples.
+ */
+export function materialize(p: Particles, placed: number[]): void {
+  const n = placed.length / 3;
+  const step = Math.max(1, Math.floor(n / 70));
+  for (let i = 0; i < n; i += step) {
+    const x = placed[i * 3] + 0.5;
+    const y = placed[i * 3 + 1] + 0.5;
+    p.spawn(PK.Dust, x, y, rnd(-12, 12), rnd(-30, -5), rnd(16, 30), 0, 0x8ae8ff);
+    if (Math.random() < 0.3) p.spawn(PK.Spark, x, y, rnd(-60, 60), rnd(-90, 10), rnd(6, 12));
+  }
+}

@@ -10,8 +10,9 @@ import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, PROJ, ProjKind, WeaponId, weaponOfProj } from '../shared/weapons.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
+import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, weaponOfProj } from '../shared/weapons.ts';
+import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -145,6 +146,10 @@ export class Game implements FrameHandler {
   /** Rounds in the current weapon's magazine, and ticks left reloading it (server truth). */
   ammo = 0;
   reloadLeft = 0;
+  /** Own gold, exact (from our own record, not the once-a-second scoreboard). */
+  gold = 0;
+  /** Materializer beams to fade out: builder muzzle to piece centre. */
+  readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number }[] = [];
   smoothX = 0;
   smoothY = 0;
   /** Prediction errors larger than 0.01 cells seen during reconciliation. */
@@ -331,6 +336,7 @@ export class Game implements FrameHandler {
     this.cooldown = s.cooldown;
     this.ammo = s.ammo;
     this.reloadLeft = s.reload;
+    this.gold = s.gold;
     const b = this.body;
     const ack = this.ack;
     this.pending = this.pending.filter((p) => seqNewer(p.seq, ack));
@@ -443,6 +449,57 @@ export class Game implements FrameHandler {
       // Digger / bullet chips: a puff of whatever was dug.
       digDust(this.particles, x, y, matRgb(removed[2]), Math.min(6, removed.length / 3));
     }
+  }
+
+  built(piece: number, builder: number, gx: number, gy: number, placed: number[]): void {
+    materialize(this.particles, placed);
+    const p = PIECES[piece];
+    if (!p) return;
+    // Beam from whoever built it (if we can see them).
+    let bx = NaN;
+    let by = NaN;
+    if (builder === this.myId && this.alive) {
+      bx = this.body.x + SHOULDER_X;
+      by = this.body.y + SHOULDER_Y;
+    } else {
+      const s = this.snaps.get(builder);
+      const last = s?.[s.length - 1];
+      if (last) {
+        bx = last.x + SHOULDER_X;
+        by = last.y + SHOULDER_Y;
+      }
+    }
+    if (!Number.isNaN(bx)) this.beams.push({ x0: bx, y0: by, x1: gx + p.w / 2, y1: gy + p.h / 2, at: performance.now() });
+    if (this.beams.length > 16) this.beams.shift();
+  }
+
+  private readonly blockers: BuildBlocker[] = [];
+
+  /**
+   * Would the server accept this piece here? The same canBuild the server
+   * runs, against our copy of the terrain and the bodies we can see, so the
+   * ghost preview is honest.
+   */
+  canBuildHere(piece: number, gx: number, gy: number): number {
+    const bl = this.blockers;
+    bl.length = 0;
+    if (this.alive) bl.push({ x: this.body.x, y: this.body.y, w: ACTOR_W, h: ACTOR_H });
+    for (const [, s] of this.snaps) {
+      const last = s[s.length - 1];
+      if (last && last.flags & F_ALIVE) bl.push({ x: last.x, y: last.y, w: ACTOR_W, h: ACTOR_H });
+    }
+    for (const [, cs] of this.craftSnaps) {
+      const c = cs[cs.length - 1];
+      if (!c) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      bl.push({ x: c.x - e.x, y: c.y - e.y, w: 2 * e.x, h: 2 * e.y });
+    }
+    return canBuild(this.terrain, piece, gx, gy, this.body.x + SHOULDER_X, this.body.y + SHOULDER_Y, this.gold, bl);
+  }
+
+  /** Holding the materializer? */
+  get building(): boolean {
+    return this.alive && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
   }
 
   chunkLoaded(ci: number): void {

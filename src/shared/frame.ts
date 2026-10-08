@@ -2,10 +2,12 @@ import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
 import { CRAFT_PARTS } from './craft.ts';
 import { applyCarve } from './particles.ts';
+import { applyBuild } from './build.ts';
 import { CHUNK, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
 import {
   R_ACTORS,
   R_BLIPS,
+  R_BUILD,
   R_CARVE,
   R_CHAT,
   R_CHUNK,
@@ -39,6 +41,7 @@ export interface SelfState {
   cooldown: number;
   ammo: number; // rounds in the current weapon's magazine
   reload: number; // ticks left reloading, 0 = not
+  gold: number; // own gold, exact (the scoreboard only updates once a second)
   respawn: number;
   parts: number; // attached-part mask (body.ts)
   partHp: number[]; // 0..100 per part, 0 = gone
@@ -113,6 +116,8 @@ export interface FrameHandler {
    */
   carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[], detached: number[]): void;
   chunkLoaded(ci: number): void;
+  /** Called after a materializer op was applied; `placed` holds x, y, mat triples. */
+  built(piece: number, builder: number, gx: number, gy: number, placed: number[]): void;
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void;
   /** `seed` reproduces the explosion's shrapnel and embers (explosionFragments). */
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void;
@@ -158,6 +163,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           cooldown: r.u8(),
           ammo: r.u8(),
           reload: r.u8(),
+          gold: r.u16(),
           respawn: r.u16(),
           parts: r.u16(),
           partHp: Array.from({ length: PART_COUNT }, () => r.u8()),
@@ -200,6 +206,15 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const debris = r.u8();
         applyCarve(terrain, x, y, rad, core, removedScratch, detachedScratch);
         h.carved(x, y, rad, seed, debris, removedScratch, detachedScratch);
+        break;
+      }
+      case R_BUILD: {
+        const piece = r.u8();
+        const builder = r.u8();
+        const gx = r.u16();
+        const gy = r.u16();
+        applyBuild(terrain, piece, gx, gy, removedScratch);
+        h.built(piece, builder, gx, gy, removedScratch);
         break;
       }
       case R_PIXELS: {
@@ -351,6 +366,7 @@ export const nullHandler: FrameHandler = {
   blips() {},
   carved() {},
   chunkLoaded() {},
+  built() {},
   projSpawn() {},
   projEnd() {},
   kill() {},

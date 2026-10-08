@@ -175,8 +175,18 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 2,
   },
+  {
+    // Materializer: a boxy projector with a cyan emitter
+    grid: [
+      '...KKKKKK.',
+      'KAAKGGgGVK',
+      'KAAKGGGGvK',
+      '.KKKKKKKK.',
+    ],
+    px: 1,
+    py: 1,
+  },
 ];
-
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
 const GIBS: Grid[] = [

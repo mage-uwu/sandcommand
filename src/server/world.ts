@@ -39,6 +39,7 @@ import {
   stumps,
 } from '../shared/body.ts';
 import { Writer, rleEncode } from '../shared/codec.ts';
+import { BuildResult, type BuildBlocker, PIECES, applyBuild, canBuild } from '../shared/build.ts';
 import {
   ACTOR_H,
   ACTOR_MAX_HP,
@@ -76,6 +77,7 @@ import {
   F_JET,
   R_ACTORS,
   R_BLIPS,
+  R_BUILD,
   R_CARVE,
   R_CHAT,
   R_CHUNK,
@@ -99,7 +101,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_DIG, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { generateWorld } from '../shared/worldgen.ts';
 
 export interface ClientLink {
@@ -135,13 +137,16 @@ export class Player {
   reloadLeft = 0;
   /** Weapon in hand last tick (switching cancels a reload). */
   held = 0;
+  /** Latest materializer request, applied on this player's next tick. */
+  buildReq: { piece: number; gx: number; gy: number } | null = null;
   /** Buttons last tick, for semi-auto triggers and the reload key. */
   prevButtons = 0;
   respawn = 1;
   firing = false;
   kills = 0;
   deaths = 0;
-  gold = 0;
+  /** Gold banked: dug up, picked from the dead, spent on fortifications. Starts with enough for a bunker. */
+  gold = STARTING_GOLD;
   inputs: InputCmd[] = [];
   buttons = 0;
   ack = 0;
@@ -287,6 +292,12 @@ export class World {
     if (!p) return;
     p.inputs.push(cmd);
     if (p.inputs.length > 12) p.inputs.shift();
+  }
+
+  /** A client asked to materialize a fortification piece (validated on its next tick). */
+  build(id: number, piece: number, gx: number, gy: number): void {
+    const p = this.players[id];
+    if (p) p.buildReq = { piece, gx, gy };
   }
 
   resync(id: number, ci: number): void {
@@ -631,7 +642,7 @@ export class World {
       if (asked || (p.ammo[p.weapon] === 0 && pressed)) this.startReload(p);
     }
     p.cooldown -= 1;
-    const want = p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || p.ammo[p.weapon] > 0);
+    const want = def.proj !== PROJ_BUILD && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || p.ammo[p.weapon] > 0);
     if (want && p.cooldown <= 0) {
       this.fire(p, def);
       p.firing = true;
@@ -641,6 +652,44 @@ export class World {
     }
     // Only carry the fractional remainder while the trigger keeps firing.
     if (p.cooldown < 0 && !want) p.cooldown = 0;
+  }
+
+  private readonly placedScratch: number[] = [];
+  private readonly blockers: BuildBlocker[] = [];
+
+  /**
+   * Materializer: turn gold into a fortification piece if the server agrees
+   * it fits (the same canBuild the client previews with), then log it as an
+   * R_BUILD op that every client replays on its own terrain.
+   */
+  private tryBuild(p: Player): number {
+    const req = p.buildReq!;
+    p.buildReq = null;
+    const def = WEAPONS[p.weapon];
+    if (def.proj !== PROJ_BUILD || !p.mob.canFire || p.cooldown > 0) return -1;
+    const bl = this.blockers;
+    bl.length = 0;
+    for (const o of this.players) if (o && o.alive) bl.push({ x: o.body.x, y: o.body.y, w: ACTOR_W, h: ACTOR_H });
+    for (const c of this.crafts) {
+      if (!c) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      bl.push({ x: c.x - e.x, y: c.y - e.y, w: 2 * e.x, h: 2 * e.y });
+    }
+    const res = canBuild(this.terrain, req.piece, req.gx, req.gy, p.body.x + SHOULDER_X, p.body.y + SHOULDER_Y, p.gold, bl);
+    if (res !== BuildResult.Ok) return res;
+    const piece = PIECES[req.piece];
+    if (applyBuild(this.terrain, req.piece, req.gx, req.gy, this.placedScratch) === 0) return BuildResult.Room;
+    p.gold -= piece.cost;
+    p.cooldown = fireInterval(def);
+    p.firing = true;
+    const w = this.tmp.reset();
+    w.u8(R_BUILD);
+    w.u8(req.piece);
+    w.u8(p.id);
+    w.u16(req.gx);
+    w.u16(req.gy);
+    this.logOp(w.finish(), req.gx, req.gy, req.gx + piece.w - 1, req.gy + piece.h - 1);
+    return BuildResult.Ok;
   }
 
   private startReload(p: Player): void {
@@ -1041,6 +1090,7 @@ export class World {
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
       this.handleWeapon(p, prev);
+      if (p.buildReq) this.tryBuild(p);
       // The view this client sees (and so its interest area): pushed down the
       // barrel by the weapon's scope distance while scoping.
       p.camX = p.cx;
@@ -1196,6 +1246,7 @@ export class World {
       w.u8(Math.ceil(p.cooldown));
       w.u8(p.ammo[p.weapon]);
       w.u8(Math.min(255, p.reloadLeft));
+      w.u16(Math.min(65535, p.gold));
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
@@ -1398,6 +1449,8 @@ export class World {
 }
 
 const TICKS_PER_SCORE = 30;
+/** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
+const STARTING_GOLD = 60;
 /** Who a rocket's exhaust flames are credited to (and so who it is immune to). */
 function exhaustOwner(c: Craft): number {
   return c.passenger !== 255 ? c.passenger : c.delivered !== 255 ? c.delivered : NO_OWNER;

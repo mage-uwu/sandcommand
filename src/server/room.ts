@@ -3,6 +3,7 @@ import { Reader, Writer } from '../shared/codec.ts';
 import { TICK_RATE } from '../shared/constants.ts';
 import {
   C_CHAT,
+  C_BUILD,
   C_INPUT,
   C_PING,
   C_RESYNC,
@@ -121,6 +122,9 @@ export class GameRoom extends DurableObject<Env> {
         }
         case C_CHAT:
           world.chat(id, r.str());
+          break;
+        case C_BUILD:
+          world.build(id, r.u8(), r.u16(), r.u16());
           break;
       }
     } catch {

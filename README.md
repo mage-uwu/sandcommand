@@ -17,9 +17,10 @@ npm run deploy       # wrangler deploy (needs a Cloudflare account)
 ```
 
 Controls: **A/D** run, **W/Space** jump (hold for jetpack), **mouse** aim and
-fire, **right mouse / Shift** scope, **R** reload, **1–5 / Q/E / wheel**
-switch weapon (Rifle, Bazooka, Grenade, Sniper, Digger), **Tab** scoreboard,
-**Enter** chat. Dig gold with the Digger. Clones gib on
+fire, **right mouse / Shift** scope, **R** reload, **1–6 / Q/E / wheel**
+switch weapon (Rifle, Bazooka, Grenade, Sniper, Digger, Materializer), **Tab**
+scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
+on the menu picks a fortification and a click builds it. Dig gold with the Digger. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
 ## Architecture
@@ -292,6 +293,7 @@ exists everywhere.
 | Grenade | grenade, 330 | 6 | 70 rpm | semi | 3 | 2.5 s | 90 |
 | Sniper | slug, 1500 | 17 | 50 rpm | semi | 5 | 2.8 s | 300 |
 | Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
+| Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
 
 How each field works:
 
@@ -319,6 +321,52 @@ How each field works:
   it is now looking at.
 - **Losing the off arm** makes firing 1.6× slower, reloading 1.5× slower,
   and triples spread.
+
+### Fortifications: the materializer
+
+The Materializer turns gold into terrain (`src/shared/build.ts`). Pick a
+piece from the menu (click it, or use the mouse wheel). A ghost snaps to a
+4-cell grid under the cursor, green where the server will accept it and red
+with the reason where it won't. Click to build. New players join with 60
+gold, enough for one bunker. After that, you dig gold up or take it off the
+dead.
+
+| Piece | Size (cells) | Material | Cost |
+| --- | --- | --- | --- |
+| Block | 8 × 8 | concrete | 8 |
+| Wall | 4 × 20 | concrete | 10 |
+| Floor | 20 × 4 | concrete | 10 |
+| Ramp (either way) | 16 × 16 | concrete | 12 |
+| Plate | 8 × 8 | metal | 20 |
+| Bunker | 28 × 20 | concrete walls, metal roof, firing slit, doorway | 60 |
+
+**Placement rules** live in one shared function, `canBuild`. The server
+validates every request with it, and the client's ghost previews with the
+same function, so green means it will build. A piece must:
+
+- sit on the grid, inside the map, and within reach (80 cells of the
+  shoulder);
+- be affordable;
+- not cover anyone's body or a rocket, though a bunker can go up around
+  someone standing inside it;
+- be at least half open space, since a piece fills open cells and leaves
+  existing terrain alone, so it can be set into a hillside;
+- touch something to anchor to.
+
+The build rate comes from the weapon row (100 pieces a minute).
+
+**Built cells are terrain.** Concrete is a new hard material, as is metal:
+rifle rounds barely scratch it, and only explosion cores and diggers get
+through. It joins the distance field, collisions and the collapse rules, and
+crumbles into rubble when blown apart.
+
+**Networking.** A build is a 7-byte `R_BUILD` op (piece, builder, grid
+position). It goes through the same chunk-version bookkeeping as carves.
+Every client replays `applyBuild` against its own terrain, so a whole bunker
+costs less bandwidth than a rifle burst. Clients add a cyan materialize
+shimmer and a beam from the builder. Your exact gold rides in your own
+`R_SELF` record, so the HUD and the ghost's cost check never wait for the
+once-a-second scoreboard.
 
 ### Drop rockets
 
@@ -401,9 +449,9 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.79 ms  p99 3.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
-replicate avg 0.61 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 30.5 KB/s; room egress 1.90 MB/s
+sim       avg 0.91 ms  p99 4.5 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
+replicate avg 0.65 ms  p99 3.2 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 32.1 KB/s; room egress 2.01 MB/s
 ```
 
 `npm run bench:physics`:

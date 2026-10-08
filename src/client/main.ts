@@ -2,10 +2,14 @@ import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { SHOULDER_X, SHOULDER_Y } from '../shared/weapons.ts';
+import { BTN_FIRE } from '../shared/actor.ts';
+import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
 import { Net } from './net.ts';
 import { Renderer } from './render.ts';
+
+const snapAt = { x: 0, y: 0 };
 
 const TICK_MS = 1000 / TICK_RATE;
 
@@ -184,9 +188,22 @@ function frame(now: number): void {
       const wx = renderer.camX + (input.mouseX * dpr - canvas.width / 2) / renderer.zoom;
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
       const aim = Math.atan2(wy - (g.body.y + SHOULDER_Y), wx - (g.body.x + SHOULDER_X));
-      const buttons = input.buttons();
+      let buttons = input.buttons();
       const weapon = input.weapon;
       const n = net;
+      // Materializer: a click on the menu picks a piece; a click in the world
+      // asks the server to build it there (it checks the same rules the
+      // preview shows).
+      if (input.takeClick() && g.building) {
+        const hit = renderer.menuHit(input.mouseX, input.mouseY);
+        if (hit >= 0) input.piece = hit;
+        else {
+          const piece = PIECES[input.piece];
+          const at = snapPiece(piece, wx, wy, snapAt);
+          if (g.canBuildHere(input.piece, at.x, at.y) === BuildResult.Ok) n.build(input.piece, at.x, at.y);
+        }
+      }
+      if (g.building) buttons &= ~BTN_FIRE;
       g.localTick(buttons, quantizeAim(aim), weapon, (seq) => n.input(seq, buttons, quantizeAim(aim), weapon));
     }
     renderer.draw(g, input, net, acc / TICK_MS);

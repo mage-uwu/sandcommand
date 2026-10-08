@@ -33,6 +33,8 @@ export const PROJ: readonly ProjDef[] = [
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
 export const PROJ_DIG = -1;
+/** WeaponDef.proj for the materializer, which builds fortifications (see build.ts) instead of shooting. */
+export const PROJ_BUILD = -2;
 
 export const WeaponId = {
   Rifle: 0,
@@ -40,6 +42,7 @@ export const WeaponId = {
   Grenade: 2,
   Sniper: 3,
   Digger: 4,
+  Materializer: 5,
 } as const;
 
 /**
@@ -49,11 +52,11 @@ export const WeaponId = {
  */
 export interface WeaponDef {
   name: string;
-  /** ProjKind fired, or PROJ_DIG for the digger. */
+  /** ProjKind fired, PROJ_DIG for the digger, or PROJ_BUILD for the materializer. */
   proj: number;
   /** Muzzle offset: cells from the shoulder pivot along the barrel to where shots leave (and the flash shows). */
   muzzle: number;
-  /** Rate of fire, rounds per minute. */
+  /** Rate of fire, rounds per minute (the materializer: pieces per minute). */
   rpm: number;
   /** Hold to keep firing (true) or one shot per press (false). */
   auto: boolean;
@@ -75,6 +78,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Grenade', proj: ProjKind.Grenade, muzzle: 6, rpm: 70, auto: false, speed: 330, spread: 0, clip: 3, reload: 75, scope: 90 },
   { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 1500, spread: 0.004, clip: 5, reload: 84, scope: 300 },
   { name: 'Digger', proj: PROJ_DIG, muzzle: 11, rpm: 900, auto: true, speed: 0, spread: 0, clip: 0, reload: 0, scope: 40 },
+  { name: 'Materializer', proj: PROJ_BUILD, muzzle: 9, rpm: 100, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */

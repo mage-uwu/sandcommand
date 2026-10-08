@@ -11,6 +11,8 @@ export const C_INPUT = 0x02;
 export const C_RESYNC = 0x03;
 export const C_PING = 0x04;
 export const C_CHAT = 0x05;
+/** Materializer: build piece u8 at grid top-left gx u16, gy u16. */
+export const C_BUILD = 0x06;
 
 // Server -> client
 export const S_WELCOME = 0x81;
@@ -37,6 +39,7 @@ export const R_CRAFTS = 15;
 export const R_CRAFT_BOOM = 16;
 export const R_CRAFT_SELF = 17;
 export const R_CRAFT_PART = 18;
+export const R_BUILD = 19;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -47,7 +50,7 @@ export const F_FACE_LEFT = 16;
 export const F_RELOAD = 32;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

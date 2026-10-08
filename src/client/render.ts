@@ -2,7 +2,8 @@ import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHU
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, F_RELOAD, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
-import { SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import type { CraftView, Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
@@ -14,7 +15,7 @@ import { type BodyFrame, SpriteCache, WALK_CYCLE } from './sprites.ts';
 const MINI_SCALE = 8;
 
 /** Precomputed RGBA (little-endian u32) palette: 4 shade variants per material, plus a lit variant. */
-const PALETTE = new Uint32Array(8 * 8);
+const PALETTE = new Uint32Array(MAT_COLOR.length * 8);
 for (let m = 0; m < MAT_COLOR.length; m++) {
   const [r, g, b] = MAT_COLOR[m];
   for (let v = 0; v < 8; v++) {
@@ -113,7 +114,10 @@ export class Renderer {
         }
         const wx = ox + x;
         const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
-        const v = (hash2(wx, wy) & 3) + (exposed ? 4 : 0);
+        let v = (hash2(wx, wy) & 3) + (exposed ? 4 : 0);
+        // Materialized concrete shows its blocks: dark mortar seams on the build grid.
+        if (m === Mat.Concrete && ((wx & 7) === 0 || (wy & 3) === 0)) v = 0;
+        else if (m === Mat.Concrete) v = 2 + (v & 1) + (exposed ? 4 : 0);
         let c = PALETTE[m * 8 + v];
         const st = stain[row + x];
         if (st) c = bloodied(c, st);
@@ -177,8 +181,10 @@ export class Renderer {
       // Look ahead toward the mouse a little, like CC's aim-follow camera.
       const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;
       const lookY = (input.mouseY * (H / innerHeight) - H / 2) / z;
-      const tx = selfX + ACTOR_W / 2 + lookX * 0.25;
-      const ty = selfY + ACTOR_H / 2 + lookY * 0.25;
+      // Building holds the view on the clone so the ghost stays under the cursor.
+      const look = game.building ? 0 : 0.25;
+      const tx = selfX + ACTOR_W / 2 + lookX * look;
+      const ty = selfY + ACTOR_H / 2 + lookY * look;
       this.camX += (tx - this.camX) * 0.25;
       this.camY += (ty - this.camY) * 0.25;
     } else {
@@ -279,6 +285,23 @@ export class Renderer {
     const ly = Math.floor(camY - halfH) - 1;
     this.particleLayer.render(game.particles, this.sprites, alpha, lx, ly, Math.ceil(halfW * 2) + 3, Math.ceil(halfH * 2) + 3);
     ctx.drawImage(this.particleLayer.canvas, lx, ly);
+
+    // Materializer beams (anyone's), fading out.
+    for (const bm of game.beams) {
+      const t = (now - bm.at) / 300;
+      if (t >= 1) continue;
+      ctx.strokeStyle = `rgba(140,232,255,${0.8 * (1 - t)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bm.x0, bm.y0);
+      ctx.lineTo(bm.x1, bm.y1);
+      ctx.stroke();
+    }
+    if (game.building) {
+      const wx = (input.mouseX * (W / innerWidth) - offX) / z;
+      const wy = (input.mouseY * (H / innerHeight) - offY) / z;
+      this.drawBuildGhost(ctx, game, input, wx, wy, selfX, selfY, z);
+    }
 
     // Projectiles.
     const p = game.projectiles;
@@ -480,7 +503,7 @@ export class Renderer {
     }
     const g = this.sprites.gun(weapon, aim);
     ctx.drawImage(g.c, sx - g.r, sy - g.r);
-    if (flags & F_FIRING) {
+    if (flags & F_FIRING && WEAPONS[weapon]?.proj !== PROJ_BUILD) {
       // Flash at the weapon's muzzle offset (where the server spawns its shots).
       const m = (WEAPONS[weapon]?.muzzle ?? 8) + 1;
       const mx = Math.round(sx + Math.cos(aim) * m);
@@ -497,6 +520,131 @@ export class Renderer {
         ctx.fillStyle = '#fffbe0';
         ctx.fillRect(mx, my, 1, 1);
       }
+    }
+  }
+
+  /**
+   * Materializer preview: the build grid around the cursor, the reach ring,
+   * and the selected piece as a ghost, green where the server will accept it
+   * (same canBuild) and red with the reason where it won't.
+   */
+  private drawBuildGhost(ctx: CanvasRenderingContext2D, game: Game, input: InputState, wx: number, wy: number, selfX: number, selfY: number, z: number): void {
+    const piece = PIECES[input.piece];
+    if (!piece || this.overMenu(input.mouseX, input.mouseY)) return;
+    const g = snapPiece(piece, wx, wy, this.snap);
+    const res = game.canBuildHere(input.piece, g.x, g.y);
+    const ok = res === BuildResult.Ok;
+    // Grid, fading out from the cursor.
+    const R = 40;
+    const gx0 = Math.floor((wx - R) / BUILD_GRID) * BUILD_GRID;
+    const gy0 = Math.floor((wy - R) / BUILD_GRID) * BUILD_GRID;
+    const lw = 1 / z;
+    ctx.fillStyle = 'rgba(140,232,255,0.16)';
+    for (let x = gx0; x <= wx + R; x += BUILD_GRID) ctx.fillRect(x, wy - R, lw, 2 * R);
+    for (let y = gy0; y <= wy + R; y += BUILD_GRID) ctx.fillRect(wx - R, y, 2 * R, lw);
+    // Reach ring.
+    ctx.strokeStyle = 'rgba(140,232,255,0.25)';
+    ctx.lineWidth = lw;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(selfX + SHOULDER_X, selfY + SHOULDER_Y, BUILD_REACH, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // The piece itself.
+    ctx.fillStyle = ok ? 'rgba(120,255,160,0.45)' : 'rgba(255,90,80,0.4)';
+    for (let y = 0; y < piece.h; y++) {
+      for (let x = 0; x < piece.w; x++) if (piece.cells[y * piece.w + x]) ctx.fillRect(g.x + x, g.y + y, 1, 1);
+    }
+    ctx.strokeStyle = ok ? 'rgba(160,255,190,0.9)' : 'rgba(255,120,110,0.9)';
+    ctx.strokeRect(g.x, g.y, piece.w, piece.h);
+    if (!ok) {
+      ctx.fillStyle = '#ffb0a8';
+      ctx.font = `${Math.max(4, Math.round(12 / z))}px ui-monospace, monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(BUILD_RESULT_TEXT[res], g.x + piece.w / 2, g.y - 2);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  private readonly snap = { x: 0, y: 0 };
+  /** Screen rects (device px) of the build menu entries, for clicks. */
+  private readonly menuRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
+  private readonly pieceIcons: HTMLCanvasElement[] = [];
+
+  /** Build menu entry under a CSS-pixel point, or -1. */
+  menuHit(cssX: number, cssY: number): number {
+    const dpr = this.canvas.width / innerWidth;
+    const x = cssX * dpr;
+    const y = cssY * dpr;
+    for (const r of this.menuRects) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.i;
+    return -1;
+  }
+
+  private overMenu(cssX: number, cssY: number): boolean {
+    if (this.menuRects.length === 0) return false;
+    const dpr = this.canvas.width / innerWidth;
+    const first = this.menuRects[0];
+    const last = this.menuRects[this.menuRects.length - 1];
+    return cssX * dpr >= first.x && cssX * dpr < first.x + first.w && cssY * dpr >= first.y && cssY * dpr < last.y + last.h;
+  }
+
+  /** A piece drawn in its materials, one pixel per cell (scaled up in the menu). */
+  private pieceIcon(i: number): HTMLCanvasElement {
+    let c = this.pieceIcons[i];
+    if (c) return c;
+    const p = PIECES[i];
+    c = this.pieceIcons[i] = document.createElement('canvas');
+    c.width = p.w;
+    c.height = p.h;
+    const ctx = c.getContext('2d')!;
+    for (let y = 0; y < p.h; y++) {
+      for (let x = 0; x < p.w; x++) {
+        const m = p.cells[y * p.w + x];
+        if (!m) continue;
+        const [r, g, b] = MAT_COLOR[m];
+        const seam = m === Mat.Concrete && ((x & 7) === 0 || (y & 3) === 0) ? 0.8 : 1;
+        ctx.fillStyle = `rgb(${Math.round(r * seam)},${Math.round(g * seam)},${Math.round(b * seam)})`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+    return c;
+  }
+
+  /** The materializer's menu: every piece with its icon and gold cost; click or wheel to pick. */
+  private drawBuildMenu(game: Game, input: InputState, s: number, H: number): void {
+    const ctx = this.ctx;
+    const rowH = 40 * s;
+    const w = 170 * s;
+    const x0 = 14 * s;
+    const y0 = Math.max(250 * s, H / 2 - (PIECES.length * rowH) / 2);
+    this.menuRects.length = 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x0 - 4 * s, y0 - 24 * s, w + 8 * s, PIECES.length * rowH + 28 * s);
+    ctx.fillStyle = '#8ae8ff';
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
+    ctx.fillText('MATERIALIZER  (wheel)', x0, y0 - 8 * s);
+    ctx.font = `${Math.round(13 * s)}px ui-monospace, monospace`;
+    for (let i = 0; i < PIECES.length; i++) {
+      const p = PIECES[i];
+      const y = y0 + i * rowH;
+      const sel = i === input.piece;
+      ctx.fillStyle = sel ? 'rgba(140,232,255,0.3)' : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(x0, y + 2 * s, w, rowH - 4 * s);
+      if (sel) {
+        ctx.strokeStyle = '#8ae8ff';
+        ctx.lineWidth = s;
+        ctx.strokeRect(x0, y + 2 * s, w, rowH - 4 * s);
+      }
+      const icon = this.pieceIcon(i);
+      const k = Math.min((32 * s) / icon.width, (32 * s) / icon.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(icon, x0 + 4 * s + (32 * s - icon.width * k) / 2, y + 4 * s + (32 * s - icon.height * k) / 2, icon.width * k, icon.height * k);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(p.name, x0 + 44 * s, y + 18 * s);
+      ctx.fillStyle = game.gold >= p.cost ? '#ffd34a' : '#ff7060';
+      ctx.fillText(`${p.cost} gold`, x0 + 44 * s, y + 33 * s);
+      this.menuRects.push({ x: x0, y, w, h: rowH, i });
     }
   }
 
@@ -577,7 +725,9 @@ export class Renderer {
     bar(32 * s, game.body.fuel, ACTOR_MAX_FUEL, '#3c8cd2', `JET ${Math.round(game.body.fuel)}`);
     const me = game.players.get(game.myId);
     ctx.fillStyle = '#ffd34a';
-    ctx.fillText(`GOLD ${me?.gold ?? 0}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
+    ctx.fillText(`GOLD ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
+    if (game.building) this.drawBuildMenu(game, input, s, H);
+    else this.menuRects.length = 0;
     if (game.alive) this.drawPaperDoll(game, s);
 
     // Weapon slots.
