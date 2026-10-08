@@ -8,7 +8,7 @@ import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
-import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS } from './game.ts';
+import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
 import { bannerLines } from './banner.ts';
 import type { InputState } from './input.ts';
@@ -1692,7 +1692,65 @@ export class Renderer {
       }
     }
 
+    // Dead, or between rounds: our K/D and the leaderboard.
+    const between = !!rs && (rs.phase === Phase.Countdown || rs.phase === Phase.Victory);
+    const piloting = game.ride?.passenger === game.myId;
+    if (!input.scoreboard && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
+
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);
+  }
+
+  /**
+   * The K/D card: this session's kills, deaths and K/D for us, our career
+   * record, and the top clones by K/D (with our rank if we're not among them).
+   */
+  private drawKd(game: Game, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const me = game.players.get(game.myId);
+    if (!me) return;
+    const kd = (p: { kills: number; deaths: number }) => kdRatio(p.kills, p.deaths);
+    const rows = [...game.players.values()].sort((a, b) => kd(b) - kd(a) || b.kills - a.kills || a.deaths - b.deaths);
+    const rank = rows.findIndex((p) => p.id === game.myId);
+    const top = rows.slice(0, 8);
+    const lineH = 15 * s;
+    const w = 340 * s;
+    const h = (top.length + (rank >= top.length ? 2 : 0) + 4) * lineH + 16 * s;
+    const x0 = W / 2 - w / 2;
+    const y0 = Math.min(H - h - 70 * s, H * 0.5 + 34 * s);
+    ctx.fillStyle = 'rgba(4,8,6,0.78)';
+    ctx.fillRect(x0, y0, w, h);
+    ctx.strokeStyle = 'rgba(160,255,160,0.25)';
+    ctx.lineWidth = Math.max(1, s);
+    ctx.strokeRect(x0 + 3 * s, y0 + 3 * s, w - 6 * s, h - 6 * s);
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.round(13 * s)}px ui-monospace, monospace`;
+    const lx = x0 + 14 * s;
+    let y = y0 + 8 * s + lineH;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(`YOU   K ${me.kills}   D ${me.deaths}   K/D ${kd(me).toFixed(2)}   #${rank + 1}/${rows.length}`, lx, y);
+    y += lineH;
+    ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
+    ctx.fillStyle = '#9fe89f';
+    const c = game.career;
+    ctx.fillText(`career  ${c.kills} kills · ${c.deaths} deaths · K/D ${kdRatio(c.kills, c.deaths).toFixed(2)}`, lx, y);
+    y += lineH * 1.4;
+    ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
+    ctx.fillStyle = '#999';
+    ctx.fillText('LEADERBOARD          K    D    K/D', lx, y);
+    const row = (p: (typeof rows)[number], i: number) => {
+      y += lineH;
+      ctx.fillStyle = p.id === game.myId ? '#fff' : p.color;
+      const name = `${String(i + 1).padStart(2)}. ${p.name}`.padEnd(19).slice(0, 19);
+      ctx.fillText(`${name} ${String(p.kills).padStart(3)}  ${String(p.deaths).padStart(3)}  ${kd(p).toFixed(2).padStart(5)}`, lx, y);
+    };
+    top.forEach(row);
+    if (rank >= top.length) {
+      y += lineH * 0.8;
+      ctx.fillStyle = '#666';
+      ctx.fillText('  ...', lx, y);
+      y -= lineH * 0.2;
+      row(me, rank);
+    }
   }
 
   /**

@@ -140,6 +140,32 @@ export interface Sfx {
   charge(level: number): void;
 }
 
+const CAREER_KEY = 'sc.career';
+/** The browser's storage, if any (typed by hand: the game also builds without the DOM types). */
+const store = () => (globalThis as { localStorage?: { getItem(k: string): string | null; setItem(k: string, v: string): void } }).localStorage;
+
+/** Lifetime kills and deaths from this browser's storage (zeros where there is none). */
+function loadCareer(): { kills: number; deaths: number } {
+  try {
+    const v = JSON.parse(store()?.getItem(CAREER_KEY) ?? 'null');
+    if (v && Number.isFinite(v.kills) && Number.isFinite(v.deaths)) return { kills: v.kills, deaths: v.deaths };
+  } catch {
+    // (no storage here, or junk in it)
+  }
+  return { kills: 0, deaths: 0 };
+}
+
+function saveCareer(c: { kills: number; deaths: number }): void {
+  try {
+    store()?.setItem(CAREER_KEY, JSON.stringify(c));
+  } catch {
+    // (storage blocked: the record lasts the session)
+  }
+}
+
+/** Kills per death (kills alone while deathless). */
+export const kdRatio = (kills: number, deaths: number) => kills / Math.max(1, deaths);
+
 export class Game implements FrameHandler {
   readonly terrain = new Terrain();
   readonly loaded = new Uint8Array(CHUNK_COUNT);
@@ -1019,8 +1045,16 @@ export class Game implements FrameHandler {
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 400) * 8);
   }
 
+  /** Our career record, across sessions (kept in this browser). */
+  readonly career = loadCareer();
+
   kill(k: KillInfo): void {
     const { killer, victim, weapon } = k;
+    if (victim === this.myId || (killer === this.myId && victim !== this.myId)) {
+      if (victim === this.myId) this.career.deaths++;
+      else this.career.kills++;
+      saveCareer(this.career);
+    }
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.

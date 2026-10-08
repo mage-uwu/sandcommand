@@ -39,7 +39,14 @@ line of sight. It works for mouse, touch and keyboard aim. With the mouse
 it reaches out as far as the pointer, up to 900 cells. Your arm and the
 aim line show the snap. Teammates are ignored, and so are tools aimed at
 the ground or at friends (digger, materializer, radio, repair kit).
-**V** turns it off or on for the mouse, and the choice is remembered. Clones gib on
+**V** turns it off or on for the mouse, and the choice is remembered.
+
+**K/D.** While you're dead, and between rounds, a card shows your kills,
+deaths and K/D for the session, your rank, and your **career** record. The
+career record is your lifetime kills and deaths, kept in this browser
+(`sc.career`). Under it is a leaderboard of the top eight clones by K/D,
+with your own row added if you're not among them. **Tab** still shows the
+full scoreboard. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
 **On phones and tablets** (`src/client/touch.ts`) touch controls switch on
