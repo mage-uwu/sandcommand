@@ -22,7 +22,7 @@ Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
 to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
-drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** music, **N** sound effects, **V** aim assist. With the Materializer out, the wheel or a click
+drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** mute all sound, **N** sound effects, **V** aim assist. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
 **Keyboard-only aim** (no mouse needed): the **arrow keys** move the
@@ -94,7 +94,7 @@ It runs in 8-bar sections: pads and bells, then the arp, then the drop
 (drums and 808), a fuller drop with rolls, a breakdown, and back in. It
 plays from Deploy (browsers only allow audio after a click) and is
 muffled behind a low-pass while you're dead, spectating or between waves.
-**M** toggles it, and the choice is remembered. `composeBar(bar, seed)` is
+**M** mutes all sound (music and effects), and the choice is remembered. `composeBar(bar, seed)` is
 pure and tested: what plays in each bar comes from the bar number and a
 per-session seed, so every session's variation differs.
 

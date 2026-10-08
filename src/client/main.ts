@@ -68,23 +68,30 @@ async function refreshRooms(): Promise<void> {
 refreshRooms();
 
 // The soundtrack and sound effects start on Deploy (browsers only allow
-// audio after a click); M toggles the music, N the effects, and the choices
-// are remembered.
+// audio after a click); M mutes everything, N toggles just the effects, and
+// the choices are remembered.
 let music: Music | null = null;
 let sfx: Sfx | null = null;
 let musicMuffled = false;
+let muted = storageGet('sc.mute') === 'on';
+/** Mute or unmute everything: music and effects share one audio context, which is paused outright. */
+function applyMute(): void {
+  sfx?.setMuted(muted);
+  const ctx = music?.ctx as AudioContext | undefined;
+  if (!ctx) return;
+  (muted ? ctx.suspend?.() : ctx.resume?.())?.catch(() => {});
+}
 function startMusic(): void {
   if (music) return;
   try {
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
     music = new Music(new Ctx());
-    if (storageGet('sc.music') === 'off') music.toggle();
-    (music.ctx as AudioContext).resume?.().catch(() => {});
     music.start();
     sfx = new Sfx(music.ctx);
     if (storageGet('sc.sfx') === 'off') sfx.toggle();
     if (game) game.sfx = sfx;
+    applyMute();
   } catch {
     music = null; // no audio here: play on in silence
     sfx = null;
@@ -93,15 +100,25 @@ function startMusic(): void {
 addEventListener('keydown', (e) => {
   if (e.code !== 'KeyM' || input.typing || e.repeat) return;
   startMusic();
-  if (!music) return;
-  const on = music.toggle();
-  storageSet('sc.music', on ? 'on' : 'off');
-  game?.feed.push({ text: on ? '♪ music on (M)' : '♪ music off (M)', color: '#b8a0ff', at: performance.now() });
+  muted = !muted;
+  storageSet('sc.mute', muted ? 'on' : 'off');
+  applyMute();
+  game?.feed.push({ text: muted ? 'all sound muted (M)' : 'sound on (M)', color: '#b8a0ff', at: performance.now() });
 });
 addEventListener('keydown', (e) => {
   if (e.code !== 'KeyN' || input.typing || e.repeat) return;
   startMusic();
   if (!sfx) return;
+  if (muted) {
+    // (Unmuting with N: bring the sound back, effects on.)
+    muted = false;
+    storageSet('sc.mute', 'off');
+    applyMute();
+    if (storageGet('sc.sfx') !== 'off') {
+      game?.feed.push({ text: 'sound on (N)', color: '#b8a0ff', at: performance.now() });
+      return;
+    }
+  }
   const on = sfx.toggle();
   storageSet('sc.sfx', on ? 'on' : 'off');
   game?.feed.push({ text: on ? 'sound effects on (N)' : 'sound effects off (N)', color: '#b8a0ff', at: performance.now() });

@@ -39,6 +39,8 @@ export class Sfx {
   /** When each shooter last made a sound (for the shotgun's nine pellets, and Gatling rate). */
   private last = new Map<number, number>();
   private on = true;
+  /** Everything muted (the context is paused): play nothing, or it would all go off at once on unmute. */
+  private muted = false;
   private volume = 0.34;
   private engine: Bed | null = null;
   private jet: Bed | null = null;
@@ -71,6 +73,10 @@ export class Sfx {
   }
 
   /** Sound effects on or off; returns the new state. */
+  setMuted(m: boolean): void {
+    this.muted = m;
+  }
+
   toggle(): boolean {
     this.on = !this.on;
     this.out.gain.setTargetAtTime(this.on ? this.volume : 0, this.ctx.currentTime, 0.03);
@@ -301,7 +307,7 @@ export class Sfx {
    * voice budget spent. Null when it's out of earshot or crowded out.
    */
   private voice(x: number, y: number, gain: number, dur: number, reach = 1, must = false): Voice | null {
-    if (!this.on) return null;
+    if (!this.on || this.muted) return null;
     const dx = x - this.earX;
     const dy = y - this.earY;
     const d = Math.hypot(dx, dy) / reach;
