@@ -30,6 +30,15 @@ export class InputState {
   touchScope = false;
   /** Driving a tank (set each tick by the game loop): the scope button fires the cannon instead. */
   driving = false;
+  /**
+   * The touch aim stick: direction (screen axes, deflection 0..1) and
+   * whether it's pushed far enough to fire. Null when no thumb is on it.
+   */
+  aimStick: { dx: number; dy: number; fire: boolean } | null = null;
+  /** Ticks left holding fire for a quick tap (so even a tap shorter than a tick shoots). */
+  tapFire = 0;
+  /** A tap or hold aimed at a screen point this tick: the game loop applies aim assist to it. */
+  pointAssist = false;
   /** Set once a touch has come in: mouse events the browser synthesises from it are ignored. */
   private lastTouch = -1e9;
 
@@ -118,6 +127,16 @@ export class InputState {
   touchRelease(): void {
     this.lastTouch = performance.now();
     this.mouseDown = false;
+    this.pointAssist = false;
+  }
+  /** A quick tap at a screen point: one shot (or build, or menu pick, or next spectate target) there. */
+  touchTap(x: number, y: number): void {
+    this.lastTouch = performance.now();
+    this.mouseX = x;
+    this.mouseY = y;
+    this.clicks++;
+    this.tapFire = 2;
+    this.pointAssist = true;
   }
   cycleBy(d: number): void {
     this.cyclePresses += d;
@@ -170,7 +189,7 @@ export class InputState {
       (this.down('KeyD', 'ArrowRight') ? BTN_RIGHT : 0) |
       (this.down('KeyW', 'ArrowUp', 'Space') ? BTN_UP : 0) |
       (this.down('KeyS', 'ArrowDown') ? BTN_DOWN : 0) |
-      (this.mouseDown ? BTN_FIRE : 0) |
+      (this.mouseDown || this.tapFire > 0 || this.aimStick?.fire ? BTN_FIRE : 0) |
       (this.scoping ? BTN_SCOPE : 0) |
       (this.down('KeyR') ? BTN_RELOAD : 0) |
       this.touchButtons

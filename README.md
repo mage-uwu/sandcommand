@@ -32,12 +32,19 @@ on a touch-first device.
   your thumb lands. Push left or right to run, up to jump and jetpack, down
   to crouch. In a drop rocket the same stick steers, burns and cuts the
   engine.
-- **Tap anywhere else.** You aim at that spot and shoot. Hold to keep firing
-  and drag to walk your aim. With the Materializer out, a tap builds. Taps
-  on its menu pick the piece. Once you're out of the wave, a tap moves to
-  the next clone to watch.
+- **Aim stick (anywhere else).** Put a thumb down and drag. The clone aims
+  along the drag, and pushed past halfway it fires; the ring turns red.
+  Semi-automatic weapons keep firing as fast as they cycle while you hold.
+- **Aim assist.** When the stick, a tap or a hold points within about 11°
+  of an enemy in sight and in range, the aim settles on it
+  (`src/client/aim.ts`). Teammates are ignored, and mouse aim is never
+  assisted.
+- **Quick tap.** Shoots once at that spot. With the Materializer out, a tap
+  builds there, and taps on its menu pick the piece. Once you're out of the
+  wave, a tap moves to the next clone to watch. A finger held still fires
+  at its spot until you lift it.
 - **Buttons (right edge).** ⇄ swaps weapon, ▲ jets, ↻ reloads, ◎ toggles
-  the scope, ⬆ / ⬇ pick up and drop.
+  the scope (in a tank: hold to fire the cannon), ⬆ / ⬇ pick up and drop.
 - **Top-left.** ☰ shows the scoreboard, 💬 opens chat.
 - **Screen layout.** The HUD shrinks on small screens. The minimap moves to
   the top-right so the buttons have the corner. Deploy goes fullscreen and

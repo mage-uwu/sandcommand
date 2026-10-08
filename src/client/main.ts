@@ -1,7 +1,10 @@
 import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
-import { SHOULDER_X, SHOULDER_Y } from '../shared/weapons.ts';
+import { SHOULDER_X, SHOULDER_Y, WEAPONS } from '../shared/weapons.ts';
+import { F_ALIVE, Team } from '../shared/protocol.ts';
+import { TANK_W, TANK_H } from '../shared/tank.ts';
+import { assistAim } from './aim.ts';
 import { BTN_FIRE } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
@@ -186,6 +189,30 @@ chatInput.addEventListener('blur', () => {
   chatInput.classList.add('hidden');
 });
 
+/** Enemies the touch aim assist may settle on: clones in view and driven tanks (never teammates). */
+function assistTargets(g: Game): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const mine = g.myTeam;
+  const foe = (id: number) => id !== g.myId && (mine === Team.None || g.teamOf[id] !== mine);
+  for (const v of g.remoteViews()) {
+    if (v.flags & F_ALIVE && !g.tankPilots.has(v.id) && foe(v.id)) out.push({ x: v.x + ACTOR_W / 2, y: v.y + 6 });
+  }
+  for (const t of g.tankViews()) if (t.pilot !== 255 && foe(t.pilot)) out.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
+  return out;
+}
+
+/** Terrain-free line of sight (3-cell steps, ignoring the first few cells at the muzzle end). */
+function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boolean {
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  const n = Math.floor(d / 3);
+  for (let i = 2; i < n; i++) {
+    const t = i / n;
+    if (g.terrain.isSolid(Math.floor(x0 + (x1 - x0) * t), Math.floor(y0 + (y1 - y0) * t))) return false;
+  }
+  return true;
+}
+let pulse = 0;
+
 // Main loop: fixed 30 Hz simulation/input ticks, render every animation frame.
 let acc = 0;
 let last = performance.now();
@@ -200,8 +227,26 @@ function frame(now: number): void {
       const dpr = canvas.width / innerWidth;
       const wx = renderer.camX + (input.mouseX * dpr - canvas.width / 2) / renderer.zoom;
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
-      const aim = Math.atan2(wy - (g.body.y + SHOULDER_Y), wx - (g.body.x + SHOULDER_X));
+      const ox = g.body.x + SHOULDER_X;
+      const oy = g.body.y + SHOULDER_Y;
+      let aim: number;
+      const st = input.aimStick;
+      if (st && (st.dx !== 0 || st.dy !== 0)) {
+        // Touch aim stick: aim along it (assisted), and park the pointer out
+        // along the aim so the crosshair, the arm and the camera follow.
+        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
+        const r = Math.min(innerWidth, innerHeight) * 0.3;
+        input.mouseX = ((ox - renderer.camX) * renderer.zoom) / dpr + innerWidth / 2 + Math.cos(aim) * r;
+        input.mouseY = ((oy - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2 + Math.sin(aim) * r;
+      } else {
+        aim = Math.atan2(wy - oy, wx - ox);
+        if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
+      }
       let buttons = input.buttons();
+      // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
+      // a held trigger pulses (fire on alternate ticks) and the gun keeps going.
+      if (input.touch && buttons & BTN_FIRE && !g.drive && !(WEAPONS[g.weapon]?.auto ?? true) && (pulse++ & 1)) buttons &= ~BTN_FIRE;
+      if (input.tapFire > 0) input.tapFire--;
       // Inventory: rotate, pick up, drop.
       g.cycle(input.takeCycle());
       if (input.takePickup()) g.pickUp();

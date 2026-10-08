@@ -44,11 +44,18 @@ body.touch .help:not(.touch-help) { display: none; }
 .stick-base { position: fixed; left: max(84px, calc(env(safe-area-inset-left) + 72px)); top: calc(100vh - 110px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 220, 160, 0.25); background: rgba(20, 16, 12, 0.25); opacity: 0.6; }
 .stick-base.active { opacity: 1; }
 .stick-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(255, 220, 160, 0.45); }
+.aim-base { position: fixed; left: calc(100vw - max(214px, calc(env(safe-area-inset-right) + 214px))); top: calc(100vh - 120px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px dashed rgba(255, 140, 110, 0.3); background: rgba(20, 16, 12, 0.18); opacity: 0.55; display: grid; place-items: center; }
+.aim-base span { font-size: 9px; font-weight: bold; color: rgba(255, 180, 160, 0.6); letter-spacing: 0.1em; }
+.aim-base.active { opacity: 1; border-style: solid; }
+.aim-base.firing { border-color: rgba(255, 90, 60, 0.85); }
+.aim-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(255, 180, 160, 0.4); }
+.aim-base.firing .aim-knob { background: rgba(255, 90, 60, 0.75); }
 @media (max-height: 430px) {
   .tbtns { grid-template-columns: repeat(2, 48px); gap: 8px; bottom: 48px; }
   .tbtns button { width: 48px; height: 48px; font-size: 17px; }
   .tbtns button.big { width: 56px; height: 56px; font-size: 21px; }
   .ttop { top: 70px; }
+  .aim-base { left: calc(100vw - 190px); top: calc(100vh - 96px); }
 }
 @media (orientation: portrait) {
   body.touch #overlay .panel::after { content: 'Tip: turn your phone sideways to play.'; display: block; margin-top: 12px; color: var(--accent); font-size: 12px; }
