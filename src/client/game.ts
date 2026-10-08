@@ -1,17 +1,17 @@
 import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type SelfState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type SelfCraftState, type SelfState, applyFrameRecords } from '../shared/frame.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
-import { CRAFT_H, CRAFT_W } from '../shared/craft.ts';
+import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { BLAST_IMPULSE, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -54,6 +54,8 @@ export interface RemoteView {
 }
 
 export interface CraftView extends CraftState {}
+
+const wrapAngle = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.PI * 2));
 
 export interface FeedItem {
   text: string;
@@ -153,6 +155,21 @@ export class Game implements FrameHandler {
   private snaps = new Map<number, Snap[]>();
   // Drop rockets, interpolated like actors.
   private craftSnaps = new Map<number, (CraftState & { tick: number })[]>();
+  /**
+   * The rocket we are riding in, predicted like our clone: rebased on the
+   * server's full-precision state each frame, then stepped over unacked inputs.
+   */
+  ride: Craft | null = null;
+  rideSlot = -1;
+  private readonly ridePrev = { x: 0, y: 0, a: 0 };
+  rideSmoothX = 0;
+  rideSmoothY = 0;
+  rideSmoothA = 0;
+  /** Rocket prediction errors larger than 0.01 cells seen during reconciliation. */
+  craftCorrections = 0;
+  private lastSelfCraft: SelfCraftState | null = null;
+  private readonly rideStep = newCraftStep();
+  private readonly ext = { x: 0, y: 0 };
   private clockOffset = NaN; // serverTick - now/TICK_MS
   lastServerTick = 0;
   /** Tick of the frame currently being applied. */
@@ -179,6 +196,15 @@ export class Game implements FrameHandler {
         for (let k = 0; k < 3; k++) jetExhaust(this.particles, b.x + (left ? 7 : 0), b.y + ACTOR_H - 5, b.vx, b.vy);
       }
     }
+    if (this.ride && !this.alive) {
+      const r = this.ride;
+      this.ridePrev.x = r.x;
+      this.ridePrev.y = r.y;
+      this.ridePrev.a = r.a;
+      stepCraft(r, this.terrain, DT, this.rideStep, buttons);
+      // Bailed out or dropped off: the server takes it from here.
+      if (this.rideStep.release) r.passenger = 255;
+    }
     this.weapon = weapon;
     // Field first: chunk snapshots and ops applied since the last tick.
     this.field.update();
@@ -188,9 +214,9 @@ export class Game implements FrameHandler {
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket) rocketTrail(this.particles, pr.x[i], pr.y[i]);
     // Drop-rocket exhaust (latest known state; cosmetic plume + local air jet).
-    for (const [, cs] of this.craftSnaps) {
-      const c = cs[cs.length - 1];
-      if (c && c.thrust > 0.12) craftExhaust(this.particles, c.x + CRAFT_W / 2, c.y + CRAFT_H, c.vx, c.vy, c.thrust);
+    for (const [slot, cs] of this.craftSnaps) {
+      const c = slot === this.rideSlot && this.ride ? this.ride : cs[cs.length - 1];
+      if (c && c.thrust > 0.12) craftExhaust(this.particles, c.x, c.y, c.a, c.vx, c.vy, c.thrust);
     }
     // Remote jetpacks, and stumps dripping on maimed clones.
     for (const [, s] of this.snaps) {
@@ -210,8 +236,10 @@ export class Game implements FrameHandler {
       if (last && last.flags & F_ALIVE && actors.n < MAX_ACTORS) actors.add(id, last.x, last.y, last.vx, last.vy);
     }
     for (const [slot, cs] of this.craftSnaps) {
-      const c = cs[cs.length - 1];
-      if (c && actors.n < MAX_ACTORS) actors.add(128 + slot, c.x, c.y, c.vx, c.vy, CRAFT_W, CRAFT_H, 60);
+      const c = slot === this.rideSlot && this.ride ? this.ride : cs[cs.length - 1];
+      if (!c || actors.n >= MAX_ACTORS) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      actors.add(128 + slot, c.x - e.x, c.y - e.y, c.vx, c.vy, 2 * e.x, 2 * e.y, 60, 255, 0);
     }
     this.particles.step(this.collider, DT, this.particleHooks, actors);
     this.shake *= 0.85;
@@ -224,6 +252,7 @@ export class Game implements FrameHandler {
     this.ack = ack;
     this.frameTick = tick;
     this.lastSelf = null;
+    this.lastSelfCraft = null;
     applyFrameRecords(r, this.terrain, this);
     // No rocket record in this frame means no drop rockets near us.
     if (this.craftsSeenTick !== tick) this.craftSnaps.clear();
@@ -233,6 +262,60 @@ export class Game implements FrameHandler {
     else this.clockOffset = this.clockOffset * 0.95 + est * 0.05;
     // Reconcile after the whole frame so replay sees this tick's terrain.
     if (this.lastSelf) this.reconcile(this.lastSelf);
+    if (this.lastSelfCraft && !this.alive) this.reconcileCraft(this.lastSelfCraft);
+    else {
+      this.ride = null;
+      this.rideSlot = -1;
+    }
+  }
+
+  /** Rebase the predicted rocket on the server's state and replay unacked inputs. */
+  private reconcileCraft(s: SelfCraftState): void {
+    const fresh = !this.ride || this.rideSlot !== s.slot;
+    if (!this.ride || fresh) this.ride = newCraft(s.x, this.myId);
+    const r = this.ride;
+    this.rideSlot = s.slot;
+    const rawX = r.x;
+    const rawY = r.y;
+    const oldX = r.x + this.rideSmoothX;
+    const oldY = r.y + this.rideSmoothY;
+    const oldA = r.a + this.rideSmoothA;
+    r.x = s.x;
+    r.y = s.y;
+    r.vx = s.vx;
+    r.vy = s.vy;
+    r.a = s.a;
+    r.w = s.w;
+    r.targetX = s.targetX;
+    r.timer = s.timer;
+    r.phase = s.phase;
+    r.parts = s.parts;
+    r.prevButtons = s.prevButtons;
+    for (let i = 0; i < s.partHp.length; i++) r.partHp[i] = s.partHp[i];
+    r.hp = s.partHp[0];
+    r.passenger = this.myId;
+    r.delivered = 255;
+    // pending was already trimmed to unacked commands by reconcile().
+    for (const p of this.pending) {
+      stepCraft(r, this.terrain, DT, this.rideStep, p.buttons);
+      if (this.rideStep.release) {
+        r.passenger = 255;
+        break;
+      }
+    }
+    const ex = oldX - r.x;
+    const ey = oldY - r.y;
+    if (!fresh && Math.abs(rawX - r.x) + Math.abs(rawY - r.y) > 0.01) this.craftCorrections++;
+    if (!fresh && ex * ex + ey * ey < 48 * 48) {
+      this.rideSmoothX = ex;
+      this.rideSmoothY = ey;
+      this.rideSmoothA = wrapAngle(oldA - r.a);
+    } else {
+      this.rideSmoothX = this.rideSmoothY = this.rideSmoothA = 0;
+      this.ridePrev.x = r.x;
+      this.ridePrev.y = r.y;
+      this.ridePrev.a = r.a;
+    }
   }
 
   private reconcile(s: SelfState): void {
@@ -466,8 +549,22 @@ export class Game implements FrameHandler {
   }
   private craftsSeenTick = 0;
 
+  selfCraft(s: SelfCraftState): void {
+    this.lastSelfCraft = s;
+  }
+
+  craftPart(_slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    craftPartOff(this.particles, part, x, y, vx, vy, seed);
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 300) * 4);
+  }
+
   craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void {
     this.craftSnaps.delete(slot);
+    if (slot === this.rideSlot) {
+      this.ride = null;
+      this.rideSlot = -1;
+    }
     craftDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE);
     this.flashes.push({ x, y, r: 40, at: performance.now() });
     const d = Math.hypot(this.body.x - x, this.body.y - y);
@@ -488,15 +585,33 @@ export class Game implements FrameHandler {
           break;
         }
       }
+      if (b.slot === this.rideSlot && this.ride) continue; // drawn from prediction
       const t = a === b ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (b.tick - a.tick)));
-      out.push({ ...b, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      out.push({ ...b, x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, a: wrapAngle(a.a + wrapAngle(b.a - a.a) * t) });
     }
     return out;
   }
 
-  /** The drop rocket carrying this player in, if any. */
-  myCraft(): CraftView | null {
+  /** The drop rocket carrying this player in, if any: predicted, interpolated by `alpha`. */
+  myCraft(alpha = 1): CraftView | null {
     if (this.alive) return null;
+    const r = this.ride;
+    if (r) {
+      const p = this.ridePrev;
+      return {
+        slot: this.rideSlot,
+        x: p.x + (r.x - p.x) * alpha + this.rideSmoothX,
+        y: p.y + (r.y - p.y) * alpha + this.rideSmoothY,
+        vx: r.vx,
+        vy: r.vy,
+        a: p.a + wrapAngle(r.a - p.a) * alpha + this.rideSmoothA,
+        thrust: r.thrust,
+        hp: r.hp,
+        passenger: this.myId,
+        phase: r.phase,
+        parts: r.parts,
+      };
+    }
     for (const c of this.craftViews()) if (c.passenger === this.myId) return c;
     return null;
   }

@@ -1,12 +1,23 @@
 import { type Body, BTN_FIRE, newBody, stepBody } from '../shared/actor.ts';
 import {
   CRAFT_H,
+  CRAFT_INERTIA,
   CRAFT_INTEGRITY,
+  CRAFT_PARTS,
+  CRAFT_PART_CENTER,
   CRAFT_W,
   type Craft,
-  type CraftStep,
+  CraftPart,
+  CraftPhase,
+  IMPACT_HARM_SPEED,
   MAX_CRAFTS,
+  craftHalfExtents,
+  craftPartAt,
+  craftToLocal,
+  craftToWorld,
+  hasCraftPart,
   newCraft,
+  newCraftStep,
   stepCraft,
 } from '../shared/craft.ts';
 import {
@@ -54,7 +65,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, applyCarve, carveExtent, craftFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -69,6 +80,8 @@ import {
   R_CHUNK,
   R_CRAFTS,
   R_CRAFT_BOOM,
+  R_CRAFT_PART,
+  R_CRAFT_SELF,
   R_DETACH,
   R_HIT,
   R_KILL,
@@ -81,6 +94,7 @@ import {
   S_FRAME,
   Y_BIAS,
   dequantizeAim,
+  quantizeAim,
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
@@ -174,8 +188,9 @@ export class World {
   readonly actors = new ActorField(ACTOR_W, ACTOR_H);
   /** Drop rockets in flight, by slot. */
   readonly crafts: (Craft | null)[] = new Array(MAX_CRAFTS).fill(null);
-  private readonly craftStep: CraftStep = { crashed: false, release: false, gone: false };
-  private craftRecords: ProjRecord[] = [];
+  private readonly craftStep = newCraftStep();
+  private readonly pt = { x: 0, y: 0 };
+  private readonly ext = { x: 0, y: 0 };
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
   readonly projectiles = new Projectiles(4096);
@@ -239,6 +254,14 @@ export class World {
     if (!p) return;
     this.players[id] = null;
     this.pendingRoster.delete(id);
+    // An empty rocket flies itself home.
+    for (const c of this.crafts) {
+      if (c && c.passenger === id) {
+        c.passenger = 255;
+        c.phase = CraftPhase.Ascend;
+      }
+      if (c && c.delivered === id) c.delivered = 255;
+    }
     this.writeRoster(this.broadcast, p, false);
   }
 
@@ -396,7 +419,10 @@ export class World {
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
-      const t = segmentBox(x0, y0, dx, dy, c.x, c.y, c.x + CRAFT_W, c.y + CRAFT_H);
+      // In the rocket's own frame the hull is an axis-aligned box.
+      const a = craftToLocal(c, x0, y0, this.segA);
+      const b = craftToLocal(c, x1, y1, this.segB);
+      const t = segmentBox(a.x, a.y, b.x - a.x, b.y - a.y, -CRAFT_W / 2, -CRAFT_H / 2, CRAFT_W / 2, CRAFT_H / 2);
       if (t >= 0 && t < bestT) {
         bestT = t;
         best = CRAFT_ID_BASE + k;
@@ -406,6 +432,8 @@ export class World {
     return best;
   };
 
+  private readonly segA = { x: 0, y: 0 };
+  private readonly segB = { x: 0, y: 0 };
   private readonly strikeScratch: StrikeResult = newStrike();
 
   private facingLeft(p: Player): boolean {
@@ -504,9 +532,10 @@ export class World {
       if (c) {
         const rvx = pr.vx[i] - c.vx;
         const rvy = pr.vy[i] - c.vy;
-        this.hurtCraft(actor - CRAFT_ID_BASE, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
-        c.vx += (rvx * def.mass) / CRAFT_MASS;
-        c.vy += (rvy * def.mass) / CRAFT_MASS;
+        const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
+        // Off-centre hits spin it.
+        this.pushCraft(c, x, y, (rvx * def.mass) / CRAFT_MASS, (rvy * def.mass) / CRAFT_MASS);
+        this.hitCraft(actor - CRAFT_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
       }
     } else if (actor >= 0) {
       // Direct hit: penetrate whichever part the projectile entered.
@@ -632,11 +661,12 @@ export class World {
   private launchCraft(p: Player): void {
     const slot = this.crafts.indexOf(null);
     if (slot < 0) return; // sky is full; try again next tick
-    let x = 48 + this.rng.int(WORLD_W - 96 - CRAFT_W);
+    const pick = () => 48 + CRAFT_W / 2 + this.rng.int(WORLD_W - 96 - CRAFT_W);
+    let x = pick();
     for (let attempt = 0; attempt < 16; attempt++) {
-      const top = this.terrain.surfaceY(x + CRAFT_W / 2);
+      const top = this.terrain.surfaceY(Math.floor(x));
       if (top > 60 && top < WORLD_H - 40) break; // land somewhere with sky above and ground below
-      x = 48 + this.rng.int(WORLD_W - 96 - CRAFT_W);
+      x = pick();
     }
     this.crafts[slot] = newCraft(x, p.id);
     p.delivering = slot;
@@ -647,34 +677,45 @@ export class World {
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
-      stepCraft(c, this.terrain, DT, out);
+      // The passenger flies it; the autopilot covers whenever they let go.
+      const pilot = c.passenger !== 255 ? this.players[c.passenger] : null;
+      stepCraft(c, this.terrain, DT, out, pilot ? pilot.buttons : 0);
       if (c.thrust > 0.12) this.exhaust(c);
       if (out.release) this.releasePassenger(k, false);
       if (out.crashed) {
         this.destroyCraft(k, c.passenger !== 255 ? c.passenger : c.lastHitBy);
         continue;
       }
+      if (out.impact > IMPACT_HARM_SPEED) {
+        // A hard landing breaks whatever hit first: fins, engine bell, nose.
+        this.hurtCraftPart(k, craftPartAt(c.parts, out.impactU, out.impactV), (out.impact - IMPACT_HARM_SPEED) * 1.2, NO_OWNER);
+        if (!this.crafts[k]) continue;
+      }
       if (out.gone) {
         this.crafts[k] = null;
         continue;
       }
-      this.crush(c, k);
+      this.crush(c);
     }
   }
 
   /**
    * Rocket exhaust is part of the particle engine: real flames that burn
-   * whoever stands under the nozzle, and a jet written into the air field that
-   * blows clones and loose particles away from the landing spot.
+   * whoever is behind the nozzle, and a jet written into the air field along
+   * the engine axis that blows clones and loose particles away.
    */
   private exhaust(c: Craft): void {
-    const nx = c.x + CRAFT_W / 2;
-    const ny = c.y + CRAFT_H;
-    const n = Math.ceil(c.thrust * 3);
-    for (let i = 0; i < n; i++) {
-      this.grains.spawn(PK.Flame, nx + this.rng.range(-2, 2), ny + 1, c.vx * 0.5 + this.rng.range(-40, 40), c.vy + 180 + 140 * c.thrust * this.rng.next(), 10 + this.rng.int(8), 0, 0, c.passenger !== 255 ? c.passenger : c.delivered !== 255 ? c.delivered : NO_OWNER);
+    const n = craftToWorld(c, 0, CRAFT_H / 2 + 1, this.pt);
+    const dx = -Math.sin(c.a);
+    const dy = Math.cos(c.a);
+    const count = Math.ceil(c.thrust * 3);
+    const owner = exhaustOwner(c);
+    for (let i = 0; i < count; i++) {
+      const s = 180 + 140 * c.thrust * this.rng.next();
+      const j = this.rng.range(-40, 40);
+      this.grains.spawn(PK.Flame, n.x + dy * this.rng.range(-2, 2), n.y - dx * this.rng.range(-2, 2), c.vx * 0.5 + dx * s + dy * j, c.vy * 0.5 + dy * s - dx * j, 10 + this.rng.int(8), 0, 0, owner);
     }
-    this.grains.wind(nx, ny + 16, 26, 0, 320 * c.thrust);
+    this.grains.wind(n.x + dx * 16, n.y + dy * 16, 26, dx * 320 * c.thrust, dy * 320 * c.thrust);
   }
 
   /** Drop the passenger out of the hatch (or throw them out of a dying rocket). */
@@ -685,42 +726,124 @@ export class World {
     c.delivered = c.passenger;
     c.passenger = 255;
     if (!p || p.delivering !== slot) return;
-    const y = c.y + CRAFT_H - ACTOR_H;
+    const pt = this.pt;
     if (violent) {
-      // Blown out of the nose cone, away from the crater the wreck digs below.
-      this.placeClone(p, c.x + CRAFT_W / 2 - ACTOR_W / 2, c.y - ACTOR_H, c.vx + this.rng.range(-160, 160), Math.min(0, c.vy) - this.rng.range(120, 220));
+      // Blown out of the nose cone, away from the crater the wreck digs.
+      craftToWorld(c, 0, -CRAFT_H / 2 - ACTOR_H / 2, pt);
+      this.placeClone(p, pt.x - ACTOR_W / 2, pt.y - ACTOR_H / 2, c.vx + this.rng.range(-160, 160), Math.min(0, c.vy) - this.rng.range(120, 220));
       return;
     }
-    // Step out of the side hatch, clear of the nozzle, then the rocket lifts off.
-    let x = c.x + CRAFT_W + 1;
-    if (this.terrain.rectSolid(Math.floor(x), Math.floor(y), Math.floor(x) + ACTOR_W - 1, Math.floor(y) + ACTOR_H - 1)) x = c.x - ACTOR_W - 1;
-    if (this.terrain.rectSolid(Math.floor(x), Math.floor(y), Math.floor(x) + ACTOR_W - 1, Math.floor(y) + ACTOR_H - 1)) x = c.x + CRAFT_W / 2 - ACTOR_W / 2;
-    this.placeClone(p, x, y, c.vx, Math.max(0, c.vy));
+    // Step out of a side hatch, clear of the nozzle, keeping the rocket's motion.
+    for (const side of [1, -1]) {
+      craftToWorld(c, side * (CRAFT_W / 2 + ACTOR_W / 2 + 1), CRAFT_H / 2 - ACTOR_H / 2, pt);
+      const x = Math.floor(pt.x - ACTOR_W / 2);
+      const y = Math.floor(pt.y - ACTOR_H / 2);
+      if (!this.terrain.rectSolid(x, y, x + ACTOR_W - 1, y + ACTOR_H - 1)) {
+        this.placeClone(p, pt.x - ACTOR_W / 2, pt.y - ACTOR_H / 2, c.vx, c.vy);
+        return;
+      }
+    }
+    this.placeClone(p, c.x - ACTOR_W / 2, c.y - ACTOR_H / 2, c.vx, c.vy);
   }
 
-  /** Damage a rocket. Energy below the hull's integrity only scratches it. */
-  private hurtCraft(slot: number, energy: number, wound: number, by: number): void {
+  /** Shove a rocket at a world point: linear and angular. */
+  private pushCraft(c: Craft, wx: number, wy: number, dvx: number, dvy: number): void {
+    c.vx += dvx;
+    c.vy += dvy;
+    c.w += ((wx - c.x) * dvy - (wy - c.y) * dvx) / CRAFT_INERTIA;
+  }
+
+  /**
+   * A penetrating hit at world (wx, wy) travelling along (dx, dy): it damages
+   * the part it entered. Energy below the integrity only scratches.
+   */
+  private hitCraft(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
     const c = this.crafts[slot];
     if (!c) return;
-    const dmg = energy > CRAFT_INTEGRITY ? wound : wound * 0.15;
-    if (dmg <= 0) return;
-    c.hp -= dmg;
-    if (by !== NO_OWNER) c.lastHitBy = by;
+    const l = craftToLocal(c, wx + dx * 2, wy + dy * 2, this.pt);
+    const part = craftPartAt(c.parts, l.x, l.y);
+    let dmg = energy > CRAFT_INTEGRITY ? wound : wound * 0.15;
+    // No nose cone: the hull behind it is exposed.
+    if (part === CraftPart.Hull && !hasCraftPart(c.parts, CraftPart.Nose)) dmg *= 1.3;
+    this.hurtCraftPart(slot, part, dmg, by);
+  }
+
+  /** Damage one part; a part out of hit points is torn off, the hull going is the end. */
+  private hurtCraftPart(slot: number, part: number, dmg: number, by: number): void {
+    const c = this.crafts[slot];
+    if (!c || dmg <= 0) return;
+    if (by !== NO_OWNER && by !== 255) c.lastHitBy = by;
+    if (part === CraftPart.Hull) c.hp -= dmg;
+    else {
+      c.hp -= Math.min(dmg, Math.max(0, c.partHp[part])) * 0.2; // shock through the frame
+      c.partHp[part] -= dmg;
+      if (c.partHp[part] <= 0 && hasCraftPart(c.parts, part)) this.detachCraftPart(slot, part);
+    }
+    c.partHp[CraftPart.Hull] = Math.max(0, c.hp);
     if (c.hp <= 0) this.destroyCraft(slot, c.lastHitBy);
   }
 
+  /**
+   * A part comes off: it flies away with the velocity of where it was on the
+   * spinning hull, as heavy fragments in the particle engine (they maim and
+   * settle as scrap), and the recoil spins the rocket.
+   */
+  private detachCraftPart(slot: number, part: number): void {
+    const c = this.crafts[slot]!;
+    c.parts &= ~(1 << part);
+    c.partHp[part] = 0;
+    const [u, v] = CRAFT_PART_CENTER[part];
+    const pt = craftToWorld(c, u, v, this.pt);
+    const rx = pt.x - c.x;
+    const ry = pt.y - c.y;
+    const d = Math.sqrt(rx * rx + ry * ry) + 1e-6;
+    const vx = c.vx - c.w * ry + (rx / d) * 90;
+    const vy = c.vy + c.w * rx + (ry / d) * 90 - 30;
+    const x = pt.x;
+    const y = pt.y;
+    const seed = this.rng.nextU32();
+    craftPartFragments(this.grains, x, y, vx, vy, c.lastHitBy === 255 ? NO_OWNER : c.lastHitBy, new Rng(seed));
+    this.pushCraft(c, x, y, -(rx / d) * 25, -(ry / d) * 25);
+    c.w += u > 0 ? -1.5 : u < 0 ? 1.5 : 0;
+    const w = this.tmp.reset();
+    w.u8(R_CRAFT_PART);
+    w.u8(slot);
+    w.u8(part);
+    w.u16(clampU16(x));
+    w.u16(clampU16(y + Y_BIAS));
+    w.i16(clampI16(vx * VEL_SCALE));
+    w.i16(clampI16(vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x, y });
+  }
+
+  /** Blast overpressure: every part in reach takes damage, and the shove spins it. */
   private splashCrafts(x: number, y: number, r: number, dmg: number, owner: number): void {
+    const pt = this.pt;
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
-      const dx = c.x + CRAFT_W / 2 - x;
-      const dy = c.y + CRAFT_H / 2 - y;
-      const d = Math.sqrt(dx * dx + dy * dy) - CRAFT_W / 2;
-      if (d < r) {
-        c.hp -= dmg * (1 - Math.max(0, d) / r);
-        if (owner !== NO_OWNER) c.lastHitBy = owner;
-        if (c.hp <= 0) this.destroyCraft(k, c.lastHitBy);
+      if (Math.abs(c.x - x) > r + CRAFT_H || Math.abs(c.y - y) > r + CRAFT_H) continue;
+      let nearest = Infinity;
+      let nx = c.x;
+      let ny = c.y;
+      for (let part = 0; part < CRAFT_PARTS && this.crafts[k] === c; part++) {
+        if (!hasCraftPart(c.parts, part)) continue;
+        craftToWorld(c, CRAFT_PART_CENTER[part][0], CRAFT_PART_CENTER[part][1], pt);
+        const d = Math.sqrt((pt.x - x) ** 2 + (pt.y - y) ** 2) - 3;
+        if (d < nearest) {
+          nearest = d;
+          nx = pt.x;
+          ny = pt.y;
+        }
+        if (d < r) this.hurtCraftPart(k, part, dmg * (1 - Math.max(0, d) / r) * (part === CraftPart.Hull ? 1 : 0.8), owner);
       }
+      if (this.crafts[k] !== c || nearest >= r) continue;
+      const dx = nx - x;
+      const dy = ny - y;
+      const dl = Math.sqrt(dx * dx + dy * dy) + 1e-6;
+      const s = 50 * (1 - Math.max(0, nearest) / r);
+      this.pushCraft(c, nx, ny, (dx / dl) * s, (dy / dl) * s);
     }
   }
 
@@ -733,13 +856,14 @@ export class World {
     const c = this.crafts[slot];
     if (!c) return;
     const owner = by === 255 ? NO_OWNER : by;
-    const cx = c.x + CRAFT_W / 2;
-    const cy = c.y + CRAFT_H / 2;
+    const cx = c.x;
+    const cy = c.y;
     const rider = c.passenger;
     this.releasePassenger(slot, true);
     this.crafts[slot] = null;
     const seed = this.rng.nextU32();
-    this.carve(cx, cy + CRAFT_H / 3, 12, 5, 30, owner);
+    const base = craftToWorld(c, 0, CRAFT_H / 3, this.pt);
+    this.carve(base.x, base.y, 12, 5, 30, owner);
     this.grains.blast(cx, cy, 70, BLAST_IMPULSE * 1.3);
     craftFragments(this.grains, cx, cy, c.vx, c.vy, owner, new Rng(seed));
     for (const p of this.players) {
@@ -772,16 +896,20 @@ export class World {
   }
 
   /** A rocket slamming into a clone crushes it, credited to the rocket's passenger. */
-  private crush(c: Craft, slot: number): void {
+  private crush(c: Craft): void {
     for (const p of this.players) {
       if (!p || !p.alive || p.id === c.passenger || p.id === c.delivered) continue;
       const b = p.body;
-      if (b.x + ACTOR_W <= c.x || b.x >= c.x + CRAFT_W || b.y + ACTOR_H <= c.y || b.y >= c.y + CRAFT_H) continue;
-      const rvx = c.vx - b.vx;
-      const rvy = c.vy - b.vy;
+      const l = craftToLocal(c, p.cx, p.cy, this.pt);
+      if (Math.abs(l.x) >= (CRAFT_W + ACTOR_W) / 2 || Math.abs(l.y) >= (CRAFT_H + ACTOR_H) / 2) continue;
+      // Velocity of the hull where it meets the clone (spin included).
+      const rx = p.cx - c.x;
+      const ry = p.cy - c.y;
+      const rvx = c.vx - c.w * ry - b.vx;
+      const rvy = c.vy + c.w * rx - b.vy;
       const rs = Math.sqrt(rvx * rvx + rvy * rvy);
       // Shove out of the way either way; hurt when it hits hard.
-      b.vx += (b.x + ACTOR_W / 2 < c.x + CRAFT_W / 2 ? -1 : 1) * 60 + rvx * 0.5;
+      b.vx += (rx < 0 ? -1 : 1) * 60 + rvx * 0.5;
       b.vy += rvy * 0.5;
       if (rs < 90) continue;
       const res = this.strikeScratch;
@@ -793,7 +921,6 @@ export class World {
       const by = c.passenger !== 255 ? c.passenger : c.lastHitBy !== 255 ? c.lastHitBy : p.id;
       this.applyStrike(p, res, by, W_CRAFT, p.cx, b.y);
     }
-    void slot;
   }
 
   // ---------------------------------------------------------------- tick
@@ -822,8 +949,8 @@ export class World {
         if (p.delivering >= 0) {
           const c = this.crafts[p.delivering];
           if (c) {
-            p.camX = c.x + CRAFT_W / 2;
-            p.camY = c.y + CRAFT_H / 2;
+            p.camX = c.x;
+            p.camY = c.y;
           }
         }
         continue;
@@ -872,7 +999,10 @@ export class World {
     for (const p of this.players) if (p && p.alive) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
-      if (c) actors.add(CRAFT_ID_BASE + k, c.x, c.y, c.vx, c.vy, CRAFT_W, CRAFT_H, CRAFT_MASS);
+      if (!c) continue;
+      const e = craftHalfExtents(c.a, this.ext);
+      // Immune to its own exhaust flames, and not dragged by its own air jet.
+      actors.add(CRAFT_ID_BASE + k, c.x - e.x, c.y - e.y, c.vx, c.vy, 2 * e.x, 2 * e.y, CRAFT_MASS, exhaustOwner(c), 0);
     }
     this.grains.step(this.collider, DT, this.hooks, actors);
     // Apply what particles and fields did to bodies this tick.
@@ -895,7 +1025,11 @@ export class World {
     for (let h = 0; h < actors.hitN; h++) {
       const hid = actors.id[actors.hitSlot[h]];
       if (hid >= CRAFT_ID_BASE) {
-        this.hurtCraft(hid - CRAFT_ID_BASE, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        const c = this.crafts[hid - CRAFT_ID_BASE];
+        if (!c) continue;
+        // Hit points are relative to the box the rocket was entered with.
+        const e = craftHalfExtents(c.a, this.ext);
+        this.hitCraft(hid - CRAFT_ID_BASE, c.x - e.x + actors.hitLx[h], c.y - e.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
         continue;
       }
       const p = this.players[hid];
@@ -997,6 +1131,26 @@ export class World {
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
 
+      // Riding in: the rocket at full precision too, since the client
+      // predicts it from this state the same way it predicts its clone.
+      const ride = !p.alive && p.delivering >= 0 ? this.crafts[p.delivering] : null;
+      if (ride && ride.passenger === p.id) {
+        w.u8(R_CRAFT_SELF);
+        w.u8(p.delivering);
+        w.f64(ride.x);
+        w.f64(ride.y);
+        w.f64(ride.vx);
+        w.f64(ride.vy);
+        w.f64(ride.a);
+        w.f64(ride.w);
+        w.f64(ride.targetX);
+        w.u16(Math.min(65535, ride.timer));
+        w.u8(ride.phase);
+        w.u8(ride.parts);
+        w.u8(ride.prevButtons);
+        for (let part = 0; part < CRAFT_PARTS; part++) w.u8(Math.max(0, Math.min(255, Math.ceil(ride.partHp[part]))));
+      }
+
       // Entity interest: full-rate inside the view rect, radar blips outside.
       const vx0 = p.camX - VIEW_HALF_W - ENTITY_INTEREST_MARGIN;
       const vx1 = p.camX + VIEW_HALF_W + ENTITY_INTEREST_MARGIN;
@@ -1058,8 +1212,7 @@ export class World {
       for (let k = 0; k < MAX_CRAFTS; k++) {
         const c = this.crafts[k];
         if (!c) continue;
-        const ccx = c.x + CRAFT_W / 2;
-        if (ccx < vx0 - 200 || ccx > vx1 + 200 || c.y > vy1 + 100 || c.y + CRAFT_H < vy0 - 500) continue;
+        if (c.x < vx0 - 200 || c.x > vx1 + 200 || c.y > vy1 + 120 || c.y < vy0 - 500) continue;
         if (nCraft === 0) {
           w.u8(R_CRAFTS);
           w.u8(0);
@@ -1070,10 +1223,12 @@ export class World {
         w.u16(clampU16((c.y + Y_BIAS) * POS_SCALE));
         w.i16(clampI16(c.vx * VEL_SCALE));
         w.i16(clampI16(c.vy * VEL_SCALE));
+        w.u16(quantizeAim(c.a));
         w.u8(Math.round(c.thrust * 255));
         w.u8(Math.max(0, Math.min(255, Math.ceil(c.hp))));
         w.u8(c.passenger);
         w.u8(c.phase);
+        w.u8(c.parts);
       }
       if (nCraft > 0) w.buf[craftAt] = nCraft;
 
@@ -1174,6 +1329,11 @@ export class World {
 }
 
 const TICKS_PER_SCORE = 30;
+/** Who a rocket's exhaust flames are credited to (and so who it is immune to). */
+function exhaustOwner(c: Craft): number {
+  return c.passenger !== 255 ? c.passenger : c.delivered !== 255 ? c.delivered : NO_OWNER;
+}
+
 /** Actor-field ids for drop rockets: CRAFT_ID_BASE + craft slot. */
 const CRAFT_ID_BASE = 128;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less

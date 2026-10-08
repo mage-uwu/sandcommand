@@ -35,6 +35,8 @@ export const R_CHAT = 13;
 export const R_DETACH = 14;
 export const R_CRAFTS = 15;
 export const R_CRAFT_BOOM = 16;
+export const R_CRAFT_SELF = 17;
+export const R_CRAFT_PART = 18;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -44,7 +46,7 @@ export const F_FIRING = 8;
 export const F_FACE_LEFT = 16;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

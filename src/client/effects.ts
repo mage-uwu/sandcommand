@@ -1,4 +1,5 @@
-import { GIB_INORGANIC, NO_OWNER, PK, type Particles, craftFragments, explosionFragments } from '../shared/particles.ts';
+import { GIB_INORGANIC, NO_OWNER, PK, type Particles, craftFragments, craftPartFragments, explosionFragments } from '../shared/particles.ts';
+import { CRAFT_H } from '../shared/craft.ts';
 import { Rng } from '../shared/rng.ts';
 import { Part, has } from '../shared/body.ts';
 
@@ -172,14 +173,40 @@ export const GIB_NOZZLE = 15;
 
 /**
  * Drop-rocket exhaust on this client: the plume (flames and billowing smoke)
- * plus the same jet into the local air field the server writes, so smoke and
- * loose particles under a landing rocket blow away on screen too.
+ * along the engine axis, plus the same jet into the local air field the
+ * server writes, so smoke and loose particles behind the nozzle blow away
+ * on screen too. (cx, cy) is the rocket's centre, `a` its angle.
  */
-export function craftExhaust(p: Particles, nx: number, ny: number, vx: number, vy: number, thrust: number): void {
+export function craftExhaust(p: Particles, cx: number, cy: number, a: number, vx: number, vy: number, thrust: number): void {
+  const dx = -Math.sin(a);
+  const dy = Math.cos(a);
+  const nx = cx + dx * (CRAFT_H / 2 + 1);
+  const ny = cy + dy * (CRAFT_H / 2 + 1);
   const n = Math.ceil(thrust * 4);
-  for (let k = 0; k < n; k++) p.spawn(PK.Flame, nx + rnd(-2, 2), ny + 1, vx * 0.5 + rnd(-40, 40), vy + 180 + 160 * thrust * Math.random(), rnd(8, 16));
-  if (Math.random() < thrust) p.spawn(PK.Smoke, nx + rnd(-3, 3), ny + 4, rnd(-60, 60), rnd(20, 80), rnd(40, 80));
-  p.wind(nx, ny + 16, 26, 0, 320 * thrust);
+  for (let k = 0; k < n; k++) {
+    const s = 180 + 160 * thrust * Math.random();
+    const j = rnd(-40, 40);
+    p.spawn(PK.Flame, nx + dy * rnd(-2, 2), ny - dx * rnd(-2, 2), vx * 0.5 + dx * s + dy * j, vy * 0.5 + dy * s - dx * j, rnd(8, 16));
+  }
+  if (Math.random() < thrust) p.spawn(PK.Smoke, nx + dx * 4 + rnd(-3, 3), ny + dy * 4, dx * 50 + rnd(-60, 60), dy * 50 + rnd(-20, 20), rnd(40, 80));
+  p.wind(nx + dx * 16, ny + dy * 16, 26, dx * 320 * thrust, dy * 320 * thrust);
+}
+
+const CRAFT_PART_GIB = [GIB_PLATE, GIB_NOSE, GIB_FIN, GIB_FIN, GIB_NOZZLE];
+
+/**
+ * A part shot off a drop rocket: mirror the server's hull fragments from the
+ * seed (they hurt and settle as scrap), plus the part itself tumbling away.
+ */
+export function craftPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+  craftPartFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
+  const i = p.n;
+  if (p.spawn(PK.Gib, x, y, vx, vy, rnd(600, 750), (CRAFT_PART_GIB[part] ?? GIB_PLATE) | GIB_INORGANIC, 0x8a9096)) {
+    p.spin[i] = Math.floor(Math.random() * 4);
+    p.spinRate[i] = (Math.random() - 0.5) * 0.15;
+  }
+  burst(p, PK.Flame, x, y, 8, 120, 12, 0, vx * 0.5, vy * 0.5);
+  burst(p, PK.Smoke, x, y, 10, 50, 60);
 }
 
 /**

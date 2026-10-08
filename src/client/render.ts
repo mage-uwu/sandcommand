@@ -7,7 +7,7 @@ import type { CraftView, Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { PARTS, Part, has } from '../shared/body.ts';
-import { CRAFT_H, CRAFT_W } from '../shared/craft.ts';
+import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE, gunMuzzle } from './sprites.ts';
 
@@ -171,10 +171,14 @@ export class Renderer {
       this.camY += (ty - this.camY) * 0.25;
     } else {
       // Riding in: follow our own drop rocket down, leading toward the ground.
-      const mine = game.myCraft();
+      game.rideSmoothX *= 0.85;
+      game.rideSmoothY *= 0.85;
+      game.rideSmoothA *= 0.85;
+      const mine = game.myCraft(alpha);
       if (mine) {
-        this.camX += (mine.x + CRAFT_W / 2 - this.camX) * 0.2;
-        this.camY += (mine.y + CRAFT_H + 40 - this.camY) * 0.2;
+        // Lead along the flight path so you can see where you'll land.
+        this.camX += (mine.x + mine.vx * 0.3 - this.camX) * 0.2;
+        this.camY += (mine.y + 30 + mine.vy * 0.3 - this.camY) * 0.2;
       }
     }
     const halfW = W / z / 2;
@@ -235,6 +239,8 @@ export class Renderer {
 
     // Drop rockets.
     for (const c of game.craftViews()) this.drawCraft(ctx, c, game, now);
+    const ride = game.myCraft(alpha);
+    if (ride && game.ride) this.drawCraft(ctx, ride, game, now);
 
     // Remote clones.
     const views = game.remoteViews();
@@ -447,28 +453,32 @@ export class Renderer {
     }
   }
 
-  /** A drop rocket: hull in the passenger's colour, exhaust plume, damage smoke. */
+  /** A drop rocket: hull in the passenger's colour, exhaust plume along its axis, damage sparks. */
   private drawCraft(ctx: CanvasRenderingContext2D, c: CraftView, game: Game, now: number): void {
-    const ix = Math.round(c.x);
-    const iy = Math.round(c.y);
     const team = c.passenger !== 255 ? (game.players.get(c.passenger)?.rgb ?? 0x8a9096) : 0x8a9096;
-    if (c.thrust > 0.05) {
-      // Plume under the nozzle, length by thrust.
-      const nx = ix + CRAFT_W / 2;
-      const ny = iy + CRAFT_H + 1;
+    const cx = Math.round(c.x);
+    const cy = Math.round(c.y);
+    if (c.thrust > 0.05 && c.parts & (1 << CraftPart.Engine)) {
+      // Plume behind the nozzle, length by thrust.
       const len = Math.round(4 + c.thrust * 14 + ((now / 40) % 3));
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(c.a);
+      const ny = CRAFT_H / 2 + 1;
       ctx.fillStyle = 'rgba(255,170,60,0.85)';
-      ctx.fillRect(nx - 2, ny, 4, Math.round(len * 0.7));
+      ctx.fillRect(-2, ny, 4, Math.round(len * 0.7));
       ctx.fillStyle = 'rgba(255,245,200,0.95)';
-      ctx.fillRect(nx - 1, ny, 2, Math.round(len * 0.45));
+      ctx.fillRect(-1, ny, 2, Math.round(len * 0.45));
       ctx.fillStyle = 'rgba(255,90,30,0.6)';
-      ctx.fillRect(nx - 1, ny + Math.round(len * 0.7), 2, Math.round(len * 0.3));
+      ctx.fillRect(-1, ny + Math.round(len * 0.7), 2, Math.round(len * 0.3));
+      ctx.restore();
     }
-    ctx.drawImage(this.sprites.craft(team), ix - 1, iy - 1);
+    const spr = this.sprites.craft(team, c.parts, c.a);
+    ctx.drawImage(spr.c, cx - spr.r, cy - spr.r);
     if (c.hp < 70 && (now / 90) % 2 < 1) {
       // Damaged: sparks off the hull.
       ctx.fillStyle = '#ffd040';
-      ctx.fillRect(ix + 2 + ((now / 50) % 8), iy + 8 + ((now / 70) % 10), 1, 1);
+      ctx.fillRect(cx - 4 + ((now / 50) % 8), cy - 5 + ((now / 70) % 10), 1, 1);
     }
   }
 
@@ -606,10 +616,26 @@ export class Renderer {
       ctx.textAlign = 'center';
       ctx.font = `bold ${Math.round(22 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(W / 2 - 220 * s, H / 2 - 40 * s, 440 * s, 60 * s);
-      ctx.fillStyle = '#fff';
       const secs = Math.ceil(game.respawnTicks / TICK_RATE);
-      ctx.fillText(game.myCraft() ? 'Drop rocket inbound…' : secs > 0 ? `New clone in ${secs}…` : 'Launching drop rocket…', W / 2, H / 2 - 2 * s);
+      const ride = game.ride;
+      if (ride && ride.passenger === game.myId) {
+        // Piloting: controls and what is left of the rocket, out of the way at the top.
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(W / 2 - 260 * s, 40 * s, 520 * s, 56 * s);
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(15 * s)}px ui-monospace, monospace`;
+        ctx.fillText('A/D steer   W burn   S cut engine   click: bail out', W / 2, 62 * s);
+        const status = [`hull ${Math.max(0, Math.round((ride.hp / CRAFT_HP) * 100))}%`];
+        if (!(ride.parts & (1 << CraftPart.Engine))) status.push('ENGINE GONE');
+        if (!(ride.parts & (1 << CraftPart.FinL)) || !(ride.parts & (1 << CraftPart.FinR))) status.push('FIN LOST');
+        if (!(ride.parts & (1 << CraftPart.Nose))) status.push('NOSE LOST');
+        ctx.fillStyle = status.length > 1 || ride.hp < 70 ? '#ff9060' : '#a0ffa0';
+        ctx.fillText(status.join('   '), W / 2, 84 * s);
+      } else {
+        ctx.fillRect(W / 2 - 220 * s, H / 2 - 40 * s, 440 * s, 60 * s);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(game.myCraft() ? 'Drop rocket inbound…' : secs > 0 ? `New clone in ${secs}…` : 'Launching drop rocket…', W / 2, H / 2 - 2 * s);
+      }
     }
 
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);

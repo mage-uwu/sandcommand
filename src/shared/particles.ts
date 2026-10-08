@@ -516,7 +516,7 @@ export class Particles {
       if (actors && actors.n > 0 && K_TOUCHES[kd]) {
         // Did the free part of this tick's path cross a body? A handful of
         // field-cell lookups along the segment find the candidates.
-        const a = actors.segment(px, py, hit.x, hit.y, aq);
+        const a = actors.segment(px, py, hit.x, hit.y, aq, this.owner[i]);
         if (a >= 0) {
           const ex = px + (hit.x - px) * aq.t;
           const ey = py + (hit.y - py) * aq.t;
@@ -788,6 +788,10 @@ export class ActorField {
   readonly h = new Float32Array(MAX_ACTORS);
   /** Mass per slot (impacts and field forces divide by it). */
   readonly mass = new Float32Array(MAX_ACTORS);
+  /** Particle owner this body ignores (a rocket and its own exhaust), 255 = none. */
+  readonly immune = new Uint8Array(MAX_ACTORS);
+  /** How strongly the blast/air field drags this body (rockets: their own jet would). */
+  readonly airScale = new Float32Array(MAX_ACTORS);
   readonly dvx = new Float32Array(MAX_ACTORS);
   readonly dvy = new Float32Array(MAX_ACTORS);
   // Hit records (struct of arrays, grown as needed).
@@ -823,9 +827,11 @@ export class ActorField {
   }
 
   /** Add a body; returns its slot. Size and mass default to a clone's. */
-  add(id: number, x: number, y: number, vx: number, vy: number, w = this.bodyW, h = this.bodyH, mass = ACTOR_MASS): number {
+  add(id: number, x: number, y: number, vx: number, vy: number, w = this.bodyW, h = this.bodyH, mass = ACTOR_MASS, immune = 255, airScale = 1): number {
     if (this.n >= MAX_ACTORS) return -1;
     const a = this.n++;
+    this.immune[a] = immune;
+    this.airScale[a] = airScale;
     this.w[a] = w;
     this.h[a] = h;
     this.mass[a] = mass;
@@ -857,7 +863,7 @@ export class ActorField {
    * cell with an exact slab test, keep the earliest entry. Writes the entry
    * fraction to `out.t`.
    */
-  segment(x0: number, y0: number, x1: number, y1: number, out: { t: number }): number {
+  segment(x0: number, y0: number, x1: number, y1: number, out: { t: number }, owner = 255): number {
     const dx = x1 - x0;
     const dy = y1 - y0;
     const len = Math.sqrt(dx * dx + dy * dy);
@@ -873,6 +879,7 @@ export class ActorField {
         if (a < 0) break;
         if (tested[a >> 5] & (1 << (a & 31))) continue;
         tested[a >> 5] |= 1 << (a & 31);
+        if (owner !== 255 && this.immune[a] === owner) continue;
         const t = segmentBox(x0, y0, dx, dy, this.x[a], this.y[a], this.x[a] + this.w[a], this.y[a] + this.h[a]);
         if (t >= 0 && t < bestT) {
           bestT = t;
@@ -964,8 +971,8 @@ export class ActorField {
         this.dvy[a] += (my / d - this.vy[a]) * k;
       }
       if (an > 0) {
-        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR * heavy;
-        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR * heavy;
+        this.dvx[a] += (ax / an - this.vx[a]) * AIR_ACTOR * heavy * this.airScale[a];
+        this.dvy[a] += (ay / an - this.vy[a]) * AIR_ACTOR * heavy * this.airScale[a];
       }
     }
   }
@@ -1037,4 +1044,21 @@ export function craftFragments(p: Particles, x: number, y: number, vx: number, v
     p.spawn(PK.Flame, x, y, vx * 0.3 + dx * rng.range(40, 160), vy * 0.3 + dy * rng.range(40, 160) - 40, rng.range(12, 22), 0, 0, owner);
   }
   explosionFragments(p, x, y, 1, owner, rng); // rocket-grade shrapnel
+}
+
+/**
+ * A drop-rocket part shot off at (x, y): a few heavy hull fragments (they
+ * hurt, and settle as scrap metal) plus sparks. Seeded so clients mirror it.
+ */
+export function craftPartFragments(p: Particles, x: number, y: number, vx: number, vy: number, owner: number, rng: Rng): void {
+  for (let k = 0; k < 8; k++) {
+    const a = rng.range(0, Math.PI * 2);
+    const s = rng.range(50, 170);
+    p.spawn(PK.Hull, x, y, vx + Math.cos(a) * s, vy + Math.sin(a) * s - 40, rng.range(300, 420), Mat.Metal, 0, owner);
+  }
+  for (let k = 0; k < 10; k++) {
+    const a = rng.range(0, Math.PI * 2);
+    const s = rng.range(80, 260);
+    p.spawn(PK.Spark, x, y, vx + Math.cos(a) * s, vy + Math.sin(a) * s, rng.range(6, 14), 0, 0, owner);
+  }
 }

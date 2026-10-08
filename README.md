@@ -279,35 +279,76 @@ the same seed. Explosive and high-overkill deaths scatter harder.
 ### Drop rockets
 
 Every clone arrives by drop rocket, including your first spawn and every
-respawn (`src/shared/craft.ts`). The rocket falls in from above the sky line
-at terminal speed. Its autopilot then fires a late retro burn: the target
-descent speed is the speed from which a planned deceleration stops exactly at
-hover height. It hovers a few cells off the ground, drops the clone out of
-the side hatch, and burns back up out of the world. Up to 64 can be in the
-air at once.
+respawn (`src/shared/craft.ts`). Up to 64 can be in the air at once.
 
-Rockets are physical bodies in the same engine as everything else:
+**A rocket is a rigid body.** It has a position, velocity, angle and spin.
+Gravity, the main engine (which pushes along the nose), attitude torque and
+quadratic air drag act on it. It collides with terrain through impulses at
+points around its hull outline:
 
-- **Thrust.** The exhaust spawns real flame particles, which burn whoever
-  stands under the nozzle, and writes a downward jet into the air field. That
-  jet blows sand, gibs and clones away from the landing spot.
-- **Hits.** Rockets are splatted into the actor field alongside clones (mass
-  60, so particles shove them far less). Bullets, shrapnel, debris and blasts
-  damage the hull. Hits below the hull's integrity only scratch it.
-- **Crushing.** A rocket hitting a clone hard crushes it, credited to the
-  rocket's passenger.
-- **Crashes.** A rocket that is shot up enough, or hits the ground faster than
-  its crash speed, blows apart. That carves a crater, sends a blast wave, and
-  throws heavy `Hull` fragments plus flames into the particle engine. Anyone
-  aboard is blown out of the nose cone into the debris.
+- The solver runs sequential impulses with accumulated, clamped totals per
+  contact, plus Coulomb friction and moment of inertia.
+- Penetration is measured along the occupancy-gradient normal (bisected to
+  the surface) and pushed out.
+- Substeps scale with speed, so nothing tunnels.
 
-Hull fragments are ordinary field-engine particles. They maim like shrapnel,
-push sand, and settle as **scrap metal** terrain (a hard material), so a
-battlefield fills up with wreckage. The destruction travels as one 14-byte
-`R_CRAFT_BOOM` record carrying a seed, and clients reproduce the same
-fragment shower from that seed. Rocket state streams as a per-client
-`R_CRAFTS` record (14 B per rocket in range), and the camera rides your
-rocket down.
+So a rocket can land on its fins, tip over, cartwheel down a slope,
+nose-dive, or come to rest lying on its side. A touchdown faster than the
+crash speed destroys it outright. Softer impacts break the part that hit.
+
+**You fly it.** While riding in, A/D steer, W burns, S cuts the engine, and
+a click bails out. With no stick input, a fly-by-wire autopilot takes over:
+
+- It falls at terminal speed, then fires a late retro burn. The target speed
+  is the one from which a planned deceleration stops exactly at hover
+  height, with that deceleration fed forward so the burn tracks the curve.
+- It leans toward its drop point, refusing to burn far off vertical, so it
+  rights itself first.
+- It hovers, drops you out of a side hatch, and flies home.
+
+If it tips over with you aboard, it opens the hatch after a couple of
+seconds. An empty rocket that can't get home scuttles itself.
+
+**It gibs.** A rocket is built from five parts: nose cone, hull, two fins and
+engine. Each has its own hit points, and every hit lands on the part it
+entered. Hits are tested against the rotated hull, in the rocket's own frame.
+What each loss does:
+
+- **Engine:** no thrust. It falls like a stone, so bail out.
+- **One fin:** lopsided drag twists it under power.
+- **Both fins:** less steering.
+- **Nose cone:** the hull behind it is exposed.
+- **Hull:** the end.
+
+A part that comes off flies away with the velocity of where it was on the
+spinning hull, as heavy `Hull` fragments in the particle engine plus a
+tumbling sprite gib, and the recoil spins the rocket.
+
+**Everything composes with the field engine:**
+
+- **Exhaust:** real flame particles, plus a jet written into the air field
+  along the engine axis that blows sand, gibs and clones away.
+- **Particle hits:** rockets sit in the actor field (as the AABB of the
+  rotated hull, mass 60). Shrapnel, debris and grains hit and hurt them.
+- **Blasts:** they damage every part in reach, and the shove spins the
+  rocket.
+- **Crushing:** a rocket hitting a clone hard crushes it, credited to its
+  passenger.
+- **Destruction:** a crater, a blast wave, and a shower of `Hull` fragments.
+
+Those fragments maim like shrapnel, push the sand, and settle as **scrap
+metal** terrain, so the battlefield fills with wreckage. A rocket is immune
+to its own exhaust and isn't dragged by its own jet.
+
+**Networking.** `stepCraft` is pure and shared. The server runs it
+authoritatively. The passenger's client gets its rocket at full precision
+(`R_CRAFT_SELF`), so it predicts the rocket exactly as it predicts its own
+clone: rebase on the server state, replay unacknowledged inputs, ease out
+corrections. Tests check that the replay matches the server exactly at
+66 ms and 198 ms of latency. Other rockets stream as `R_CRAFTS` (16 B each,
+angle and part mask included) and are interpolated, angle included. Losing a
+part and blowing up are one seeded record each (`R_CRAFT_PART`,
+`R_CRAFT_BOOM`), from which every client mirrors the same fragment shower.
 
 ## Measured numbers
 
@@ -316,9 +357,9 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 1.20 ms  p99 6.9 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
-replicate avg 0.87 ms  p99 3.6 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 36.2 KB/s; room egress 2.26 MB/s
+sim       avg 1.07 ms  p99 4.3 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
+replicate avg 0.71 ms  p99 3.0 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 32.1 KB/s; room egress 2.01 MB/s
 ```
 
 `npm run bench:physics`:

@@ -5,6 +5,8 @@
  * gun at any angle still lands on the world's pixel grid.
  */
 
+import { ALL_CRAFT_PARTS, craftPartAt } from '../shared/craft.ts';
+
 type Grid = readonly string[];
 
 // Body: 10x16, facing right. The 8x14 hitbox maps to columns 1..8, rows 2..15.
@@ -191,7 +193,10 @@ const GIBS: Grid[] = [
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
 ];
 
-// Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin).
+// Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin), centred on
+// the rocket's centre of mass.
+const CRAFT_SPRITE_W = 14;
+const CRAFT_SPRITE_H = 28;
 const CRAFT: Grid = [
   '......KK......',
   '.....KLLK.....',
@@ -386,6 +391,40 @@ function bakeRotated(def: GunDef, pal: Record<string, number>, angle: number, fl
   return { c, r };
 }
 
+/** Rotate any grid about a (fractional) pivot onto a square canvas, nearest-neighbour. */
+function bakeRotatedGrid(g: Grid, pal: Record<string, number>, angle: number, px: number, py: number): { c: HTMLCanvasElement; r: number } {
+  const h = g.length;
+  const w = g[0].length;
+  let r = 0;
+  for (const [cx, cy] of [[0, 0], [w, 0], [0, h], [w, h]]) r = Math.max(r, Math.hypot(cx - px, cy - py));
+  r = Math.ceil(r);
+  const size = r * 2;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(size, size);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  for (let ty = 0; ty < size; ty++) {
+    for (let tx = 0; tx < size; tx++) {
+      const dx = tx + 0.5 - r;
+      const dy = ty + 0.5 - r;
+      const sx = Math.floor(cos * dx + sin * dy + px);
+      const sy = Math.floor(-sin * dx + cos * dy + py);
+      if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+      const rgb = pal[g[sy][sx]];
+      if (rgb === undefined) continue;
+      const o = (ty * size + tx) * 4;
+      img.data[o] = (rgb >> 16) & 255;
+      img.data[o + 1] = (rgb >> 8) & 255;
+      img.data[o + 2] = rgb & 255;
+      img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return { c, r };
+}
+
 export const ANGLE_STEPS = 64;
 const NEUTRAL = paletteFor(0x808080);
 
@@ -424,13 +463,25 @@ export class SpriteCache {
 
   private gibData = new Map<string, { w: number; h: number; data: Uint32Array }>();
 
-  private crafts = new Map<number, HTMLCanvasElement>();
+  private crafts = new Map<string, { c: HTMLCanvasElement; r: number }>();
 
-  /** Drop rocket in its passenger's team colour (grey when empty). */
-  craft(team: number): HTMLCanvasElement {
-    let c = this.crafts.get(team);
-    if (!c) this.crafts.set(team, (c = bake(CRAFT, this.pal(team))));
-    return c;
+  /**
+   * Drop rocket in its passenger's team colour (grey when empty), with only
+   * its attached parts, rotated to `angle` about its centre (64 steps,
+   * nearest-neighbour). Draw at centre - r.
+   */
+  craft(team: number, parts: number, angle: number): { c: HTMLCanvasElement; r: number } {
+    const step = ((Math.round((angle / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
+    const key = `${team}|${parts}|${step}`;
+    let g = this.crafts.get(key);
+    if (!g) {
+      const grid = CRAFT.map((row, sy) =>
+        [...row].map((ch, sx) => (craftPartAt(parts, sx + 0.5 - CRAFT_SPRITE_W / 2, sy + 0.5 - CRAFT_SPRITE_H / 2) === craftPartAt(ALL_CRAFT_PARTS, sx + 0.5 - CRAFT_SPRITE_W / 2, sy + 0.5 - CRAFT_SPRITE_H / 2) ? ch : '.')).join(''),
+      );
+      g = bakeRotatedGrid(grid, this.pal(team), (step / ANGLE_STEPS) * Math.PI * 2, CRAFT_SPRITE_W / 2, CRAFT_SPRITE_H / 2);
+      this.crafts.set(key, g);
+    }
+    return g;
   }
 
   /** Raw ABGR pixels of a gib piece, for blitting into the particle buffer. */

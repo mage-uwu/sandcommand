@@ -1,5 +1,6 @@
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
+import { CRAFT_PARTS } from './craft.ts';
 import { applyCarve } from './particles.ts';
 import { CHUNK, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
 import {
@@ -10,6 +11,8 @@ import {
   R_CHUNK,
   R_CRAFTS,
   R_CRAFT_BOOM,
+  R_CRAFT_PART,
+  R_CRAFT_SELF,
   R_DETACH,
   R_HIT,
   R_KILL,
@@ -20,6 +23,7 @@ import {
   R_SCORES,
   R_SELF,
   Y_BIAS,
+  dequantizeAim,
 } from './protocol.ts';
 import type { Terrain } from './terrain.ts';
 
@@ -67,14 +71,33 @@ export interface KillInfo {
 
 export interface CraftState {
   slot: number;
-  x: number; // top-left
+  x: number; // centre
   y: number;
   vx: number;
   vy: number;
+  a: number; // radians, 0 = nose up
   thrust: number; // 0..1
   hp: number;
   passenger: number; // player id or 255
   phase: number;
+  parts: number; // attached-part mask (craft.ts)
+}
+
+/** This client's own drop rocket at full precision: everything stepCraft needs. */
+export interface SelfCraftState {
+  slot: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  a: number;
+  w: number;
+  targetX: number;
+  timer: number;
+  phase: number;
+  parts: number;
+  prevButtons: number;
+  partHp: number[];
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -98,6 +121,10 @@ export interface FrameHandler {
   chat(id: number, text: string): void;
   /** Drop rockets near this client's view this tick (absent when none). */
   crafts(list: CraftState[]): void;
+  /** The drop rocket carrying this client, for prediction (absent when not riding). */
+  selfCraft(s: SelfCraftState): void;
+  /** A part was shot off drop rocket `slot` at (x, y); `seed` reproduces its fragments. */
+  craftPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** Drop rocket `slot` blew apart at (x, y); `seed` reproduces its fragments. */
   craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** A body part was torn off actor `id` at (x, y), flying with (vx, vy). */
@@ -252,10 +279,12 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             y: r.u16() / 16 - Y_BIAS,
             vx: r.i16() / 8,
             vy: r.i16() / 8,
+            a: dequantizeAim(r.u16()),
             thrust: r.u8() / 255,
             hp: r.u8(),
             passenger: r.u8(),
             phase: r.u8(),
+            parts: r.u8(),
           });
         }
         h.crafts(list);
@@ -268,6 +297,33 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const vx = r.i16() / 8;
         const vy = r.i16() / 8;
         h.craftBoom(slot, x, y, vx, vy, r.u32());
+        break;
+      }
+      case R_CRAFT_SELF:
+        h.selfCraft({
+          slot: r.u8(),
+          x: r.f64(),
+          y: r.f64(),
+          vx: r.f64(),
+          vy: r.f64(),
+          a: r.f64(),
+          w: r.f64(),
+          targetX: r.f64(),
+          timer: r.u16(),
+          phase: r.u8(),
+          parts: r.u8(),
+          prevButtons: r.u8(),
+          partHp: Array.from({ length: CRAFT_PARTS }, () => r.u8()),
+        });
+        break;
+      case R_CRAFT_PART: {
+        const slot = r.u8();
+        const part = r.u8();
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        const vx = r.i16() / 8;
+        const vy = r.i16() / 8;
+        h.craftPart(slot, part, x, y, vx, vy, r.u32());
         break;
       }
       case R_DETACH: {
@@ -300,5 +356,7 @@ export const nullHandler: FrameHandler = {
   chat() {},
   detach() {},
   crafts() {},
+  selfCraft() {},
+  craftPart() {},
   craftBoom() {},
 };
