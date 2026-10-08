@@ -39,7 +39,7 @@ export class Sfx {
   /** When each shooter last made a sound (for the shotgun's nine pellets, and Gatling rate). */
   private last = new Map<number, number>();
   private on = true;
-  private volume = 0.85;
+  private volume = 0.34;
   private engine: Bed | null = null;
   private jet: Bed | null = null;
   private whine: Bed | null = null;
@@ -268,7 +268,7 @@ export class Sfx {
     const b = (this.engine ??= this.bed('lowpass', 300, 0.8, 34));
     const t = this.ctx.currentTime;
     const l = clamp(level, 0, 1.6);
-    b.gain.gain.setTargetAtTime(0.55 * l, t, 0.08);
+    b.gain.gain.setTargetAtTime(0.22 * l, t, 0.08);
     b.tone.frequency.setTargetAtTime(220 + 520 * Math.min(1, l), t, 0.1);
     b.pan.pan.setTargetAtTime(clamp(pan, -1, 1) * 0.8, t, 0.1);
     if (b.osc) b.osc.frequency.setTargetAtTime(30 + 18 * Math.min(1, l), t, 0.15);
@@ -279,7 +279,7 @@ export class Sfx {
     if (!this.jet && level <= 0.01) return;
     const b = (this.jet ??= this.bed('bandpass', 1800, 0.6));
     const t = this.ctx.currentTime;
-    b.gain.gain.setTargetAtTime(0.32 * clamp(level, 0, 1.4), t, 0.05);
+    b.gain.gain.setTargetAtTime(0.13 * clamp(level, 0, 1.4), t, 0.05);
     b.pan.pan.setTargetAtTime(clamp(pan, -1, 1) * 0.8, t, 0.08);
   }
 
