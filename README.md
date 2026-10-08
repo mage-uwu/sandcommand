@@ -502,6 +502,26 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
     turrets left and has been idle a while, or when its caller leaves. In
     team modes it stays on while any of the caller's team is still in the
     match.
+- **Remote piloting.** The caller can fly their dropship by hand from
+  anywhere. Press **P**, or pick **PILOT DROPSHIP** on the radio menu, to
+  take over (`CallKind.Pilot`); press P again to hand it back. Your clone
+  stays where it stood: alive, inert and as shootable as ever. The view
+  rides with the ship.
+  - **Controls.** A/D slide it, W/S climb and sink (never into the
+    ground), click fires both turrets at the mouse, right-click drops a
+    bomb.
+  - **Stability.** The autopilot still keeps it level and holding the
+    point you steer it to.
+  - **Ending it.** Piloting ends when the ship goes down or heads home, or
+    when your clone dies. Whenever nobody is flying it, the autopilot's own
+    brain (covering, striking, scouting, spotting) is back in charge.
+- **Bots buy air support too.** About half the bots are prospectors. When
+  no enemy is close and in sight, they go to the nearest gold, dig it out,
+  and bank it. Once they have 1500 they get on the radio and call a
+  dropship, for themselves or, in team modes, for their whole team. They
+  don't call while one of their own is already up. With four enemies or
+  fewer left in a wave, they stop digging and finish the fight. Gold resets every wave,
+  so a bot has to survive and dig most of a wave to afford one.
 - **Damage.** The dropship has about half a tank's toughness (3750 hull).
   Each engine, each turret and the bay doors can be shot off separately.
   Without doors it can't bomb. On three engines it leans on the rest and

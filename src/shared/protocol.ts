@@ -17,7 +17,8 @@ export const C_BUILD = 0x06;
 export const C_CALL = 0x07;
 
 /** What a radio can call in. */
-export const CallKind = { Dropship: 0, Tank: 1 } as const;
+/** What a radio can call in; `Pilot` takes (or hands back) remote control of our own dropship. */
+export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2 } as const;
 /** Gold a radio call costs. */
 export const CALL_COST = 1500;
 
@@ -91,7 +92,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 21;
+export const PROTOCOL_VERSION = 22;
 
 /** Last Man Standing round phases. */
 export const Phase = {

@@ -359,6 +359,8 @@ export class Game implements FrameHandler {
     copyBody(this.prevBody, this.body);
     // Record every command, even while dead: the server may already have
     // respawned us and will apply it.
+    // (Flying our dropship: the controls are the ship's; the clone stands still.)
+    if (this.pilot >= 0) buttons = 0;
     this.pending.push({ seq: this.seq, buttons });
     if (this.pending.length > 90) this.pending.shift();
     // The laser's charge, as the server counts it (for the meter and the glow).
@@ -699,8 +701,18 @@ export class Game implements FrameHandler {
 
   // ------------------------------------------------------------ FrameHandler
 
+  /** The dropship slot we're remote-piloting, or -1 (our clone stands inert meanwhile). */
+  pilot = -1;
+
   self(s: SelfState): void {
     this.lastSelf = s;
+    this.pilot = s.pilot === 255 ? -1 : s.pilot;
+  }
+
+  /** The dropship we're flying, if we are. */
+  pilotedShip(): ShipView | null {
+    if (this.pilot < 0) return null;
+    return this.shipViews().find((v) => v.slot === this.pilot) ?? null;
   }
 
   actors(list: RemoteActor[]): void {
@@ -869,7 +881,7 @@ export class Game implements FrameHandler {
 
   /** Holding the materializer? */
   get building(): boolean {
-    return this.alive && !this.drive && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
+    return this.alive && !this.drive && this.pilot < 0 && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
   }
 
   itemsGone(ids: number[]): void {
@@ -1244,7 +1256,7 @@ export class Game implements FrameHandler {
 
   /** The radio is in hand: the call-in menu is up. */
   get calling(): boolean {
-    return this.alive && !this.drive && this.weapon === WeaponId.Radio;
+    return this.alive && !this.drive && this.pilot < 0 && this.weapon === WeaponId.Radio;
   }
 
   /** Tanks at the render time, interpolated between snapshots (ours from prediction). */

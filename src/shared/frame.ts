@@ -74,6 +74,8 @@ export interface SelfState {
   stance: number; // actor.ts Stance
   downTicks: number; // how long down has been held (prediction)
   faction: number; // factions.ts: this clone's vendor
+  /** The dropship slot we're remote-piloting (255: none). */
+  pilot: number;
 }
 
 export interface RemoteActor {
@@ -157,6 +159,8 @@ export interface ShipState {
   thrust: number[]; // per engine, 0..1
   /** What it's doing (dropship.ts ShipMission). */
   mission: number;
+  /** Being flown by remote control (by its caller). */
+  piloted: boolean;
 }
 
 /** The tank this client drives, at full precision: everything stepTank needs, plus its damage. */
@@ -305,11 +309,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           stance: 0,
           downTicks: 0,
           faction: 0,
+          pilot: 255,
         };
         const st = r.u8();
         self.stance = st & 3;
         self.downTicks = (st >> 2) & 15;
         self.faction = st >> 6;
+        self.pilot = r.u8();
         h.self(self);
         break;
       }
@@ -639,7 +645,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const aim: [number, number] = [dequantizeAim(r.u16()), dequantizeAim(r.u16())];
           const f = r.u8();
           const thrust = [r.u8() / 255, r.u8() / 255, r.u8() / 255, r.u8() / 255];
-          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: (f >> 4) & 3 });
+          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: (f >> 4) & 3, piloted: (f & 64) !== 0 });
         }
         h.ships(list);
         break;

@@ -132,6 +132,10 @@ export interface Ship {
   goalX: number;
   focus: number;
   planCd: number;
+  /** Remote control: who's flying it (255: the autopilot), and the point they're holding it at. */
+  pilot: number;
+  holdX: number;
+  holdY: number;
 }
 
 export function newShip(x: number, y: number, owner: number, team: number): Ship {
@@ -165,6 +169,9 @@ export function newShip(x: number, y: number, owner: number, team: number): Ship
     goalX: x + SHIP_W / 2,
     focus: 255,
     planCd: 0,
+    pilot: 255,
+    holdX: x + SHIP_W / 2,
+    holdY: y,
   };
 }
 

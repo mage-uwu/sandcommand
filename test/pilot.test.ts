@@ -1,0 +1,119 @@
+import { describe, expect, it } from 'vitest';
+import { BTN_FIRE, BTN_RIGHT, BTN_SCOPE } from '../src/shared/actor.ts';
+import { ACTOR_H } from '../src/shared/constants.ts';
+import { SHIP_BOMBS, SHIP_W } from '../src/shared/dropship.ts';
+import { Mat } from '../src/shared/materials.ts';
+import { CALL_COST, CallKind, quantizeAim } from '../src/shared/protocol.ts';
+import { ProjKind, WeaponId } from '../src/shared/weapons.ts';
+import { type Player, World } from '../src/server/world.ts';
+import { deliverAll } from './helpers.ts';
+
+/** A caller with a dropship on station overhead. */
+function withShip(seed: number) {
+  const world = new World(seed);
+  const a = world.addPlayer('caller', { send() {} })!;
+  deliverAll(world, [a]);
+  a.gold = CALL_COST;
+  world.equip(a, WeaponId.Radio);
+  world.step();
+  expect(world.call(a.id, CallKind.Dropship)).toBe(true);
+  for (let k = 0; k < 30 * 8; k++) world.step();
+  const slot = world.ships.findIndex(Boolean);
+  return { world, a, slot, sh: world.ships[slot]! };
+}
+
+describe('remote-piloting your dropship', () => {
+  it('only its caller can take it, and then flies it while the clone stands inert', () => {
+    const { world, a, slot, sh } = withShip(81);
+    const b = world.addPlayer('other', { send() {} })!;
+    deliverAll(world, [b]);
+    expect(world.call(b.id, CallKind.Pilot)).toBe(false); // not their ship
+    expect(world.call(a.id, CallKind.Pilot)).toBe(true);
+    expect(a.pilot).toBe(slot);
+    expect(sh.pilot).toBe(a.id);
+    const x0 = sh.x;
+    const bx = a.body.x;
+    for (let k = 0; k < 30 * 4; k++) {
+      a.buttons = BTN_RIGHT; // A/D fly the ship, not the clone
+      world.step();
+    }
+    expect(sh.x - x0).toBeGreaterThan(150);
+    expect(Math.abs(a.body.x - bx)).toBeLessThan(2);
+    expect(a.alive).toBe(true);
+  });
+
+  it("its guns fire on the pilot's aim, and right mouse drops a bomb", () => {
+    const { world, a, sh } = withShip(82);
+    world.call(a.id, CallKind.Pilot);
+    const pr = world.projectiles;
+    const gun = () => Array.from(pr.kind.subarray(0, pr.n)).filter((k) => k === ProjKind.ShipGun).length;
+    a.aimQ = quantizeAim(Math.PI / 2); // straight down
+    let shots = 0;
+    for (let k = 0; k < 20; k++) {
+      a.buttons = BTN_FIRE;
+      world.step();
+      shots = Math.max(shots, gun());
+    }
+    expect(shots).toBeGreaterThan(0);
+    expect(sh.aim[0]).toBeCloseTo(Math.PI / 2, 2);
+    for (let k = 0; k < 4; k++) {
+      a.buttons = BTN_SCOPE;
+      world.step();
+    }
+    expect(sh.bombs).toBe(SHIP_BOMBS - 1);
+  });
+
+  it('handing it back (or dying) returns it to the autopilot and its support role', () => {
+    const { world, a, sh } = withShip(83);
+    world.call(a.id, CallKind.Pilot);
+    a.buttons = 0;
+    world.step();
+    expect(world.call(a.id, CallKind.Pilot)).toBe(true); // P again: hand it back
+    expect(a.pilot).toBe(-1);
+    expect(sh.pilot).toBe(255);
+    for (let k = 0; k < 30; k++) world.step();
+    expect(sh.mission).not.toBe(-1); // planning again
+    // Take it again, then the clone dies: the autopilot takes over.
+    world.call(a.id, CallKind.Pilot);
+    (world as unknown as { damage: (p: Player, n: number, by: number, w: number) => void }).damage(a, 999, a.id, 255);
+    world.step();
+    expect(a.pilot).toBe(-1);
+    expect(sh.pilot).toBe(255);
+  });
+});
+
+describe('bots that save up for air support', () => {
+  /** A lone bot (a prospector) on the surface. */
+  function lone(seed: number): { world: World; bot: Player } {
+    const world = new World(seed);
+    const bot = world.addBot()!;
+    deliverAll(world, [bot]);
+    (bot.bot as unknown as { prospector: boolean }).prospector = true;
+    return { world, bot };
+  }
+
+  it('mines gold on purpose when nobody is about', () => {
+    const { world, bot } = lone(84);
+    // A seam of gold just under the ground a little way off.
+    const gx = Math.floor(bot.cx + 50);
+    for (let x = gx; x < gx + 14; x++) {
+      const top = world.terrain.surfaceY(x);
+      for (let y = top + 2; y < top + 12; y++) world.terrain.set(x, y, Mat.Gold);
+    }
+    const g0 = bot.gold;
+    for (let k = 0; k < 30 * 20 && bot.gold < g0 + 40; k++) world.step();
+    expect(bot.gold).toBeGreaterThan(g0 + 40);
+  });
+
+  it('with the gold banked, it gets on the radio and calls in a dropship', () => {
+    const { world, bot } = lone(85);
+    bot.gold = CALL_COST + 10;
+    bot.callCd = 0;
+    for (let k = 0; k < 30 * 3 && !world.ships.some(Boolean); k++) world.step();
+    const sh = world.ships.find(Boolean);
+    expect(sh?.owner).toBe(bot.id);
+    expect(bot.gold).toBeLessThan(CALL_COST);
+    void ACTOR_H;
+    void SHIP_W;
+  });
+});

@@ -198,8 +198,16 @@ export class Renderer {
     game.smoothY *= 0.85;
     const selfX = pb.x + (b.x - pb.x) * alpha + game.smoothX;
     const selfY = pb.y + (b.y - pb.y) * alpha + game.smoothY;
-    this.scoped = game.alive && input.scoping && !game.drive; // in a tank, right mouse is the cannon
-    if (this.scoped) {
+    const flying = game.alive ? game.pilotedShip() : null;
+    this.scoped = game.alive && input.scoping && !game.drive && !flying; // in a tank, right mouse is the cannon; flying, it's the bombs
+    if (flying) {
+      // Remote-piloting our dropship: the view rides with it, looking ahead
+      // toward the mouse and down at the ground it's working over.
+      const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;
+      const lookY = (input.mouseY * (H / innerHeight) - H / 2) / z;
+      this.camX += (flying.x + SHIP_W / 2 + lookX * 0.3 - this.camX) * 0.2;
+      this.camY += (flying.y + SHIP_H / 2 + 50 + lookY * 0.3 - this.camY) * 0.2;
+    } else if (this.scoped) {
       // Scoping: push the view out along the barrel by the weapon's scope
       // distance (the server moves this client's interest area the same way).
       // It stops where the line of sight does: never through or past terrain.
@@ -535,7 +543,8 @@ export class Renderer {
       const info = game.players.get(sh.owner);
       // Our side's dropships say what they're up to.
       const ours = sh.owner === game.myId || (sh.team !== Team.None && sh.team === game.myTeam);
-      const tag = `${info?.name ?? '?'}'s dropship  ✸${sh.bombs}${ours && !sh.leaving ? `  · ${SHIP_MISSION_NAMES[sh.mission]}` : ''}`;
+      const doing = sh.piloted ? 'REMOTE PILOT' : SHIP_MISSION_NAMES[sh.mission];
+      const tag = `${info?.name ?? '?'}'s dropship  ✸${sh.bombs}${ours && !sh.leaving ? `  · ${doing}` : ''}`;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillText(tag, sx + dpr, sy + dpr);
       ctx.fillStyle = info?.color ?? '#ccc';
@@ -949,10 +958,12 @@ export class Renderer {
     const rowH = 46 * s;
     const w = 236 * s;
     const x0 = 14 * s;
-    const entries = [
+    const entries: { kind: number; name: string; blurb: string; free?: boolean }[] = [
       { kind: CallKind.Dropship, name: 'DROPSHIP', blurb: 'air support · 2 turrets · 8 bombs' },
       { kind: CallKind.Tank, name: 'TANK', blurb: 'parachuted onto your position' },
     ];
+    // Our dropship's up: the remote to fly it ourselves.
+    if (game.shipViews().some((v) => v.owner === game.myId && !v.leaving)) entries.push({ kind: CallKind.Pilot, name: 'PILOT DROPSHIP', blurb: 'fly it yourself (P) · your clone stands by', free: true });
     const y0 = Math.max(250 * s, H / 2 - (entries.length * rowH) / 2);
     this.callRects.length = 0;
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
@@ -961,8 +972,8 @@ export class Renderer {
     ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
     ctx.fillStyle = '#9fe870';
     ctx.fillText(`RADIO  (${input.touch ? 'tap' : 'click'} to call in)`, x0, y0 - 8 * s);
-    const afford = game.gold >= CALL_COST;
     entries.forEach((e, i) => {
+      const afford = e.free || game.gold >= CALL_COST;
       const y = y0 + i * rowH;
       ctx.fillStyle = afford ? 'rgba(160,232,112,0.14)' : 'rgba(255,255,255,0.05)';
       ctx.fillRect(x0, y + 2 * s, w, rowH - 4 * s);
@@ -974,7 +985,7 @@ export class Renderer {
       ctx.fillText(e.name, x0 + 8 * s, y + 20 * s);
       ctx.fillStyle = afford ? '#ffd34a' : '#ff7060';
       ctx.textAlign = 'right';
-      ctx.fillText(`${CALL_COST} gold`, x0 + w - 8 * s, y + 20 * s);
+      ctx.fillText(e.free ? 'remote' : `${CALL_COST} gold`, x0 + w - 8 * s, y + 20 * s);
       ctx.textAlign = 'left';
       ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = '#c8d0d8';
@@ -1664,6 +1675,23 @@ export class Renderer {
     // Last Man Standing: the round, and what's happening to us in it.
     const rs = game.roundState;
     if (rs) this.drawRound(game, rs, s, W, H);
+
+    // Remote-piloting the dropship: the controls, and what's left of it.
+    const flown = game.alive ? game.pilotedShip() : null;
+    if (flown) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      // (Low on the screen, over the inventory bar: the ship flies up top.)
+      const py = H - 150 * s;
+      ctx.fillRect(W / 2 - 320 * s, py, 640 * s, 56 * s);
+      ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText('REMOTE PILOT   A/D fly   W/S climb/sink   click guns   right-click bomb   P exit', W / 2, py + 22 * s);
+      const lost = (['ENGINE A', 'ENGINE B', 'ENGINE C', 'ENGINE D', 'GUN L', 'GUN R', 'BAY'] as const).filter((_, i) => !hasShipPart(flown.parts, [ShipPart.EngineA, ShipPart.EngineB, ShipPart.EngineC, ShipPart.EngineD, ShipPart.TurretL, ShipPart.TurretR, ShipPart.Doors][i]));
+      ctx.fillStyle = lost.length || flown.hp < SHIP_HP * 0.35 ? '#ff9060' : '#a0ffa0';
+      ctx.fillText([`hull ${Math.max(0, Math.round((flown.hp / SHIP_HP) * 100))}%`, `bombs ${flown.bombs}`, ...lost.map((l) => `${l} LOST`)].join('   '), W / 2, py + 44 * s);
+      ctx.textAlign = 'left';
+    }
 
     // Death / respawn banner.
     if (!game.alive && game.myId >= 0 && (!rs || game.ride || game.myCraft())) {

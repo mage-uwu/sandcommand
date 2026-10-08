@@ -1,6 +1,7 @@
 import { ACTOR_H, ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
-import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
+import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
+import { SHIP_H, SHIP_W } from '../shared/dropship.ts';
 import { WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
@@ -266,6 +267,15 @@ addEventListener('keydown', (e) => {
   storageSet('sc.assist', mouseAssist ? 'on' : 'off');
   game?.feed.push({ text: mouseAssist ? 'aim assist on (V)' : 'aim assist off (V)', color: '#b8a0ff', at: performance.now() });
 });
+// P: take remote control of our dropship (or hand it back to the autopilot).
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyP' || input.typing || e.repeat || !game || !net) return;
+  if (game.pilot < 0 && !game.shipViews().some((v) => v.owner === game!.myId && !v.leaving)) {
+    game.feed.push({ text: 'no dropship of yours to fly (call one in by radio)', color: '#b8a0ff', at: performance.now() });
+    return;
+  }
+  net.call(CallKind.Pilot);
+});
 let pulse = 0;
 const shoulderPt = { x: 0, y: 0 };
 
@@ -301,8 +311,10 @@ function frame(now: number): void {
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
       // Aim from the shoulder, wherever the stance puts it (crouched, prone).
       const sh = shoulderAt(g.body.x, g.body.y, g.body.stance, wx < g.body.x + ACTOR_W / 2, shoulderPt);
-      const ox = sh.x;
-      const oy = sh.y;
+      // Flying our dropship: aim from the ship (its turrets), not the clone.
+      const flying = g.pilotedShip();
+      const ox = flying ? flying.x + SHIP_W / 2 : sh.x;
+      const oy = flying ? flying.y + SHIP_H / 2 : sh.y;
       let aim: number;
       const st = input.aimStick;
       if (st && (st.dx !== 0 || st.dy !== 0)) {
@@ -315,7 +327,7 @@ function frame(now: number): void {
       } else {
         aim = Math.atan2(wy - oy, wx - ox);
         if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
-        else if (mouseAssist && !g.drive && !NO_ASSIST.has(g.weapon)) {
+        else if (mouseAssist && !g.drive && (flying || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
           const reach = Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80));
           aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach);
@@ -323,7 +335,7 @@ function frame(now: number): void {
       }
       const raw = Math.atan2(wy - oy, wx - ox);
       // Scoped onto someone: the aim locks onto them.
-      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
+      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
       // Locked or assisted onto someone: the arm and the aim line show the snap.
       g.lockAim = g.scopeLock || Math.abs(aim - raw) > 1e-4 ? aim : null;
       let buttons = input.buttons();
@@ -347,7 +359,7 @@ function frame(now: number): void {
         const kind = renderer.callMenuHit(input.mouseX, input.mouseY);
         if (kind >= 0) n.call(kind);
       }
-      if (click && g.building) {
+      if (click && g.building && !flying) {
         const hit = renderer.menuHit(input.mouseX, input.mouseY);
         if (hit >= 0) input.piece = hit;
         else {
@@ -356,7 +368,7 @@ function frame(now: number): void {
           if (g.canBuildHere(input.piece, at.x, at.y) === BuildResult.Ok) n.build(input.piece, at.x, at.y);
         }
       }
-      if (g.building || g.calling) buttons &= ~BTN_FIRE;
+      if ((g.building || g.calling) && !flying) buttons &= ~BTN_FIRE;
       const inv = g.invByte();
       g.localTick(buttons, quantizeAim(aim), (seq) => n.input(seq, buttons, quantizeAim(aim), inv));
     }

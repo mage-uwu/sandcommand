@@ -1,4 +1,4 @@
-import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import { FACTION_SHIFT, STANCE_SHIFT } from '../shared/protocol.ts';
 import { FACTIONS, rollFaction } from '../shared/factions.ts';
 import {
@@ -243,6 +243,8 @@ export class Player {
   tank = -1;
   /** Ticks until this clone's radio can call in support again. */
   callCd = 0;
+  /** Remote-piloting our dropship (its slot), or -1. The clone stands inert meanwhile. */
+  pilot = -1;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
   /** Muzzle climb from recent shots (radians), settling back each tick. */
@@ -1033,6 +1035,7 @@ export class World {
       p.inWave = false;
       p.team = Team.None;
       p.tank = -1;
+      p.pilot = -1;
       p.pendingSpawn = false;
       p.delivering = -1;
       p.inv = [];
@@ -1390,6 +1393,7 @@ export class World {
     this.dropAll(victim);
     // Out of the wave: watch whoever did it.
     if (this.mode === 'ffa') victim.spectate = attacker !== victim.id && this.players[attacker]?.alive ? attacker : 255;
+    if (victim.pilot >= 0) this.endPilot(victim);
     victim.deaths++;
     const killer = this.players[attacker];
     if (killer && killer !== victim) {
@@ -2676,6 +2680,7 @@ export class World {
    * each radio then needs a while to recharge.
    */
   call(id: number, kind: number): boolean {
+    if (kind === CallKind.Pilot) return this.togglePilot(id);
     const p = this.players[id];
     if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < CALL_COST) return false;
     if (kind === CallKind.Tank) {
@@ -2699,6 +2704,39 @@ export class World {
     this.broadcast.u8(p.id);
     this.broadcast.str(kind === CallKind.Tank ? '*radio* tank inbound on my position' : '*radio* dropship inbound for air support');
     return true;
+  }
+
+  /**
+   * Take remote control of our own dropship (the remote in the radio kit),
+   * or hand it back to the autopilot. The clone stays where it stood, alive
+   * and inert (and as shootable as ever) while we fly.
+   */
+  togglePilot(id: number): boolean {
+    const p = this.players[id];
+    if (!p) return false;
+    if (p.pilot >= 0) {
+      this.endPilot(p);
+      return true;
+    }
+    if (!p.alive || p.tank >= 0) return false;
+    const slot = this.ships.findIndex((sh) => sh !== null && sh.owner === id && !sh.leaving && sh.pilot === 255);
+    if (slot < 0) return false;
+    const sh = this.ships[slot]!;
+    p.pilot = slot;
+    sh.pilot = id;
+    sh.holdX = sh.x + SHIP_W / 2;
+    sh.holdY = sh.y;
+    return true;
+  }
+
+  /** Back to the autopilot (and its support role): the clone is ours again. */
+  private endPilot(p: Player): void {
+    const sh = p.pilot >= 0 ? this.ships[p.pilot] : null;
+    if (sh && sh.pilot === p.id) {
+      sh.pilot = 255;
+      sh.planCd = 0;
+    }
+    p.pilot = -1;
   }
 
   /** Is `p` a target for a dropship called by `owner` (an enemy of its caller)? */
@@ -2856,7 +2894,13 @@ export class World {
       const served = !!owner || (sh.team !== Team.None && this.players.some((o) => o && o.team === sh.team));
       const guns = hasShipPart(sh.parts, ShipPart.TurretL) || hasShipPart(sh.parts, ShipPart.TurretR);
       if (!served || (sh.bombs === 0 && !guns && sh.sinceBomb > 30 * 20) || sh.age > 30 * 120) sh.leaving = true;
-      if (--sh.planCd <= 0) {
+      // Remote control: whoever's flying it (if they still are), else the autopilot's own brain.
+      if (sh.pilot !== 255 && this.players[sh.pilot]?.pilot !== k) sh.pilot = 255;
+      const pilot = sh.pilot !== 255 ? this.players[sh.pilot]! : null;
+      if (pilot) {
+        sh.mission = ShipMission.Escort;
+        sh.focus = 255;
+      } else if (--sh.planCd <= 0) {
         sh.planCd = 10;
         this.planShip(sh);
       }
@@ -2880,6 +2924,20 @@ export class World {
         }
         if (bombTarget && (sh.mission === ShipMission.Cover || sh.mission === ShipMission.Strike)) tx = bombTarget.cx;
       }
+      if (pilot) {
+        // Flown by hand: A/D slide the point it holds, W/S raise and lower it
+        // (never into the ground); the autopilot keeps it level and on it.
+        const bt = pilot.buttons;
+        const dx = (bt & BTN_RIGHT ? 1 : 0) - (bt & BTN_LEFT ? 1 : 0);
+        const dy = (bt & BTN_DOWN ? 1 : 0) - (bt & BTN_UP ? 1 : 0);
+        sh.holdX = Math.max(cx - 150, Math.min(cx + 150, sh.holdX + dx * PILOT_SPEED * DT));
+        if (dx === 0) sh.holdX += (cx - sh.holdX) * 0.02;
+        let floor = WORLD_H;
+        for (let gx = Math.floor(cx - SHIP_W); gx <= cx + SHIP_W; gx += 6) floor = Math.min(floor, this.terrain.surfaceY(Math.max(0, Math.min(WORLD_W - 1, gx))));
+        sh.holdY = Math.max(-40, Math.min(floor - SHIP_H - 18, sh.holdY + dy * PILOT_CLIMB * DT));
+        tx = sh.holdX;
+        bombTarget = null;
+      }
       tx = Math.max(SHIP_W, Math.min(WORLD_W - SHIP_W, tx));
       // Altitude over the highest ground (hills, towers) between here and the goal, and a little ahead.
       const lo = Math.max(0, Math.floor(Math.min(cx, tx) - SHIP_W));
@@ -2887,7 +2945,7 @@ export class World {
       let ground = WORLD_H;
       for (let gx = lo; gx <= hi && gx <= lo + 600; gx += 6) ground = Math.min(ground, this.terrain.surfaceY(gx));
       if (tx < cx) for (let gx = hi; gx >= lo && gx >= hi - 600; gx -= 6) ground = Math.min(ground, this.terrain.surfaceY(gx));
-      const ty = sh.leaving ? -260 : Math.max(40, ground - SHIP_ALT);
+      const ty = sh.leaving ? -260 : pilot ? sh.holdY : Math.max(40, ground - SHIP_ALT);
       const impact = stepShip(sh, this.terrain, DT, sh.leaving ? cx : tx, ty);
       if (impact > 90) {
         this.destroyShip(k, sh.lastHitBy);
@@ -2906,6 +2964,16 @@ export class World {
         const g = shipPoint(sh, TURRET_AT[side][0], TURRET_AT[side][1], pt);
         const gx = g.x;
         const gy = g.y;
+        if (pilot) {
+          // The pilot's guns: both turrets on the pilot's aim, firing while the trigger's held.
+          sh.aim[side] = dequantizeAim(pilot.aimQ);
+          if (sh.gunCd[side] > 0 || !(pilot.buttons & BTN_FIRE)) continue;
+          const a = sh.aim[side] + (this.rng.next() - 0.5) * 0.06;
+          this.spawnProj(this.nextProjId++, ProjKind.ShipGun, sh.owner, gx + Math.cos(a) * 9, gy + Math.sin(a) * 9, Math.cos(a) * 900 + sh.vx * 0.3, Math.sin(a) * 900 + sh.vy * 0.3);
+          sh.gunCd[side] = 5;
+          sh.fired[side] = true;
+          continue;
+        }
         let target: Player | null = null;
         let best = SHIP_GUN_RANGE;
         for (const o of this.players) {
@@ -2924,6 +2992,15 @@ export class World {
         this.spawnProj(this.nextProjId++, ProjKind.ShipGun, sh.owner, gx + Math.cos(a) * 9, gy + Math.sin(a) * 9, Math.cos(a) * 900 + sh.vx * 0.3, Math.sin(a) * 900 + sh.vy * 0.3);
         sh.gunCd[side] = 5;
         sh.fired[side] = true;
+      }
+      // The pilot's bombs: right mouse (scope) opens the bay and lets one go.
+      if (pilot && pilot.buttons & BTN_SCOPE && sh.bombs > 0 && sh.bombCd === 0 && hasShipPart(sh.parts, ShipPart.Doors)) {
+        const bay = shipPoint(sh, BAY_AT[0], BAY_AT[1] + 2, pt);
+        this.spawnProj(this.nextProjId++, ProjKind.Bomb, sh.owner, bay.x, bay.y + 3, sh.vx, Math.max(30, sh.vy + 30));
+        sh.bombs--;
+        sh.bombCd = 24;
+        sh.doors = 24;
+        sh.sinceBomb = 0;
       }
       // Bombs: the bay opens over an enemy below with nothing in the way.
       if (bombTarget && sh.bombCd === 0 && Math.abs(sh.a) < 0.3) {
@@ -3115,7 +3192,12 @@ export class World {
         continue;
       }
       p.body.burdened = p.inv.some((it) => it.weapon === WeaponId.Idol);
-      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.buttons, terrain, DT);
+      // Piloting: still flying it? (It may have gone down, or headed home.)
+      if (p.pilot >= 0) {
+        const sh = this.ships[p.pilot];
+        if (!sh || sh.pilot !== p.id || sh.leaving) this.endPilot(p);
+      }
+      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 ? 0 : p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -3140,6 +3222,14 @@ export class World {
       const n = FACTIONS[p.parts.faction].bleeds ? stumps(p.parts.mask) : 0;
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
+      if (p.pilot >= 0) {
+        // Flying the dropship: the clone stands inert; the view (and interest) is the ship's.
+        const sh = this.ships[p.pilot]!;
+        p.camX = sh.x + SHIP_W / 2;
+        p.camY = sh.y + SHIP_H / 2 + 40;
+        p.buildReq = null;
+        continue;
+      }
       this.handleInventory(p);
       this.handleWeapon(p, prev);
       if (p.buildReq) this.tryBuild(p);
@@ -3412,6 +3502,7 @@ export class World {
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
       w.u8(b.stance | (b.downTicks << 2) | (b.faction << 6));
+      w.u8(p.pilot >= 0 ? p.pilot : 255);
 
       // Riding in: the rocket at full precision too, since the client
       // predicts it from this state the same way it predicts its clone.
@@ -3577,7 +3668,7 @@ export class World {
           w.u8(sh.team);
           w.u16(quantizeAim(sh.aim[0]));
           w.u16(quantizeAim(sh.aim[1]));
-          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4));
+          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4) | (sh.pilot !== 255 ? 64 : 0));
           for (let e = 0; e < 4; e++) w.u8(Math.round(sh.thrust[e] * 255));
         }
       }
@@ -3731,6 +3822,9 @@ const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
 const SHIP_MASS = 120;
 /** Station altitude over the ground, turret reach, how long a radio waits between calls. */
 const SHIP_ALT = 80;
+/** Remote piloting: how fast the held point slides sideways and climbs or sinks (cells/s). */
+const PILOT_SPEED = 260;
+const PILOT_CLIMB = 150;
 /** The dropship brain: how close an enemy must be to an ally to need covering, how far out it strikes and scouts, its leash (solo / team), how far it sees, and how long a sighting lasts. */
 const SHIP_COVER_R = 320;
 const SHIP_STRIKE_R = 900;

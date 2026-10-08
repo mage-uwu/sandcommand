@@ -2,9 +2,10 @@ import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/acto
 import { stumps } from '../shared/body.ts';
 import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
-import { Evac, Team, quantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/protocol.ts';
+import { Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
-import { LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -34,6 +35,11 @@ const RANGE: Record<number, number> = {
   [WeaponId.Laser]: 230,
 };
 const MAX_SHOT = 340; // won't shoot at anything further than this
+/** How far around itself a prospecting bot looks for gold (half-width, and depth from just above its head). */
+const GOLD_SCAN_W = 220;
+const GOLD_SCAN_H = 160;
+/** With this many enemies left or fewer, prospectors stop digging and fight. */
+const ENDGAME_FOES = 4;
 
 /**
  * A server-side bot: it reads the world directly (no network) and emits the
@@ -81,6 +87,11 @@ export class BotBrain {
   private laserGoal = 30;
   /** Extraction: resting on a ledge to refill the jetpack before the next climb. */
   private resting = false;
+  /** Some bots mine gold whenever the fighting's elsewhere, to buy dropships. */
+  private readonly prospector: boolean;
+  /** The gold cell it's digging toward, and when it last looked for one. */
+  private gold: { x: number; y: number } | null = null;
+  private goldScanAt = -1e9;
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -89,6 +100,35 @@ export class BotBrain {
     this.react = 15 + this.rng.int(25);
     this.tanker = this.rng.next() < 0.5;
     this.assault = this.rng.next() < 0.5;
+    this.prospector = this.rng.next() < 0.45;
+  }
+
+  /**
+   * The nearest gold to mine: a gold cell within reach of a short walk and
+   * dig (nearest first, ones below the feet counting a little further off).
+   * Re-scanned every second or so, or as soon as the one it had is dug out.
+   */
+  private findGold(world: World, p: Player): { x: number; y: number } | null {
+    const t = world.tick;
+    const g = this.gold;
+    if (g && world.terrain.get(g.x, g.y) === Mat.Gold && t - this.goldScanAt < 90) return g;
+    if (g === null && t - this.goldScanAt < 30) return null;
+    this.goldScanAt = t;
+    this.gold = null;
+    let best = Infinity;
+    const x0 = Math.floor(p.cx) - GOLD_SCAN_W;
+    const y0 = Math.floor(p.cy) - 40;
+    for (let y = y0; y < y0 + GOLD_SCAN_H; y += 3) {
+      for (let x = x0; x < x0 + GOLD_SCAN_W * 2; x += 3) {
+        if (world.terrain.get(x, y) !== Mat.Gold) continue;
+        const d = Math.abs(x - p.cx) + Math.max(0, y - p.cy) * 1.5 + Math.max(0, p.cy - y) * 2;
+        if (d < best) {
+          best = d;
+          this.gold = { x, y };
+        }
+      }
+    }
+    return this.gold;
   }
 
   think(world: World, p: Player): InputCmd {
@@ -171,6 +211,22 @@ export class BotBrain {
       if (nav.pickup) pickup = (t & 1) === 0;
     }
 
+    // Saving up for a dropship: with the fighting elsewhere, go and dig gold;
+    // with enough banked, get on the radio (for itself, or its whole team).
+    const near2 = tgt ? Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) : Infinity;
+    // (Nearly there: it keeps its head down and digs unless they're right on it.)
+    const quiet = !tgt || near2 > (p.gold >= CALL_COST / 2 ? 130 : 220) || (!this.seeTarget && near2 > 110);
+    const radioSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Radio);
+    const airCover = world.ships.some((sh) => sh && !sh.leaving && (sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)));
+    const calling =
+      !nav && !world.extractionLive && !(world.regicideLive && world.isKing(p)) && radioSlot >= 0 && p.gold >= CALL_COST && p.callCd === 0 && !airCover && world.ships.includes(null) && (!tgt || near2 > 110);
+    if (calling && p.weapon === WeaponId.Radio) world.call(p.id, CallKind.Dropship);
+    // (Not in the endgame: with only a few enemies left, it's time to finish them.)
+    let foesLeft = 0;
+    if (this.prospector) for (const o of world.players) if (o && o.alive && o !== p && (p.team === Team.None || o.team !== p.team)) foesLeft++;
+    const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.regicideLive && world.isKing(p)) && p.gold < CALL_COST && gunSlot >= 0 ? this.findGold(world, p) : null;
+    if (goldAt) goalX = goldAt.x;
+
     // Moving and getting nowhere: stuck against a wall.
     const moved = Math.abs(p.body.x - this.lastX);
     this.lastX = p.body.x;
@@ -199,13 +255,16 @@ export class BotBrain {
     const by0 = Math.floor(p.body.y);
     const headClear = !world.terrain.rectSolid(bx0, by0 - 22, bx0 + 7, by0 - 1);
     // (The labyrinth's stone never yields: no digging through it.)
-    const digging = !world.extractionLive && digSlot >= 0 && !this.seeTarget && (this.stuck > 75 || this.blind > 60);
+    // Close enough to the gold to bite at it (or tunnelling down to it).
+    const mining = !!goldAt && digSlot >= 0 && Math.abs(goldAt.x - p.cx) < 22 && goldAt.y - p.cy < 60;
+    const digging = !world.extractionLive && digSlot >= 0 && (mining || (!this.seeTarget && (this.stuck > 75 || this.blind > 60)));
     if (digging) want = digSlot;
+    if (calling) want = radioSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
     // Hurt or maimed, with nobody shooting back right now: patch up with the nanobots.
     const kitSlot = p.inv.findIndex((it) => it.weapon === WeaponId.RepairKit);
     const healing = kitSlot >= 0 && !digging && (p.hp < 55 || stumps(p.parts.mask) > 0) && (!tgt || !this.seeTarget || dist > 200);
-    if (healing) want = kitSlot;
+    if (healing && !calling) want = kitSlot;
     const weapon = p.inv[want]?.weapon ?? WeaponId.Digger;
 
     // Line of sight to the target, every few ticks.
@@ -219,6 +278,8 @@ export class BotBrain {
     // On the objective unless someone's right in our face (a carrier never stops to brawl).
     const onTask = nav && !(tgt && this.seeTarget && dist < 100 && !nav.urgent);
     if (onTask) dir = Math.abs(dx) < 2.5 || nav.fall ? 0 : Math.sign(dx);
+    else if (goldAt) dir = Math.abs(dx) < 6 ? 0 : Math.sign(dx);
+    else if (calling) dir = 0;
     else if (gunSlot < 0 || !tgt) dir = Math.sign(dx);
     else if (weapon === WeaponId.Digger) dir = Math.sign(dx);
     else if (dist > range + 30 || !this.seeTarget) dir = Math.sign(dx);
@@ -252,7 +313,12 @@ export class BotBrain {
       if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
     }
     let sweep = 0;
-    if (weapon === WeaponId.Digger) {
+    if (weapon === WeaponId.Digger && mining && goldAt && this.stuck <= 150) {
+      // Mining: straight at the gold (the beam bites the first solid cell on the way).
+      const tl = Math.hypot(goldAt.x - sx, goldAt.y - sy) || 1;
+      ax = sx + ((goldAt.x - sx) / tl) * DIGGER_REACH;
+      ay = sy + ((goldAt.y - sy) / tl) * DIGGER_REACH;
+    } else if (weapon === WeaponId.Digger) {
       // Dig at the target when it's just the other side of a floor or wall;
       // otherwise through the obstacle in the way.
       let tx = (tgt ? tgt.cx : goalX) - p.cx;
