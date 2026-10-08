@@ -58,7 +58,7 @@ export class GameRoom extends DurableObject<Env> {
     // input path must stay synchronous so commands keep their order.
     (server as unknown as { binaryType: string }).binaryType = 'arraybuffer';
 
-    // Free for all, with bots in every slot no human has.
+    // Last Man Standing, with bots in every slot no human has.
     this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS });
     const world = this.world;
     const player = world.addPlayer(name, {

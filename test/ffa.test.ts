@@ -14,7 +14,7 @@ function until(world: World, cond: () => boolean, max = 3000): void {
 }
 const inWave = (world: World) => world.players.filter((p): p is Player => !!p && p.inWave);
 
-describe('free for all', () => {
+describe('Last Man Standing', () => {
   it('waits for two clones, counts down, and lands everyone by rocket once', () => {
     const world = new World(5, { mode: 'ffa' });
     const a = world.addPlayer('a', { send() {} })!;

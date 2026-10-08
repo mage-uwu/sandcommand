@@ -71,7 +71,7 @@ export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
 /** Bump whenever records change; clients on another version reload. */
 export const PROTOCOL_VERSION = 10;
 
-/** Free-for-all round phases. */
+/** Last Man Standing round phases. */
 export const Phase = {
   Waiting: 0, // not enough clones to fight
   Countdown: 1,
@@ -81,8 +81,8 @@ export const Phase = {
 
 /** What a wave is played as (round rooms alternate them). */
 export const GameMode = {
-  Ffa: 0, // every clone for itself, last one standing
-  Tdm: 1, // red vs green, last team standing
+  Lms: 0, // Last Man Standing: every clone for itself, last one alive wins
+  Lts: 1, // Last Team Standing: red vs green, last team with a clone alive wins
 } as const;
 
 export const Team = {

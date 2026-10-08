@@ -104,7 +104,7 @@ function playerColor(id: number): { css: string; rgb: number } {
   return { css: `rgb(${r},${g},${b})`, rgb: (r << 16) | (g << 8) | b };
 }
 
-/** Team deathmatch colours: red and green fatigues (Team.Red, Team.Green). */
+/** Last Team Standing colours: red and green fatigues (Team.Red, Team.Green). */
 export const TEAM_COLORS = [
   { css: 'rgb(222,64,56)', rgb: 0xde4038 },
   { css: 'rgb(76,190,72)', rgb: 0x4cbe48 },
@@ -168,7 +168,7 @@ export class Game implements FrameHandler {
   invVersion = -1;
   private pickupHold = 0;
   private dropHold = 0;
-  /** Free-for-all round state (null in sandbox rooms), and who we watch while out. */
+  /** Last Man Standing round state (null in sandbox rooms), and who we watch while out. */
   roundState: RoundState | null = null;
   spectate = 255;
   /** Chunks whose regenerated contents didn't match the server's hash: ask for them. */
@@ -694,7 +694,7 @@ export class Game implements FrameHandler {
     this.roundState = s;
   }
 
-  /** Every slot's team this wave (Team.None outside team deathmatch). */
+  /** Every slot's team this wave (Team.None outside Last Team Standing). */
   teamOf: Uint8Array = new Uint8Array(64).fill(Team.None);
 
   teams(teams: Uint8Array): void {

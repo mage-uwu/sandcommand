@@ -195,7 +195,7 @@ export class Player {
   inWave = false;
   pendingSpawn = false;
   spectate = 255;
-  /** Team deathmatch: Team.Red / Team.Green for this wave, Team.None outside one. */
+  /** Last Team Standing: Team.Red / Team.Green for this wave, Team.None outside one. */
   team: number = Team.None;
   /** Tank slot this clone is driving, -1 on foot. */
   tank = -1;
@@ -330,7 +330,7 @@ export class World {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
     this.tankDrops = opts.tanks ?? this.mode === 'ffa';
-    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Ffa, GameMode.Tdm];
+    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts];
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
     generateWorld(this.terrain, this.mapSeed);
@@ -411,7 +411,7 @@ export class World {
     return p;
   }
 
-  // ---------------------------------------------------------------- free for all
+  // ---------------------------------------------------------------- Last Man Standing
 
   /** Clones still in the wave: alive, riding in, or waiting for their rocket. */
   remaining(team = -1): number {
@@ -431,7 +431,7 @@ export class World {
 
   /** Mode of the wave being played, or (between waves) of the next one. */
   get waveMode(): number {
-    if (this.mode !== 'ffa') return GameMode.Ffa;
+    if (this.mode !== 'ffa') return GameMode.Lms;
     return this.modeOfWave(this.phase === Phase.Live || this.phase === Phase.Victory ? this.wave : this.wave + 1);
   }
 
@@ -461,7 +461,7 @@ export class World {
         // Last one standing; or, when time runs out, the survivor with the
         // most kills this wave (so nobody can win by hiding in a bunker).
         const timeUp = --this.phaseTimer <= 0;
-        if (this.modeOfWave(this.wave) === GameMode.Tdm) {
+        if (this.modeOfWave(this.wave) === GameMode.Lts) {
           this.stepTeamRound(timeUp);
           break;
         }
@@ -487,7 +487,7 @@ export class World {
   }
 
   /**
-   * Team deathmatch: the last team with a clone standing wins, every member
+   * Last Team Standing: the last team with a clone standing wins, every member
    * scoring the win (the fallen too). When time runs out, the team with
    * more clones left; then the one with more kills this wave.
    */
@@ -541,7 +541,7 @@ export class World {
   private startWave(): void {
     this.wave++;
     this.winner = 255;
-    this.drawTeams(this.modeOfWave(this.wave) === GameMode.Tdm);
+    this.drawTeams(this.modeOfWave(this.wave) === GameMode.Lts);
     for (const p of this.players) {
       if (!p) continue;
       p.inWave = true;

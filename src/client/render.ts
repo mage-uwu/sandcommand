@@ -1118,7 +1118,7 @@ export class Renderer {
       ctx.fillRect(mx + game.body.x * k - 2 * s, my + game.body.y * k - 2 * s, 4 * s, 4 * s);
     }
 
-    // Free for all: the round, and what's happening to us in it.
+    // Last Man Standing: the round, and what's happening to us in it.
     const rs = game.roundState;
     if (rs) this.drawRound(game, rs, s, W, H);
 
@@ -1153,7 +1153,7 @@ export class Renderer {
   }
 
   /**
-   * Free-for-all banners: waiting, the countdown, clones left, who you're
+   * Last Man Standing banners: waiting, the countdown, clones left, who you're
    * watching once you're out, and the winner of each wave.
    */
   private drawRound(game: Game, rs: RoundState, s: number, W: number, H: number): void {
@@ -1161,16 +1161,16 @@ export class Renderer {
     const secs = Math.ceil(rs.timer / TICK_RATE);
     const name = (id: number) => (id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '???'));
     const big = (text: string, sub: string, color = '#fff') => this.drawBanner(text, sub, color, s, W, H);
-    const tdm = rs.mode === GameMode.Tdm;
+    const teams = rs.mode === GameMode.Lts;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(tdm ? 'TEAM DEATHMATCH' : 'FREE FOR ALL', 'waiting for clones...');
+    if (rs.phase === Phase.Waiting) big(teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
-        tdm ? 'team deathmatch · red vs green · last team standing wins' : 'free for all · one life each · last clone standing wins',
+        teams ? 'last team standing · red vs green · one life each' : 'last man standing · one life each · every clone for itself',
         '#ffd34a',
       );
-    } else if (rs.phase === Phase.Victory && tdm) {
+    } else if (rs.phase === Phase.Victory && teams) {
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
       if (rs.winner === 255) big(rs.teamLeft[0] > 0 ? 'STALEMATE' : 'NO SURVIVORS', `wave ${rs.wave} · next wave in ${secs}`);
       else big(`${TEAM_NAMES[rs.winner]} WINS`, `${mine ? 'your team takes' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' takes'} wave ${rs.wave} · next wave in ${secs}`, teamCss(rs.winner));
@@ -1186,8 +1186,8 @@ export class Renderer {
       ctx.fillRect(W / 2 - 150 * s, 8 * s, 300 * s, 24 * s);
       ctx.fillStyle = secs <= 30 ? '#ff8070' : '#ffd34a';
       const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-      if (tdm) {
-        // Team deathmatch: the clock, then red's and green's clones left beneath it.
+      if (teams) {
+        // Last Team Standing: the clock, then red's and green's clones left beneath it.
         ctx.fillText(`WAVE ${rs.wave} · TEAMS · ${clock}`, W / 2, 25 * s);
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(W / 2 - 150 * s, 32 * s, 300 * s, 22 * s);
@@ -1207,7 +1207,7 @@ export class Renderer {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
         if (rs.out) big('FRAGGED', `(${watching})`, '#ff6050');
         else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${watching}`, '#c8d0d8');
-        else if (tdm && game.myTeam !== Team.None) big('INBOUND', `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · drop rocket on its way`, teamCss(game.myTeam));
+        else if (teams && game.myTeam !== Team.None) big('INBOUND', `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · drop rocket on its way`, teamCss(game.myTeam));
         else big('INBOUND', 'drop rocket on its way', '#ffd34a');
       }
     }

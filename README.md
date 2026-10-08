@@ -1,7 +1,7 @@
 # SandCommand
 
 A Cloudflare-native multiplayer shooter inspired by **Cortex Command**: up to
-**64 clones per room** fight free-for-all waves in one fully destructible
+**64 clones per room** fight waves of Last Man Standing and Last Team Standing in one fully destructible
 4096×1024-cell world, with bots in every seat no human has taken.
 Every explosion carves terrain, throws debris, and the debris settles back as
 rubble. All of it is simulated on one authoritative Durable Object and
@@ -12,7 +12,7 @@ npm install
 npm run dev          # builds the client and runs wrangler dev on :8787
 npm test             # terrain, codec, replication and prediction tests
 npm run bench        # headless 64-player server benchmark
-npm run bench:ffa    # one human + 63 bots playing free-for-all waves for 2 minutes
+npm run bench:ffa    # one human + 63 bots playing Last Man Standing waves for 2 minutes
 npm run bench:physics # particle/field scaling, collider probes, big collapse
 npm run loadtest     # 64 real WebSocket bots against a running server
 npm run deploy       # wrangler deploy (needs a Cloudflare account)
@@ -50,9 +50,9 @@ on a touch-first device.
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
 
-## Free for all
+## Last Man Standing
 
-Every room plays free-for-all waves (`stepRound` in `src/server/world.ts`):
+Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
 
 1. **Countdown.** Once there are two clones, a 4-second countdown starts.
 2. **The wave.** Everyone in the room is in it. Drop rockets bring them in
@@ -72,13 +72,13 @@ Every room plays free-for-all waves (`stepRound` in `src/server/world.ts`):
    terrain, with nothing carried over (rockets, dropped weapons, debris in
    flight).
 
-## Team deathmatch
+## Last Team Standing
 
-Waves alternate between free-for-all and **team deathmatch**: odd waves
-FFA, even waves TDM (`rotation` in the `World` options; `modeOfWave`).
+Waves alternate between Last Man Standing and **Last Team Standing**: odd waves
+LMS, even waves LTS (`rotation` in the `World` options; `modeOfWave`).
 The countdown banner says which one is coming.
 
-- **Even teams.** When a TDM wave starts, everyone is dealt into **red** and
+- **Even teams.** When an LTS wave starts, everyone is dealt into **red** and
   **green** (`drawTeams`). Humans are dealt first, so two humans end up on
   opposite sides, then bots even up the numbers.
 - **Opposite sides.** Red's rockets come down on the left 40% of the map,
@@ -86,7 +86,7 @@ The countdown banner says which one is coming.
 - **No friendly fire.** Teammates can't hurt each other with bullets,
   blasts, shrapnel, debris or rocket crashes (`World.friendly`). Your own
   blasts still hurt you.
-- **Fight to the last clone.** One life each, as in FFA. The last team with
+- **Fight to the last clone.** One life each, as in Last Man Standing. The last team with
   a clone standing wins, and every member scores the win, the fallen
   included. If the clock runs out, the team with more clones left wins,
   then the team with more kills that wave.
@@ -689,7 +689,7 @@ replicate avg 0.87 ms  p99 2.6 ms      (budget per tick: 33.3 ms)
 downstream per client: avg 18.2 KB/s; room egress 1.14 MB/s
 ```
 
-`npm run bench:ffa` (one human, 63 server-side bots, free-for-all waves for
+`npm run bench:ffa` (one human, 63 server-side bots, Last Man Standing waves for
 two minutes, map resets included):
 
 ```
@@ -758,8 +758,8 @@ match's sockets pin to it.
 
 ## Not done yet
 
-- Teams, brains, buying bodies and drop ships, which are the Cortex Command
-  meta-game. Free-for-all is the only mode so far.
+- Brains, buying bodies and drop ships, which are the Cortex Command
+  meta-game. Last Man Standing and Last Team Standing are the only modes so far.
 - Delta-compressing actor records against the last acknowledged frame.
 - Running the kernels in a WASM SIMD module. They are already laid out for it.
 - A learned (neural) surrogate for dense granular flow. The field formulation

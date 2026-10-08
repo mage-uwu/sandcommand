@@ -11,7 +11,7 @@ import { Rng } from '../src/shared/rng.ts';
 import { World } from '../src/server/world.ts';
 
 const TICKS = Number(process.env.TICKS ?? 900);
-// MODE=ffa: one human and 63 server-side bots playing free-for-all waves
+// MODE=ffa: one human and 63 server-side bots playing Last Man Standing waves
 // (bot AI, rounds and map resets included). Default: 64 scripted clients.
 const FFA = process.env.MODE === 'ffa';
 const world = FFA ? new World(12345, { mode: 'ffa', bots: MAX_PLAYERS }) : new World(12345);

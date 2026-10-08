@@ -15,32 +15,32 @@ function until(world: World, cond: () => boolean, max = 3000): void {
 }
 const present = (world: World) => world.players.filter((p): p is Player => !!p);
 const tdmRoom = (seed: number, n: number) => {
-  const world = new World(seed, { mode: 'ffa', rotation: [GameMode.Tdm] });
+  const world = new World(seed, { mode: 'ffa', rotation: [GameMode.Lts] });
   const ps = Array.from({ length: n }, (_, i) => world.addPlayer(`p${i}`, { send() {} })!);
   until(world, () => ps.every((p) => p.alive));
   return { world, ps };
 };
 
-describe('team deathmatch', () => {
-  it('alternates with free for all, wave by wave', () => {
+describe('Last Team Standing', () => {
+  it('alternates with Last Man Standing, wave by wave', () => {
     const world = new World(21, { mode: 'ffa' });
     const [a, b] = ['a', 'b'].map((n) => world.addPlayer(n, { send() {} })!);
-    expect(world.waveMode).toBe(GameMode.Ffa); // the first wave is announced as FFA
+    expect(world.waveMode).toBe(GameMode.Lms); // the first wave is announced as Last Man Standing
     until(world, () => a.alive && b.alive);
     expect(world.wave).toBe(1);
     expect(a.team).toBe(Team.None);
     kill(world, b, a);
     until(world, () => world.phase === Phase.Countdown);
-    expect(world.waveMode).toBe(GameMode.Tdm); // the next one is a team wave
+    expect(world.waveMode).toBe(GameMode.Lts); // the next one is a team wave
     until(world, () => world.wave === 2 && a.alive && b.alive);
-    expect(world.modeOfWave(2)).toBe(GameMode.Tdm);
+    expect(world.modeOfWave(2)).toBe(GameMode.Lts);
     expect(a.team).not.toBe(Team.None);
     expect(b.team).not.toBe(a.team);
-    expect(world.modeOfWave(3)).toBe(GameMode.Ffa);
+    expect(world.modeOfWave(3)).toBe(GameMode.Lms);
   });
 
   it('splits the room into even teams, humans across both, and lands them on opposite sides', () => {
-    const world = new World(22, { mode: 'ffa', bots: 16, rotation: [GameMode.Tdm] });
+    const world = new World(22, { mode: 'ffa', bots: 16, rotation: [GameMode.Lts] });
     const humans = ['h0', 'h1'].map((n) => world.addPlayer(n, { send() {} })!);
     until(world, () => world.phase === Phase.Live);
     const all = present(world);
@@ -110,7 +110,7 @@ describe('team deathmatch', () => {
   });
 
   it('bots only hunt the other team, and a room of bots fights it out', () => {
-    const world = new World(26, { mode: 'ffa', bots: 16, rotation: [GameMode.Tdm] });
+    const world = new World(26, { mode: 'ffa', bots: 16, rotation: [GameMode.Lts] });
     const me = world.addPlayer('watcher', { send() {} })!;
     until(world, () => world.phase === Phase.Live);
     until(world, () => me.alive, 600);
@@ -137,7 +137,7 @@ describe('team deathmatch', () => {
 
   it('clients learn the teams and dress clones in their team colours', () => {
     const frames: Uint8Array[] = [];
-    const world = new World(27, { mode: 'ffa', rotation: [GameMode.Tdm] });
+    const world = new World(27, { mode: 'ffa', rotation: [GameMode.Lts] });
     const a = world.addPlayer('a', { send: (d) => frames.push(d) })!;
     const b = world.addPlayer('b', { send() {} })!;
     const game = new Game();
@@ -155,7 +155,7 @@ describe('team deathmatch', () => {
     until(world, () => world.phase === Phase.Live);
     world.step();
     pump();
-    expect(game.roundState?.mode).toBe(GameMode.Tdm);
+    expect(game.roundState?.mode).toBe(GameMode.Lts);
     expect(game.myTeam).toBe(a.team);
     expect(game.teamOf[b.id]).toBe(b.team);
     expect(game.players.get(a.id)?.rgb).toBe(TEAM_COLORS[a.team].rgb);
