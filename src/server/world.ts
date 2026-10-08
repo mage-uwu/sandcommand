@@ -173,7 +173,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, ProjKind, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { generateWorld, lastComplexes } from '../shared/worldgen.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
@@ -235,6 +235,8 @@ export class Player {
   tank = -1;
   /** Ticks until this clone's radio can call in support again. */
   callCd = 0;
+  /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
+  regrow = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
   /** Latest materializer request, applied on this player's next tick. */
@@ -590,6 +592,7 @@ export class World {
       // Abdicated (left the game): crown someone else, where they stand.
       const heir = this.players.find((p) => p && p.team === team && p.alive);
       this.kings[team] = heir ? heir.id : 255;
+      if (heir) this.crown(heir);
     }
     let winner = 255;
     let fallen = false;
@@ -622,6 +625,12 @@ export class World {
     return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Regicide;
   }
 
+  /** Put the crown on a king's head (in place of a helmet). */
+  private crown(p: Player): void {
+    p.parts.mask = (p.parts.mask | (1 << Part.Crown)) & ~(1 << Part.Helmet);
+    p.parts.wounds[Part.Crown] = 0;
+  }
+
   /** Is this clone a king (this wave)? */
   isKing(p: Player): boolean {
     return p.team !== Team.None && this.kings[p.team] === p.id;
@@ -650,6 +659,7 @@ export class World {
         if (p === king) {
           resetBody(p.parts, ClassId.Heavy);
           p.body.cls = p.parts.cls;
+          this.crown(p);
         }
       }
     }
@@ -1251,7 +1261,8 @@ export class World {
       if (asked || (item.ammo === 0 && pressed)) this.startReload(p);
     }
     p.cooldown -= 1;
-    const want = def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
+    // The repair kit works off either hand (so it can regrow a lost gun arm).
+    const want = def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
     if (want && p.cooldown <= 0) {
       this.fire(p, def);
       p.firing = true;
@@ -1513,6 +1524,10 @@ export class World {
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
     const ox = sh.x;
     const oy = sh.y;
+    if (def.proj === PROJ_REPAIR) {
+      this.repair(p, ox, oy, cos, sin);
+      return;
+    }
     if (def.proj === PROJ_DIG) {
       // Digger: vacuum terrain in front of the clone, banking any gold. It
       // bites at the first solid cell along the aim (so a wall you're
@@ -1549,6 +1564,43 @@ export class World {
     }
     this.spawnProj(id, def.proj, p.id, sx, sy, vx, vy);
   }
+
+  /**
+   * One tick of the repair kit's nanobot spray: on the teammate it's aimed
+   * at (in reach, in sight), else on the clone holding it. It closes wounds
+   * and restores health, and once the clone is patched up enough it regrows
+   * a missing limb (arms first, then legs, then the jetpack) every
+   * REGROW_TICKS of spraying.
+   */
+  private repair(p: Player, ox: number, oy: number, cos: number, sin: number): void {
+    let reach = REPAIR_REACH;
+    for (let r = 1; r < REPAIR_REACH; r++) {
+      if (this.terrain.isSolid(Math.floor(ox + cos * r), Math.floor(oy + sin * r))) {
+        reach = r;
+        break;
+      }
+    }
+    let t = p;
+    const hit = this.segmentActor(ox, oy, ox + cos * reach, oy + sin * reach, p.id, this.repairQ);
+    const o = hit >= 0 && hit < MAX_PLAYERS ? this.players[hit] : null;
+    if (o && o.alive && p.team !== Team.None && o.team === p.team) t = o;
+    t.hp = Math.min(ACTOR_MAX_HP, t.hp + REPAIR_HP);
+    const parts = t.parts;
+    for (let part = 0; part < PART_COUNT; part++) if (has(parts.mask, part)) parts.wounds[part] = Math.max(0, parts.wounds[part] - REPAIR_WOUND);
+    const missing = REGROWABLE.find((part) => !has(parts.mask, part));
+    if (missing === undefined || t.hp < ACTOR_MAX_HP * 0.6) {
+      t.regrow = 0;
+      return;
+    }
+    if (++t.regrow < REGROW_TICKS) return;
+    t.regrow = 0;
+    parts.mask |= 1 << missing;
+    parts.wounds[missing] = 0;
+    mobility(parts.mask, t.mob);
+    t.body.legs = t.mob.legs;
+    t.body.jet = t.mob.jet;
+  }
+  private readonly repairQ = { t: 0 };
 
   /** Launch a projectile and tell the clients that will see it. */
   private spawnProj(id: number, kind: number, owner: number, sx: number, sy: number, vx: number, vy: number): void {
@@ -1587,6 +1639,7 @@ export class World {
     p.lastWeapon = 255;
     p.hp = ACTOR_MAX_HP;
     p.alive = true;
+    p.regrow = 0;
     p.cooldown = 10;
     p.reloadLeft = 0;
     // A fresh, random kit (always a primary, a digger and a materializer).
@@ -3100,8 +3153,10 @@ const CALL_COOLDOWN = 30 * 30;
 const BOARD_REACH = 10;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less
 /** Base parts (armour is reached through them) and their share of blast overpressure. */
-const PARTS_BASE = [true, true, true, true, true, true, false, false, true];
-const SPLASH_SHARE = [0.45, 0.55, 0.6, 0.6, 0.6, 0.6, 0, 0, 0.5];
+/** What nanobots can grow back, in order. */
+const REGROWABLE = [Part.GunArm, Part.OffArm, Part.LegF, Part.LegB, Part.Jetpack];
+const PARTS_BASE = [true, true, true, true, true, true, false, false, true, false];
+const SPLASH_SHARE = [0.45, 0.55, 0.6, 0.6, 0.6, 0.6, 0, 0, 0.5, 0];
 
 function clampU16(v: number): number {
   return Math.max(0, Math.min(65535, Math.round(v)));

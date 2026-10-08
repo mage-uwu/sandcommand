@@ -22,6 +22,7 @@ export const GIB_PACK = 6;
 export const GIB_MEAT = [7, 8, 9];
 export const GIB_HEAD = 10;
 export const GIB_VEST = 11;
+export const GIB_CROWN = 16;
 
 const rnd = (a: number, b: number) => a + (b - a) * Math.random();
 
@@ -103,6 +104,7 @@ export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: n
   };
   // Only what is still attached flies apart.
   if (on(Part.Head)) fling(0, -6, on(Part.Helmet) ? GIB_HELMET : GIB_HEAD, 70);
+  if (on(Part.Crown)) fling(0, -8, GIB_CROWN, 80);
   if (on(Part.Vest)) fling(1, -2, GIB_VEST, 60);
   fling(-1, -1, GIB_TORSO[0], 50);
   fling(1, 0, GIB_TORSO[1], 50);
@@ -123,7 +125,7 @@ export function gibBurst(p: Particles, cx: number, cy: number, vx: number, vy: n
   bloodSplat(p, cx, cy, Math.round(24 + 14 * v), 70 + 30 * v, vx * 0.3, vy * 0.3);
 }
 
-const INORGANIC = new Set([GIB_HELMET, GIB_PACK, GIB_VEST, 12, 13, 14, 15]);
+const INORGANIC = new Set([GIB_HELMET, GIB_PACK, GIB_VEST, 12, 13, 14, 15, GIB_CROWN]);
 
 function spawnGib(p: Particles, x: number, y: number, vx: number, vy: number, piece: number, team: number): void {
   const i = p.n;
@@ -142,6 +144,7 @@ const PART_GIB: Record<number, number> = {
   [Part.Helmet]: GIB_HELMET,
   [Part.Vest]: GIB_VEST,
   [Part.Jetpack]: GIB_PACK,
+  [Part.Crown]: GIB_CROWN,
 };
 
 /**
@@ -152,7 +155,7 @@ export function limbOff(p: Particles, part: number, x: number, y: number, vx: nu
   const piece = PART_GIB[part];
   if (piece === undefined) return;
   spawnGib(p, x, y, vx, vy, piece, team);
-  if (part === Part.Helmet || part === Part.Vest || part === Part.Jetpack || synthetic) {
+  if (part === Part.Helmet || part === Part.Vest || part === Part.Jetpack || part === Part.Crown || synthetic) {
     burst(p, PK.Spark, x, y, 8, 160, 10);
     return;
   }

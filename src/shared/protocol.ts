@@ -85,7 +85,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 /** Last Man Standing round phases. */
 export const Phase = {

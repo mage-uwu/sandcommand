@@ -192,8 +192,10 @@ export class Game implements FrameHandler {
   reloadLeft = 0;
   /** Own gold, exact (from our own record, not the once-a-second scoreboard). */
   gold = 0;
-  /** Materializer beams to fade out: builder muzzle to piece centre. */
-  readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number }[] = [];
+  /** Beams to fade out: materializer (builder muzzle to piece centre) and sniper tracers (muzzle to impact). */
+  readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number; tracer?: boolean }[] = [];
+  /** Where each sniper slug in flight was fired from, for its tracer. */
+  private slugFrom = new Map<number, { x: number; y: number }>();
   smoothX = 0;
   smoothY = 0;
   /** Prediction errors larger than 0.01 cells seen during reconciliation. */
@@ -786,6 +788,7 @@ export class Game implements FrameHandler {
     this.ride = null;
     this.rideSlot = -1;
     this.beams.length = 0;
+    this.slugFrom.clear();
     this.flashes.length = 0;
     this.skyline.fill(WORLD_H);
     for (let ci = 0; ci < CHUNK_COUNT; ci++) {
@@ -808,6 +811,10 @@ export class Game implements FrameHandler {
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void {
     if (this.projectiles.indexOf(id) >= 0) return;
     this.projectiles.spawn(id, kind, owner, x, y, vx, vy);
+    if (kind === ProjKind.Slug) {
+      this.slugFrom.set(id, { x, y });
+      if (this.slugFrom.size > 64) this.slugFrom.delete(this.slugFrom.keys().next().value!);
+    }
     const sp = Math.hypot(vx, vy) || 1;
     muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell);
   }
@@ -815,6 +822,13 @@ export class Game implements FrameHandler {
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void {
     const i = this.projectiles.indexOf(id);
     if (i >= 0) this.projectiles.removeAt(i);
+    const from = this.slugFrom.get(id);
+    if (from) {
+      // The slug was only on screen a frame or two: leave its streak hanging in the air.
+      this.slugFrom.delete(id);
+      this.beams.push({ x0: from.x, y0: from.y, x1: x, y1: y, at: performance.now(), tracer: true });
+      if (this.beams.length > 16) this.beams.shift();
+    }
     if (!detonate) return;
     if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));

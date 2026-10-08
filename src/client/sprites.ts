@@ -202,6 +202,19 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 4,
   },
+  {
+    // Repair kit: a white nanobot canister with a red cross, its emitter glowing cyan
+    grid: [
+      '...KKKKK....',
+      'KAAKLLLLKKK.',
+      'KAAKLrLLKVVK',
+      '.KKKrrrLKKK.',
+      '...KLrLLK...',
+      '...KKKKK....',
+    ],
+    px: 1,
+    py: 1,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
@@ -222,7 +235,11 @@ const GIBS: Grid[] = [
   ['KLHK', 'LHHK', 'KTTK', 'KHHK'], // rocket hull plate
   ['KGK', 'GGK', 'GK.'], // rocket fin
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
+  ['Y.Y.Y', 'YYYYY', 'yYrYy'], // a king's crown, knocked off
 ];
+
+/** A king's crown as worn (5x3, sits on the head's top row): gold spikes, a band, a red jewel. */
+export const CROWN: Grid = ['Y.Y.Y', 'YYYYY', 'yYrYy'];
 
 // Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin), centred on
 // the rocket's centre of mass.
@@ -531,6 +548,11 @@ export class SpriteCache {
     let c = this.bodies.get(key);
     if (!c) this.bodies.set(key, (c = bakeBody(factionGrid(BODY[frame], faction), factionPalette(classPalette(this.pal(team), cls), faction, cls), left, mask)));
     return c;
+  }
+
+  /** The top row of a body frame's head (it bobs down a row in some frames). */
+  headTop(frame: BodyFrame): number {
+    return Math.max(0, BODY[frame].findIndex((r) => r.includes('K')));
   }
 
   /** Weapon + arm rotated to `aim` (radians). Draw at pivot - r. */

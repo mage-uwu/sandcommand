@@ -16,7 +16,7 @@ import { WEAPONS, WeaponId } from './weapons.ts';
  * last sent; the server only resends an item when something changes it (it
  * lands, a blast kicks it, it is picked up).
  */
-export const INV_MAX = 6;
+export const INV_MAX = 7;
 /** How close (cells, centre to centre) a clone must be to pick something up. */
 export const PICKUP_R = 14;
 /** Ticks a dropped weapon lies around before it's cleared away. */
@@ -38,8 +38,8 @@ export function newItem(weapon: number): InvItem {
 }
 
 /**
- * A fresh clone's kit: always a primary, a digger, a materializer and a
- * radio; often grenades, sometimes a second gun.
+ * A fresh clone's kit: always a primary, a digger, a materializer, a
+ * radio and a repair kit; often grenades, sometimes a second gun.
  */
 export function spawnLoadout(rng: Rng): InvItem[] {
   const primary = PRIMARIES[rng.int(PRIMARIES.length)];
@@ -49,7 +49,7 @@ export function spawnLoadout(rng: Rng): InvItem[] {
     const others = PRIMARIES.filter((w) => w !== primary);
     inv.push(newItem(others[rng.int(others.length)]));
   }
-  inv.push(newItem(WeaponId.Digger), newItem(WeaponId.Materializer), newItem(WeaponId.Radio));
+  inv.push(newItem(WeaponId.Digger), newItem(WeaponId.Materializer), newItem(WeaponId.Radio), newItem(WeaponId.RepairKit));
   return inv;
 }
 

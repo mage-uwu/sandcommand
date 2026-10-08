@@ -1,4 +1,5 @@
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
+import { stumps } from '../shared/body.ts';
 import { GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
 import { Team, quantizeAim } from '../shared/protocol.ts';
@@ -177,6 +178,10 @@ export class BotBrain {
     const digging = digSlot >= 0 && !this.seeTarget && (this.stuck > 75 || this.blind > 60);
     if (digging) want = digSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
+    // Hurt or maimed, with nobody shooting back right now: patch up with the nanobots.
+    const kitSlot = p.inv.findIndex((it) => it.weapon === WeaponId.RepairKit);
+    const healing = kitSlot >= 0 && !digging && (p.hp < 55 || stumps(p.parts.mask) > 0) && (!tgt || !this.seeTarget || dist > 200);
+    if (healing) want = kitSlot;
     const weapon = p.inv[want]?.weapon ?? WeaponId.Digger;
 
     // Line of sight to the target, every few ticks.
@@ -253,7 +258,9 @@ export class BotBrain {
     // No point-blank blasts, unless cornered with nothing else.
     const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade ? 50 : 0;
     const shoot =
-      weapon === WeaponId.Digger
+      weapon === WeaponId.RepairKit
+        ? healing
+        : weapon === WeaponId.Digger
         ? digging
         : tgt !== null && t >= this.holdFire && this.seeTarget && dist < MAX_SHOT && dist > minRange && (weapon !== WeaponId.Grenade || dist < 220);
     if (shoot) {

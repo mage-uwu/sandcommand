@@ -243,8 +243,14 @@ Standing → Regicide; `rotation` in the `World` options).
 - **The king.** One clone per team is crowned and starts as a heavy, deep
   in his fortress's **king's vault**. The vault is a steel-lined room at the
   bottom of the deepest basement, reached only by a shaft from the floor
-  above. Kings wear a crown, their name tags carry ♛, and the minimap rings
-  them in gold. The top bar shows both kings.
+  above. A king wears his **crown on his head**, in place of a helmet
+  (`Part.Crown` in `src/shared/body.ts`). It's armour with integrity 600
+  (1800 on a heavy), so it stops every small-arms round, a sniper slug
+  included. Only blasts and big guns wear it down, and slowly: it takes
+  well over a dozen close rocket blasts. Once it's knocked off (it
+  clatters away as a gib), his head is as soft as anyone's. It leans,
+  ducks and lies down with the head. Name tags carry ♛, and the minimap
+  rings kings in gold. The top bar shows both kings.
 - **Soldiers.** Soldiers start already at their posts: in the fortress's
   rooms and on its roofs, with no drop rockets. When one dies, he comes
   back after **10 seconds** by drop rocket, landing at his own fortress.
@@ -516,7 +522,7 @@ hard landings don't need to penetrate: they go into the outermost layer
 | Hit | Energy | Result |
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |
-| Sniper slug (1.1 × 0.95 × 1500) | ~1570 | Through any armour with energy to spare; 38 wounds per layer, so one headshot kills |
+| Sniper slug (0.069 × 0.95 × 24000) | ~1570 | Through any armour with energy to spare; 38 wounds per layer, so one headshot kills |
 | Shrapnel (0.5 × 0.85 × ~460–760) | ~200–320 | Bullet-grade: through a helmet or vest, 12 wounds a layer. A grenade throws 56 fragments, a rocket 36, as tracers |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
 
@@ -671,9 +677,26 @@ exists everywhere.
 | Rifle | bullet, 880 cells/s | 13 | 450 rpm | auto | 30 | 1.8 s | 110 |
 | Bazooka | rocket, 380 | 14 | 60 rpm | semi | 1 | 2.2 s | 140 |
 | Grenade | grenade, 330 | 6 | 70 rpm | semi | 3 | 2.5 s | 90 |
-| Sniper | slug, 1500 | 17 | 50 rpm | semi | 5 | 2.8 s | 600 |
+| Sniper | slug, 24000 (near instant) | 17 | 50 rpm | semi | 5 | 2.8 s | 600 |
 | Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
 | Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
+| Radio | calls support (see below) | 6 | – | click | ∞ | – | 60 |
+| Repair Kit | nanobots (see below) | 11 | every tick | auto | 120 | 5 s | 40 |
+
+The **sniper** is near instant: its slug flies 800 cells a tick and crosses
+the whole map in about five ticks, so you point and click. It's light for
+its speed, so its energy and knockback are what they were at 1500 cells/s.
+It leaves a tracer streak from muzzle to impact that hangs in the air for a
+moment.
+
+The **repair kit** sprays a stream of nanobots (`World.repair`). Aimed at
+a teammate in reach (30 cells, in sight), it works on them; otherwise it
+works on you. Every tick it restores 1.5 health and closes wounds on every
+part. Once the clone is above 60% health, it regrows a missing limb every
+1.3 s of spraying: gun arm first, then the off arm, legs, and jetpack. It
+works off either hand, so a clone can grow back its own gun arm. A
+canister lasts 4 s of spraying, then brews more for 5 s. Bots patch
+themselves up when they're hurt or maimed and nobody's shooting at them.
 
 How each field works:
 
@@ -707,8 +730,8 @@ How each field works:
 
 You don't carry every weapon. Each clone spawns with a random kit
 (`spawnLoadout` in `src/shared/items.ts`): always a primary (rifle, sniper or
-bazooka), a digger and a materializer. It often has grenades too, and
-sometimes a second gun. You carry up to five items, each with its own
+bazooka), a digger, a materializer, a radio and a repair kit. It often has grenades too, and
+sometimes a second gun. You carry up to seven items, each with its own
 magazine. **1/2** cycle through them, **4** throws the one in hand, and **3**
 picks up the nearest weapon in reach. With full hands, picking up swaps the
 held weapon for the new one. Dying spills the whole kit where you fell, so

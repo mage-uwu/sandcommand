@@ -27,9 +27,16 @@ export const Part = {
   Helmet: 6,
   Vest: 7,
   Jetpack: 8,
+  /**
+   * A king's crown, worn on the head in place of a helmet: armour that's
+   * very hard to get through and slow to wear down. Blow it off and the
+   * king's head is as soft as anyone's.
+   */
+  Crown: 9,
 } as const;
-export const PART_COUNT = 9;
-export const ALL_PARTS = (1 << PART_COUNT) - 1;
+export const PART_COUNT = 10;
+/** A full standard body (the crown is extra, kings only). */
+export const ALL_PARTS = (1 << Part.Crown) - 1;
 
 export interface PartDef {
   name: string;
@@ -56,13 +63,22 @@ export const PARTS: readonly PartDef[] = [
   { name: 'helmet', integrity: 140, limit: 45, flesh: false, vital: false, armorOf: Part.Head, rx0: 1, ry0: 0, rx1: 6, ry1: 2 },
   { name: 'vest', integrity: 160, limit: 60, flesh: false, vital: false, armorOf: Part.Torso, rx0: 3, ry0: 3, rx1: 7, ry1: 8 },
   { name: 'jetpack', integrity: 120, limit: 35, flesh: false, vital: false, armorOf: -1, rx0: 0, ry0: 3, rx1: 1, ry1: 7 },
+  // Stops any small-arms round (even a sniper slug, on a heavy king); only blasts and big guns wear it down.
+  { name: 'crown', integrity: 600, limit: 160, flesh: false, vital: false, armorOf: Part.Head, rx0: 1, ry0: 0, rx1: 6, ry1: 2 },
 ];
 
 /** Base parts in hit-test priority order (small/outer regions first). */
 const HIT_ORDER = [Part.Head, Part.GunArm, Part.OffArm, Part.Jetpack, Part.LegF, Part.LegB, Part.Torso];
-/** Armour covering each base part (-1 none). */
+/** Standard armour covering each base part (-1 none); the crown goes over the head on top of that. */
 const ARMOR_OVER = new Int8Array(PART_COUNT).fill(-1);
-for (let p = 0; p < PART_COUNT; p++) if (PARTS[p].armorOf >= 0) ARMOR_OVER[PARTS[p].armorOf] = p;
+for (let p = 0; p < PART_COUNT; p++) if (PARTS[p].armorOf >= 0 && p !== Part.Crown) ARMOR_OVER[PARTS[p].armorOf] = p;
+
+/** The armour layer a hit on `part` meets first, if any is on (a crown before a helmet). */
+function armorOn(mask: number, part: number): number {
+  if (part === Part.Head && has(mask, Part.Crown)) return Part.Crown;
+  const a = ARMOR_OVER[part];
+  return a >= 0 && has(mask, a) ? a : -1;
+}
 
 const BLUNT = 0.03; // HP per unit of energy stopped by a layer
 export const BLEED_PER_STUMP = 1.2; // HP per second per missing limb
@@ -172,8 +188,7 @@ function woundLayer(s: BodyState, layer: number, amount: number, out: StrikeResu
     out.detached.push(layer);
     if (PARTS[layer].vital) out.vital = true;
     // A torn-off limb takes its armour with it.
-    const armor = ARMOR_OVER[layer];
-    if (armor >= 0 && has(s.mask, armor)) {
+    for (let armor = armorOn(s.mask, layer); armor >= 0; armor = armorOn(s.mask, layer)) {
       s.mask &= ~(1 << armor);
       out.detached.push(armor);
     }
@@ -185,8 +200,8 @@ function woundLayer(s: BodyState, layer: number, amount: number, out: StrikeResu
  * dealing `wound` points to each layer it gets through. Accumulates into out.
  */
 export function strike(s: BodyState, part: number, energy: number, wound: number, out: StrikeResult): void {
-  const armor = ARMOR_OVER[part];
-  const layers = armor >= 0 && has(s.mask, armor) ? [armor, part] : [part];
+  const armor = armorOn(s.mask, part);
+  const layers = armor >= 0 ? [armor, part] : [part];
   for (const layer of layers) {
     const integ = integrityOf(s, layer);
     if (energy <= integ) {
@@ -204,8 +219,8 @@ export function strike(s: BodyState, part: number, energy: number, wound: number
  */
 export function harm(s: BodyState, part: number, amount: number, out: StrikeResult): void {
   if (!has(s.mask, part) || amount <= 0) return;
-  const armor = ARMOR_OVER[part];
-  woundLayer(s, armor >= 0 && has(s.mask, armor) ? armor : part, amount * CLASSES[s.cls].harm * FACTIONS[s.faction].harm, out);
+  const armor = armorOn(s.mask, part);
+  woundLayer(s, armor >= 0 ? armor : part, amount * CLASSES[s.cls].harm * FACTIONS[s.faction].harm, out);
 }
 
 /** What a body can still do. Shared by server simulation and client prediction. */

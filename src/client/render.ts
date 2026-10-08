@@ -2,7 +2,7 @@ import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK,
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, CallKind, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
-import { PROJ, PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { PROJ, PROJ_BUILD, REPAIR_REACH, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
@@ -12,13 +12,13 @@ import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { FACTIONS } from '../shared/factions.ts';
-import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
+import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor } from './texture.ts';
 import { Backdrop } from './backdrop.ts';
-import { type BodyFrame, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
+import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
 /** Most terrain chunks re-rasterized per frame (the rest wait for the next). */
 const CHUNKS_PER_FRAME = 64;
@@ -313,7 +313,6 @@ export class Renderer {
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
       this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction);
-      if (game.isKing(v.id)) this.drawCrown(ctx, v.x, v.y, now);
     }
     // Own clone (hidden inside its tank while driving).
     if (game.alive && !game.drive) {
@@ -327,12 +326,11 @@ export class Renderer {
         F_ALIVE |
         (b.onGround ? F_GROUND : 0) |
         (b.jetting ? F_JET : 0) |
-        (input.mouseDown && !reloading && !dry ? F_FIRING : 0) |
+        (input.buttons() & BTN_FIRE && !reloading && !dry ? F_FIRING : 0) |
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction);
-      if (game.isKing(game.myId)) this.drawCrown(ctx, selfX, selfY, now);
     }
 
     // Every particle the field engine owns (grains, sparks, flames, smoke,
@@ -382,7 +380,7 @@ export class Renderer {
     for (const bm of game.beams) {
       const t = (now - bm.at) / 300;
       if (t >= 1) continue;
-      ctx.strokeStyle = `rgba(140,232,255,${0.8 * (1 - t)})`;
+      ctx.strokeStyle = bm.tracer ? `rgba(255,246,200,${0.9 * (1 - t) ** 2})` : `rgba(140,232,255,${0.8 * (1 - t)})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(bm.x0, bm.y0);
@@ -436,7 +434,10 @@ export class Renderer {
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(x - p.vx[i] * 0.012, y - p.vy[i] * 0.012);
+        // A short streak behind it (a sniper slug's full tracer is drawn when it lands).
+        const sp = Math.hypot(p.vx[i], p.vy[i]) + 1e-6;
+        const len = Math.min(sp * 0.012, 24);
+        ctx.lineTo(x - (p.vx[i] / sp) * len, y - (p.vy[i] / sp) * len);
         ctx.stroke();
       } else if (k === 1) {
         ctx.fillStyle = '#d8d8d8';
@@ -642,6 +643,15 @@ export class Renderer {
       ctx.restore();
     }
 
+    // A king wears the crown on the head.
+    if (has(parts, Part.Crown)) {
+      ctx.save();
+      ctx.translate(hipX, hipY);
+      ctx.rotate(a);
+      this.drawCrown(ctx, frame, left, now);
+      ctx.restore();
+    }
+
     // Jetpack exhaust under the pack (pack is on the clone's back).
     if (flags & F_JET && has(parts, Part.Jetpack)) {
       const [px, py] = posed(left ? 2.5 : -4.5, -1);
@@ -682,7 +692,19 @@ export class Renderer {
       const m = (WEAPONS[weapon]?.muzzle ?? 8) + 1;
       const mx = Math.round(sx + Math.cos(aim) * m);
       const my = Math.round(sy + Math.sin(aim) * m);
-      if (weapon === WeaponId.Digger) {
+      if (weapon === WeaponId.RepairKit) {
+        // Nanobots: a shimmering cyan-green swarm streaming out along the aim.
+        const cos = Math.cos(aim);
+        const sin = Math.sin(aim);
+        for (let k = 0; k < 14; k++) {
+          const ph = ((now / 260 + k * 0.137) % 1) * (REPAIR_REACH - m);
+          const wob = Math.sin(now / 70 + k * 2.1) * (1 + ph * 0.12);
+          const px = Math.round(mx + cos * ph - sin * wob);
+          const py = Math.round(my + sin * ph + cos * wob);
+          ctx.fillStyle = k % 3 === 0 ? '#e8fff6' : k % 3 === 1 ? '#5af0c8' : '#58e0ff';
+          ctx.fillRect(px, py, 1, 1);
+        }
+      } else if (weapon === WeaponId.Digger) {
         ctx.fillStyle = 'rgba(255,230,120,0.45)';
         ctx.fillRect(mx - 2, my - 2, 5, 5);
         ctx.fillStyle = 'rgba(255,250,210,0.8)';
@@ -1002,18 +1024,27 @@ export class Renderer {
     }
   }
 
-  /** A gold crown over a king's head, glinting. */
-  private drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number, now: number): void {
-    ctx.fillStyle = '#ffd34a';
-    ctx.fillRect(x + 1, y - 2.5, 6, 2);
-    ctx.fillRect(x + 1, y - 4.5, 1, 2);
-    ctx.fillRect(x + 3.5, y - 5, 1, 2.5);
-    ctx.fillRect(x + 6, y - 4.5, 1, 2);
-    ctx.fillStyle = '#c0392b';
-    ctx.fillRect(x + 3.5, y - 2, 1, 1);
+  /**
+   * A king's crown, worn on the head: drawn in the torso's posed frame (hip
+   * at the origin, the sprite's top-left at (-5.5, -11)) so it leans, ducks
+   * and lies down with the head. A jewel glints now and then.
+   */
+  private drawCrown(ctx: CanvasRenderingContext2D, frame: BodyFrame, left: boolean, now: number): void {
+    const top = this.sprites.headTop(frame);
+    const x0 = -5.5 + (left ? 2 : 3);
+    const y0 = -11 + top - 2;
+    const col: Record<string, string> = { Y: '#ffd34a', y: '#a8801e', r: '#d03020' };
+    for (let r = 0; r < CROWN.length; r++) {
+      for (let c = 0; c < CROWN[r].length; c++) {
+        const ch = CROWN[r][left ? CROWN[r].length - 1 - c : c];
+        if (ch === '.') continue;
+        ctx.fillStyle = col[ch];
+        ctx.fillRect(x0 + c, y0 + r, 1, 1);
+      }
+    }
     if ((now / 400) % 4 < 0.5) {
       ctx.fillStyle = '#fff';
-      ctx.fillRect(x + 6, y - 5, 1, 1);
+      ctx.fillRect(x0 + (left ? 0 : 4), y0, 1, 1);
     }
   }
 
@@ -1152,7 +1183,7 @@ export class Renderer {
       rect(p);
     }
     ctx.lineWidth = Math.max(1, s);
-    for (const p of [Part.Helmet, Part.Vest]) {
+    for (const p of [Part.Helmet, Part.Vest, Part.Crown]) {
       if (game.partHp[p] <= 0) continue;
       ctx.strokeStyle = col(game.partHp[p]);
       const d = PARTS[p];

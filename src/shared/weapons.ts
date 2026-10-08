@@ -44,8 +44,10 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.15, life: 40, damage: 16, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
   { gravity: 0.2, life: 120, damage: 30, mass: 2, sharp: 0.6, carveR: 20, coreR: 9, splashR: 34, splashDamage: 70, debris: 48, bounce: 0, ballistic: false },
   { gravity: 1, life: 66, damage: 0, mass: 0.6, sharp: 0.1, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45, ballistic: false },
-  // Heavy sniper slug: flat, fast, punches through armour.
-  { gravity: 0.04, life: 30, damage: 38, mass: 1.1, sharp: 0.95, carveR: 3, coreR: 1, splashR: 0, splashDamage: 0, debris: 3, bounce: 0, ballistic: true },
+  // Heavy sniper slug: near-instant (it crosses the map in about five
+  // ticks), dead flat, punches through armour. Light for its speed, so its
+  // energy (mass x speed) and knockback stay what they were at 1500 cells/s.
+  { gravity: 0.04, life: 10, damage: 38, mass: (1.1 * 1500) / 24000, sharp: 0.95, carveR: 3, coreR: 1, splashR: 0, splashDamage: 0, debris: 3, bounce: 0, ballistic: true },
   // Tank cannon shell: a heavy lobbed high-explosive round.
   { gravity: 0.35, life: 120, damage: 50, mass: 3, sharp: 0.6, carveR: 24, coreR: 11, splashR: 40, splashDamage: 90, debris: 56, bounce: 0, ballistic: false },
   // Tank vulcan: a rifle round, a touch lighter.
@@ -64,6 +66,14 @@ export const PROJ_DIG = -1;
 export const PROJ_BUILD = -2;
 /** WeaponDef.proj for the radio, which calls in support (a dropship or a tank) instead of shooting. */
 export const PROJ_RADIO = -3;
+/** WeaponDef.proj for the repair kit, which sprays nanobots that heal (and regrow limbs) instead of shooting. */
+export const PROJ_REPAIR = -4;
+/** How far the repair kit's nanobot spray reaches (cells), and how much it mends per tick of spraying. */
+export const REPAIR_REACH = 30;
+export const REPAIR_HP = 1.5;
+export const REPAIR_WOUND = 0.6;
+/** Ticks of spraying a healthy-enough clone to regrow one missing limb. */
+export const REGROW_TICKS = 40;
 
 export const WeaponId = {
   Rifle: 0,
@@ -74,6 +84,8 @@ export const WeaponId = {
   Materializer: 5,
   /** Calls in a dropship or a tank, for gold. */
   Radio: 6,
+  /** Nanobots: heals whoever it's sprayed on (a teammate, or yourself) and regrows lost limbs. */
+  RepairKit: 7,
 } as const;
 
 /**
@@ -107,10 +119,12 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Rifle', proj: ProjKind.Bullet, muzzle: 13, rpm: 450, auto: true, speed: 880, spread: 0.035, clip: 30, reload: 54, scope: 110 },
   { name: 'Bazooka', proj: ProjKind.Rocket, muzzle: 14, rpm: 60, auto: false, speed: 380, spread: 0.01, clip: 1, reload: 66, scope: 140 },
   { name: 'Grenade', proj: ProjKind.Grenade, muzzle: 6, rpm: 70, auto: false, speed: 330, spread: 0, clip: 3, reload: 75, scope: 90 },
-  { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 1500, spread: 0.004, clip: 5, reload: 84, scope: 600 },
+  { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 24000, spread: 0.004, clip: 5, reload: 84, scope: 600 },
   { name: 'Digger', proj: PROJ_DIG, muzzle: 11, rpm: 900, auto: true, speed: 0, spread: 0, clip: 0, reload: 0, scope: 40 },
   { name: 'Materializer', proj: PROJ_BUILD, muzzle: 9, rpm: 100, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
   { name: 'Radio', proj: PROJ_RADIO, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
+  // Sprays every tick; a canister lasts 4 s of spraying and takes 5 s to brew more nanobots.
+  { name: 'Repair Kit', proj: PROJ_REPAIR, muzzle: 11, rpm: 1800, auto: true, speed: 0, spread: 0, clip: 120, reload: 150, scope: 40 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
