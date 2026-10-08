@@ -612,7 +612,7 @@ exists everywhere.
 | Rifle | bullet, 880 cells/s | 13 | 450 rpm | auto | 30 | 1.8 s | 110 |
 | Bazooka | rocket, 380 | 14 | 60 rpm | semi | 1 | 2.2 s | 140 |
 | Grenade | grenade, 330 | 6 | 70 rpm | semi | 3 | 2.5 s | 90 |
-| Sniper | slug, 1500 | 17 | 50 rpm | semi | 5 | 2.8 s | 300 |
+| Sniper | slug, 1500 | 17 | 50 rpm | semi | 5 | 2.8 s | 600 |
 | Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
 | Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
 

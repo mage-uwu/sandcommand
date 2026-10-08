@@ -84,7 +84,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Rifle', proj: ProjKind.Bullet, muzzle: 13, rpm: 450, auto: true, speed: 880, spread: 0.035, clip: 30, reload: 54, scope: 110 },
   { name: 'Bazooka', proj: ProjKind.Rocket, muzzle: 14, rpm: 60, auto: false, speed: 380, spread: 0.01, clip: 1, reload: 66, scope: 140 },
   { name: 'Grenade', proj: ProjKind.Grenade, muzzle: 6, rpm: 70, auto: false, speed: 330, spread: 0, clip: 3, reload: 75, scope: 90 },
-  { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 1500, spread: 0.004, clip: 5, reload: 84, scope: 300 },
+  { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 1500, spread: 0.004, clip: 5, reload: 84, scope: 600 },
   { name: 'Digger', proj: PROJ_DIG, muzzle: 11, rpm: 900, auto: true, speed: 0, spread: 0, clip: 0, reload: 0, scope: 40 },
   { name: 'Materializer', proj: PROJ_BUILD, muzzle: 9, rpm: 100, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
 ];
