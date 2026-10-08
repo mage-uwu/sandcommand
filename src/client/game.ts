@@ -1,12 +1,13 @@
 import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type TankState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, applyFrameRecords } from '../shared/frame.ts';
+import { ENGINE_X, ENGINE_Y, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
 import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_TANK, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -16,7 +17,7 @@ import { generateWorld } from '../shared/worldgen.ts';
 import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, shipDownwash, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -68,6 +69,10 @@ export interface RemoteView {
 
 export interface CraftView extends CraftState {}
 export interface TankView extends TankState {}
+export interface ShipView extends ShipState {}
+
+/** Dropship scrap: grey-blue gunmetal. */
+const SHIP_SCRAP = 0x6e7a86;
 
 /** Where a driver's clone sits inside its tank (top-left of the clone, from the tank's). */
 const SEAT_X = TANK_W / 2 - ACTOR_W / 2;
@@ -231,6 +236,10 @@ export class Game implements FrameHandler {
   private lastSelfTank: SelfTankState | null = null;
   /** Tank prediction errors larger than 0.01 cells seen during reconciliation. */
   tankCorrections = 0;
+  // Dropships, interpolated like tanks (nobody predicts them: they fly themselves).
+  private shipSnaps = new Map<number, (ShipState & { tick: number })[]>();
+  private shipsSeenTick = 0;
+  private readonly shipPt = { x: 0, y: 0 };
   private readonly rideStep = newCraftStep();
   private readonly ext = { x: 0, y: 0 };
   private clockOffset = NaN; // serverTick - now/TICK_MS
@@ -284,6 +293,16 @@ export class Game implements FrameHandler {
       const t = ts[ts.length - 1];
       if (t && t.jetting && slot !== this.driveSlot) tankJets(this.particles, t.x, t.y, t.vx, t.vy);
     }
+    // Dropship engines: glow and downwash under each pod still attached.
+    for (const [, ss] of this.shipSnaps) {
+      const s = ss[ss.length - 1];
+      if (!s) continue;
+      for (let e = 0; e < 4; e++) {
+        if (!(s.parts & (1 << (1 + e)))) continue;
+        const q = shipPoint(s, ENGINE_X[e], ENGINE_Y + 5, this.shipPt);
+        shipDownwash(this.particles, q.x, q.y, s.vx, s.vy, s.thrust[e]);
+      }
+    }
     // Drop-rocket exhaust (latest known state; cosmetic plume + local air jet).
     for (const [slot, cs] of this.craftSnaps) {
       const c = slot === this.rideSlot && this.ride ? this.ride : cs[cs.length - 1];
@@ -316,6 +335,10 @@ export class Game implements FrameHandler {
       const t = slot === this.driveSlot && this.drive ? this.drive : ts[ts.length - 1];
       if (t && actors.n < MAX_ACTORS) actors.add(192 + slot, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H, 200, 255, 0.3);
     }
+    for (const [slot, ss] of this.shipSnaps) {
+      const s = ss[ss.length - 1];
+      if (s && actors.n < MAX_ACTORS) actors.add(196 + slot, s.x, s.y, s.vx, s.vy, SHIP_W, SHIP_H, 120, 255, 0.2);
+    }
     this.particles.step(this.collider, DT, this.particleHooks, actors);
     this.shake *= 0.85;
     this.hurtFlash *= 0.9;
@@ -334,6 +357,7 @@ export class Game implements FrameHandler {
       this.tankSnaps.clear();
       this.tankPilots.clear();
     }
+    if (this.shipsSeenTick !== tick) this.shipSnaps.clear();
     // No rocket record in this frame means no drop rockets near us.
     if (this.craftsSeenTick !== tick) this.craftSnaps.clear();
     this.lastServerTick = tick;
@@ -803,7 +827,7 @@ export class Game implements FrameHandler {
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
-    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
+    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
@@ -823,7 +847,7 @@ export class Game implements FrameHandler {
     const camDx = k.x - me.x;
     const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
-    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === W_TANK;
+    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === W_TANK || weapon === W_SHIP;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
     // Same seed as the server, so the gold shower matches what will settle.
@@ -932,6 +956,59 @@ export class Game implements FrameHandler {
     this.flashes.push({ x, y, r: 56, at: performance.now() });
     const d = Math.hypot(this.body.x - x, this.body.y - y);
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 600) * 16);
+  }
+
+  ships(list: ShipState[]): void {
+    const seen = new Set<number>();
+    for (const s of list) {
+      seen.add(s.slot);
+      let q = this.shipSnaps.get(s.slot);
+      if (!q) this.shipSnaps.set(s.slot, (q = []));
+      q.push({ ...s, tick: this.frameTick });
+      if (q.length > 12) q.shift();
+    }
+    this.shipsSeenTick = this.frameTick;
+    for (const slot of this.shipSnaps.keys()) if (!seen.has(slot)) this.shipSnaps.delete(slot);
+  }
+
+  shipPart(_slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    tankPartOff(this.particles, part === 5 ? 0 : 1, x, y, vx, vy, seed, SHIP_SCRAP);
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 300) * 5);
+  }
+
+  shipBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    this.shipSnaps.delete(slot);
+    tankDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE, SHIP_SCRAP);
+    this.flashes.push({ x, y, r: 70, at: performance.now() });
+    const d = Math.hypot(this.body.x - x, this.body.y - y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 700) * 18);
+  }
+
+  /** Dropships at the render time, interpolated between snapshots. */
+  shipViews(): ShipView[] {
+    const rt = this.renderTick();
+    const out: ShipView[] = [];
+    for (const [, s] of this.shipSnaps) {
+      const last = s[s.length - 1];
+      let a = s[0];
+      let c = s[0];
+      for (let i = s.length - 1; i >= 0; i--) {
+        if (s[i].tick <= rt) {
+          a = s[i];
+          c = s[Math.min(i + 1, s.length - 1)];
+          break;
+        }
+      }
+      const t = a === c ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (c.tick - a.tick)));
+      out.push({ ...c, fired: last.fired, doors: last.doors, x: a.x + (c.x - a.x) * t, y: a.y + (c.y - a.y) * t, a: a.a + (c.a - a.a) * t });
+    }
+    return out;
+  }
+
+  /** The radio is in hand: the call-in menu is up. */
+  get calling(): boolean {
+    return this.alive && !this.drive && this.weapon === WeaponId.Radio;
   }
 
   /** Tanks at the render time, interpolated between snapshots (ours from prediction). */

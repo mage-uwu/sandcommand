@@ -2,6 +2,24 @@ import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, STANCE_H, Stance, newBody, 
 import { FACTION_SHIFT, STANCE_SHIFT } from '../shared/protocol.ts';
 import { FACTIONS, rollFaction } from '../shared/factions.ts';
 import {
+  BAY_AT,
+  MAX_SHIPS,
+  SHIP_H,
+  SHIP_INTEGRITY,
+  SHIP_PARTS,
+  SHIP_PART_CENTER,
+  SHIP_W,
+  type Ship,
+  ShipPart,
+  TURRET_AT,
+  hasShipPart,
+  newShip,
+  shipLocal,
+  shipPartAt,
+  shipPoint,
+  stepShip,
+} from '../shared/dropship.ts';
+import {
   CANNON_INTERVAL,
   CANNON_SPEED,
   MAX_TANKS,
@@ -86,6 +104,7 @@ import {
   DT,
   ENTITY_INTEREST_MARGIN,
   FALL_DAMAGE_SPEED,
+  GRAVITY,
   FAR_UPDATE_INTERVAL,
   MAX_PLAYERS,
   POS_SCALE,
@@ -99,7 +118,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_TANK, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -118,6 +137,11 @@ import {
   R_TEAMS,
   R_TANKS,
   R_TANK_SELF,
+  R_SHIPS,
+  R_SHIP_PART,
+  R_SHIP_BOOM,
+  CALL_COST,
+  CallKind,
   R_TANK_PART,
   R_TANK_BOOM,
   GameMode,
@@ -147,7 +171,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, ProjKind, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { generateWorld, lastComplexes } from '../shared/worldgen.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
@@ -207,6 +231,8 @@ export class Player {
   team: number = Team.None;
   /** Tank slot this clone is driving, -1 on foot. */
   tank = -1;
+  /** Ticks until this clone's radio can call in support again. */
+  callCd = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
   /** Latest materializer request, applied on this player's next tick. */
@@ -283,6 +309,8 @@ export class World {
   readonly crafts: (Craft | null)[] = new Array(MAX_CRAFTS).fill(null);
   /** Tanks: dropped by parachute, driven by whoever climbs in. */
   readonly tanks: (Tank | null)[] = new Array(MAX_TANKS).fill(null);
+  /** Dropships: aerial support, called in by radio. */
+  readonly ships: (Ship | null)[] = new Array(MAX_SHIPS).fill(null);
   /** Drop tanks into each wave (round rooms; sandbox rooms only on request). */
   readonly tankDrops: boolean;
   private readonly tankMz = { x: 0, y: 0, a: 0 };
@@ -702,6 +730,7 @@ export class World {
     this.kings[0] = this.kings[1] = 255;
     this.crafts.fill(null);
     this.tanks.fill(null);
+    this.ships.fill(null);
     this.items.length = 0;
     this.grains.n = 0;
     this.projectiles.n = 0;
@@ -961,6 +990,17 @@ export class World {
         best = TANK_ID_BASE + k;
       }
     }
+    for (let k = 0; k < MAX_SHIPS; k++) {
+      const sh = this.ships[k];
+      if (!sh || owner === sh.owner) continue; // its own guns and bombs (and its caller's) never hit it
+      const la = shipLocal(sh, x0, y0, this.segA);
+      const lb = shipLocal(sh, x1, y1, this.segB);
+      const tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, SHIP_W, SHIP_H);
+      if (tt >= 0 && tt < bestT) {
+        bestT = tt;
+        best = SHIP_ID_BASE + k;
+      }
+    }
     out.t = bestT;
     return best;
   };
@@ -1088,7 +1128,15 @@ export class World {
     const kind = pr.kind[i];
     const owner = pr.owner[i];
     const def = PROJ[kind];
-    if (actor >= TANK_ID_BASE) {
+    if (actor >= SHIP_ID_BASE) {
+      const sh = this.ships[actor - SHIP_ID_BASE];
+      if (sh) {
+        const rvx = pr.vx[i] - sh.vx;
+        const rvy = pr.vy[i] - sh.vy;
+        const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
+        this.hitShip(actor - SHIP_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
+      }
+    } else if (actor >= TANK_ID_BASE) {
       const t = this.tanks[actor - TANK_ID_BASE];
       if (t) {
         const rvx = pr.vx[i] - t.vx;
@@ -1138,6 +1186,7 @@ export class World {
         explosionFragments(this.grains, x, y, kind, owner, new Rng(seed));
         this.splashCrafts(x, y, def.splashR, def.splashDamage, owner);
         this.splashTanks(x, y, def.splashR, def.splashDamage, owner);
+        this.splashShips(x, y, def.splashR, def.splashDamage, owner);
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
           if (!p || !p.alive || this.shielded(p) || this.friendly(owner, p)) continue;
@@ -1197,7 +1246,7 @@ export class World {
       if (asked || (item.ammo === 0 && pressed)) this.startReload(p);
     }
     p.cooldown -= 1;
-    const want = def.proj !== PROJ_BUILD && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
+    const want = def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
     if (want && p.cooldown <= 0) {
       this.fire(p, def);
       p.firing = true;
@@ -1780,6 +1829,7 @@ export class World {
     this.grains.blast(cx, cy, 70, BLAST_IMPULSE * 1.3);
     craftFragments(this.grains, cx, cy, c.vx, c.vy, owner, new Rng(seed));
     this.splashTanks(cx, cy, 36, 60, owner);
+    this.splashShips(cx, cy, 36, 60, owner);
     for (const p of this.players) {
       // The rider is thrown clear by the blast; its fragments can still find them.
       if (!p || !p.alive || this.shielded(p) || p.id === rider || this.friendly(owner, p)) continue;
@@ -2134,6 +2184,7 @@ export class World {
     craftFragments(this.grains, cx, cy, t.vx, t.vy, owner, rng);
     this.splashCrafts(cx, cy, 48, 80, owner);
     this.splashTanks(cx, cy, 48, 80, owner);
+    this.splashShips(cx, cy, 48, 80, owner);
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || this.friendly(owner, p)) continue;
       const d = Math.hypot(p.cx - cx, p.cy - cy);
@@ -2155,6 +2206,268 @@ export class World {
     w.u16(clampU16(cy + Y_BIAS));
     w.i16(clampI16(t.vx * VEL_SCALE));
     w.i16(clampI16(t.vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x: cx, y: cy });
+  }
+
+  // ---------------------------------------------------------------- radio and dropships
+
+  /**
+   * A radio call: a dropship for air support, or a tank parachuted onto the
+   * caller, for CALL_COST gold. The caller must have the radio in hand;
+   * each radio then needs a while to recharge.
+   */
+  call(id: number, kind: number): boolean {
+    const p = this.players[id];
+    if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < CALL_COST) return false;
+    if (kind === CallKind.Tank) {
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0) return false;
+      const x = Math.max(60, Math.min(WORLD_W - 60 - TANK_W, p.cx - TANK_W / 2 + this.rng.range(-24, 24)));
+      this.tanks[slot] = newTank(x, -TANK_H - 40);
+    } else if (kind === CallKind.Dropship) {
+      const slot = this.ships.indexOf(null);
+      if (slot < 0) return false;
+      // In from high up off to one side, then down onto station.
+      const side = this.rng.next() < 0.5 ? -1 : 1;
+      const x = Math.max(40, Math.min(WORLD_W - 40 - SHIP_W, p.cx + side * 260 - SHIP_W / 2));
+      const sh = newShip(x, -SHIP_H - 80, p.id, p.team);
+      sh.anchorX = p.cx;
+      this.ships[slot] = sh;
+    } else return false;
+    p.gold -= CALL_COST;
+    p.callCd = CALL_COOLDOWN;
+    this.broadcast.u8(R_CHAT);
+    this.broadcast.u8(p.id);
+    this.broadcast.str(kind === CallKind.Tank ? '*radio* tank inbound on my position' : '*radio* dropship inbound for air support');
+    return true;
+  }
+
+  /** Is `p` a target for a dropship called by `owner` (an enemy of its caller)? */
+  private shipFoe(sh: Ship, p: Player): boolean {
+    return p.alive && p.id !== sh.owner && !(sh.team !== Team.None && p.team === sh.team);
+  }
+
+  /** Terrain-free line of sight (3-cell steps). */
+  private clearLine(x0: number, y0: number, x1: number, y1: number): boolean {
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    const n = Math.max(1, Math.floor(d / 3));
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      if (this.terrain.isSolid(Math.floor(x0 + (x1 - x0) * t), Math.floor(y0 + (y1 - y0) * t))) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Fly every dropship: hold station over its caller (or over an enemy near
+   * them, to bomb it), strafe with both turrets, open the bay over targets,
+   * and head home once it's out of bombs and idle, its time is up, or its
+   * caller has left.
+   */
+  private stepShips(): void {
+    const pt = this.pt;
+    for (let k = 0; k < MAX_SHIPS; k++) {
+      const sh = this.ships[k];
+      if (!sh) continue;
+      sh.age++;
+      sh.sinceBomb++;
+      if (sh.bombCd > 0) sh.bombCd--;
+      if (sh.doors > 0) sh.doors--;
+      const owner = this.players[sh.owner];
+      if (owner && owner.alive) sh.anchorX = owner.cx;
+      if (!owner || (sh.bombs === 0 && sh.sinceBomb > 30 * 20) || sh.age > 30 * 120) sh.leaving = true;
+      // Station: over the enemy nearest its caller (bombs to drop, bay intact), else over the caller.
+      const cx = sh.x + SHIP_W / 2;
+      let tx = sh.anchorX;
+      let bombTarget: Player | null = null;
+      if (!sh.leaving && sh.bombs > 0 && hasShipPart(sh.parts, ShipPart.Doors)) {
+        let best = 240;
+        for (const o of this.players) {
+          if (!o || !this.shipFoe(sh, o)) continue;
+          const d = Math.abs(o.cx - sh.anchorX);
+          if (d < best) {
+            best = d;
+            bombTarget = o;
+          }
+        }
+        if (bombTarget) tx = bombTarget.cx;
+      }
+      const ground = this.terrain.surfaceY(Math.max(0, Math.min(WORLD_W - 1, Math.floor(tx))));
+      const ty = sh.leaving ? -260 : Math.max(40, ground - SHIP_ALT);
+      const impact = stepShip(sh, this.terrain, DT, sh.leaving ? cx : tx, ty);
+      if (impact > 90) {
+        this.destroyShip(k, sh.lastHitBy);
+        continue;
+      }
+      if (sh.y > WORLD_H || (sh.leaving && sh.y < -SHIP_H - 200)) {
+        if (sh.y > WORLD_H) this.destroyShip(k, sh.lastHitBy);
+        else this.ships[k] = null;
+        continue;
+      }
+      // Turrets: each takes the nearest enemy in sight and reach.
+      for (const side of [0, 1]) {
+        sh.fired[side] = false;
+        if (sh.gunCd[side] > 0) sh.gunCd[side]--;
+        if (!hasShipPart(sh.parts, ShipPart.TurretL + side) || sh.leaving) continue;
+        const g = shipPoint(sh, TURRET_AT[side][0], TURRET_AT[side][1], pt);
+        const gx = g.x;
+        const gy = g.y;
+        let target: Player | null = null;
+        let best = SHIP_GUN_RANGE;
+        for (const o of this.players) {
+          if (!o || !this.shipFoe(sh, o)) continue;
+          const d = Math.hypot(o.cx - gx, o.cy - gy);
+          if (d < best && this.clearLine(gx, gy, o.cx, o.cy)) {
+            best = d;
+            target = o;
+          }
+        }
+        if (!target) continue;
+        const lead = best / 900;
+        sh.aim[side] = Math.atan2(target.cy + target.body.vy * lead - gy, target.cx + target.body.vx * lead - gx);
+        if (sh.gunCd[side] > 0) continue;
+        const a = sh.aim[side] + (this.rng.next() - 0.5) * 0.1;
+        this.spawnProj(this.nextProjId++, ProjKind.ShipGun, sh.owner, gx + Math.cos(a) * 9, gy + Math.sin(a) * 9, Math.cos(a) * 900 + sh.vx * 0.3, Math.sin(a) * 900 + sh.vy * 0.3);
+        sh.gunCd[side] = 5;
+        sh.fired[side] = true;
+      }
+      // Bombs: the bay opens over an enemy below with nothing in the way.
+      if (bombTarget && sh.bombCd === 0 && Math.abs(sh.a) < 0.3) {
+        const bay = shipPoint(sh, BAY_AT[0], BAY_AT[1] + 2, pt);
+        // Where a bomb dropped now lands: lead by its fall time.
+        const fall = Math.sqrt((2 * Math.max(1, bombTarget.cy - bay.y)) / GRAVITY);
+        const landX = bay.x + sh.vx * fall;
+        if (bombTarget.cy > bay.y + 10 && Math.abs(landX - bombTarget.cx) < 16 && this.clearLine(bay.x, bay.y + 4, bombTarget.cx, bombTarget.cy)) {
+          this.spawnProj(this.nextProjId++, ProjKind.Bomb, sh.owner, bay.x, bay.y + 3, sh.vx, Math.max(30, sh.vy + 30));
+          sh.bombs--;
+          sh.bombCd = 36;
+          sh.doors = 24;
+          sh.sinceBomb = 0;
+        }
+      }
+    }
+  }
+
+  /** Is a hit by `by` on this dropship friendly fire (its caller or a teammate of theirs)? */
+  private friendlyShip(by: number, sh: Ship): boolean {
+    if (by === sh.owner) return true;
+    const a = by >= 0 && by < MAX_PLAYERS ? this.players[by] : null;
+    return !!a && sh.team !== Team.None && a.team === sh.team;
+  }
+
+  private hitShip(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
+    const sh = this.ships[slot];
+    if (!sh || this.friendlyShip(by, sh)) return;
+    const l = shipLocal(sh, wx + dx * 2, wy + dy * 2, this.pt);
+    this.hurtShipPart(slot, shipPartAt(sh.parts, l.x, l.y), energy > SHIP_INTEGRITY ? wound : wound * 0.2, by);
+  }
+
+  /** Damage one part; a part out of hit points is blown off, the hull going is the end. */
+  private hurtShipPart(slot: number, part: number, dmg: number, by: number): void {
+    const sh = this.ships[slot];
+    if (!sh || dmg <= 0) return;
+    if (by !== NO_OWNER && by !== 255) sh.lastHitBy = by;
+    if (part === ShipPart.Hull) sh.hp -= dmg;
+    else {
+      sh.hp -= dmg * 0.1;
+      sh.partHp[part] -= dmg;
+      if (sh.partHp[part] <= 0 && hasShipPart(sh.parts, part)) this.detachShipPart(slot, part);
+    }
+    sh.partHp[ShipPart.Hull] = Math.max(0, sh.hp);
+    if (sh.hp <= 0) this.destroyShip(slot, sh.lastHitBy);
+  }
+
+  /** Blast overpressure: every part in reach takes its share, and the shove rocks the hull. */
+  private splashShips(x: number, y: number, r: number, dmg: number, owner: number): void {
+    const pt = this.pt;
+    for (let k = 0; k < MAX_SHIPS; k++) {
+      const sh = this.ships[k];
+      if (!sh || this.friendlyShip(owner, sh)) continue;
+      const c = shipPoint(sh, SHIP_W / 2, SHIP_H / 2, pt);
+      if (Math.hypot(c.x - x, c.y - y) > r + SHIP_W / 2) continue;
+      for (let part = 0; part < SHIP_PARTS && this.ships[k] === sh; part++) {
+        if (!hasShipPart(sh.parts, part)) continue;
+        const q = shipPoint(sh, SHIP_PART_CENTER[part][0], SHIP_PART_CENTER[part][1], pt);
+        const d = Math.hypot(q.x - x, q.y - y);
+        if (d < r) this.hurtShipPart(k, part, dmg * 1.3 * (1 - d / r) * (part === ShipPart.Hull ? 1 : 0.8), owner);
+      }
+      if (this.ships[k] !== sh) continue;
+      const d = Math.hypot(c.x - x, c.y - y) + 1e-6;
+      const push = 60 * Math.max(0, 1 - d / (r + SHIP_W / 2));
+      sh.vx += ((c.x - x) / d) * push;
+      sh.vy += ((c.y - y) / d) * push;
+      sh.w += ((c.x - x) / d) * push * 0.02;
+    }
+  }
+
+  /** A part flies off as scrap; losing an engine kicks the hull round toward that side. */
+  private detachShipPart(slot: number, part: number): void {
+    const sh = this.ships[slot]!;
+    sh.parts &= ~(1 << part);
+    sh.partHp[part] = 0;
+    const q = shipPoint(sh, SHIP_PART_CENTER[part][0], SHIP_PART_CENTER[part][1], this.pt);
+    const x = q.x;
+    const y = q.y;
+    const out = x >= sh.x + SHIP_W / 2 ? 1 : -1;
+    const vx = sh.vx + out * (50 + this.rng.range(0, 60));
+    const vy = sh.vy - 60 - this.rng.range(0, 60);
+    if (part >= ShipPart.EngineA && part <= ShipPart.EngineD) sh.w += out * 1.2;
+    const seed = this.rng.nextU32();
+    // Its own scrap is its side's: the pieces it sheds must not chew through the hull they came off.
+    craftPartFragments(this.grains, x, y, vx, vy, sh.owner, new Rng(seed));
+    const w = this.tmp.reset();
+    w.u8(R_SHIP_PART);
+    w.u8(slot);
+    w.u8(part);
+    w.u16(clampU16(x));
+    w.u16(clampU16(y + Y_BIAS));
+    w.i16(clampI16(vx * VEL_SCALE));
+    w.i16(clampI16(vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x, y });
+  }
+
+  /** The dropship blows apart; whatever bombs it still carried go up with it. */
+  private destroyShip(slot: number, by: number): void {
+    const sh = this.ships[slot];
+    if (!sh) return;
+    this.ships[slot] = null;
+    const owner = by === 255 ? NO_OWNER : by;
+    const c = shipPoint(sh, SHIP_W / 2, SHIP_H / 2, this.pt);
+    const cx = c.x;
+    const cy = c.y;
+    const r = 50 + sh.bombs * 6;
+    const seed = this.rng.nextU32();
+    this.carve(cx, cy, 16 + sh.bombs * 2, 7, 40, owner);
+    this.grains.blast(cx, cy, r * 1.6, BLAST_IMPULSE * 1.5);
+    const rng = new Rng(seed);
+    craftFragments(this.grains, cx, cy, sh.vx, sh.vy, owner, rng);
+    craftFragments(this.grains, cx, cy, sh.vx, sh.vy, owner, rng);
+    this.splashCrafts(cx, cy, r, 90, owner);
+    this.splashTanks(cx, cy, r, 90, owner);
+    this.splashShips(cx, cy, r, 90, owner);
+    for (const p of this.players) {
+      if (!p || !p.alive || this.shielded(p) || this.friendly(owner, p)) continue;
+      const d = Math.hypot(p.cx - cx, p.cy - cy);
+      if (d >= r) continue;
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      const amt = (90 + sh.bombs * 15) * (1 - d / r);
+      for (let part = 0; part < PART_COUNT; part++) {
+        if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+      }
+      this.applyStrike(p, res, owner === NO_OWNER ? p.id : owner, W_SHIP, cx, cy);
+    }
+    const w = this.tmp.reset();
+    w.u8(R_SHIP_BOOM);
+    w.u8(slot);
+    w.u16(clampU16(cx));
+    w.u16(clampU16(cy + Y_BIAS));
+    w.i16(clampI16(sh.vx * VEL_SCALE));
+    w.i16(clampI16(sh.vy * VEL_SCALE));
     w.u32(seed);
     this.hits.push({ bytes: w.finish(), id: 0, x: cx, y: cy });
   }
@@ -2182,6 +2495,7 @@ export class World {
         p.ack = cmd.seq;
       }
       p.firing = false;
+      if (p.callCd > 0) p.callCd--;
       const prev = p.prevButtons;
       p.prevButtons = p.buttons;
       if (!p.alive) {
@@ -2239,6 +2553,7 @@ export class World {
 
     this.stepCrafts();
     this.stepTanks();
+    this.stepShips();
     this.stepItems();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
@@ -2259,6 +2574,11 @@ export class World {
       // The tilted hull dips below its box by up to tankSink: cover that too.
       if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H + tankSink(t.a), TANK_MASS, t.pilot !== 255 ? t.pilot : NO_OWNER, 0.3);
     }
+    for (let k = 0; k < MAX_SHIPS; k++) {
+      const sh = this.ships[k];
+      // Immune to its own (and its caller's) fragments; its downwash doesn't drag it.
+      if (sh) actors.add(SHIP_ID_BASE + k, sh.x, sh.y, sh.vx, sh.vy, SHIP_W, SHIP_H, SHIP_MASS, sh.owner, 0.2);
+    }
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
@@ -2270,6 +2590,14 @@ export class World {
     // Apply what particles and fields did to bodies this tick.
     for (let a = 0; a < actors.n; a++) {
       const id = actors.id[a];
+      if (id >= SHIP_ID_BASE) {
+        const sh = this.ships[id - SHIP_ID_BASE];
+        if (sh) {
+          sh.vx += actors.dvx[a];
+          sh.vy += actors.dvy[a];
+        }
+        continue;
+      }
       if (id >= TANK_ID_BASE) {
         const t = this.tanks[id - TANK_ID_BASE];
         if (t) {
@@ -2294,6 +2622,11 @@ export class World {
     // Resolve every particle impact against the part of the body it struck.
     for (let h = 0; h < actors.hitN; h++) {
       const hid = actors.id[actors.hitSlot[h]];
+      if (hid >= SHIP_ID_BASE) {
+        const sh = this.ships[hid - SHIP_ID_BASE];
+        if (sh) this.hitShip(hid - SHIP_ID_BASE, sh.x + actors.hitLx[h], sh.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        continue;
+      }
       if (hid >= TANK_ID_BASE) {
         const t = this.tanks[hid - TANK_ID_BASE];
         if (t) this.hitTank(hid - TANK_ID_BASE, t.x + actors.hitLx[h], t.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
@@ -2593,6 +2926,33 @@ export class World {
         }
       }
 
+      // Dropships: all of them, every frame (there are only a few).
+      let nShip = 0;
+      for (const sh of this.ships) if (sh) nShip++;
+      if (nShip > 0) {
+        w.u8(R_SHIPS);
+        w.u8(nShip);
+        for (let k = 0; k < MAX_SHIPS; k++) {
+          const sh = this.ships[k];
+          if (!sh) continue;
+          w.u8(k);
+          w.u16(clampU16(sh.x * POS_SCALE));
+          w.u16(clampU16((sh.y + Y_BIAS) * POS_SCALE));
+          w.i16(clampI16(sh.vx * VEL_SCALE));
+          w.i16(clampI16(sh.vy * VEL_SCALE));
+          w.u8(Math.round(sh.a * 100) & 255);
+          w.u8(sh.parts);
+          w.u16(Math.max(0, Math.ceil(sh.hp)));
+          w.u8(sh.bombs);
+          w.u8(sh.owner);
+          w.u8(sh.team);
+          w.u16(quantizeAim(sh.aim[0]));
+          w.u16(quantizeAim(sh.aim[1]));
+          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0));
+          for (let e = 0; e < 4; e++) w.u8(Math.round(sh.thrust[e] * 255));
+        }
+      }
+
       this.replicateItems(p, w, vx0, vy0, vx1, vy1);
 
       const roster = this.pendingRoster.get(p.id);
@@ -2714,6 +3074,13 @@ const CRAFT_ID_BASE = 128;
 /** Actor-field ids for tanks: TANK_ID_BASE + tank slot (above every rocket's). */
 const TANK_ID_BASE = CRAFT_ID_BASE + MAX_CRAFTS;
 const TANK_MASS = 200;
+/** Actor-field ids for dropships, above every tank's. */
+const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
+const SHIP_MASS = 120;
+/** Station altitude over the ground, turret reach, how long a radio waits between calls. */
+const SHIP_ALT = 80;
+const SHIP_GUN_RANGE = 300;
+const CALL_COOLDOWN = 30 * 30;
 /** How close (cells, box to box) a clone must be to climb into a tank. */
 const BOARD_REACH = 10;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less

@@ -260,7 +260,13 @@ function frame(now: number): void {
       // Materializer: a click on the menu picks a piece; a click in the world
       // asks the server to build it there (it checks the same rules the
       // preview shows).
-      if (input.takeClick() && g.building) {
+      const click = input.takeClick();
+      // Radio in hand: a click on its menu calls in a dropship or a tank.
+      if (click && g.calling) {
+        const kind = renderer.callMenuHit(input.mouseX, input.mouseY);
+        if (kind >= 0) n.call(kind);
+      }
+      if (click && g.building) {
         const hit = renderer.menuHit(input.mouseX, input.mouseY);
         if (hit >= 0) input.piece = hit;
         else {
@@ -269,7 +275,7 @@ function frame(now: number): void {
           if (g.canBuildHere(input.piece, at.x, at.y) === BuildResult.Ok) n.build(input.piece, at.x, at.y);
         }
       }
-      if (g.building) buttons &= ~BTN_FIRE;
+      if (g.building || g.calling) buttons &= ~BTN_FIRE;
       const inv = g.invByte();
       g.localTick(buttons, quantizeAim(aim), (seq) => n.input(seq, buttons, quantizeAim(aim), inv));
     }

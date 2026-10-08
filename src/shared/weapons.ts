@@ -9,6 +9,10 @@ export const ProjKind = {
   Shell: 4,
   /** Tank vulcan round. */
   TankBullet: 5,
+  /** Dropship turret round. */
+  ShipGun: 6,
+  /** Dropship bomb: five times a bazooka rocket's blast. */
+  Bomb: 7,
 } as const;
 
 export interface ProjDef {
@@ -37,12 +41,18 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.35, life: 120, damage: 50, mass: 3, sharp: 0.6, carveR: 24, coreR: 11, splashR: 40, splashDamage: 90, debris: 56, bounce: 0, ballistic: false },
   // Tank vulcan: a rifle round, a touch lighter.
   { gravity: 0.15, life: 40, damage: 14, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
+  // Dropship turret: the same light round.
+  { gravity: 0.15, life: 40, damage: 13, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
+  // Dropship bomb: 5x the bazooka's blast (splash damage), a much bigger crater and reach.
+  { gravity: 1, life: 240, damage: 120, mass: 4, sharp: 0.4, carveR: 40, coreR: 18, splashR: 64, splashDamage: 350, debris: 140, bounce: 0, ballistic: false },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
 export const PROJ_DIG = -1;
 /** WeaponDef.proj for the materializer, which builds fortifications (see build.ts) instead of shooting. */
 export const PROJ_BUILD = -2;
+/** WeaponDef.proj for the radio, which calls in support (a dropship or a tank) instead of shooting. */
+export const PROJ_RADIO = -3;
 
 export const WeaponId = {
   Rifle: 0,
@@ -51,6 +61,8 @@ export const WeaponId = {
   Sniper: 3,
   Digger: 4,
   Materializer: 5,
+  /** Calls in a dropship or a tank, for gold. */
+  Radio: 6,
 } as const;
 
 /**
@@ -87,6 +99,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Sniper', proj: ProjKind.Slug, muzzle: 17, rpm: 50, auto: false, speed: 1500, spread: 0.004, clip: 5, reload: 84, scope: 600 },
   { name: 'Digger', proj: PROJ_DIG, muzzle: 11, rpm: 900, auto: true, speed: 0, spread: 0, clip: 0, reload: 0, scope: 40 },
   { name: 'Materializer', proj: PROJ_BUILD, muzzle: 9, rpm: 100, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
+  { name: 'Radio', proj: PROJ_RADIO, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
@@ -103,6 +116,8 @@ export function weaponOfProj(kind: number): WeaponDef | undefined {
 export function projName(kind: number): string {
   if (kind === ProjKind.Shell) return 'Tank Cannon';
   if (kind === ProjKind.TankBullet) return 'Tank SMG';
+  if (kind === ProjKind.ShipGun) return 'Dropship Gun';
+  if (kind === ProjKind.Bomb) return 'Dropship Bomb';
   return weaponOfProj(kind)?.name ?? '';
 }
 

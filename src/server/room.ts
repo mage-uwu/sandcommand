@@ -4,6 +4,7 @@ import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import {
   C_CHAT,
   C_BUILD,
+  C_CALL,
   C_INPUT,
   C_PING,
   C_RESYNC,
@@ -126,6 +127,9 @@ export class GameRoom extends DurableObject<Env> {
           break;
         case C_BUILD:
           world.build(id, r.u8(), r.u16(), r.u16());
+          break;
+        case C_CALL:
+          world.call(id, r.u8());
           break;
       }
     } catch {

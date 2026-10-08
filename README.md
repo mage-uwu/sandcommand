@@ -310,6 +310,39 @@ come down by parachute** at spread-out spots and land empty.
   Parts blown off and explosions go out as seeded records (`R_TANK_PART`,
   `R_TANK_BOOM`), so every client throws the same scrap.
 
+## Radio and dropship
+
+Every clone carries a **Radio** (`WeaponId.Radio`, always in the kit
+alongside the digger and the materializer). With the radio in hand, a menu
+comes up: click **Dropship** or **Tank** to call it in for **1500 gold**.
+The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
+
+- **Tank.** An empty tank is parachuted onto your position. Climb in, or
+  leave it for a teammate.
+- **Dropship** (`src/shared/dropship.ts`). An aerial gunship that hangs
+  from four engine pods on struts, like a modern drone. Nobody pilots it.
+  An autopilot tilts the hull to move and shares lift and attitude torque
+  between the engines still attached; it holds attitude first and lift
+  second. It flies in, stations about 80 cells over its caller, and does
+  three things:
+  - **Turrets.** It strafes enemies in sight with a turret on either side.
+  - **Bombs.** It slides over enemies near its caller, opens the bomb-bay
+    doors in its belly and drops bombs. It carries **8**, each with five
+    times a bazooka's blast. It leads each bomb by its fall time and
+    drops only with a clear line down.
+  - **Leaving.** It flies home when it's out of bombs and idle, after two
+    minutes, or when its caller leaves.
+- **Damage.** The dropship has about half a tank's toughness (3750 hull).
+  Each engine, each turret and the bay doors can be shot off separately.
+  Without doors it can't bomb. On three engines it leans on the rest and
+  keeps flying; lose more and it flips and crashes. When the hull goes, it
+  explodes along with whatever bombs it still carries. Its caller's and
+  teammates' fire doesn't hurt it.
+- **Networking.** Dropships go out every frame (`R_SHIPS`, 24 bytes each).
+  Each record carries position, tilt, parts, bombs, turret aims, doors and
+  per-engine throttle for the exhaust. Parts lost and the final explosion
+  are seeded records (`R_SHIP_PART`, `R_SHIP_BOOM`).
+
 ## Bunkers
 
 Every map has bunker complexes on the surface (`src/shared/structures.ts`),

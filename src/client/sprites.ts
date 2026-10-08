@@ -186,6 +186,21 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 1,
   },
+  {
+    // Radio: a field handset, its whip antenna up
+    grid: [
+      '......K..',
+      '......K..',
+      '......K..',
+      '...KKKKK.',
+      'KAAKGgVGK',
+      'KAAKGGGGK',
+      '.KKKGgGGK',
+      '...KKKKK.',
+    ],
+    px: 1,
+    py: 4,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
@@ -541,6 +556,13 @@ export class SpriteCache {
   tankArmor(left: boolean): HTMLCanvasElement {
     return this.tankSprite(`armor${left ? 1 : 0}`, () => bake(TANK_ARMOR, TANK_PAL, left));
   }
+  /** Dropship hull in the caller's team colour. */
+  shipHull(team: number): HTMLCanvasElement {
+    return this.tankSprite(`ship${team}`, () => bake(shipHullGrid(), shipPalette(team)));
+  }
+  shipEngine(): HTMLCanvasElement {
+    return this.tankSprite('shipEngine', () => bake(SHIP_ENGINE, shipPalette(0x808080)));
+  }
   /** The steel cupola over the hatch. */
   tankShield(left: boolean): HTMLCanvasElement {
     return this.tankSprite(`shield${left ? 1 : 0}`, () => bake(TANK_SHIELD, TANK_PAL, left));
@@ -739,6 +761,76 @@ const TANK_SHIELD: Grid = [
   'KKKKKKKKKKKK',
 ];
 const TREAD_FRAMES = 4;
+
+/** Dropship colours: grey-blue gunmetal, a canopy, hazard markings (T = the caller's team colour). */
+function shipPalette(team: number): Record<string, number> {
+  return {
+    K: 0x14181c,
+    H: 0xc8d2dc,
+    L: 0x9aa8b4,
+    M: 0x6e7c88,
+    D: 0x4a5560,
+    d: 0x2e363e,
+    C: 0x6ad6ff,
+    c: 0x1e6a8a,
+    T: team,
+    Y: 0xe2b63a,
+    k: 0x111111,
+    g: 0x3a4248,
+  };
+}
+
+/**
+ * The dropship's hull, procedurally laid out on its 44x24 box (its top 7
+ * rows hold the engine struts): a rounded gunship body lit from above, a
+ * canopy at the nose, panel lines and rivets, the caller's team stripe and
+ * hazard chevrons around the bomb bay in its belly.
+ */
+function shipHullGrid(): Grid {
+  const W = 44;
+  const H = 24;
+  const g: string[][] = Array.from({ length: H }, () => new Array<string>(W).fill('.'));
+  const top = 7;
+  const bottom = 21;
+  const inset = (y: number) => {
+    const r = y - top;
+    const fromBottom = bottom - 1 - y;
+    return Math.max([5, 3, 2, 1, 1][r] ?? 0, [4, 2, 1][fromBottom] ?? 0);
+  };
+  for (let y = top; y < bottom; y++) {
+    const i = inset(y);
+    for (let x = 1 + i; x < W - 1 - i; x++) {
+      const edge = x === 1 + i || x === W - 2 - i || y === top || y === bottom - 1;
+      const r = y - top;
+      let c = r <= 2 ? 'H' : r <= 5 ? 'L' : r <= 9 ? 'M' : 'D';
+      if (r === 1 && x > W - 14) c = 'L';
+      if (edge) c = 'K';
+      g[y][x] = c;
+    }
+  }
+  // Panel lines and rivets.
+  for (const px of [11, 22, 32]) for (let y = top + 2; y < bottom - 1; y++) if (g[y][px] !== 'K') g[y][px] = 'D';
+  for (const px of [6, 16, 27, 37]) if (g[top + 4][px] !== 'K') g[top + 4][px] = 'K';
+  // Canopy at the nose.
+  for (let y = top + 2; y < top + 6; y++) for (let x = W - 12; x < W - 4 - (y - top - 2); x++) g[y][x] = y < top + 4 ? 'C' : 'c';
+  // The caller's team stripe along the flank.
+  for (let x = 4; x < W - 14; x++) if (g[top + 7][x] !== 'K' && g[top + 7][x] !== 'D') g[top + 7][x] = 'T';
+  // Hazard chevrons framing the bay.
+  for (let x = 14; x < 31; x++) if (x < 17 || x > 27) g[bottom - 3][x] = (x & 1) === 0 ? 'Y' : 'k';
+  // Struts up to the engine pods.
+  for (const ex of [5, 15, 29, 39]) for (let y = 6; y < top; y++) g[y][ex] = 'g';
+  return g.map((r) => r.join(''));
+}
+
+/** An engine pod: a ducted nacelle, intake ring on top, the nozzle below (its glow is drawn live). */
+const SHIP_ENGINE: Grid = [
+  '..KKKKK..',
+  '.KLHHHLK.',
+  'KLMMMMMLK',
+  'KMDDDDDMK',
+  '.KDdddDK.',
+  '..KKKKK..',
+];
 
 /** The track under the hull: links that crawl and road wheels whose spoke turns, by frame. */
 function tankTread(frame: number): Grid {

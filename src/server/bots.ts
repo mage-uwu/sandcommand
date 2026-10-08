@@ -61,6 +61,8 @@ export class BotBrain {
   private readonly assault: boolean;
   /** Ticks driving without getting anywhere (it shells the way clear, then bails out). */
   private tankStuck = 0;
+  /** Distance to the target at the last progress check (driving). */
+  private progD = Infinity;
   /** A tank it gave up on, left alone until `abandonUntil`. */
   private abandoned = -1;
   private abandonUntil = 0;
@@ -292,7 +294,16 @@ export class BotBrain {
       const dir = !this.seeTarget || Math.abs(dx) > 220 ? Math.sign(dx) : Math.abs(dx) < 90 ? -Math.sign(dx) : 0;
       if (dir > 0) buttons |= BTN_RIGHT;
       if (dir < 0) buttons |= BTN_LEFT;
-      this.tankStuck = dir !== 0 && moved < 0.3 ? this.tankStuck + 1 : Math.max(0, this.tankStuck - 2);
+      // Stuck means no progress toward the target over a couple of seconds
+      // (rocking against a face it can't climb still counts as stuck).
+      if (dir === 0) this.tankStuck = 0;
+      else if (moved < 0.3) this.tankStuck++;
+      if ((t + this.phase) % 60 === 0) {
+        const d = Math.abs(dx);
+        if (dir !== 0 && d > this.progD - 10) this.tankStuck = Math.max(this.tankStuck, 60) + 30;
+        else if (d < this.progD - 10) this.tankStuck = 0;
+        this.progD = d;
+      }
       if ((this.tankStuck > 8 || tgt.cy < cy - 60) && k.fuel > 20) buttons |= BTN_UP;
       // Lead with the vulcan's flight time; shells drop, so lift them.
       const lead = dist / SMG_SPEED;

@@ -134,6 +134,7 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_SHIP = 250; // dropship crashes and explosions
 export const W_TANK = 251; // tank crushes and explosions
 export const W_CRAFT = 252; // drop-rocket crashes, crushes and explosions
 export const W_DEBRIS = 253;
@@ -763,7 +764,7 @@ const SAND_MIN = 6; // grains overlapping a body before a flow can drag it
 const SAND_DRAG = 0.012; // per grain, capped by SAND_DRAG_MAX
 const SAND_DRAG_MAX = 0.35;
 const AIR_ACTOR = 0.35; // per-tick blend toward the blast wind
-export const MAX_ACTORS = 136; // 64 clones + 64 drop rockets + tanks
+export const MAX_ACTORS = 140; // 64 clones + 64 drop rockets + tanks + dropships
 
 /**
  * Actors (players) as seen by the particle engine. Each tick the world loads
@@ -993,6 +994,8 @@ const FRAGMENTS: readonly FragmentDef[] = [
   { shrapnel: 0, speed: 0, embers: 0 },
   { shrapnel: 44, speed: 820, embers: 20 }, // tank shell
   { shrapnel: 0, speed: 0, embers: 0 },
+  { shrapnel: 0, speed: 0, embers: 0 },
+  { shrapnel: 110, speed: 920, embers: 50 }, // dropship bomb
 ];
 
 /**

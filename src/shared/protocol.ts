@@ -13,6 +13,13 @@ export const C_PING = 0x04;
 export const C_CHAT = 0x05;
 /** Materializer: build piece u8 at grid top-left gx u16, gy u16. */
 export const C_BUILD = 0x06;
+/** Radio: call in support, kind u8 (CallKind). */
+export const C_CALL = 0x07;
+
+/** What a radio can call in. */
+export const CallKind = { Dropship: 0, Tank: 1 } as const;
+/** Gold a radio call costs. */
+export const CALL_COST = 1500;
 
 // Server -> client
 export const S_WELCOME = 0x81;
@@ -56,6 +63,11 @@ export const R_TANK_SELF = 26;
 export const R_TANK_PART = 27;
 /** A tank exploding. */
 export const R_TANK_BOOM = 28;
+/** Every dropship, every frame (few of them): position, tilt, parts, guns, bombs. */
+export const R_SHIPS = 29;
+/** A part blown off a dropship / a dropship exploding (same layout as the tank records). */
+export const R_SHIP_PART = 30;
+export const R_SHIP_BOOM = 31;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -73,7 +85,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 /** Last Man Standing round phases. */
 export const Phase = {

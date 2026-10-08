@@ -1,10 +1,10 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, CallKind, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
 import { PROJ, PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
-import { type CraftView, type Game, type RemoteView, type TankView, TEAM_COLORS } from './game.ts';
+import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
 import { bannerLines } from './banner.ts';
 import type { InputState } from './input.ts';
@@ -13,6 +13,7 @@ import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
+import { BAY_AT, ENGINE_X, SHIP_H, SHIP_HP, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor } from './texture.ts';
@@ -301,6 +302,9 @@ export class Renderer {
       this.drawTank(ctx, t, mine ? wmx < t.x + TANK_W / 2 : t.faceLeft, aim, game, now);
     }
 
+    // Dropships.
+    for (const sh of game.shipViews()) this.drawShip(ctx, sh, game, now);
+
     // Remote clones (not those riding inside a tank).
     const views = game.remoteViews().filter((v) => !game.tankPilots.has(v.id));
     for (const v of views) {
@@ -397,7 +401,14 @@ export class Renderer {
       const k = p.kind[i];
       const x = p.x[i];
       const y = p.y[i];
-      if (k === 4) {
+      if (k === 7) {
+        // Dropship bomb: a dark finned casing, nose down, a red band.
+        ctx.fillStyle = '#2a2e30';
+        ctx.fillRect(x - 1.5, y - 3, 3, 5);
+        ctx.fillRect(x - 2.5, y - 4, 5, 1);
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(x - 1.5, y, 3, 1);
+      } else if (k === 4) {
         // Tank shell: a fat dark slug with a hot base.
         ctx.fillStyle = '#3a3a30';
         ctx.fillRect(x - 2, y - 2, 4, 4);
@@ -440,6 +451,24 @@ export class Renderer {
     const dpr = W / innerWidth;
     ctx.font = `${Math.round(11 * dpr)}px ui-monospace, monospace`;
     ctx.textAlign = 'center';
+    // Dropships: whose they are, how much hull is left, bombs aboard.
+    for (const sh of game.shipViews()) {
+      const sx = offX + (sh.x + SHIP_W / 2) * z;
+      const sy = offY + (sh.y - 6) * z - 10 * dpr;
+      const info = game.players.get(sh.owner);
+      const tag = `${info?.name ?? '?'}'s dropship  ✸${sh.bombs}`;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillText(tag, sx + dpr, sy + dpr);
+      ctx.fillStyle = info?.color ?? '#ccc';
+      ctx.fillText(tag, sx, sy);
+      if (sh.hp < SHIP_HP) {
+        const w = 44 * dpr;
+        ctx.fillStyle = '#300';
+        ctx.fillRect(sx - w / 2, sy + 3 * dpr, w, 3 * dpr);
+        ctx.fillStyle = sh.hp > SHIP_HP * 0.35 ? '#d8c040' : '#e33';
+        ctx.fillRect(sx - w / 2, sy + 3 * dpr, (w * sh.hp) / SHIP_HP, 3 * dpr);
+      }
+    }
     // Tanks: who's driving, and how much hull is left.
     for (const t of game.tankViews(alpha)) {
       const sx = offX + (t.x + TANK_W / 2) * z;
@@ -730,6 +759,113 @@ export class Renderer {
   private readonly pieceIcons: HTMLCanvasElement[] = [];
 
   /** Build menu entry under a CSS-pixel point, or -1. */
+  /** Radio call menu entry (CallKind) under a CSS-pixel point, or -1. */
+  callMenuHit(cssX: number, cssY: number): number {
+    const dpr = this.canvas.width / innerWidth;
+    const x = cssX * dpr;
+    const y = cssY * dpr;
+    for (const r of this.callRects) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.i;
+    return -1;
+  }
+  private readonly callRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
+
+  /** The radio's menu: call in a dropship or a tank, for gold. */
+  private drawCallMenu(game: Game, input: InputState, s: number, H: number): void {
+    const ctx = this.ctx;
+    const rowH = 46 * s;
+    const w = 236 * s;
+    const x0 = 14 * s;
+    const entries = [
+      { kind: CallKind.Dropship, name: 'DROPSHIP', blurb: 'air support · 2 turrets · 8 bombs' },
+      { kind: CallKind.Tank, name: 'TANK', blurb: 'parachuted onto your position' },
+    ];
+    const y0 = Math.max(250 * s, H / 2 - (entries.length * rowH) / 2);
+    this.callRects.length = 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(x0 - 4 * s, y0 - 24 * s, w + 8 * s, entries.length * rowH + 28 * s);
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
+    ctx.fillStyle = '#9fe870';
+    ctx.fillText(`RADIO  (${input.touch ? 'tap' : 'click'} to call in)`, x0, y0 - 8 * s);
+    const afford = game.gold >= CALL_COST;
+    entries.forEach((e, i) => {
+      const y = y0 + i * rowH;
+      ctx.fillStyle = afford ? 'rgba(160,232,112,0.14)' : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(x0, y + 2 * s, w, rowH - 4 * s);
+      ctx.strokeStyle = afford ? '#9fe870' : '#555';
+      ctx.lineWidth = s;
+      ctx.strokeRect(x0, y + 2 * s, w, rowH - 4 * s);
+      ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(e.name, x0 + 8 * s, y + 20 * s);
+      ctx.fillStyle = afford ? '#ffd34a' : '#ff7060';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${CALL_COST} gold`, x0 + w - 8 * s, y + 20 * s);
+      ctx.textAlign = 'left';
+      ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
+      ctx.fillStyle = '#c8d0d8';
+      ctx.fillText(e.blurb, x0 + 8 * s, y + 36 * s);
+      this.callRects.push({ x: x0, y, w, h: rowH, i: e.kind });
+    });
+  }
+
+  /**
+   * A dropship: four engine pods on struts over a gunship hull (in its
+   * caller's team colours), nozzles glowing with each engine's throttle,
+   * a turret swivelling at either end and the bomb-bay doors swinging open
+   * in its belly; all tilted with the hull. Lost parts are simply gone.
+   */
+  private drawShip(ctx: CanvasRenderingContext2D, sh: ShipView, game: Game, now: number): void {
+    const sp = this.sprites;
+    const team = (sh.team !== 255 ? TEAM_COLORS[sh.team]?.rgb : undefined) ?? game.players.get(sh.owner)?.rgb ?? 0x8090a0;
+    const x = Math.round(sh.x);
+    const y = Math.round(sh.y);
+    ctx.save();
+    ctx.translate(sh.x + SHIP_W / 2, sh.y + SHIP_H / 2);
+    ctx.rotate(sh.a);
+    ctx.translate(-(x + SHIP_W / 2), -(y + SHIP_H / 2));
+    ctx.drawImage(sp.shipHull(team), x, y);
+    for (let e = 0; e < 4; e++) {
+      if (!hasShipPart(sh.parts, ShipPart.EngineA + e)) continue;
+      const ex = x + ENGINE_X[e] - 4;
+      ctx.drawImage(sp.shipEngine(), ex, y);
+      // The nozzle's glow, brighter with the throttle (and a flicker).
+      const t = sh.thrust[e] * (0.8 + 0.2 * Math.sin(now / 37 + e));
+      ctx.fillStyle = `rgba(120,220,255,${0.35 + 0.6 * t})`;
+      ctx.fillRect(ex + 3, y + 6, 3, 1 + Math.round(t * 2));
+    }
+    // Bomb bay: closed doors are a seam; open, two flaps hang down.
+    if (hasShipPart(sh.parts, ShipPart.Doors)) {
+      ctx.fillStyle = '#20262c';
+      if (sh.doors) {
+        ctx.fillRect(x + BAY_AT[0] - 5, y + 19, 10, 2);
+        ctx.fillStyle = '#4a5560';
+        ctx.fillRect(x + BAY_AT[0] - 6, y + 20, 2, 4);
+        ctx.fillRect(x + BAY_AT[0] + 4, y + 20, 2, 4);
+      } else ctx.fillRect(x + BAY_AT[0], y + 18, 1, 2);
+    } else {
+      ctx.fillStyle = '#111';
+      ctx.fillRect(x + BAY_AT[0] - 5, y + 18, 10, 3); // a torn hole
+    }
+    // Turrets: a ball mount and twin barrels on the aim (relative to the tilted hull).
+    for (const side of [0, 1]) {
+      if (!hasShipPart(sh.parts, ShipPart.TurretL + side)) continue;
+      const [tx, ty] = TURRET_AT[side];
+      const g = sp.tankGun(true, sh.aim[side] - sh.a);
+      ctx.drawImage(g.c, Math.round(x + tx - g.r), Math.round(y + ty - g.r));
+      ctx.fillStyle = '#2e363e';
+      ctx.fillRect(x + tx - 3, y + ty - 3, 6, 6);
+      ctx.fillStyle = '#9aa8b4';
+      ctx.fillRect(x + tx - 2, y + ty - 2, 3, 2);
+      if (sh.fired[side] && (now / 45) % 2 < 1) {
+        const a = sh.aim[side] - sh.a;
+        ctx.fillStyle = '#fff4b0';
+        ctx.fillRect(Math.round(x + tx + Math.cos(a) * 11) - 1, Math.round(y + ty + Math.sin(a) * 11) - 1, 3, 3);
+      }
+    }
+    ctx.restore();
+  }
+
   menuHit(cssX: number, cssY: number): number {
     const dpr = this.canvas.width / innerWidth;
     const x = cssX * dpr;
@@ -1031,6 +1167,8 @@ export class Renderer {
     }
     if (game.building) this.drawBuildMenu(game, input, s, H);
     else this.menuRects.length = 0;
+    if (game.calling) this.drawCallMenu(game, input, s, H);
+    else this.callRects.length = 0;
     if (game.alive) this.drawPaperDoll(game, s);
 
     // Inventory: what we carry, the one in hand highlighted.

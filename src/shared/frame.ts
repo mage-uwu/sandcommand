@@ -27,6 +27,9 @@ import {
   R_PROJ_SPAWN,
   R_ROUND,
   R_TEAMS,
+  R_SHIPS,
+  R_SHIP_PART,
+  R_SHIP_BOOM,
   R_TANKS,
   R_TANK_SELF,
   R_TANK_PART,
@@ -131,6 +134,25 @@ export interface TankState {
   a: number; // hull tilt, radians
 }
 
+export interface ShipState {
+  slot: number;
+  x: number; // box top-left
+  y: number;
+  vx: number;
+  vy: number;
+  a: number; // tilt, radians
+  parts: number; // attached-part mask (dropship.ts)
+  hp: number;
+  bombs: number;
+  owner: number; // who called it in
+  team: number;
+  aim: [number, number]; // turret aims, port and starboard
+  doors: boolean; // bomb bay open
+  fired: [boolean, boolean];
+  leaving: boolean;
+  thrust: number[]; // per engine, 0..1
+}
+
 /** The tank this client drives, at full precision: everything stepTank needs, plus its damage. */
 export interface SelfTankState {
   slot: number;
@@ -224,6 +246,10 @@ export interface FrameHandler {
   selfTank(s: SelfTankState): void;
   tankPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   tankBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
+  /** Every dropship this frame. */
+  ships(list: ShipState[]): void;
+  shipPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void;
+  shipBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** A body part was torn off actor `id` at (x, y), flying with (vx, vy). */
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void;
 }
@@ -542,6 +568,42 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.selfTank({ slot, x, y, vx, vy, fuel, chute: (f & 1) !== 0, onGround: (f & 2) !== 0, jetting: (f & 4) !== 0, parts, partHp, cannonCd: r.u8(), a, w });
         break;
       }
+      case R_SHIPS: {
+        const n = r.u8();
+        const list: ShipState[] = [];
+        for (let i = 0; i < n; i++) {
+          const slot = r.u8();
+          const x = r.u16() / 16;
+          const y = r.u16() / 16 - Y_BIAS;
+          const vx = r.i16() / 8;
+          const vy = r.i16() / 8;
+          const a = ((r.u8() << 24) >> 24) / 100;
+          const parts = r.u8();
+          const hp = r.u16();
+          const bombs = r.u8();
+          const owner = r.u8();
+          const team = r.u8();
+          const aim: [number, number] = [dequantizeAim(r.u16()), dequantizeAim(r.u16())];
+          const f = r.u8();
+          const thrust = [r.u8() / 255, r.u8() / 255, r.u8() / 255, r.u8() / 255];
+          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust });
+        }
+        h.ships(list);
+        break;
+      }
+      case R_SHIP_PART:
+      case R_SHIP_BOOM: {
+        const slot = r.u8();
+        const part = type === R_SHIP_PART ? r.u8() : 0;
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        const vx = r.i16() / 8;
+        const vy = r.i16() / 8;
+        const seed = r.u32();
+        if (type === R_SHIP_PART) h.shipPart(slot, part, x, y, vx, vy, seed);
+        else h.shipBoom(slot, x, y, vx, vy, seed);
+        break;
+      }
       case R_TANK_PART:
       case R_TANK_BOOM: {
         const slot = r.u8();
@@ -608,4 +670,7 @@ export const nullHandler: FrameHandler = {
   selfTank() {},
   tankPart() {},
   tankBoom() {},
+  ships() {},
+  shipPart() {},
+  shipBoom() {},
 };

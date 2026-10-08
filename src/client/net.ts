@@ -1,5 +1,5 @@
 import { Reader, Writer } from '../shared/codec.ts';
-import { C_BUILD, C_CHAT, C_INPUT, C_PING, C_RESYNC, S_FRAME, S_PONG, S_REJECT, S_WELCOME } from '../shared/protocol.ts';
+import { C_BUILD, C_CALL, C_CHAT, C_INPUT, C_PING, C_RESYNC, S_FRAME, S_PONG, S_REJECT, S_WELCOME } from '../shared/protocol.ts';
 
 export interface Welcome {
   id: number;
@@ -106,6 +106,14 @@ export class Net {
     w.u8(piece);
     w.u16(gx);
     w.u16(gy);
+    this.send();
+  }
+
+  /** Radio: call in support (CallKind). */
+  call(kind: number): void {
+    const w = this.w.reset();
+    w.u8(C_CALL);
+    w.u8(kind);
     this.send();
   }
 
