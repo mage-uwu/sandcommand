@@ -178,6 +178,7 @@ import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
+import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
@@ -1442,8 +1443,9 @@ export class World {
       res.detached.length = 0;
       res.vital = false;
       if (!this.friendly(owner, v)) strike(v.parts, part, energy, def.damage, res);
-      v.body.vx += (rvx * def.mass) / 8;
-      v.body.vy += (rvy * def.mass) / 8;
+      const knock = (def.mass * (def.knock ?? 1)) / 8;
+      v.body.vx += rvx * knock;
+      v.body.vy += rvy * knock;
       this.applyStrike(v, res, owner, kind, x, y);
     }
     const seed = this.rng.nextU32();
@@ -2873,14 +2875,16 @@ export class World {
       this.handleWeapon(p, prev);
       if (p.buildReq) this.tryBuild(p);
       // The view this client sees (and so its interest area): pushed down the
-      // barrel by the weapon's scope distance while scoping.
+      // barrel by the weapon's scope distance while scoping, but no further
+      // than the line of sight runs (a scope never sees through terrain).
       p.camX = p.cx;
       p.camY = p.cy;
       if (p.buttons & BTN_SCOPE) {
         const aim = dequantizeAim(p.aimQ);
-        const reach = WEAPONS[p.weapon]?.scope ?? 0;
-        p.camX += Math.cos(aim) * reach;
-        p.camY += Math.sin(aim) * reach;
+        const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, Math.cos(aim) < 0, this.shoulderPt);
+        const reach = sightLine(this.terrain, sh.x, sh.y, aim, WEAPONS[p.weapon]?.scope ?? 0);
+        p.camX = sh.x + Math.cos(aim) * reach;
+        p.camY = sh.y + Math.sin(aim) * reach;
       }
     }
 

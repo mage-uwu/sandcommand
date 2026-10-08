@@ -2,6 +2,8 @@ import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK,
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
+import { sightLine } from '../shared/scope.ts';
+import { segmentBox } from '../shared/kernels.ts';
 import { hash2 } from '../shared/rng.ts';
 import { PROJ, PROJ_BUILD, REPAIR_REACH, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
@@ -66,6 +68,8 @@ export class Renderer {
   private readonly backdrop = new Backdrop();
   /** Aiming down the scope this frame (camera pushed out, overlay drawn). */
   private scoped = false;
+  /** The scope's line of sight this frame: from the shoulder along the aim to the first solid cell. */
+  private sight: { x: number; y: number; aim: number; dist: number } | null = null;
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
   camX = WORLD_W / 2;
@@ -196,12 +200,15 @@ export class Renderer {
     if (this.scoped) {
       // Scoping: push the view out along the barrel by the weapon's scope
       // distance (the server moves this client's interest area the same way).
+      // It stops where the line of sight does: never through or past terrain.
       const mx = this.camX + (input.mouseX * (W / innerWidth) - W / 2) / z;
       const my = this.camY + (input.mouseY * (H / innerHeight) - H / 2) / z;
-      const aim = Math.atan2(my - (selfY + SHOULDER_Y), mx - (selfX + SHOULDER_X));
-      const reach = WEAPONS[game.weapon]?.scope ?? 0;
-      this.camX += (selfX + SHOULDER_X + Math.cos(aim) * reach - this.camX) * 0.12;
-      this.camY += (selfY + SHOULDER_Y + Math.sin(aim) * reach - this.camY) * 0.12;
+      const sh = shoulderAt(selfX, selfY, b.stance, mx < selfX + ACTOR_W / 2, this.shPt);
+      const aim = Math.atan2(my - sh.y, mx - sh.x);
+      const reach = sightLine(game.terrain, sh.x, sh.y, aim, WEAPONS[game.weapon]?.scope ?? 0);
+      this.sight = { x: sh.x, y: sh.y, aim, dist: sightLine(game.terrain, sh.x, sh.y, aim, 2000) };
+      this.camX += (sh.x + Math.cos(aim) * reach - this.camX) * 0.12;
+      this.camY += (sh.y + Math.sin(aim) * reach - this.camY) * 0.12;
     } else if (game.alive) {
       // Look ahead toward the mouse a little, like CC's aim-follow camera.
       const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;
@@ -320,6 +327,10 @@ export class Renderer {
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
       this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction);
     }
+    // Scoped: the line a shot would take, to the wall it would hit or the
+    // first clone in its way (bracketed): only what you can actually hit.
+    if (this.scoped && this.sight) this.drawSightLine(ctx, game, views, now);
+
     // Own clone (hidden inside its tank while driving).
     if (game.alive && !game.drive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
@@ -1035,6 +1046,47 @@ export class Renderer {
       ctx.fillStyle = game.gold >= p.cost ? '#ffd34a' : '#ff7060';
       ctx.fillText(`${p.cost} gold`, x0 + 44 * s, y + 33 * s);
       this.menuRects.push({ x: x0, y, w, h: rowH, i });
+    }
+  }
+
+  /** Line of sight down the scope (see `sight`): a faint laser, an impact mark, brackets on the clone it would hit. */
+  private drawSightLine(ctx: CanvasRenderingContext2D, game: Game, views: RemoteView[], now: number): void {
+    const s = this.sight!;
+    const dx = Math.cos(s.aim) * s.dist;
+    const dy = Math.sin(s.aim) * s.dist;
+    let t = 1;
+    let hit: RemoteView | null = null;
+    for (const v of views) {
+      if (!(v.flags & F_ALIVE) || v.id === game.myId) continue;
+      const k = segmentBox(s.x, s.y, dx, dy, v.x, v.y, v.x + ACTOR_W, v.y + ACTOR_H);
+      if (k >= 0 && k < t) {
+        t = k;
+        hit = v;
+      }
+    }
+    const ex = s.x + dx * t;
+    const ey = s.y + dy * t;
+    const foe = hit && !(game.myTeam !== Team.None && game.teamOf[hit.id] === game.myTeam);
+    ctx.strokeStyle = foe ? 'rgba(255,70,50,0.55)' : 'rgba(255,90,70,0.25)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(s.x + Math.cos(s.aim) * 8, s.y + Math.sin(s.aim) * 8);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.fillStyle = foe ? '#ff4030' : '#ffb0a0';
+    ctx.fillRect(Math.round(ex) - 1, Math.round(ey) - 1, 2, 2);
+    if (hit) {
+      // Brackets on the clone in the line of fire (red: an enemy; grey: a friend).
+      const p = 1 + Math.round(Math.sin(now / 90));
+      const x0 = Math.round(hit.x) - 2 - p;
+      const y0 = Math.round(hit.y) - 2 - p;
+      const x1 = Math.round(hit.x) + ACTOR_W + 1 + p;
+      const y1 = Math.round(hit.y) + ACTOR_H + 1 + p;
+      ctx.fillStyle = foe ? '#ff4030' : '#c0c8d0';
+      for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+        ctx.fillRect(Math.min(cx, cx + sx * 3), cy, 3, 1);
+        ctx.fillRect(cx, Math.min(cy, cy + sy * 3), 1, 3);
+      }
     }
   }
 

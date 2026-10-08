@@ -590,7 +590,7 @@ hard landings don't need to penetrate: they go into the outermost layer
 | Hit | Energy | Result |
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |
-| Sniper slug (0.069 × 0.95 × 24000) | ~1570 | Through any armour with energy to spare; 38 wounds per layer, so one headshot kills |
+| Sniper slug (0.069 × 0.95 × 24000) | ~1570 | Through any armour (but a king's crown) with energy to spare; 80 wounds per layer: one headshot kills anyone, one body shot kills a scout or a medium, a limb hit takes the limb off. It shoves 2.4× its momentum |
 | Shrapnel (0.5 × 0.85 × ~460–760) | ~200–320 | Bullet-grade: through a helmet or vest, 12 wounds a layer. A grenade throws 56 fragments, a rocket 36, as tracers |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
 
@@ -787,10 +787,15 @@ How each field works:
   cancels a reload. The magazine count and reload timer ride in the
   client's own `R_SELF` record for the HUD. Other players see the
   reloading pose through an `F_RELOAD` actor flag.
-- **Scope distance:** holding right mouse or Shift pushes the view that far
-  down the barrel and halves spread. The server moves that client's
-  interest area by the same offset, so it is sent the chunks and players
-  it is now looking at.
+- **Scope distance:** holding right mouse or left Shift pushes the view up
+  to that far down the barrel and halves spread. It goes **only as far as
+  the line of sight**: a raycast from the shoulder along the aim
+  (`sightLine` in `src/shared/scope.ts`) stops at the first solid cell, so
+  a scope never looks through or past terrain. The server moves that
+  client's interest area the same way, so it is sent only what the scope
+  can see. While scoped, a faint laser runs from the barrel to where the
+  shot would land. Red brackets mark the first clone in its path (grey for
+  a teammate). What the scope shows is what you can hit.
 - **Losing the off arm** makes firing 1.6× slower, reloading 1.5× slower,
   and triples spread.
 

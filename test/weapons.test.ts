@@ -194,13 +194,17 @@ describe('magazines and reloading', () => {
 });
 
 describe('scope', () => {
-  it("scoping pushes the client's view (and interest area) out along the barrel by the scope distance", () => {
+  it("scoping pushes the client's view (and interest area) out along the barrel by the scope distance, as far as it can see", () => {
     const { world, p } = range();
     hold(world, p, 0, WeaponId.Sniper, 1, 0);
     const cx = p.camX;
     hold(world, p, BTN_SCOPE, WeaponId.Sniper, 1, 0);
     expect(p.camX - cx).toBeCloseTo(WEAPONS[WeaponId.Sniper].scope, 0);
+    // Up into open sky (from the shoulder): the rifle's full reach.
+    hold(world, p, BTN_SCOPE, WeaponId.Rifle, 1, -Math.PI / 2);
+    expect(p.body.y + SHOULDER_Y - p.camY).toBeCloseTo(WEAPONS[WeaponId.Rifle].scope, 0);
+    // Down at the floor: the line of sight (and the view) stops at it.
     hold(world, p, BTN_SCOPE, WeaponId.Rifle, 1, Math.PI / 2);
-    expect(p.camY - p.cy).toBeCloseTo(WEAPONS[WeaponId.Rifle].scope, 0);
+    expect(p.camY - p.cy).toBeLessThan(12);
   });
 });
