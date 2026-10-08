@@ -33,9 +33,10 @@ function range(link: { send(d: Uint8Array): void } = { send() {} }): { world: Wo
 }
 
 let seq = 0;
+const ammoOf = (p: Player, weapon: number) => p.inv.find((it) => it.weapon === weapon)!.ammo;
 function hold(world: World, p: Player, buttons: number, weapon: number, ticks: number, aim = 0): void {
   for (let k = 0; k < ticks; k++) {
-    world.input(p.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(aim), weapon });
+    world.input(p.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(aim), inv: world.equip(p, weapon) });
     world.step();
   }
 }
@@ -119,7 +120,7 @@ describe('magazines and reloading', () => {
       hold(world, p, BTN_FIRE, WeaponId.Rifle, 1);
       if (shots.length === rifle.clip && emptiedAt < 0) {
         emptiedAt = t;
-        expect(p.ammo[WeaponId.Rifle]).toBe(0);
+        expect(ammoOf(p, WeaponId.Rifle)).toBe(0);
         expect(p.reloadLeft).toBeGreaterThan(0);
       }
       if (emptiedAt >= 0 && shots.length > before && shots.length > rifle.clip) resumedAt = t;
@@ -133,18 +134,18 @@ describe('magazines and reloading', () => {
     const { world, p } = range();
     const rifle = WEAPONS[WeaponId.Rifle];
     hold(world, p, BTN_FIRE, WeaponId.Rifle, 20);
-    const left = p.ammo[WeaponId.Rifle];
+    const left = ammoOf(p, WeaponId.Rifle);
     expect(left).toBeLessThan(rifle.clip);
     hold(world, p, BTN_RELOAD, WeaponId.Rifle, 1);
     expect(p.reloadLeft).toBeGreaterThan(0);
     // Switch away mid-reload: cancelled, the rifle keeps what it had.
     hold(world, p, 0, WeaponId.Sniper, 1);
     expect(p.reloadLeft).toBe(0);
-    expect(p.ammo[WeaponId.Rifle]).toBe(left);
+    expect(ammoOf(p, WeaponId.Rifle)).toBe(left);
     // Back to the rifle and let the reload finish this time.
     hold(world, p, BTN_RELOAD, WeaponId.Rifle, 1);
     hold(world, p, 0, WeaponId.Rifle, rifle.reload + 1);
-    expect(p.ammo[WeaponId.Rifle]).toBe(rifle.clip);
+    expect(ammoOf(p, WeaponId.Rifle)).toBe(rifle.clip);
   });
 
   it('a clone missing its off arm fires and reloads slower', () => {

@@ -254,6 +254,17 @@ function lighten(rgb: number, t: number): number {
   return (f((rgb >> 16) & 255) << 16) | (f((rgb >> 8) & 255) << 8) | f(rgb & 255);
 }
 
+/**
+ * Class looks over a team palette: scouts wear a green army helmet; heavies
+ * are plated in grey metal (helmet, vest, greaves, sleeves) with an amber
+ * visor. Mediums are the base palette.
+ */
+function classPalette(base: Record<string, number>, cls: number): Record<string, number> {
+  if (cls === 0) return { ...base, L: 0x8c9a58, H: 0x56652e, V: 0x3a3226, v: 0x241e16 };
+  if (cls === 2) return { ...base, L: 0xa4acb4, H: 0x5c636c, V: 0xffb040, v: 0xa86a20, P: 0x646a72, B: 0x30343a, O: 0x8a9198, o: 0x5c636a, g: 0x6e747a, G: 0x3c4146, A: 0x737a82 };
+  return base;
+}
+
 /** Palette char -> 0xRRGGBB, or -1 for transparent. */
 function paletteFor(team: number): Record<string, number> {
   return {
@@ -455,11 +466,11 @@ export class SpriteCache {
     return p;
   }
 
-  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff): HTMLCanvasElement {
+  body(team: number, frame: BodyFrame, left: boolean, parts = 0x1ff, cls = 1): HTMLCanvasElement {
     const mask = parts & BODY_RENDER_PARTS;
-    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}`;
+    const key = `${team}|${frame}|${left ? 1 : 0}|${mask}|${cls}`;
     let c = this.bodies.get(key);
-    if (!c) this.bodies.set(key, (c = bakeBody(BODY[frame], this.pal(team), left, mask)));
+    if (!c) this.bodies.set(key, (c = bakeBody(BODY[frame], classPalette(this.pal(team), cls), left, mask)));
     return c;
   }
 

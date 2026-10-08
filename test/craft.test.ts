@@ -340,7 +340,7 @@ describe('drop rocket prediction', () => {
           const r = rng.next();
           buttons = (r < 0.3 ? BTN_RIGHT : r < 0.6 ? BTN_LEFT : 0) | (rng.next() < 0.3 ? BTN_UP : 0);
         }
-        game.localTick(buttons, quantizeAim(0), 0, (seq) => toServer.push({ at: now + latencyTicks, cmd: { seq, buttons, aim: 0, weapon: 0 } }));
+        game.localTick(buttons, quantizeAim(0), (seq) => toServer.push({ at: now + latencyTicks, cmd: { seq, buttons, aim: 0, inv: 0 } }));
         while (toServer.length && toServer[0].at <= now) world.input(p.id, toServer.shift()!.cmd);
         world.step();
         while (toClient.length && toClient[0].at <= now) {

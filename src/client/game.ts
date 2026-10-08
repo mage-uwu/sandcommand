@@ -6,12 +6,13 @@ import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET } from '../shared/protocol.ts';
+import { F_ALIVE, F_FIRING, F_GROUND, F_JET, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
+import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
 import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, stumpDrip } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
@@ -141,10 +142,21 @@ export class Game implements FrameHandler {
   partHp: number[] = new Array(PART_COUNT).fill(100);
   private readonly mob: Mobility = { legs: 2, jet: true, canFire: true, oneHanded: false };
   respawnTicks = 0;
-  weapon = 0;
+  /**
+   * What we carry (server truth: weapon and rounds in its magazine) and the
+   * slot in hand. The selection is ours, applied at once and sent each tick;
+   * when the server changes the inventory (pick-up, drop, death) its version
+   * moves on and we take its slot.
+   */
+  inv: { weapon: number; ammo: number }[] = [];
+  slot = 0;
+  invVersion = -1;
+  private pickupHold = 0;
+  private dropHold = 0;
+  /** Weapons lying on the ground near us, simulated like the server does. */
+  readonly groundItems = new Map<number, GroundItem>();
   cooldown = 0;
-  /** Rounds in the current weapon's magazine, and ticks left reloading it (server truth). */
-  ammo = 0;
+  /** Ticks left reloading the weapon in hand (server truth). */
   reloadLeft = 0;
   /** Own gold, exact (from our own record, not the once-a-second scoreboard). */
   gold = 0;
@@ -188,7 +200,7 @@ export class Game implements FrameHandler {
   // ------------------------------------------------------------ local tick
 
   /** One fixed 30 Hz client tick: predict own clone, advance local kernels. */
-  localTick(buttons: number, aimQ: number, weapon: number, send: (seq: number) => void): void {
+  localTick(buttons: number, aimQ: number, send: (seq: number) => void): void {
     this.seq = (this.seq + 1) & 0xffff;
     send(this.seq);
     copyBody(this.prevBody, this.body);
@@ -213,7 +225,7 @@ export class Game implements FrameHandler {
       // Bailed out or dropped off: the server takes it from here.
       if (this.rideStep.release) r.passenger = 255;
     }
-    this.weapon = weapon;
+    for (const [, it] of this.groundItems) stepItem(it, this.terrain, DT);
     // Field first: chunk snapshots and ops applied since the last tick.
     this.field.update();
     this.projectiles.step(this.collider, DT, null, (i, x, y, _a, _d) => {
@@ -334,7 +346,12 @@ export class Game implements FrameHandler {
     this.parts = s.parts;
     this.partHp = s.partHp;
     this.cooldown = s.cooldown;
-    this.ammo = s.ammo;
+    this.inv = s.inv;
+    if (s.invVersion !== this.invVersion) {
+      this.invVersion = s.invVersion;
+      this.slot = s.slot;
+    }
+    if (this.slot >= this.inv.length) this.slot = Math.max(0, this.inv.length - 1);
     this.reloadLeft = s.reload;
     this.gold = s.gold;
     const b = this.body;
@@ -355,6 +372,7 @@ export class Game implements FrameHandler {
     mobility(s.parts, this.mob);
     b.legs = this.mob.legs;
     b.jet = this.mob.jet;
+    b.cls = classOfFlags(s.flags);
     if (!this.alive) {
       copyBody(this.prevBody, b);
       this.smoothX = this.smoothY = 0;
@@ -497,9 +515,66 @@ export class Game implements FrameHandler {
     return canBuild(this.terrain, piece, gx, gy, this.body.x + SHOULDER_X, this.body.y + SHOULDER_Y, this.gold, bl);
   }
 
+  /** Weapon in hand (WeaponId), NO_WEAPON with empty hands. */
+  get weapon(): number {
+    return this.inv[this.slot]?.weapon ?? NO_WEAPON;
+  }
+
+  /** Rounds in the magazine of the weapon in hand. */
+  get ammo(): number {
+    return this.inv[this.slot]?.ammo ?? 0;
+  }
+
+  /** Rotate through what we carry (1/2, Q/E, wheel). */
+  cycle(d: number): void {
+    const n = this.inv.length;
+    if (n > 0 && d !== 0) this.slot = (((this.slot + d) % n) + n) % n;
+  }
+
+  /** Pick up / drop: held in the inventory byte for a few ticks; the server acts on the edge. */
+  pickUp(): void {
+    this.pickupHold = 3;
+  }
+  drop(): void {
+    this.dropHold = 3;
+  }
+
+  /** This tick's inventory byte for the input command. */
+  invByte(): number {
+    const b = invByte(this.slot, this.invVersion, this.pickupHold > 0, this.dropHold > 0);
+    if (this.pickupHold > 0) this.pickupHold--;
+    if (this.dropHold > 0) this.dropHold--;
+    return b;
+  }
+
+  /** The ground item we'd pick up right now, if any. */
+  nearestItem(): GroundItem | null {
+    if (!this.alive) return null;
+    const cx = this.body.x + ACTOR_W / 2;
+    const cy = this.body.y + ACTOR_H / 2;
+    let best: GroundItem | null = null;
+    let bestD = PICKUP_R * PICKUP_R;
+    for (const [, it] of this.groundItems) {
+      const d = (it.x - cx) ** 2 + (it.y - cy) ** 2;
+      if (d <= bestD) {
+        bestD = d;
+        best = it;
+      }
+    }
+    return best;
+  }
+
+  items(list: GroundItem[]): void {
+    for (const it of list) this.groundItems.set(it.id, it);
+  }
+
   /** Holding the materializer? */
   get building(): boolean {
     return this.alive && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
+  }
+
+  itemsGone(ids: number[]): void {
+    for (const id of ids) this.groundItems.delete(id);
   }
 
   chunkLoaded(ci: number): void {

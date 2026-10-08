@@ -118,6 +118,20 @@ export class ParticleLayer {
         case PK.Blood:
           buf[o] = BLOOD;
           break;
+        case PK.Shrapnel: {
+          // A hot tracer streak back along its path, like a bullet's.
+          buf[o] = SPARK_HOT;
+          const vx = x[i] - px[i];
+          const vy = y[i] - py[i];
+          const dist = Math.sqrt(vx * vx + vy * vy) + 1e-6;
+          const len = Math.min(10, Math.floor(dist));
+          for (let k = 1; k <= len; k++) {
+            const tx = Math.floor(fx - (vx / dist) * k) - ox;
+            const ty = Math.floor(fy - (vy / dist) * k) - oy;
+            if (tx >= 0 && ty >= 0 && tx < w && ty < h) blendOver(buf, ty * w + tx, 255, 190, 90, Math.round(210 * (1 - k / (len + 1))));
+          }
+          break;
+        }
         default:
           buf[o] = fromRgb(color[i]);
       }

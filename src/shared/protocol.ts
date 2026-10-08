@@ -40,6 +40,8 @@ export const R_CRAFT_BOOM = 16;
 export const R_CRAFT_SELF = 17;
 export const R_CRAFT_PART = 18;
 export const R_BUILD = 19;
+export const R_ITEMS = 20;
+export const R_ITEMS_GONE = 21;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -48,9 +50,12 @@ export const F_JET = 4;
 export const F_FIRING = 8;
 export const F_FACE_LEFT = 16;
 export const F_RELOAD = 32;
+/** Bits 6-7 of the actor flags: the clone's class (body.ts ClassId). */
+export const F_CLASS_SHIFT = 6;
+export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 7;
 
 /** Aim angle (radians) <-> u16. */
 export function quantizeAim(a: number): number {

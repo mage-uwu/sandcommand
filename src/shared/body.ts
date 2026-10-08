@@ -80,18 +80,73 @@ export function partAt(mask: number, lx: number, ly: number, left: boolean): num
   return Part.Torso;
 }
 
+/**
+ * Clone classes. Every clone is one, rolled at spawn:
+ * - Scout: a green army helmet and no vest. Lighter armour, but quicker
+ *   on its feet and on its jetpack.
+ * - Medium: the standard clone (helmet and vest).
+ * - Heavy: a metal armour layer over everything. Armour is 3x as hard to
+ *   get through and every part takes 2.5x the wounds; blasts and fire do
+ *   0.4x. The price: a weak, thirsty jetpack and a slower run.
+ */
+export const ClassId = {
+  Scout: 0,
+  Medium: 1,
+  Heavy: 2,
+} as const;
+
+export interface ClassDef {
+  name: string;
+  /** Integrity multiplier for armour layers (helmet, vest, jetpack). */
+  armor: number;
+  /** Wound-limit multiplier for every part. */
+  limit: number;
+  /** Multiplier on blast, fire and fall damage (harm). */
+  harm: number;
+  /** Movement: run speed, jetpack thrust, fuel use. */
+  run: number;
+  jet: number;
+  fuel: number;
+  /** Parts it spawns with. */
+  mask: number;
+}
+
+export const CLASSES: readonly ClassDef[] = [
+  { name: 'Scout', armor: 0.7, limit: 1, harm: 1, run: 1.12, jet: 1.15, fuel: 0.8, mask: ALL_PARTS & ~(1 << Part.Vest) },
+  { name: 'Medium', armor: 1, limit: 1, harm: 1, run: 1, jet: 1, fuel: 1, mask: ALL_PARTS },
+  { name: 'Heavy', armor: 3, limit: 2.5, harm: 0.4, run: 0.85, jet: 0.6, fuel: 1.5, mask: ALL_PARTS },
+];
+
+/** Roll a class for a fresh clone (semi-random: mediums are most common). */
+export function rollClass(r: number): number {
+  return r < 0.35 ? ClassId.Scout : r < 0.75 ? ClassId.Medium : ClassId.Heavy;
+}
+
 export interface BodyState {
   mask: number; // attached parts
   readonly wounds: Float32Array; // per part
+  cls: number; // ClassId
 }
 
-export function newBodyState(): BodyState {
-  return { mask: ALL_PARTS, wounds: new Float32Array(PART_COUNT) };
+export function newBodyState(cls: number = ClassId.Medium): BodyState {
+  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls };
 }
 
-export function resetBody(s: BodyState): void {
-  s.mask = ALL_PARTS;
+export function resetBody(s: BodyState, cls: number = ClassId.Medium): void {
+  s.cls = cls;
+  s.mask = CLASSES[cls].mask;
   s.wounds.fill(0);
+}
+
+/** A part's integrity for this body's class (armour layers scale with it). */
+function integrityOf(s: BodyState, part: number): number {
+  const d = PARTS[part];
+  return d.flesh ? d.integrity : d.integrity * CLASSES[s.cls].armor;
+}
+
+/** A part's wound limit for this body's class. */
+export function limitOf(s: BodyState, part: number): number {
+  return PARTS[part].limit * CLASSES[s.cls].limit;
 }
 
 /** Result of one strike: HP lost, parts torn off (in order), whether a vital part went. */
@@ -108,7 +163,7 @@ export function newStrike(): StrikeResult {
 function woundLayer(s: BodyState, layer: number, amount: number, out: StrikeResult): void {
   s.wounds[layer] += amount;
   if (PARTS[layer].flesh) out.hp += amount;
-  if (s.wounds[layer] >= PARTS[layer].limit && has(s.mask, layer)) {
+  if (s.wounds[layer] >= limitOf(s, layer) && has(s.mask, layer)) {
     s.mask &= ~(1 << layer);
     out.detached.push(layer);
     if (PARTS[layer].vital) out.vital = true;
@@ -129,9 +184,9 @@ export function strike(s: BodyState, part: number, energy: number, wound: number
   const armor = ARMOR_OVER[part];
   const layers = armor >= 0 && has(s.mask, armor) ? [armor, part] : [part];
   for (const layer of layers) {
-    const integ = PARTS[layer].integrity;
+    const integ = integrityOf(s, layer);
     if (energy <= integ) {
-      out.hp += energy * BLUNT; // stopped here: a bruise
+      out.hp += energy * BLUNT * CLASSES[s.cls].harm; // stopped here: a bruise
       return;
     }
     woundLayer(s, layer, wound, out);
@@ -146,7 +201,7 @@ export function strike(s: BodyState, part: number, energy: number, wound: number
 export function harm(s: BodyState, part: number, amount: number, out: StrikeResult): void {
   if (!has(s.mask, part) || amount <= 0) return;
   const armor = ARMOR_OVER[part];
-  woundLayer(s, armor >= 0 && has(s.mask, armor) ? armor : part, amount, out);
+  woundLayer(s, armor >= 0 && has(s.mask, armor) ? armor : part, amount * CLASSES[s.cls].harm, out);
 }
 
 /** What a body can still do. Shared by server simulation and client prediction. */
@@ -175,5 +230,5 @@ export function stumps(mask: number): number {
 /** 0..100 health per part for the HUD (0 = gone). */
 export function partHealth(s: BodyState, p: number): number {
   if (!has(s.mask, p)) return 0;
-  return Math.max(1, Math.round(100 * (1 - s.wounds[p] / PARTS[p].limit)));
+  return Math.max(1, Math.round(100 * (1 - s.wounds[p] / limitOf(s, p))));
 }

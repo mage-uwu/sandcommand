@@ -3,6 +3,7 @@ import { PART_COUNT } from './body.ts';
 import { CRAFT_PARTS } from './craft.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
+import type { GroundItem } from './items.ts';
 import { CHUNK, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
 import {
   R_ACTORS,
@@ -17,6 +18,8 @@ import {
   R_CRAFT_SELF,
   R_DETACH,
   R_HIT,
+  R_ITEMS,
+  R_ITEMS_GONE,
   R_KILL,
   R_PIXELS,
   R_PROJ_END,
@@ -39,7 +42,10 @@ export interface SelfState {
   hp: number;
   weapon: number;
   cooldown: number;
-  ammo: number; // rounds in the current weapon's magazine
+  /** Everything carried (weapon, rounds in its magazine), the slot in hand, and the inventory's version. */
+  inv: { weapon: number; ammo: number }[];
+  slot: number;
+  invVersion: number;
   reload: number; // ticks left reloading, 0 = not
   gold: number; // own gold, exact (the scoreboard only updates once a second)
   respawn: number;
@@ -116,6 +122,10 @@ export interface FrameHandler {
    */
   carved(x: number, y: number, r: number, seed: number, debris: number, removed: number[], detached: number[]): void;
   chunkLoaded(ci: number): void;
+  /** Ground items whose state this client must take (new in view, or changed). */
+  items(list: GroundItem[]): void;
+  /** Ground items this client should forget (taken, expired, far away). */
+  itemsGone(ids: number[]): void;
   /** Called after a materializer op was applied; `placed` holds x, y, mat triples. */
   built(piece: number, builder: number, gx: number, gy: number, placed: number[]): void;
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void;
@@ -161,9 +171,11 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           hp: r.u8(),
           weapon: r.u8(),
           cooldown: r.u8(),
-          ammo: r.u8(),
           reload: r.u8(),
           gold: r.u16(),
+          inv: Array.from({ length: r.u8() }, () => ({ weapon: r.u8(), ammo: r.u8() })),
+          slot: r.u8(),
+          invVersion: r.u8(),
           respawn: r.u16(),
           parts: r.u16(),
           partHp: Array.from({ length: PART_COUNT }, () => r.u8()),
@@ -215,6 +227,26 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const gy = r.u16();
         applyBuild(terrain, piece, gx, gy, removedScratch);
         h.built(piece, builder, gx, gy, removedScratch);
+        break;
+      }
+      case R_ITEMS: {
+        const n = r.u8();
+        const list: GroundItem[] = [];
+        for (let i = 0; i < n; i++) {
+          const id = r.u16();
+          const weapon = r.u8();
+          const ammo = r.u8();
+          const f = r.u8();
+          list.push({ id, weapon, ammo, rest: (f & 1) !== 0, left: (f & 2) !== 0, x: r.f64(), y: r.f64(), vx: r.f64(), vy: r.f64() });
+        }
+        h.items(list);
+        break;
+      }
+      case R_ITEMS_GONE: {
+        const n = r.u8();
+        const ids: number[] = [];
+        for (let i = 0; i < n; i++) ids.push(r.u16());
+        h.itemsGone(ids);
         break;
       }
       case R_PIXELS: {
@@ -366,6 +398,8 @@ export const nullHandler: FrameHandler = {
   blips() {},
   carved() {},
   chunkLoaded() {},
+  items() {},
+  itemsGone() {},
   built() {},
   projSpawn() {},
   projEnd() {},

@@ -3,7 +3,8 @@ import { deliverAll } from './helpers.ts';
 import { ACTOR_H, ACTOR_W, DT, WORLD_W } from '../src/shared/constants.ts';
 import { Collider, DistanceField } from '../src/shared/field.ts';
 import { Mat } from '../src/shared/materials.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_DEBRIS } from '../src/shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_DEBRIS, explosionFragments } from '../src/shared/particles.ts';
+import { Rng } from '../src/shared/rng.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { ProjKind } from '../src/shared/weapons.ts';
 import { World } from '../src/server/world.ts';
@@ -59,6 +60,27 @@ describe('particles act on players', () => {
     expect(af.hitWound[0]).toBeGreaterThan(0);
     expect(af.hitOwner[0]).toBe(2);
     expect(af.hitWeapon[0]).toBe(ProjKind.Grenade);
+  });
+
+  it('grenade shrapnel carries across the room and hits like a rifle round', () => {
+    const col = flatWorld();
+    const p = new Particles(512);
+    const af = bodyAt(600, 700);
+    // A grenade goes off 120 cells away: some fragments fly at the clone.
+    explosionFragments(p, 480, 706, ProjKind.Grenade, 2, new Rng(5));
+    let hits = 0;
+    let best = 0;
+    for (let k = 0; k < 20; k++) {
+      af.hitN = 0;
+      p.step(col, DT, {}, af);
+      for (let h = 0; h < af.hitN; h++) {
+        if (af.hitWeapon[h] !== ProjKind.Grenade) continue;
+        hits++;
+        best = Math.max(best, af.hitEnergy[h]);
+      }
+    }
+    expect(hits).toBeGreaterThan(0); // the spray reaches it
+    expect(best).toBeGreaterThan(160); // through a vest (integrity 160), like a bullet
   });
 
   it('a dense sand flow drags a body along with it', () => {

@@ -189,7 +189,11 @@ function frame(now: number): void {
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
       const aim = Math.atan2(wy - (g.body.y + SHOULDER_Y), wx - (g.body.x + SHOULDER_X));
       let buttons = input.buttons();
-      const weapon = input.weapon;
+      // Inventory: rotate, pick up, drop.
+      g.cycle(input.takeCycle());
+      if (input.takePickup()) g.pickUp();
+      if (input.takeDrop()) g.drop();
+      input.building = g.building;
       const n = net;
       // Materializer: a click on the menu picks a piece; a click in the world
       // asks the server to build it there (it checks the same rules the
@@ -204,7 +208,8 @@ function frame(now: number): void {
         }
       }
       if (g.building) buttons &= ~BTN_FIRE;
-      g.localTick(buttons, quantizeAim(aim), weapon, (seq) => n.input(seq, buttons, quantizeAim(aim), weapon));
+      const inv = g.invByte();
+      g.localTick(buttons, quantizeAim(aim), (seq) => n.input(seq, buttons, quantizeAim(aim), inv));
     }
     renderer.draw(g, input, net, acc / TICK_MS);
   } else {

@@ -35,10 +35,12 @@ import {
   partAt,
   partHealth,
   resetBody,
+  rollClass,
   strike,
   stumps,
 } from '../shared/body.ts';
 import { Writer, rleEncode } from '../shared/codec.ts';
+import { type GroundItem, INV_DROP, INV_MAX, INV_PICKUP, type InvItem, ITEM_LIFE, MAX_ITEMS, NO_WEAPON, PICKUP_R, invByte, invSlot, invVersionBits, newItem, spawnLoadout, stepItem } from '../shared/items.ts';
 import { BuildResult, type BuildBlocker, PIECES, applyBuild, canBuild } from '../shared/build.ts';
 import {
   ACTOR_H,
@@ -72,12 +74,15 @@ import {
   F_ALIVE,
   F_FACE_LEFT,
   F_RELOAD,
+  F_CLASS_SHIFT,
   F_FIRING,
   F_GROUND,
   F_JET,
   R_ACTORS,
   R_BLIPS,
   R_BUILD,
+  R_ITEMS,
+  R_ITEMS_GONE,
   R_CARVE,
   R_CHAT,
   R_CHUNK,
@@ -112,7 +117,8 @@ export interface InputCmd {
   seq: number;
   buttons: number;
   aim: number; // quantized u16
-  weapon: number;
+  /** Inventory selection and pick-up/drop keys (see invByte in items.ts). */
+  inv: number;
 }
 
 export class Player {
@@ -128,15 +134,22 @@ export class Player {
   alive = false;
   hp = ACTOR_MAX_HP;
   aimQ = 0;
-  weapon = 0;
+  /** Weapon in hand (WeaponId of inv[slot]), NO_WEAPON with empty hands. */
+  weapon = NO_WEAPON;
+  /** What this clone carries: each weapon with its own magazine. */
+  inv: InvItem[] = [];
+  slot = 0;
+  /** Bumped whenever the inventory changes under the client (pick-up, drop, death, respawn). */
+  invVersion = 0;
+  /** Latest inventory byte from the client, and the one before (for key edges). */
+  invCmd = 0;
+  prevInv = 0;
   /** Ticks until the next shot may leave (fractional: rate of fire is exact on average). */
   cooldown = 0;
-  /** Rounds left in each weapon's magazine (kept when switching, CC style). */
-  readonly ammo = Uint8Array.from(WEAPONS, (w) => w.clip);
   /** Ticks left on the current weapon's reload, 0 = not reloading. */
   reloadLeft = 0;
-  /** Weapon in hand last tick (switching cancels a reload). */
-  held = 0;
+  /** Item in hand last tick (switching cancels a reload). */
+  heldItem: InvItem | null = null;
   /** Latest materializer request, applied on this player's next tick. */
   buildReq: { piece: number; gx: number; gy: number } | null = null;
   /** Buttons last tick, for semi-auto triggers and the reload key. */
@@ -158,6 +171,8 @@ export class Player {
   lastChat = 0;
   /** Projectile ids this client was told about (for end events). */
   readonly seenProj = new Set<number>();
+  /** Ground items this client knows about, and the revision it was last sent. */
+  readonly knownItems = new Map<number, number>();
 
   constructor(
     readonly id: number,
@@ -267,6 +282,7 @@ export class World {
   removePlayer(id: number): void {
     const p = this.players[id];
     if (!p) return;
+    if (p.alive) this.dropAll(p); // a deserter's kit stays behind
     this.players[id] = null;
     this.pendingRoster.delete(id);
     // An empty rocket flies itself home.
@@ -517,6 +533,8 @@ export class World {
     victim.alive = false;
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
+    // Everything it carried spills where it fell, for anyone to take.
+    this.dropAll(victim);
     victim.deaths++;
     const killer = this.players[attacker];
     if (killer && killer !== victim) killer.kills++;
@@ -589,6 +607,7 @@ export class World {
         this.grains.blast(x, y, def.splashR * 1.6, BLAST_IMPULSE);
         explosionFragments(this.grains, x, y, kind, owner, new Rng(seed));
         this.splashCrafts(x, y, def.splashR, def.splashDamage, owner);
+        this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
           if (!p || !p.alive) continue;
           const dx = p.cx - x;
@@ -629,29 +648,227 @@ export class World {
    * reload; an empty magazine reloads itself; R reloads early.
    */
   private handleWeapon(p: Player, prev: number): void {
-    const def = WEAPONS[p.weapon];
-    if (p.weapon !== p.held) {
-      p.held = p.weapon;
+    const item = p.inv[p.slot];
+    if (item !== p.heldItem) {
+      p.heldItem = item ?? null;
       p.reloadLeft = 0;
     }
+    if (!item) {
+      p.cooldown = Math.max(0, p.cooldown - 1);
+      return;
+    }
+    const def = WEAPONS[item.weapon];
     const pressed = (p.buttons & BTN_FIRE) !== 0;
     const fresh = pressed && !(prev & BTN_FIRE);
-    if (p.reloadLeft > 0 && --p.reloadLeft === 0) p.ammo[p.weapon] = def.clip;
+    if (p.reloadLeft > 0 && --p.reloadLeft === 0) item.ammo = def.clip;
     if (def.clip > 0 && p.reloadLeft === 0) {
-      const asked = p.buttons & BTN_RELOAD && !(prev & BTN_RELOAD) && p.ammo[p.weapon] < def.clip;
-      if (asked || (p.ammo[p.weapon] === 0 && pressed)) this.startReload(p);
+      const asked = p.buttons & BTN_RELOAD && !(prev & BTN_RELOAD) && item.ammo < def.clip;
+      if (asked || (item.ammo === 0 && pressed)) this.startReload(p);
     }
     p.cooldown -= 1;
-    const want = def.proj !== PROJ_BUILD && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || p.ammo[p.weapon] > 0);
+    const want = def.proj !== PROJ_BUILD && p.mob.canFire && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
     if (want && p.cooldown <= 0) {
       this.fire(p, def);
       p.firing = true;
       // One-handed (off arm gone): slower to recover.
       p.cooldown += fireInterval(def) * (p.mob.oneHanded ? 1.6 : 1);
-      if (def.clip > 0 && --p.ammo[p.weapon] === 0) this.startReload(p);
+      if (def.clip > 0 && --item.ammo === 0) this.startReload(p);
     }
     // Only carry the fractional remainder while the trigger keeps firing.
     if (p.cooldown < 0 && !want) p.cooldown = 0;
+  }
+
+  // ------------------------------------------------------------ inventory
+
+  /**
+   * Ground items for one client: an item's full state when it comes into
+   * view or changes (it lands, a blast kicks it), and a gone notice when it
+   * is taken, expires or drifts far out of view. In between, the client
+   * simulates it with the same stepItem, so a resting gun costs nothing.
+   */
+  private replicateItems(p: Player, w: Writer, vx0: number, vy0: number, vx1: number, vy1: number): void {
+    const known = p.knownItems;
+    const gone = this.goneScratch;
+    gone.length = 0;
+    for (const id of this.itemsGone) if (known.delete(id)) gone.push(id);
+    let n = 0;
+    let nAt = -1;
+    const M = 120; // send a little before it's on screen
+    for (const it of this.items) {
+      const sent = known.get(it.id);
+      const near = it.x >= vx0 - M && it.x <= vx1 + M && it.y >= vy0 - M && it.y <= vy1 + M;
+      if (!near) {
+        // Well out of view: let the client forget it (it is resent on return).
+        if (sent !== undefined && (it.x < vx0 - 3 * M || it.x > vx1 + 3 * M || it.y < vy0 - 3 * M || it.y > vy1 + 3 * M)) {
+          known.delete(it.id);
+          gone.push(it.id);
+        }
+        continue;
+      }
+      if (sent === it.rev || n === 255) continue;
+      if (n === 0) {
+        w.u8(R_ITEMS);
+        nAt = w.pos;
+        w.u8(0);
+      }
+      n++;
+      known.set(it.id, it.rev);
+      w.u16(it.id);
+      w.u8(it.weapon);
+      w.u8(it.ammo);
+      w.u8((it.rest ? 1 : 0) | (it.left ? 2 : 0));
+      w.f64(it.x);
+      w.f64(it.y);
+      w.f64(it.vx);
+      w.f64(it.vy);
+    }
+    if (n > 0) w.buf[nAt] = n;
+    for (let i = 0; i < gone.length; i += 255) {
+      const k = Math.min(255, gone.length - i);
+      w.u8(R_ITEMS_GONE);
+      w.u8(k);
+      for (let j = 0; j < k; j++) w.u16(gone[i + j]);
+    }
+  }
+
+  private readonly goneScratch: number[] = [];
+
+
+  /** Ground items: dropped weapons, lying around (and bouncing) for anyone to take. */
+  readonly items: (GroundItem & { age: number; rev: number })[] = [];
+  private nextItemId = 1;
+  /** Ids of items removed this tick (picked up, expired), for replication. */
+  private readonly itemsGone: number[] = [];
+
+  /** Re-derive what's in hand after the inventory or slot changed. */
+  private syncHeld(p: Player): void {
+    if (p.slot >= p.inv.length) p.slot = Math.max(0, p.inv.length - 1);
+    p.weapon = p.inv[p.slot]?.weapon ?? NO_WEAPON;
+  }
+
+  /** The inventory changed under the client: bump the version so stale selections are ignored. */
+  private invChanged(p: Player): void {
+    p.invVersion = (p.invVersion + 1) & 255;
+    this.syncHeld(p);
+  }
+
+  /**
+   * Apply the client's inventory byte: the selected slot (if chosen from the
+   * current inventory version), and the rising edges of pick-up and drop.
+   */
+  private handleInventory(p: Player): void {
+    const b = p.invCmd;
+    const prev = p.prevInv;
+    p.prevInv = b;
+    if (invVersionBits(b) === (p.invVersion & 3) && invSlot(b) < p.inv.length && invSlot(b) !== p.slot) {
+      p.slot = invSlot(b);
+      this.syncHeld(p);
+    }
+    if (b & INV_PICKUP && !(prev & INV_PICKUP)) this.pickUp(p);
+    if (b & INV_DROP && !(prev & INV_DROP)) this.dropHeld(p);
+  }
+
+  /**
+   * Give a clone a weapon and put it in its hand (tests, and handy for admin
+   * tools). Returns the inventory byte a client would now send for it.
+   */
+  equip(p: Player, weapon: number): number {
+    let i = p.inv.findIndex((it) => it.weapon === weapon);
+    if (i < 0) {
+      if (p.inv.length >= INV_MAX) p.inv.pop();
+      p.inv.push(newItem(weapon));
+      i = p.inv.length - 1;
+    }
+    if (i !== p.slot || p.weapon !== weapon) {
+      p.slot = i;
+      this.invChanged(p);
+    }
+    return invByte(p.slot, p.invVersion);
+  }
+
+  private spawnItem(weapon: number, ammo: number, x: number, y: number, vx: number, vy: number): void {
+    // Never inside terrain: back up to the nearest open cell above.
+    for (let k = 0; k < 16 && this.terrain.isSolid(Math.floor(x), Math.floor(y)); k++) y -= 1;
+    this.items.push({ id: this.nextItemId, weapon, ammo, x, y, vx, vy, rest: false, left: vx < 0, age: 0, rev: 0 });
+    this.nextItemId = (this.nextItemId % 65535) + 1;
+    if (this.items.length > MAX_ITEMS) this.removeItem(0); // the oldest goes
+  }
+
+  private removeItem(i: number): void {
+    this.itemsGone.push(this.items[i].id);
+    this.items.splice(i, 1);
+  }
+
+  /** Throw the weapon in hand away, along the aim. */
+  private dropHeld(p: Player): void {
+    const it = p.inv[p.slot];
+    if (!it) return;
+    p.inv.splice(p.slot, 1);
+    const aim = dequantizeAim(p.aimQ);
+    this.spawnItem(it.weapon, it.ammo, p.body.x + SHOULDER_X, p.body.y + SHOULDER_Y, p.body.vx * 0.5 + Math.cos(aim) * 140, p.body.vy * 0.5 + Math.sin(aim) * 140 - 60);
+    this.invChanged(p);
+  }
+
+  /** Pick up the nearest weapon in reach; with full hands, swap the one held for it. */
+  private pickUp(p: Player): void {
+    let best = -1;
+    let bestD = PICKUP_R * PICKUP_R;
+    for (let i = 0; i < this.items.length; i++) {
+      const it = this.items[i];
+      const d = (it.x - p.cx) ** 2 + (it.y - p.cy) ** 2;
+      if (d <= bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best < 0) return;
+    const it = this.items[best];
+    this.removeItem(best);
+    if (p.inv.length >= INV_MAX) {
+      const held = p.inv.splice(p.slot, 1)[0];
+      this.spawnItem(held.weapon, held.ammo, it.x, it.y - 2, 0, -40);
+    }
+    p.inv.push({ weapon: it.weapon, ammo: it.ammo });
+    p.slot = p.inv.length - 1;
+    this.invChanged(p);
+  }
+
+  /** Death (or leaving): the whole kit spills where the clone was. */
+  private dropAll(p: Player): void {
+    for (const it of p.inv) {
+      this.spawnItem(it.weapon, it.ammo, p.cx, p.cy, p.body.vx * 0.5 + this.rng.range(-110, 110), p.body.vy * 0.5 - this.rng.range(60, 200));
+    }
+    p.inv = [];
+    this.invChanged(p);
+  }
+
+  private stepItems(): void {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i];
+      if (++it.age > ITEM_LIFE) {
+        this.removeItem(i);
+        continue;
+      }
+      const wasRest = it.rest;
+      stepItem(it, this.terrain, DT);
+      // Landing is where client and server could have drifted apart: resend.
+      if (it.rest !== wasRest) it.rev++;
+    }
+  }
+
+  /** A blast throws nearby weapons around. */
+  private kickItems(x: number, y: number, r: number): void {
+    for (const it of this.items) {
+      const dx = it.x - x;
+      const dy = it.y - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d >= r) continue;
+      const s = 260 * (1 - d / r);
+      it.vx += (dx / (d + 1e-6)) * s;
+      it.vy += (dy / (d + 1e-6)) * s - 60;
+      it.rest = false;
+      it.rev++;
+    }
   }
 
   private readonly placedScratch: number[] = [];
@@ -666,7 +883,7 @@ export class World {
     const req = p.buildReq!;
     p.buildReq = null;
     const def = WEAPONS[p.weapon];
-    if (def.proj !== PROJ_BUILD || !p.mob.canFire || p.cooldown > 0) return -1;
+    if (!def || def.proj !== PROJ_BUILD || !p.mob.canFire || p.cooldown > 0) return -1;
     const bl = this.blockers;
     bl.length = 0;
     for (const o of this.players) if (o && o.alive) bl.push({ x: o.body.x, y: o.body.y, w: ACTOR_W, h: ACTOR_H });
@@ -753,7 +970,9 @@ export class World {
     b.vx = vx;
     b.vy = vy;
     b.fuel = 100;
-    resetBody(p.parts);
+    // Every clone rolls a class: scout, medium or heavy.
+    resetBody(p.parts, rollClass(this.rng.next()));
+    b.cls = p.parts.cls;
     mobility(p.parts.mask, p.mob);
     b.legs = p.mob.legs;
     b.jet = p.mob.jet;
@@ -763,7 +982,10 @@ export class World {
     p.alive = true;
     p.cooldown = 10;
     p.reloadLeft = 0;
-    for (let k = 0; k < WEAPONS.length; k++) p.ammo[k] = WEAPONS[k].clip;
+    // A fresh, random kit (always a primary, a digger and a materializer).
+    p.inv = spawnLoadout(this.rng);
+    p.slot = 0;
+    this.invChanged(p);
     p.delivering = -1;
   }
 
@@ -1051,7 +1273,7 @@ export class World {
       if (cmd) {
         p.buttons = cmd.buttons;
         p.aimQ = cmd.aim;
-        if (cmd.weapon < WEAPONS.length) p.weapon = cmd.weapon;
+        p.invCmd = cmd.inv;
         p.ack = cmd.seq;
       }
       p.firing = false;
@@ -1089,6 +1311,7 @@ export class World {
       const n = stumps(p.parts.mask);
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
+      this.handleInventory(p);
       this.handleWeapon(p, prev);
       if (p.buildReq) this.tryBuild(p);
       // The view this client sees (and so its interest area): pushed down the
@@ -1097,13 +1320,14 @@ export class World {
       p.camY = p.cy;
       if (p.buttons & BTN_SCOPE) {
         const aim = dequantizeAim(p.aimQ);
-        const reach = WEAPONS[p.weapon].scope;
+        const reach = WEAPONS[p.weapon]?.scope ?? 0;
         p.camX += Math.cos(aim) * reach;
         p.camY += Math.sin(aim) * reach;
       }
     }
 
     this.stepCrafts();
+    this.stepItems();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
     // the chunks that changed). Removals later in the tick only increase true
@@ -1198,7 +1422,8 @@ export class World {
       (p.body.jetting ? F_JET : 0) |
       (p.firing ? F_FIRING : 0) |
       (p.alive && p.reloadLeft > 0 ? F_RELOAD : 0) |
-      (Math.cos(aim) < 0 ? F_FACE_LEFT : 0)
+      (Math.cos(aim) < 0 ? F_FACE_LEFT : 0) |
+      (p.parts.cls << F_CLASS_SHIFT)
     );
   }
 
@@ -1244,9 +1469,16 @@ export class World {
       w.u8(Math.max(0, Math.ceil(p.hp)));
       w.u8(p.weapon);
       w.u8(Math.ceil(p.cooldown));
-      w.u8(p.ammo[p.weapon]);
       w.u8(Math.min(255, p.reloadLeft));
       w.u16(Math.min(65535, p.gold));
+      // The whole inventory (it's small) and which slot is in hand.
+      w.u8(p.inv.length);
+      for (const it of p.inv) {
+        w.u8(it.weapon);
+        w.u8(it.ammo);
+      }
+      w.u8(p.slot);
+      w.u8(p.invVersion);
       w.u16(p.alive ? 0 : p.respawn);
       w.u16(p.parts.mask);
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
@@ -1352,6 +1584,8 @@ export class World {
       }
       if (nCraft > 0) w.buf[craftAt] = nCraft;
 
+      this.replicateItems(p, w, vx0, vy0, vx1, vy1);
+
       const roster = this.pendingRoster.get(p.id);
       if (roster) {
         w.bytes(roster);
@@ -1366,6 +1600,7 @@ export class World {
     }
 
     this.ops.length = 0;
+    this.itemsGone.length = 0;
     this.projSpawns.length = 0;
     this.projEnds.length = 0;
     this.hits.length = 0;

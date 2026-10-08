@@ -4,7 +4,7 @@
  * client. Run with `npm run bench`.
  */
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
-import { WEAPONS } from '../src/shared/weapons.ts';
+import { invByte } from '../src/shared/items.ts';
 import { MAX_PLAYERS, TICK_RATE } from '../src/shared/constants.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { Rng } from '../src/shared/rng.ts';
@@ -30,7 +30,10 @@ for (let t = 0; t < TICKS; t++) {
   for (const id of ids) {
     const r = rng.next();
     const buttons = (r < 0.45 ? BTN_RIGHT : r < 0.9 ? BTN_LEFT : 0) | (rng.next() < 0.35 ? BTN_UP : 0) | (rng.next() < 0.6 ? BTN_FIRE : 0);
-    world.input(id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(rng.range(0, Math.PI * 2)), weapon: rng.int(WEAPONS.length) });
+    // Switch weapons now and then, and sometimes drop or grab one (ground items get exercised).
+    const p = world.players[id]!;
+    const inv = invByte(rng.next() < 0.02 ? rng.int(Math.max(1, p.inv.length)) : p.slot, p.invVersion, rng.next() < 0.01, rng.next() < 0.004);
+    world.input(id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(rng.range(0, Math.PI * 2)), inv });
   }
   world.step();
   step.push(world.lastStepMs);

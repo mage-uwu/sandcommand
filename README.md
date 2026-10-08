@@ -17,9 +17,9 @@ npm run deploy       # wrangler deploy (needs a Cloudflare account)
 ```
 
 Controls: **A/D** run, **W/Space** jump (hold for jetpack), **mouse** aim and
-fire, **right mouse / Shift** scope, **R** reload, **1–6 / Q/E / wheel**
-switch weapon (Rifle, Bazooka, Grenade, Sniper, Digger, Materializer), **Tab**
-scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
+fire, **right mouse / Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
+through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
+drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
@@ -153,8 +153,22 @@ hard landings don't need to penetrate: they go into the outermost layer
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |
 | Sniper slug (1.1 × 0.95 × 1500) | ~1570 | Through any armour with energy to spare; 38 wounds per layer, so one headshot kills |
-| Shrapnel (0.4 × 1.0 × ~400) | ~160 | Stopped by armour; cuts limbs (integrity 30), so four fragments take a leg |
+| Shrapnel (0.5 × 0.85 × ~460–760) | ~200–320 | Bullet-grade: through a helmet or vest, 12 wounds a layer. A grenade throws 56 fragments, a rocket 36, as tracers |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
+
+**Classes.** Every clone rolls one at spawn (35% scout, 40% medium, 25%
+heavy), shown on the sprite and in the HUD:
+
+| Class | Armour | Jetpack | Run |
+| --- | --- | --- | --- |
+| Scout | green army helmet, no vest; armour 0.7× as hard | 1.15× thrust, 0.8× fuel use | 1.12× |
+| Medium | helmet and vest (the standard clone) | 1× | 1× |
+| Heavy | metal plate over everything: armour 3× as hard, every part takes 2.5× the wounds, blasts, fire and falls do 0.4× | 0.6× thrust (it still lifts, slowly), 1.5× fuel use | 0.85× |
+
+A rifle round stops at a heavy's plate, two shots to a medium's head kill,
+and shrapnel goes straight through a scout's helmet. Class rides in two
+spare bits of the actor flags, and movement scaling lives in the shared
+`stepBody`, so prediction stays exact.
 
 A part whose wounds reach its limit is **torn off**. The server broadcasts an
 `R_DETACH` record, and every client throws that part as a gib with a blood
@@ -310,7 +324,8 @@ How each field works:
   damage for direct hits, plus carve, splash, fragments and fuse.
   `ballistic` rounds chip terrain and puff dust. Kills are credited by
   projectile and named by the weapon that fires it.
-- **Clip** counts per weapon and survives switching weapons (CC style). An
+- **Clip** belongs to the item: each weapon you carry (or find on the
+  ground) keeps its own magazine. An
   empty clip reloads itself, and **R** reloads early. Switching weapons
   cancels a reload. The magazine count and reload timer ride in the
   client's own `R_SELF` record for the HUD. Other players see the
@@ -321,6 +336,34 @@ How each field works:
   it is now looking at.
 - **Losing the off arm** makes firing 1.6× slower, reloading 1.5× slower,
   and triples spread.
+
+### Inventory and weapons on the ground
+
+You don't carry every weapon. Each clone spawns with a random kit
+(`spawnLoadout` in `src/shared/items.ts`): always a primary (rifle, sniper or
+bazooka), a digger and a materializer. It often has grenades too, and
+sometimes a second gun. You carry up to five items, each with its own
+magazine. **1/2** cycle through them, **4** throws the one in hand, and **3**
+picks up the nearest weapon in reach. With full hands, picking up swaps the
+held weapon for the new one. Dying spills the whole kit where you fell, so
+the dead sniper's rifle is there for the taking. Dropped weapons are cleared
+away after 90 s.
+
+- **Ground items are physical.** They fly, bounce, settle and get thrown
+  around by blasts. `stepItem` is shared: the server sends an item's full
+  state once, when a client first sees it, and again only when something
+  changes it (it lands, a blast kicks it, someone takes it). In between,
+  the client simulates the same physics, so a gun lying on the ground costs
+  no bandwidth.
+- **Selection is instant.** Your client applies a weapon switch at once and
+  sends the selected slot in each input command, tagged with the
+  inventory's version. When the server changes your inventory (a pick-up,
+  drop, death or respawn), the version moves on. The server then ignores
+  selections made against the old inventory, and the client adopts the
+  server's slot.
+- **Pick up and drop** are held in that same byte for a few ticks, and the
+  server acts on the rising edge, so a tap shorter than a tick still
+  counts.
 
 ### Fortifications: the materializer
 
@@ -449,9 +492,9 @@ weapons (60% trigger duty) and running and jetpacking at random, over a world
 with dunes, so collapses happen constantly:
 
 ```
-sim       avg 0.91 ms  p99 4.5 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets)
-replicate avg 0.65 ms  p99 3.2 ms      (budget per tick: 33.3 ms)
-downstream per client: avg 32.1 KB/s; room egress 2.01 MB/s
+sim       avg 0.80 ms  p99 5.1 ms      (grains, shrapnel, embers, body parts, collapses, drop rockets, ground items)
+replicate avg 1.02 ms  p99 3.5 ms      (budget per tick: 33.3 ms)
+downstream per client: avg 32.9 KB/s; room egress 2.06 MB/s
 ```
 
 `npm run bench:physics`:

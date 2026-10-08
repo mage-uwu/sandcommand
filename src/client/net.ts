@@ -82,13 +82,13 @@ export class Net {
     this.ws.send(out);
   }
 
-  input(seq: number, buttons: number, aim: number, weapon: number): void {
+  input(seq: number, buttons: number, aim: number, inv: number): void {
     const w = this.w.reset();
     w.u8(C_INPUT);
     w.u16(seq & 0xffff);
     w.u8(buttons);
     w.u16(aim);
-    w.u8(weapon);
+    w.u8(inv);
     this.send();
   }
 

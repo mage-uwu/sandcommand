@@ -83,7 +83,8 @@ export const KINDS: readonly KindDef[] = [
   /* Dust     */ { gravity: 0.25, drag: 0.95, e: 0.1, mu: 0.6, mass: false, advect: 0.5, air: 0.5, contact: C_BOUNCE, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
   /* Blood    */ { gravity: 1, drag: 0.995, e: 0, mu: 0, mass: false, advect: 0.05, air: 0.2, contact: C_STAIN, pmass: 0, sharp: 0, wound: 0, burn: 0, onActor: A_PASS },
   /* Gib      */ { gravity: 1, drag: 0.997, e: 0.35, mu: 0.55, mass: false, advect: 0, air: 0.15, contact: C_RIGID, pmass: 0.3, sharp: 0.1, wound: 0, burn: 0, onActor: A_BOUNCE },
-  /* Shrapnel */ { gravity: 0.35, drag: 0.99, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.05, contact: C_SPENT, pmass: 0.4, sharp: 1.0, wound: 7, burn: 0, onActor: A_EMBED },
+  // Shrapnel flies like a bullet and hits like one: flat, fast, armour-piercing at full speed.
+  /* Shrapnel */ { gravity: 0.15, drag: 0.996, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.02, contact: C_SPENT, pmass: 0.5, sharp: 0.85, wound: 12, burn: 0, onActor: A_EMBED },
   /* Hull     */ { gravity: 1, drag: 0.997, e: 0.25, mu: 0.6, mass: true, advect: 0, air: 0.04, contact: C_SETTLE, pmass: 1.2, sharp: 0.35, wound: 12, burn: 0, onActor: A_BOUNCE },
 ];
 const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
@@ -986,8 +987,8 @@ interface FragmentDef {
 /** Explosion fragments by projectile kind (bullet, rocket, grenade). */
 const FRAGMENTS: readonly FragmentDef[] = [
   { shrapnel: 0, speed: 0, embers: 0 },
-  { shrapnel: 24, speed: 360, embers: 18 },
-  { shrapnel: 40, speed: 420, embers: 24 },
+  { shrapnel: 36, speed: 820, embers: 18 }, // rocket
+  { shrapnel: 56, speed: 760, embers: 24 }, // grenade
   { shrapnel: 0, speed: 0, embers: 0 },
 ];
 
@@ -1006,8 +1007,8 @@ export function explosionFragments(p: Particles, x: number, y: number, projKind:
     const d = Math.sqrt(dx * dx + dy * dy) + 1e-6;
     dx /= d;
     dy /= d;
-    const s = def.speed * rng.range(0.55, 1);
-    p.spawn(PK.Shrapnel, x, y, dx * s, dy * s, rng.range(18, 30), projKind, 0, owner);
+    const s = def.speed * rng.range(0.6, 1);
+    p.spawn(PK.Shrapnel, x, y, dx * s, dy * s, rng.range(14, 24), projKind, 0, owner);
   }
   for (let k = 0; k < def.embers; k++) {
     let dx = rng.range(-1, 1);

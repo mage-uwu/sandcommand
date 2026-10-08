@@ -94,7 +94,7 @@ function setup(): { world: World; p: Player; frames: Uint8Array[] } {
 let seq = 0;
 function holdTool(world: World, p: Player, weapon: number, ticks = 1): void {
   for (let k = 0; k < ticks; k++) {
-    world.input(p.id, { seq: ++seq & 0xffff, buttons: 0, aim: quantizeAim(0), weapon });
+    world.input(p.id, { seq: ++seq & 0xffff, buttons: 0, aim: quantizeAim(0), inv: world.equip(p, weapon) });
     world.step();
   }
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deliverAll } from './helpers.ts';
 import { BTN_RIGHT, BTN_UP, newBody, stepBody } from '../src/shared/actor.ts';
-import { Part, has, mobility, newBodyState, newStrike, partAt, strike, harm } from '../src/shared/body.ts';
+import { ClassId, Part, has, mobility, newBodyState, newStrike, partAt, resetBody, strike, harm } from '../src/shared/body.ts';
 import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, DT, WORLD_W } from '../src/shared/constants.ts';
 import { applyFrameRecords, nullHandler } from '../src/shared/frame.ts';
@@ -101,6 +101,9 @@ describe('modular body', () => {
     const shooter = world.addPlayer('shooter', { send: (d) => inbox.push(d) })!;
     const victim = world.addPlayer('victim', { send() {} })!;
     deliverAll(world, [shooter, victim]);
+    // A standard (medium) clone: heavies shrug rifle rounds off (see the class tests).
+    resetBody(victim.parts, ClassId.Medium);
+    victim.body.cls = ClassId.Medium;
     const t = world.terrain;
     for (let x = 900; x < 1100; x++) {
       for (let y = 300; y < 310; y++) t.set(x, y, Mat.Bedrock);
@@ -138,5 +141,57 @@ describe('modular body', () => {
     expect(victim.alive).toBe(false);
     expect(has(victim.parts.mask, Part.Head)).toBe(false);
     expect(shooter.kills).toBe(1);
+  });
+});
+
+describe('clone classes', () => {
+  const RIFLE_E = 0.5 * 0.8 * 880;
+  it('a heavy shrugs off rifle rounds and blasts that wreck a medium', () => {
+    const med = newBodyState(ClassId.Medium);
+    const hvy = newBodyState(ClassId.Heavy);
+    const a = newStrike();
+    const b = newStrike();
+    for (let k = 0; k < 2; k++) {
+      strike(med, Part.Head, RIFLE_E, 16, a);
+      strike(hvy, Part.Head, RIFLE_E, 16, b);
+    }
+    expect(a.vital).toBe(true); // two headshots kill a medium
+    expect(b.vital).toBe(false);
+    expect(b.detached.length).toBe(0); // stopped at the plate
+    // Overpressure: the same blast leaves a heavy's limbs on.
+    const m2 = newBodyState(ClassId.Medium);
+    const h2 = newBodyState(ClassId.Heavy);
+    const ra = newStrike();
+    const rb = newStrike();
+    harm(m2, Part.LegF, 30, ra);
+    harm(h2, Part.LegF, 30, rb);
+    expect(ra.detached).toContain(Part.LegF);
+    expect(rb.detached.length).toBe(0);
+  });
+
+  it('scouts wear no vest and their army helmet stops less', () => {
+    const sc = newBodyState(ClassId.Scout);
+    expect(has(sc.mask, Part.Vest)).toBe(false);
+    expect(has(sc.mask, Part.Helmet)).toBe(true);
+    // Shrapnel-grade energy: a medium's helmet stops it, a scout's doesn't.
+    const md = newBodyState(ClassId.Medium);
+    const r1 = newStrike();
+    const r2 = newStrike();
+    strike(md, Part.Head, 130, 12, r1);
+    strike(sc, Part.Head, 130, 12, r2);
+    expect(md.wounds[Part.Head]).toBe(0);
+    expect(sc.wounds[Part.Helmet]).toBeGreaterThan(0);
+  });
+
+  it('scouts run and fly further on a tank of fuel; heavies lumber', () => {
+    const t = new Terrain();
+    const fly = (cls: number) => {
+      const b = newBody(500, 300);
+      b.cls = cls;
+      for (let k = 0; k < 60; k++) stepBody(b, BTN_UP, t, DT);
+      return 300 - b.y;
+    };
+    expect(fly(ClassId.Scout)).toBeGreaterThan(fly(ClassId.Medium));
+    expect(fly(ClassId.Medium)).toBeGreaterThan(fly(ClassId.Heavy));
   });
 });

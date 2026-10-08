@@ -1,13 +1,13 @@
 import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET, F_RELOAD, dequantizeAim } from '../shared/protocol.ts';
+import { F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
 import { PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import type { CraftView, Game, RemoteView } from './game.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
-import { PARTS, Part, has } from '../shared/body.ts';
+import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE } from './sprites.ts';
@@ -273,9 +273,14 @@ export class Renderer {
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
       const myAim = Math.atan2(wy - (selfY + SHOULDER_Y), wx - (selfX + SHOULDER_X));
       const reloading = game.reloadLeft > 0;
-      const dry = WEAPONS[game.weapon].clip > 0 && game.ammo === 0;
+      const dry = (WEAPONS[game.weapon]?.clip ?? 0) > 0 && game.ammo === 0;
       const flags =
-        F_ALIVE | (b.onGround ? F_GROUND : 0) | (b.jetting ? F_JET : 0) | (input.mouseDown && !reloading && !dry ? F_FIRING : 0) | (reloading ? F_RELOAD : 0);
+        F_ALIVE |
+        (b.onGround ? F_GROUND : 0) |
+        (b.jetting ? F_JET : 0) |
+        (input.mouseDown && !reloading && !dry ? F_FIRING : 0) |
+        (reloading ? F_RELOAD : 0) |
+        (b.cls << F_CLASS_SHIFT);
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts);
     }
 
@@ -285,6 +290,27 @@ export class Renderer {
     const ly = Math.floor(camY - halfH) - 1;
     this.particleLayer.render(game.particles, this.sprites, alpha, lx, ly, Math.ceil(halfW * 2) + 3, Math.ceil(halfH * 2) + 3);
     ctx.drawImage(this.particleLayer.canvas, lx, ly);
+
+    // Weapons lying on the ground (spinning while they fly), and a prompt
+    // over the one we'd pick up.
+    for (const [, it] of game.groundItems) {
+      const ang = it.rest ? (it.left ? Math.PI : 0) : (now / 90) % (Math.PI * 2);
+      const g = this.sprites.gun(it.weapon, ang);
+      ctx.drawImage(g.c, Math.round(it.x) - g.r, Math.round(it.y) - 1 - g.r);
+    }
+    const near = game.nearestItem();
+    if (near && WEAPONS[near.weapon]) {
+      const d = WEAPONS[near.weapon];
+      ctx.font = `${Math.max(4, Math.round(11 / z))}px ui-monospace, monospace`;
+      const label = `[3] ${d.name}${d.clip > 0 ? ` ${near.ammo}/${d.clip}` : ''}`;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(near.x - tw / 2 - 1, near.y - 13, tw + 2, 6);
+      ctx.fillStyle = '#ffd34a';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, near.x, near.y - 8);
+      ctx.textAlign = 'left';
+    }
 
     // Materializer beams (anyone's), fading out.
     for (const bm of game.beams) {
@@ -470,7 +496,7 @@ export class Renderer {
     const iy = Math.round(y);
     // Walk cycle advances with distance travelled, so feet don't skate.
     const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / 3) & 3] : 'idle';
-    ctx.drawImage(this.sprites.body(team, frame, left, parts), ix - 1, iy - 2);
+    ctx.drawImage(this.sprites.body(team, frame, left, parts, classOfFlags(flags)), ix - 1, iy - 2);
 
     // Jetpack exhaust under the pack (pack is on the clone's back).
     if (flags & F_JET && has(parts, Part.Jetpack)) {
@@ -494,6 +520,7 @@ export class Renderer {
       ctx.fillRect(left ? sx - 1 : sx, sy, 2, 2);
       return;
     }
+    if (!WEAPONS[weapon]) return; // empty-handed
     if (flags & F_RELOAD) {
       // Reloading: gun tipped down in front, bobbing as the magazine goes in.
       const down = 1.05 + Math.sin(now / 90) * 0.12;
@@ -726,21 +753,33 @@ export class Renderer {
     const me = game.players.get(game.myId);
     ctx.fillStyle = '#ffd34a';
     ctx.fillText(`GOLD ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
+    if (game.alive) {
+      ctx.fillStyle = '#c8d0d8';
+      ctx.fillText(CLASSES[game.body.cls]?.name.toUpperCase() ?? '', 14 * s, 78 * s);
+    }
     if (game.building) this.drawBuildMenu(game, input, s, H);
     else this.menuRects.length = 0;
     if (game.alive) this.drawPaperDoll(game, s);
 
-    // Weapon slots.
-    const slotW = 92 * s;
-    const total = WEAPONS.length * slotW;
+    // Inventory: what we carry, the one in hand highlighted.
+    const slotW = 104 * s;
+    const total = Math.max(1, game.inv.length) * slotW;
     const sx0 = W / 2 - total / 2;
-    for (let i = 0; i < WEAPONS.length; i++) {
+    for (let i = 0; i < game.inv.length; i++) {
+      const it = game.inv[i];
+      const d = WEAPONS[it.weapon];
       const x = sx0 + i * slotW;
-      const sel = i === input.weapon;
+      const sel = i === game.slot;
       ctx.fillStyle = sel ? 'rgba(255,210,80,0.85)' : 'rgba(0,0,0,0.5)';
       ctx.fillRect(x + 2 * s, H - 34 * s, slotW - 4 * s, 24 * s);
       ctx.fillStyle = sel ? '#000' : '#ddd';
-      ctx.fillText(`${i + 1} ${WEAPONS[i].name}`, x + 10 * s, H - 18 * s);
+      ctx.fillText(d ? (d.clip > 0 ? `${d.name} ${it.ammo}` : d.name) : '?', x + 10 * s, H - 18 * s);
+    }
+    if (game.alive) {
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText(game.inv.length ? '1/2 switch   3 pick up   4 drop' : 'empty-handed: 3 picks up a weapon', W / 2, H - 42 * s);
+      ctx.textAlign = 'left';
     }
     // Magazine and reload for the weapon in hand.
     const def = WEAPONS[game.weapon];

@@ -107,7 +107,7 @@ export class GameRoom extends DurableObject<Env> {
       const r = new Reader(new Uint8Array(data));
       switch (r.u8()) {
         case C_INPUT:
-          world.input(id, { seq: r.u16(), buttons: r.u8(), aim: r.u16(), weapon: r.u8() });
+          world.input(id, { seq: r.u16(), buttons: r.u8(), aim: r.u16(), inv: r.u8() });
           break;
         case C_RESYNC:
           while (r.remaining >= 2) world.resync(id, r.u16());

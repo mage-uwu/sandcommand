@@ -1,5 +1,4 @@
 import { BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
-import { PROJ_BUILD, WEAPONS } from '../shared/weapons.ts';
 import { PIECES } from '../shared/build.ts';
 
 export class InputState {
@@ -11,7 +10,12 @@ export class InputState {
   private clicks = 0;
   /** Right mouse held: aiming down the scope. */
   scopeDown = false;
-  weapon = 0;
+  /** Inventory key presses since last taken (taps shorter than a tick still count). */
+  private cyclePresses = 0;
+  private pickups = 0;
+  private drops = 0;
+  /** Set each tick by the game loop: with the materializer out, the wheel picks pieces. */
+  building = false;
   /** Selected materializer piece (index into PIECES). */
   piece = 0;
   scoreboard = false;
@@ -32,12 +36,13 @@ export class InputState {
         e.preventDefault();
         return;
       }
-      if (/^Digit[1-9]$/.test(e.code)) {
-        const n = Number(e.code.slice(5)) - 1;
-        if (n < WEAPONS.length) this.weapon = n;
+      // Inventory: 1/2 (or Q/E) rotate, 3 (or F) pick up, 4 (or G) drop.
+      if (!e.repeat) {
+        if (e.code === 'Digit1' || e.code === 'KeyQ') this.cyclePresses--;
+        if (e.code === 'Digit2' || e.code === 'KeyE') this.cyclePresses++;
+        if (e.code === 'Digit3' || e.code === 'KeyF') this.pickups++;
+        if (e.code === 'Digit4' || e.code === 'KeyG') this.drops++;
       }
-      if (e.code === 'KeyQ') this.weapon = (this.weapon + WEAPONS.length - 1) % WEAPONS.length;
-      if (e.code === 'KeyE') this.weapon = (this.weapon + 1) % WEAPONS.length;
       if (e.code === 'Space') e.preventDefault();
       this.keys.add(e.code);
     });
@@ -73,8 +78,8 @@ export class InputState {
       (e) => {
         const d = Math.sign(e.deltaY);
         // With the materializer out, the wheel picks what to build.
-        if (WEAPONS[this.weapon].proj === PROJ_BUILD) this.piece = (this.piece + d + PIECES.length) % PIECES.length;
-        else this.weapon = (this.weapon + d + WEAPONS.length) % WEAPONS.length;
+        if (this.building) this.piece = (this.piece + d + PIECES.length) % PIECES.length;
+        else this.cyclePresses += d;
         e.preventDefault();
       },
       { passive: false },
@@ -84,6 +89,23 @@ export class InputState {
   private down(...codes: string[]): boolean {
     for (const c of codes) if (this.keys.has(c)) return true;
     return false;
+  }
+
+  /** Net inventory rotation pressed since last asked (-1 back, +1 forward, ...). */
+  takeCycle(): number {
+    const d = this.cyclePresses;
+    this.cyclePresses = 0;
+    return d;
+  }
+  takePickup(): boolean {
+    const n = this.pickups;
+    this.pickups = 0;
+    return n > 0;
+  }
+  takeDrop(): boolean {
+    const n = this.drops;
+    this.drops = 0;
+    return n > 0;
   }
 
   /** Consume one pending left click (materializer placement and menu picks). */
