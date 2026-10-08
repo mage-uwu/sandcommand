@@ -57,6 +57,8 @@ export class BotBrain {
   private readonly phase: number;
   /** Some bots go for a tank when one lands near them. */
   private readonly tanker: boolean;
+  /** Regicide: some bots go straight for the enemy king; the rest fight whoever is nearest. */
+  private readonly assault: boolean;
   /** Ticks driving without getting anywhere (it shells the way clear, then bails out). */
   private tankStuck = 0;
   /** A tank it gave up on, left alone until `abandonUntil`. */
@@ -69,6 +71,7 @@ export class BotBrain {
     this.phase = this.rng.int(15);
     this.react = 15 + this.rng.int(25);
     this.tanker = this.rng.next() < 0.5;
+    this.assault = this.rng.next() < 0.5;
   }
 
   think(world: World, p: Player): InputCmd {
@@ -100,6 +103,9 @@ export class BotBrain {
           this.target = o.id;
         }
       }
+      // Regicide assault: the enemy king, wherever he hides (unless someone is right here).
+      const king = world.regicideLive && this.assault && p.team !== Team.None ? world.players[world.kings[1 - p.team]] : null;
+      if (king && king.alive && best > 90 * 90) this.target = king.id;
       tgt = this.target >= 0 ? world.players[this.target] : null;
       if (tgt && tgt.id !== prevTarget) this.holdFire = Math.max(this.holdFire, t + this.react);
     }
@@ -253,6 +259,13 @@ export class BotBrain {
       if (this.trigger) buttons |= BTN_FIRE;
     } else this.trigger = false;
 
+    // A king holds his vault: he turns and fights, but never leaves it.
+    if (world.regicideLive && world.isKing(p)) {
+      buttons &= ~(BTN_LEFT | BTN_RIGHT | BTN_UP);
+      if (weapon === WeaponId.Digger) buttons &= ~BTN_FIRE;
+      if (want === digSlot && gunSlot >= 0) want = gunSlot;
+      pickup = false;
+    }
     cmd.buttons = buttons;
     cmd.inv = invByte(want >= 0 ? want : p.slot, p.invVersion, pickup);
     return cmd;

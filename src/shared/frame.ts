@@ -165,7 +165,8 @@ export interface RoundState {
   inWave: boolean; // are we in it
   out: boolean; // were we in it, and got fragged
   mode: number; // GameMode of this wave (between waves: the next one)
-  teamLeft: [number, number]; // TDM: red and green clones still in the wave
+  teamLeft: [number, number]; // team modes: red and green clones still in the wave
+  kings: [number, number]; // Regicide: red's and green's king (player id, 255 none)
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -196,7 +197,7 @@ export interface FrameHandler {
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
-  wave(seed: number, hashes: Uint32Array): void;
+  wave(seed: number, hashes: Uint32Array, fortresses: boolean): void;
   hit(victim: number, x: number, y: number, amount: number): void;
   chat(id: number, text: string): void;
   /** Drop rockets near this client's view this tick (absent when none). */
@@ -328,7 +329,8 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const mode = r.u8();
         const red = r.u8();
         const green = r.u8();
-        h.round({ phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green] });
+        const kings: [number, number] = [r.u8(), r.u8()];
+        h.round({ phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green], kings });
         break;
       }
       case R_TEAMS: {
@@ -339,12 +341,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       }
       case R_WAVE: {
         const seed = r.u32();
+        const fortresses = (r.u8() & 1) !== 0;
         const hashes = new Uint32Array(CHUNK_COUNT);
         for (let i = 0; i < CHUNK_COUNT; i++) hashes[i] = r.u32();
         // The handler makes the map from the seed (same generator as the
         // server) before any later record touches the terrain; headless
         // decoders that don't keep terrain can skip it.
-        h.wave(seed, hashes);
+        h.wave(seed, hashes, fortresses);
         break;
       }
       case R_PIXELS: {

@@ -37,13 +37,37 @@ export interface Complex {
   floor: number; // ground-floor standing surface (y)
   heights: number[]; // storeys above ground per module
   basements: number[]; // storeys below ground per module
+  /** Regicide fortresses only: whose it is, where its king starts, and where its soldiers do. */
+  fortress?: Fortress;
 }
+
+/** A standing spot: x centre, y the surface a clone stands on. */
+export interface Spot {
+  x: number;
+  y: number;
+}
+
+export interface Fortress {
+  team: number; // 0 red (west), 1 green (east)
+  /** The king's vault, at the bottom of the deepest basement. */
+  king: Spot;
+  /** Rooms, roofs and the ground outside its gates. */
+  spawns: Spot[];
+}
+
+/** Regicide fortress layout, west to east (the east one is mirrored): storeys up, basements down. */
+const FORT_STOREYS = [2, 2, 3, 3, 2, 2];
+const FORT_BASEMENTS = [1, 2, 2, 3, 2, 1];
+/** Module holding the king's vault (in the west fortress's order). */
+const FORT_VAULT = 3;
+/** First module of the west fortress (the east one sits as far in from the other edge). */
+const FORT_INSET = 15;
 
 /**
  * Build bunker complexes into `m` (a raw material grid, WORLD_W x WORLD_H)
  * along the surface `heights`. Returns the complexes for tests and spawning.
  */
-export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number): Complex[] {
+export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number, fortresses = false): Complex[] {
   const rng = new Rng(seed ^ 0xb0b5);
   const coverage = 0.15 + rng.next() * 0.45;
   const nMods = Math.floor((WORLD_W - 2 * MARGIN) / MOD_W);
@@ -51,22 +75,43 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
   const complexes = Math.max(1, Math.round(target / 4.5));
   const meanGap = Math.max(1, (nMods - target) / (complexes + 1));
   const out: Complex[] = [];
+  // Regicide: two great fortresses first, one near each end; the ordinary
+  // complexes fill in around them (never within a module of their walls).
+  const reserved: [number, number][] = [];
+  if (fortresses) {
+    const len = FORT_STOREYS.length;
+    for (const team of [0, 1]) {
+      const i0 = team === 0 ? FORT_INSET : nMods - FORT_INSET - len;
+      const storeys = team === 0 ? FORT_STOREYS : [...FORT_STOREYS].reverse();
+      const basements = team === 0 ? FORT_BASEMENTS : [...FORT_BASEMENTS].reverse();
+      const vault = team === 0 ? FORT_VAULT : len - 1 - FORT_VAULT;
+      const c = buildComplex(m, heights, MARGIN + i0 * MOD_W, len, rng, { storeys, basements, vault, team });
+      if (c) out.push(c);
+      reserved.push([i0 - 1, i0 + len + 1]);
+    }
+  }
   let i = 1 + rng.int(Math.ceil(meanGap));
   let built = 0;
   while (built < target && i < nMods - 1) {
     let len = Math.min(target - built, 2 + rng.int(6), nMods - 1 - i);
     if (len < 1) break;
     if (len === 1 && target - built > 1) len = 2;
+    const clash = reserved.find(([r0, r1]) => i < r1 && i + len > r0);
+    if (clash) {
+      i = clash[1];
+      continue;
+    }
     const x0 = MARGIN + i * MOD_W;
     const c = buildComplex(m, heights, x0, len, rng);
     if (c) out.push(c);
     built += len;
     i += len + 1 + rng.int(Math.max(1, Math.round(meanGap * 2 - 1)));
   }
+  out.sort((a, b) => a.x0 - b.x0);
   // Escape tunnels from end basements, out under the open ground beside them.
   for (let k = 0; k < out.length; k++) {
     const c = out[k];
-    if (rng.next() > 0.45) continue;
+    if (rng.next() > 0.45 || c.fortress) continue;
     const right = rng.next() < 0.5;
     const end = right ? c.basements.length - 1 : 0;
     if (c.basements[end] === 0) continue;
@@ -84,21 +129,32 @@ function fill(m: Uint8Array, x0: number, y0: number, x1: number, y1: number, mat
   for (let y = ya; y < yb; y++) m.fill(mat, y * WORLD_W + xa, y * WORLD_W + xb);
 }
 
-function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: number, rng: Rng): Complex | null {
+/** A fixed layout for a fortress (instead of a random one). */
+interface FortPlan {
+  storeys: number[];
+  basements: number[];
+  vault: number; // module of the king's vault (it has the deepest basement)
+  team: number;
+}
+
+function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: number, rng: Rng, plan?: FortPlan): Complex | null {
   const x1 = x0 + len * MOD_W;
   // Level the site at the median ground height under it (snapped to 4).
   const hs: number[] = [];
   for (let x = x0; x < x1; x += 4) hs.push(heights[x]);
   hs.sort((a, b) => a - b);
-  const floor = (hs[hs.length >> 1] >> 2) << 2;
+  let floor = (hs[hs.length >> 1] >> 2) << 2;
   const storeys: number[] = [];
   const basements: number[] = [];
   for (let k = 0; k < len; k++) {
-    storeys.push([1, 1, 1, 1, 2, 2, 3][rng.int(7)]);
-    basements.push([0, 0, 1, 1, 1, 2][rng.int(6)]);
+    storeys.push(plan ? plan.storeys[k] : [1, 1, 1, 1, 2, 2, 3][rng.int(7)]);
+    basements.push(plan ? plan.basements[k] : [0, 0, 1, 1, 1, 2][rng.int(6)]);
   }
   const deepest = Math.max(...basements);
-  if (floor - 3 * MOD_H < 8 || floor + SLAB + deepest * MOD_H > WORLD_H - 40) return null;
+  if (plan) {
+    // A fortress always gets built: shift the site into the depth that fits.
+    floor = (Math.max(3 * MOD_H + 8, Math.min(WORLD_H - 41 - SLAB - deepest * MOD_H, floor)) >> 2) << 2;
+  } else if (floor - 3 * MOD_H < 8 || floor + SLAB + deepest * MOD_H > WORLD_H - 40) return null;
 
   // Site: clear the ground above the floor (a notch where the hill rises),
   // pour the floor slab, and fill any dip beneath it down to solid ground.
@@ -132,10 +188,10 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
       const inside = lv < Math.min(left, right);
       if (inside) {
         // Rooms on both sides: a doorway (always at ground level).
-        if (lv === 0 || rng.next() < 0.6) fill(m, bx, yFloor - DOOR_H, bx + WALL, yFloor, Mat.Air);
+        if (lv === 0 || rng.next() < 0.6 || plan) fill(m, bx, yFloor - DOOR_H, bx + WALL, yFloor, Mat.Air);
       } else if (lv === 0) {
-        // An end of the complex: the way in (most ends have one).
-        if (rng.next() < 0.8 || (b === 0 && len === 1)) fill(m, bx, yFloor - DOOR_H, bx + WALL, yFloor, Mat.Air);
+        // An end of the complex: the way in (most ends have one; a fortress always has its gates).
+        if (rng.next() < 0.8 || (b === 0 && len === 1) || plan) fill(m, bx, yFloor - DOOR_H, bx + WALL, yFloor, Mat.Air);
       } else if (rng.next() < 0.6) {
         // An upper storey looking out over a lower roof: a firing slit at head height.
         fill(m, bx, yFloor - 12 * SCALE, bx + WALL, yFloor - 9 * SCALE, Mat.Air);
@@ -177,6 +233,8 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
     }
   }
 
+  if (plan) return fortify(m, x0, len, floor, storeys, basements, plan, rng);
+
   // Battle damage: some modules come pre-shot.
   for (let k = 0; k < len; k++) {
     if (rng.next() > 0.22) continue;
@@ -199,6 +257,52 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
     }
   }
   return { x0, x1, floor, heights: storeys, basements };
+}
+
+/**
+ * Finish a fortress: steel facing on its outer walls, battlements on every
+ * roof, and the king's vault at the bottom of the deepest basement lined in
+ * metal (only explosion cores and diggers get through). Then note where the
+ * king and the soldiers start.
+ */
+function fortify(m: Uint8Array, x0: number, len: number, floor: number, storeys: number[], basements: number[], plan: FortPlan, rng: Rng): Complex {
+  const x1 = x0 + len * MOD_W;
+  const FACING = 2 * SCALE;
+  // Steel over the outer walls, leaving the gates open.
+  for (const [wx, h] of [
+    [x0 - FACING, storeys[0]],
+    [x1, storeys[len - 1]],
+  ] as const) {
+    fill(m, wx, floor - h * MOD_H, wx + FACING, floor - DOOR_H, Mat.Metal);
+  }
+  // Battlements: merlons along every roof, gaps to shoot through.
+  const MERLON = 6 * SCALE;
+  for (let k = 0; k < len; k++) {
+    const mx = x0 + k * MOD_W;
+    const roof = floor - storeys[k] * MOD_H;
+    for (let x = mx; x + MERLON <= mx + MOD_W; x += 2 * MERLON) fill(m, x, roof - 5 * SCALE, x + MERLON, roof, Mat.Concrete);
+  }
+  // The vault: its whole module column at the deepest level turns to steel.
+  const j = basements[plan.vault] - 1;
+  const vx = x0 + plan.vault * MOD_W;
+  const vy0 = floor + SLAB + j * MOD_H;
+  const vy1 = vy0 + MOD_H;
+  for (let y = vy0; y < vy1; y++) {
+    for (let x = vx; x < vx + MOD_W; x++) if (m[y * WORLD_W + x] === Mat.Concrete) m[y * WORLD_W + x] = Mat.Metal;
+  }
+  // Under the vault floor, a steel plate too (so it can't be dug into from below cheaply).
+  fill(m, vx, vy1, vx + MOD_W, vy1 + 2 * SCALE, Mat.Metal);
+  const king: Spot = { x: vx + MOD_W / 2, y: vy1 - SLAB };
+  // Soldiers: every above-ground room, the roofs, and the ground outside the gates.
+  const spawns: Spot[] = [];
+  for (let k = 0; k < len; k++) {
+    const mx = x0 + k * MOD_W;
+    for (let lv = 0; lv < storeys[k]; lv++) {
+      for (let n = 0; n < 2; n++) spawns.push({ x: mx + WALL + 8 + rng.int(MOD_W - 2 * WALL - 16), y: floor - lv * MOD_H });
+    }
+    spawns.push({ x: mx + 8 + rng.int(MOD_W - 16), y: floor - storeys[k] * MOD_H - 5 * SCALE });
+  }
+  return { x0, x1, floor, heights: storeys, basements, fortress: { team: plan.team, king, spawns } };
 }
 
 /**

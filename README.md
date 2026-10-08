@@ -146,6 +146,37 @@ lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then gold, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
+## Regicide
+
+The third mode in the rotation (waves go Last Man Standing → Last Team
+Standing → Regicide; `rotation` in the `World` options).
+- **Two fortresses.** A Regicide map always has two large fortresses built
+  into it, one per team: red's in the west, green's in the east, about
+  1500 cells apart. Each is six modules wide, with two- and three-storey
+  towers and battlements on every roof. It has steel facing on its outer
+  walls, gates at both ends, and three basement levels. Ordinary bunkers
+  fill the rest of the map but keep clear of the fortresses. The generator
+  builds them from the seed (`placeStructures(…, fortresses)` in
+  `src/shared/structures.ts`). `R_WAVE` carries a flag, so every client
+  builds the same map.
+- **The king.** One clone per team is crowned and starts as a heavy, deep
+  in his fortress's **king's vault**. The vault is a steel-lined room at the
+  bottom of the deepest basement, reached only by a shaft from the floor
+  above. Kings wear a crown, their name tags carry ♛, and the minimap rings
+  them in gold. The top bar shows both kings.
+- **Soldiers.** Soldiers start already at their posts: in the fortress's
+  rooms and on its roofs, with no drop rockets. When one dies, he comes
+  back after **10 seconds** by drop rocket, landing at his own fortress.
+  Players who join mid-wave are dealt to the smaller side and drop in the
+  same way.
+- **Winning.** The king never respawns. When a king dies, the other team
+  wins the wave, and every member scores. A king who leaves the game hands
+  the crown to a living teammate. Waves run six minutes; if both kings are
+  still alive at the end, the side with more kills takes it.
+- **Bots.** About half the bots assault: they go straight for the enemy king
+  and dig through whatever is in the way. The rest fight whoever is
+  nearest. A bot king holds his vault and shoots whatever comes into view.
+
 ## Tanks
 
 Metal Slug style tanks (`src/shared/tank.ts`). Each wave, **one or two

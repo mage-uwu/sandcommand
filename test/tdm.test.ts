@@ -36,7 +36,8 @@ describe('Last Team Standing', () => {
     expect(world.modeOfWave(2)).toBe(GameMode.Lts);
     expect(a.team).not.toBe(Team.None);
     expect(b.team).not.toBe(a.team);
-    expect(world.modeOfWave(3)).toBe(GameMode.Lms);
+    expect(world.modeOfWave(3)).toBe(GameMode.Regicide);
+    expect(world.modeOfWave(4)).toBe(GameMode.Lms);
   });
 
   it('splits the room into even teams, humans across both, and lands them on opposite sides', () => {

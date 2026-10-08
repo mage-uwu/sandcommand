@@ -142,7 +142,9 @@ import {
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
-import { generateWorld } from '../shared/worldgen.ts';
+import { generateWorld, lastComplexes } from '../shared/worldgen.ts';
+import type { Fortress } from '../shared/structures.ts';
+import { ClassId } from '../shared/body.ts';
 
 export interface ClientLink {
   send(data: Uint8Array): void;
@@ -314,6 +316,11 @@ export class World {
   readonly rotation: readonly number[];
   /** Bumped whenever the team table changes (clients are re-sent it). */
   teamsRev = 0;
+  /** This map has the two Regicide fortresses (clients build them too). */
+  mapFortresses = false;
+  /** Regicide: each team's fortress (by team), and each team's king (player id, 255 none). */
+  fortresses: Fortress[] = [];
+  readonly kings = [255, 255];
   /** FFA: fill the room with bots up to this many clones (humans count first). */
   readonly botFill: number;
   /** Seed of the current map (each wave gets a new one). */
@@ -330,10 +337,10 @@ export class World {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
     this.tankDrops = opts.tanks ?? this.mode === 'ffa';
-    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts];
+    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts, GameMode.Regicide];
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
-    generateWorld(this.terrain, this.mapSeed);
+    this.makeMap(this.mode === 'ffa' && this.modeOfWave(1) === GameMode.Regicide);
     this.sealMap();
   }
 
@@ -353,12 +360,21 @@ export class World {
     this.mapRecord = null;
   }
 
+  /** Generate the map for `mapSeed` (with the Regicide fortresses if asked) and note the fortresses. */
+  private makeMap(fortresses: boolean): void {
+    this.mapFortresses = fortresses;
+    generateWorld(this.terrain, this.mapSeed, fortresses);
+    this.fortresses = [];
+    for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
+  }
+
   /** Remember the freshly generated map, so newcomers can make it themselves instead of downloading it. */
   private sealMap(): void {
     this.pristine.set(this.chunkVersion);
     const w = new Writer(8 + CHUNK_COUNT * 4);
     w.u8(R_WAVE);
     w.u32(this.mapSeed);
+    w.u8(this.mapFortresses ? 1 : 0);
     for (let ci = 0; ci < CHUNK_COUNT; ci++) w.u32(this.terrain.chunkHash(ci));
     this.mapRecord = w.finish();
   }
@@ -401,6 +417,17 @@ export class World {
     // In FFA you join between waves (spectating until the next one starts).
     if (this.mode === 'ffa') p.respawn = 0;
     this.players[id] = p;
+    if (this.regicideLive) {
+      // Regicide has reinforcements: join the smaller side and drop in.
+      let red = 0;
+      let green = 0;
+      for (const o of this.players) if (o && o !== p && o.team === Team.Red) red++;
+      else if (o && o !== p && o.team === Team.Green) green++;
+      p.team = red <= green ? Team.Red : Team.Green;
+      p.inWave = true;
+      p.pendingSpawn = true;
+      p.respawn = REGICIDE_RESPAWN_TICKS;
+    }
     this.teamsRev++; // whoever had this slot before may have had a team
     this.writeRoster(this.broadcast, p, true);
     if (bot) return p;
@@ -465,6 +492,10 @@ export class World {
           this.stepTeamRound(timeUp);
           break;
         }
+        if (this.modeOfWave(this.wave) === GameMode.Regicide) {
+          this.stepRegicide(timeUp);
+          break;
+        }
         if (this.remaining() <= 1 || timeUp) {
           let best: Player | null = null;
           for (const p of this.players) {
@@ -508,6 +539,95 @@ export class World {
   }
 
   /**
+   * Regicide: a king falls, the other side wins (every member scores). A
+   * king who leaves the game hands the crown to a living teammate. When time
+   * runs out, the side with more kills this wave takes it.
+   */
+  private stepRegicide(timeUp: boolean): void {
+    for (const team of [Team.Red, Team.Green]) {
+      const k = this.kings[team];
+      if (k !== 255 && this.players[k]) continue;
+      // Abdicated (left the game): crown someone else, where they stand.
+      const heir = this.players.find((p) => p && p.team === team && p.alive);
+      this.kings[team] = heir ? heir.id : 255;
+    }
+    let winner = 255;
+    let fallen = false;
+    for (const team of [Team.Red, Team.Green]) {
+      const k = this.kings[team];
+      const king = k !== 255 ? this.players[k] : null;
+      if (!king || !king.alive) {
+        winner = team === Team.Red ? Team.Green : Team.Red;
+        fallen = true;
+      }
+    }
+    if (!fallen && !timeUp) return;
+    if (!fallen || (!this.kingAlive(Team.Red) && !this.kingAlive(Team.Green))) {
+      const kills = [0, 0];
+      for (const p of this.players) if (p && p.inWave && p.team !== Team.None) kills[p.team] += p.waveKills;
+      winner = kills[0] === kills[1] ? 255 : kills[0] > kills[1] ? Team.Red : Team.Green;
+    }
+    this.winner = winner;
+    if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  private kingAlive(team: number): boolean {
+    const k = this.kings[team];
+    return k !== 255 && !!this.players[k]?.alive;
+  }
+
+  /** A Regicide wave is being fought right now. */
+  get regicideLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Regicide;
+  }
+
+  /** Is this clone a king (this wave)? */
+  isKing(p: Player): boolean {
+    return p.team !== Team.None && this.kings[p.team] === p.id;
+  }
+
+  /**
+   * Regicide opening: a king for each side (a heavy, deep in its vault), and
+   * every soldier already at their posts in and around the fortress. Only
+   * reinforcements come by drop rocket.
+   */
+  private startRegicide(): void {
+    const forts = this.fortresses;
+    for (const team of [Team.Red, Team.Green]) {
+      const side = this.players.filter((p): p is Player => !!p && p.team === team);
+      const king = side.length ? side[this.rng.int(side.length)] : null;
+      this.kings[team] = king ? king.id : 255;
+      const fort = forts[team];
+      for (const p of side) {
+        p.pendingSpawn = false;
+        if (!fort) {
+          p.pendingSpawn = true; // no fortress (can't happen): drop in instead
+          continue;
+        }
+        const spot = p === king ? fort.king : this.freeSpot(fort);
+        this.placeClone(p, spot.x - ACTOR_W / 2 + (p === king ? 0 : this.rng.range(-3, 3)), spot.y - ACTOR_H, 0, 0);
+        if (p === king) {
+          resetBody(p.parts, ClassId.Heavy);
+          p.body.cls = p.parts.cls;
+        }
+      }
+    }
+    this.teamsRev++;
+  }
+
+  /** A fortress spawn spot with room for a clone. */
+  private freeSpot(fort: Fortress): { x: number; y: number } {
+    for (let n = 0; n < 12; n++) {
+      const s = fort.spawns[this.rng.int(fort.spawns.length)];
+      const x = Math.floor(s.x - ACTOR_W / 2);
+      const y = Math.floor(s.y - ACTOR_H);
+      if (!this.terrain.rectSolid(x, y, x + ACTOR_W - 1, y + ACTOR_H - 1)) return s;
+    }
+    return fort.spawns[0];
+  }
+
+  /**
    * Split everyone into two even teams: humans dealt out first (so people
    * end up on both sides), then bots evening up the numbers.
    */
@@ -541,7 +661,9 @@ export class World {
   private startWave(): void {
     this.wave++;
     this.winner = 255;
-    this.drawTeams(this.modeOfWave(this.wave) === GameMode.Lts);
+    const mode = this.modeOfWave(this.wave);
+    this.drawTeams(mode === GameMode.Lts || mode === GameMode.Regicide);
+    this.kings[0] = this.kings[1] = 255;
     for (const p of this.players) {
       if (!p) continue;
       p.inWave = true;
@@ -552,7 +674,8 @@ export class World {
     }
     // One or two tanks come down by parachute for whoever gets to them first.
     if (this.tankDrops) this.dropTanks(1 + this.rng.int(2));
-    this.setPhase(Phase.Live, WAVE_TICKS);
+    if (mode === GameMode.Regicide) this.startRegicide();
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : WAVE_TICKS);
   }
 
   /**
@@ -564,7 +687,9 @@ export class World {
    */
   private newMap(): void {
     this.mapSeed = this.rng.nextU32();
-    generateWorld(this.terrain, this.mapSeed);
+    // A Regicide wave is fought over two fortresses built into the map.
+    this.makeMap(this.modeOfWave(this.wave + 1) === GameMode.Regicide);
+    this.kings[0] = this.kings[1] = 255;
     this.crafts.fill(null);
     this.tanks.fill(null);
     this.items.length = 0;
@@ -890,6 +1015,11 @@ export class World {
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
     this.leaveTank(victim, false);
+    // Regicide: soldiers come back by drop rocket after a while; the king never does.
+    if (this.regicideLive && victim.inWave && !this.isKing(victim)) {
+      victim.pendingSpawn = true;
+      victim.respawn = REGICIDE_RESPAWN_TICKS;
+    }
     // Everything it carried spills where it fell, for anyone to take.
     this.dropAll(victim);
     // Out of the wave: watch whoever did it.
@@ -1388,7 +1518,14 @@ export class World {
     // Teams come down on opposite sides of the map: red the left, green the right.
     let lo = 48 + CRAFT_W / 2;
     let span = WORLD_W - 96 - CRAFT_W;
-    if (p.team !== Team.None) {
+    const fort = this.regicideLive && p.team !== Team.None ? this.fortresses[p.team] : undefined;
+    if (fort) {
+      // Reinforcements land at their own fortress.
+      const spots = fort.spawns;
+      const xs = spots.map((s) => s.x);
+      lo = Math.max(48 + CRAFT_W / 2, Math.min(...xs) - 120);
+      span = Math.max(1, Math.min(WORLD_W - 48 - CRAFT_W / 2, Math.max(...xs) + 120) - lo);
+    } else if (p.team !== Team.None) {
       span = Math.floor(span * 0.4);
       if (p.team === Team.Green) lo = WORLD_W - 48 - CRAFT_W / 2 - span;
     }
@@ -2214,6 +2351,8 @@ export class World {
         w.u8(this.waveMode);
         w.u8(this.remaining(Team.Red));
         w.u8(this.remaining(Team.Green));
+        w.u8(this.kings[0]);
+        w.u8(this.kings[1]);
         if (p.teamsSeen !== this.teamsRev) {
           p.teamsSeen = this.teamsRev;
           w.u8(R_TEAMS);
@@ -2494,6 +2633,10 @@ const COUNTDOWN_TICKS = 30 * 4;
 const VICTORY_TICKS = 30 * 7;
 /** A wave's time limit. */
 const WAVE_TICKS = 30 * 60 * 4;
+/** Regicide waves run longer: fortresses take a while to crack. */
+const REGICIDE_TICKS = 30 * 60 * 6;
+/** Regicide reinforcements: dead soldiers drop back in after this long. */
+const REGICIDE_RESPAWN_TICKS = 30 * 10;
 /** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
 const STARTING_GOLD = 60;
 /** Who a rocket's exhaust flames are credited to (and so who it is immune to). */

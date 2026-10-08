@@ -286,6 +286,7 @@ export class Renderer {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
       this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts);
+      if (game.isKing(v.id)) this.drawCrown(ctx, v.x, v.y, now);
     }
     // Own clone (hidden inside its tank while driving).
     if (game.alive && !game.drive) {
@@ -302,6 +303,7 @@ export class Renderer {
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts);
+      if (game.isKing(game.myId)) this.drawCrown(ctx, selfX, selfY, now);
     }
 
     // Every particle the field engine owns (grains, sparks, flames, smoke,
@@ -437,10 +439,11 @@ export class Renderer {
       const info = game.players.get(v.id);
       const sx = offX + (v.x + ACTOR_W / 2) * z;
       const sy = offY + v.y * z - 8 * dpr;
+      const tag = game.isKing(v.id) ? `♛ ${info?.name ?? '?'}` : (info?.name ?? '?');
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillText(info?.name ?? '?', sx + dpr, sy + dpr);
+      ctx.fillText(tag, sx + dpr, sy + dpr);
       ctx.fillStyle = info?.color ?? '#ccc';
-      ctx.fillText(info?.name ?? '?', sx, sy);
+      ctx.fillText(tag, sx, sy);
       if (v.hp < ACTOR_MAX_HP) {
         const w = 24 * dpr;
         ctx.fillStyle = '#300';
@@ -768,6 +771,21 @@ export class Renderer {
       ctx.fillStyle = game.gold >= p.cost ? '#ffd34a' : '#ff7060';
       ctx.fillText(`${p.cost} gold`, x0 + 44 * s, y + 33 * s);
       this.menuRects.push({ x: x0, y, w, h: rowH, i });
+    }
+  }
+
+  /** A gold crown over a king's head, glinting. */
+  private drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number, now: number): void {
+    ctx.fillStyle = '#ffd34a';
+    ctx.fillRect(x + 1, y - 2.5, 6, 2);
+    ctx.fillRect(x + 1, y - 4.5, 1, 2);
+    ctx.fillRect(x + 3.5, y - 5, 1, 2.5);
+    ctx.fillRect(x + 6, y - 4.5, 1, 2);
+    ctx.fillStyle = '#c0392b';
+    ctx.fillRect(x + 3.5, y - 2, 1, 1);
+    if ((now / 400) % 4 < 0.5) {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x + 6, y - 5, 1, 1);
     }
   }
 
@@ -1113,6 +1131,14 @@ export class Renderer {
       ctx.fillStyle = game.colorOf(v.id);
       ctx.fillRect(mx + v.x * k - 1.5 * s, my + v.y * k - 1.5 * s, 3 * s, 3 * s);
     }
+    // Kings stand out: a gold square around their dot (radar blips included).
+    const rs0 = game.roundState;
+    if (rs0 && rs0.mode === GameMode.Regicide) {
+      ctx.strokeStyle = '#ffd34a';
+      ctx.lineWidth = Math.max(1, s);
+      for (const bl of game.radar) if (game.isKing(bl.id)) ctx.strokeRect(mx + bl.x * k - 3 * s, my + bl.y * k - 3 * s, 6 * s, 6 * s);
+      for (const v of views) if (v.flags & F_ALIVE && game.isKing(v.id)) ctx.strokeRect(mx + v.x * k - 3 * s, my + v.y * k - 3 * s, 6 * s, 6 * s);
+    }
     if (game.alive) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(mx + game.body.x * k - 2 * s, my + game.body.y * k - 2 * s, 4 * s, 4 * s);
@@ -1161,15 +1187,25 @@ export class Renderer {
     const secs = Math.ceil(rs.timer / TICK_RATE);
     const name = (id: number) => (id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '???'));
     const big = (text: string, sub: string, color = '#fff') => this.drawBanner(text, sub, color, s, W, H);
-    const teams = rs.mode === GameMode.Lts;
+    const regicide = rs.mode === GameMode.Regicide;
+    const teams = rs.mode === GameMode.Lts || regicide;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
+    if (rs.phase === Phase.Waiting) big(regicide ? 'REGICIDE' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
-        teams ? 'last team standing · red vs green · one life each' : 'last man standing · one life each · every clone for itself',
+        regicide
+          ? 'regicide · kill their king · guard yours'
+          : teams
+            ? 'last team standing · red vs green · one life each'
+            : 'last man standing · one life each · every clone for itself',
         '#ffd34a',
       );
+    } else if (rs.phase === Phase.Victory && regicide) {
+      const loser = rs.winner === Team.Red ? Team.Green : Team.Red;
+      const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
+      if (rs.winner === 255) big('STALEMATE', `both kings stand · wave ${rs.wave} · next wave in ${secs}`);
+      else big(`${TEAM_NAMES[rs.winner]} WINS`, `${mine ? 'you killed' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' killed'} the ${TEAM_NAMES[loser].toLowerCase()} king · next wave in ${secs}`, teamCss(rs.winner));
     } else if (rs.phase === Phase.Victory && teams) {
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
       if (rs.winner === 255) big(rs.teamLeft[0] > 0 ? 'STALEMATE' : 'NO SURVIVORS', `wave ${rs.wave} · next wave in ${secs}`);
@@ -1186,7 +1222,28 @@ export class Renderer {
       ctx.fillRect(W / 2 - 150 * s, 8 * s, 300 * s, 24 * s);
       ctx.fillStyle = secs <= 30 ? '#ff8070' : '#ffd34a';
       const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-      if (teams) {
+      if (regicide) {
+        // Regicide: the clock, then each side's king beneath it.
+        ctx.fillText(`WAVE ${rs.wave} · REGICIDE · ${clock}`, W / 2, 25 * s);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(W / 2 - 190 * s, 32 * s, 380 * s, 22 * s);
+        const king = (t: number) => {
+          const id = rs.kings[t];
+          const who = id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '?').replace(/^BOT /, '');
+          return `♛ ${who}${game.myTeam === t && id !== game.myId ? ' (yours)' : ''}`;
+        };
+        ctx.textAlign = 'right';
+        ctx.fillStyle = teamCss(Team.Red);
+        ctx.fillText(king(Team.Red), W / 2 - 12 * s, 48 * s);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText('v', W / 2, 48 * s);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = teamCss(Team.Green);
+        ctx.fillText(king(Team.Green), W / 2 + 12 * s, 48 * s);
+        ctx.textAlign = 'center';
+        if (game.alive && game.isKing(game.myId) && secs > 6 * 60 - 5) big('YOU ARE KING', 'stay alive · if you fall, your side loses', teamCss(game.myTeam));
+      } else if (teams) {
         // Last Team Standing: the clock, then red's and green's clones left beneath it.
         ctx.fillText(`WAVE ${rs.wave} · TEAMS · ${clock}`, W / 2, 25 * s);
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -1206,6 +1263,10 @@ export class Renderer {
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
         if (rs.out) big('FRAGGED', `(${watching})`, '#ff6050');
+        else if (regicide && rs.inWave) {
+          const back = Math.ceil(game.respawnTicks / TICK_RATE);
+          big('FRAGGED', back > 0 ? `reinforcements in ${back}s by drop rocket · ${watching}` : 'drop rocket inbound', '#ff6050');
+        }
         else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${watching}`, '#c8d0d8');
         else if (teams && game.myTeam !== Team.None) big('INBOUND', `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · drop rocket on its way`, teamCss(game.myTeam));
         else big('INBOUND', 'drop rocket on its way', '#ffd34a');

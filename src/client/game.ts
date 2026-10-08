@@ -7,7 +7,7 @@ import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_TANK, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET, Team, classOfFlags } from '../shared/protocol.ts';
+import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
@@ -707,6 +707,12 @@ export class Game implements FrameHandler {
     }
   }
 
+  /** Is this player a king right now (Regicide)? */
+  isKing(id: number): boolean {
+    const rs = this.roundState;
+    return !!rs && rs.mode === GameMode.Regicide && (rs.phase === Phase.Live || rs.phase === Phase.Victory) && (rs.kings[0] === id || rs.kings[1] === id) && id !== 255;
+  }
+
   /** Our team this wave, Team.None if we have none. */
   get myTeam(): number {
     return this.myId >= 0 ? this.teamOf[this.myId] : Team.None;
@@ -717,8 +723,8 @@ export class Game implements FrameHandler {
    * Clear everything left from the last one, rebuild what derives from the
    * terrain, and flag any chunk that didn't come out identical to the server's.
    */
-  wave(seed: number, hashes: Uint32Array): void {
-    generateWorld(this.terrain, seed);
+  wave(seed: number, hashes: Uint32Array, fortresses: boolean): void {
+    generateWorld(this.terrain, seed, fortresses);
     this.particles.n = 0;
     this.projectiles.n = 0;
     this.stain.fill(0);

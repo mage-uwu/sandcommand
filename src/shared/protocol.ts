@@ -69,7 +69,7 @@ export const F_CLASS_SHIFT = 6;
 export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /** Last Man Standing round phases. */
 export const Phase = {
@@ -83,6 +83,7 @@ export const Phase = {
 export const GameMode = {
   Lms: 0, // Last Man Standing: every clone for itself, last one alive wins
   Lts: 1, // Last Team Standing: red vs green, last team with a clone alive wins
+  Regicide: 2, // two fortresses, a king in each: kill theirs, keep yours (everyone else respawns)
 } as const;
 
 export const Team = {
