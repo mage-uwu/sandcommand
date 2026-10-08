@@ -207,6 +207,7 @@ function frame(now: number): void {
       if (input.takePickup()) g.pickUp();
       if (input.takeDrop()) g.drop();
       input.building = g.building;
+      input.driving = !!g.drive;
       const n = net;
       // Materializer: a click on the menu picks a piece; a click in the world
       // asks the server to build it there (it checks the same rules the

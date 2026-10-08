@@ -28,6 +28,8 @@ export class InputState {
   touchButtons = 0;
   /** Scope toggled on from the touch controls. */
   touchScope = false;
+  /** Driving a tank (set each tick by the game loop): the scope button fires the cannon instead. */
+  driving = false;
   /** Set once a touch has come in: mouse events the browser synthesises from it are ignored. */
   private lastTouch = -1e9;
 
@@ -158,7 +160,7 @@ export class InputState {
 
   /** Aiming down the scope (right mouse or Shift). */
   get scoping(): boolean {
-    return !this.typing && (this.scopeDown || this.touchScope || this.down('ShiftLeft', 'ShiftRight'));
+    return !this.typing && (this.scopeDown || (this.touchScope && !this.driving) || this.down('ShiftLeft', 'ShiftRight'));
   }
 
   buttons(): number {

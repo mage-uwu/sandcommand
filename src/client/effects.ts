@@ -246,3 +246,50 @@ export function materialize(p: Particles, placed: number[]): void {
     if (Math.random() < 0.3) p.spawn(PK.Spark, x, y, rnd(-60, 60), rnd(-90, 10), rnd(6, 12));
   }
 }
+
+/** Olive drab: the tank's paint, on its scrap. */
+const TANK_SCRAP = 0x6f7a3c;
+const TANK_PART_GIB = [GIB_PLATE, GIB_NOZZLE, GIB_NOZZLE, GIB_PLATE];
+
+/** A part blown off a tank: the server's fragments from the seed, and the piece itself flying. */
+export function tankPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+  craftPartFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
+  for (let k = 0; k < (part === 3 ? 3 : 1); k++) {
+    const i = p.n;
+    if (p.spawn(PK.Gib, x + rnd(-3, 3), y + rnd(-3, 3), vx + rnd(-40, 40), vy + rnd(-40, 20), rnd(600, 750), (TANK_PART_GIB[part] ?? GIB_PLATE) | GIB_INORGANIC, part === 3 ? 0x9aa0a6 : TANK_SCRAP)) {
+      p.spin[i] = Math.floor(Math.random() * 4);
+      p.spinRate[i] = (Math.random() - 0.5) * 0.15;
+    }
+  }
+  burst(p, PK.Flame, x, y, 10, 140, 12, 0, vx * 0.5, vy * 0.5);
+  burst(p, PK.Spark, x, y, 16, 220, 14);
+  burst(p, PK.Smoke, x, y, 14, 50, 70);
+}
+
+/** A tank exploding: the server's two hull-fragment showers from the seed, big scrap, fire and smoke. */
+export function tankDebris(p: Particles, x: number, y: number, vx: number, vy: number, seed: number, blastStrength: number): void {
+  p.blast(x, y, 90, blastStrength * 1.5);
+  const rng = new Rng(seed);
+  craftFragments(p, x, y, vx, vy, NO_OWNER, rng);
+  craftFragments(p, x, y, vx, vy, NO_OWNER, rng);
+  for (let k = 0; k < 10; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = rnd(80, 280);
+    const i = p.n;
+    if (p.spawn(PK.Gib, x + rnd(-10, 10), y + rnd(-6, 6), vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 90, rnd(600, 750), (k % 3 === 0 ? GIB_NOZZLE : GIB_PLATE) | GIB_INORGANIC, TANK_SCRAP)) {
+      p.spin[i] = Math.floor(Math.random() * 4);
+      p.spinRate[i] = (Math.random() - 0.5) * 0.12;
+    }
+  }
+  burst(p, PK.Flame, x, y, 90, 260, 18);
+  burst(p, PK.Spark, x, y, 60, 320, 22);
+  burst(p, PK.Smoke, x, y, 90, 100, 100);
+}
+
+/** A tank's lift jets: flame and smoke out of the two nozzles under its hull. */
+export function tankJets(p: Particles, x: number, y: number, vx: number, vy: number): void {
+  for (const nx of [7, 25]) {
+    for (let k = 0; k < 2; k++) p.spawn(PK.Flame, x + nx + rnd(-2, 2), y + 23, vx * 0.5 + rnd(-30, 30), vy * 0.5 + rnd(180, 300), rnd(6, 11));
+    if (Math.random() < 0.5) p.spawn(PK.Smoke, x + nx, y + 26, vx * 0.3 + rnd(-20, 20), rnd(40, 90), rnd(30, 50));
+  }
+}

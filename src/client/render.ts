@@ -2,15 +2,16 @@ import { ACTOR_H, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHU
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { hash2 } from '../shared/rng.ts';
-import { PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { PROJ, PROJ_BUILD, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
-import { type CraftView, type Game, type RemoteView, TEAM_COLORS } from './game.ts';
+import { type CraftView, type Game, type RemoteView, type TankView, TEAM_COLORS } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
 import { bannerLines } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
+import { CANNON_INTERVAL, CANNON_LEN, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { type BodyFrame, SpriteCache, WALK_CYCLE } from './sprites.ts';
 
@@ -170,7 +171,7 @@ export class Renderer {
     game.smoothY *= 0.85;
     const selfX = pb.x + (b.x - pb.x) * alpha + game.smoothX;
     const selfY = pb.y + (b.y - pb.y) * alpha + game.smoothY;
-    this.scoped = game.alive && input.scoping;
+    this.scoped = game.alive && input.scoping && !game.drive; // in a tank, right mouse is the cannon
     if (this.scoped) {
       // Scoping: push the view out along the barrel by the weapon's scope
       // distance (the server moves this client's interest area the same way).
@@ -270,15 +271,24 @@ export class Renderer {
     const ride = game.myCraft(alpha);
     if (ride && game.ride) this.drawCraft(ctx, ride, game, now);
 
-    // Remote clones.
-    const views = game.remoteViews();
+    // Tanks (behind the clones, so a clone walking past shows in front).
+    const wmx = (input.mouseX * (W / innerWidth) - offX) / z;
+    const wmy = (input.mouseY * (H / innerHeight) - offY) / z;
+    for (const t of game.tankViews(alpha)) {
+      const mine = t.slot === game.driveSlot && !!game.drive;
+      const aim = mine ? Math.atan2(wmy - (t.y + CANNON_PIVOT[1]), wmx - (t.x + TANK_W / 2)) : t.aim;
+      this.drawTank(ctx, t, mine ? wmx < t.x + TANK_W / 2 : t.faceLeft, aim, game, now);
+    }
+
+    // Remote clones (not those riding inside a tank).
+    const views = game.remoteViews().filter((v) => !game.tankPilots.has(v.id));
     for (const v of views) {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
       this.drawActor(ctx, v.x, v.y, dequantizeAim(v.aim), v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts);
     }
-    // Own clone.
-    if (game.alive) {
+    // Own clone (hidden inside its tank while driving).
+    if (game.alive && !game.drive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
       const myAim = Math.atan2(wy - (selfY + SHOULDER_Y), wx - (selfX + SHOULDER_X));
@@ -322,6 +332,21 @@ export class Renderer {
       ctx.textAlign = 'left';
     }
 
+    // Over an empty tank in reach: how to climb in.
+    const boardable = game.boardableTank();
+    if (boardable) {
+      ctx.font = `${Math.max(4, Math.round(11 / z))}px ui-monospace, monospace`;
+      const label = `${input.touch ? '⬆' : '[3]'} climb in`;
+      const tx = boardable.x + TANK_W / 2;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(tx - tw / 2 - 1, boardable.y - 15, tw + 2, 6);
+      ctx.fillStyle = '#9fe870';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, tx, boardable.y - 10);
+      ctx.textAlign = 'left';
+    }
+
     // Materializer beams (anyone's), fading out.
     for (const bm of game.beams) {
       const t = (now - bm.at) / 300;
@@ -345,7 +370,13 @@ export class Renderer {
       const k = p.kind[i];
       const x = p.x[i];
       const y = p.y[i];
-      if (k === 0) {
+      if (k === 4) {
+        // Tank shell: a fat dark slug with a hot base.
+        ctx.fillStyle = '#3a3a30';
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+        ctx.fillStyle = '#ffb040';
+        ctx.fillRect(x - p.vx[i] * 0.006 - 1, y - p.vy[i] * 0.006 - 1, 2, 2);
+      } else if (PROJ[k]?.ballistic) {
         ctx.strokeStyle = '#fff3b0';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -382,6 +413,25 @@ export class Renderer {
     const dpr = W / innerWidth;
     ctx.font = `${Math.round(11 * dpr)}px ui-monospace, monospace`;
     ctx.textAlign = 'center';
+    // Tanks: who's driving, and how much hull is left.
+    for (const t of game.tankViews(alpha)) {
+      const sx = offX + (t.x + TANK_W / 2) * z;
+      const sy = offY + t.y * z - 10 * dpr;
+      if (t.pilot !== 255 && t.pilot !== game.myId) {
+        const info = game.players.get(t.pilot);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillText(info?.name ?? '?', sx + dpr, sy + dpr);
+        ctx.fillStyle = info?.color ?? '#ccc';
+        ctx.fillText(info?.name ?? '?', sx, sy);
+      }
+      if (t.hp < TANK_HP) {
+        const w = 40 * dpr;
+        ctx.fillStyle = '#300';
+        ctx.fillRect(sx - w / 2, sy + 3 * dpr, w, 3 * dpr);
+        ctx.fillStyle = t.hp > TANK_HP * 0.35 ? '#d8c040' : '#e33';
+        ctx.fillRect(sx - w / 2, sy + 3 * dpr, (w * t.hp) / TANK_HP, 3 * dpr);
+      }
+    }
     for (const v of views) {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
@@ -647,6 +697,42 @@ export class Renderer {
     return c;
   }
 
+  /** Driving: the tank's parts (blown off ones crossed out), the cannon's load, and the controls. */
+  private drawTankHud(game: Game, input: InputState, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const st = game.myTankState!;
+    const x0 = W / 2 - 230 * s;
+    const y0 = H - 92 * s;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x0, y0, 460 * s, 44 * s);
+    ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
+    ctx.textAlign = 'left';
+    const names = ['HULL', 'CANNON', 'SMG', 'ARMOUR'];
+    for (let part = 0; part < 4; part++) {
+      const x = x0 + 8 * s + part * 113 * s;
+      const on = hasTankPart(st.parts, part);
+      const f = Math.max(0, Math.min(1, st.partHp[part] / TANK_PART_HP[part]));
+      ctx.fillStyle = on ? '#e8e0c8' : '#a05040';
+      ctx.fillText(on ? names[part] : `${names[part]} LOST`, x, y0 + 16 * s);
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.fillRect(x, y0 + 22 * s, 100 * s, 6 * s);
+      ctx.fillStyle = !on ? '#553' : f > 0.5 ? '#8fd060' : f > 0.25 ? '#e0c040' : '#e05040';
+      ctx.fillRect(x, y0 + 22 * s, 100 * s * f, 6 * s);
+    }
+    // Cannon load.
+    if (hasTankPart(st.parts, TankPart.Cannon)) {
+      const load = 1 - Math.min(1, st.cannonCd / (CANNON_INTERVAL * TICK_RATE));
+      ctx.fillStyle = load >= 1 ? '#ffd34a' : 'rgba(255,211,74,0.5)';
+      ctx.fillRect(x0 + 8 * s + 113 * s, y0 + 32 * s, 100 * s * load, 3 * s);
+    }
+    ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+    ctx.textAlign = 'center';
+    const help = input.touch ? 'tap: SMG   ◎ cannon   ▲ jets   ⬆ climb out' : 'LMB: SMG   RMB/Shift: cannon   W: jets   3/F: climb out';
+    ctx.fillText(help, W / 2, y0 - 6 * s);
+    ctx.textAlign = 'left';
+  }
+
   /** The materializer's menu: every piece with its icon and gold cost; click or wheel to pick. */
   private drawBuildMenu(game: Game, input: InputState, s: number, H: number): void {
     const ctx = this.ctx;
@@ -683,6 +769,156 @@ export class Renderer {
       ctx.fillText(`${p.cost} gold`, x0 + 44 * s, y + 33 * s);
       this.menuRects.push({ x: x0, y, w, h: rowH, i });
     }
+  }
+
+  /**
+   * A tank, Metal Slug style: olive hull on treads, a domed turret with a
+   * long cannon, a twin-barrel vulcan swivelling on the front, a riveted
+   * steel plate over the nose and roof, and its driver's head out of the
+   * hatch. Drawn facing right in tank-local cells, mirrored when facing left.
+   */
+  private drawTank(ctx: CanvasRenderingContext2D, t: TankView, faceLeft: boolean, aim: number, game: Game, now: number): void {
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    if (faceLeft) {
+      ctx.translate(TANK_W, 0);
+      ctx.scale(-1, 1);
+    }
+    // In the mirrored frame a world angle a reads as PI - a.
+    const local = (a: number) => (faceLeft ? Math.PI - a : a);
+    if (t.chute) {
+      // Striped canopy and its lines.
+      ctx.strokeStyle = 'rgba(40,30,20,0.8)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (const [ax, bx] of [
+        [-8, 3],
+        [4, 10],
+        [28, 22],
+        [40, 29],
+      ]) {
+        ctx.moveTo(ax, -30);
+        ctx.lineTo(bx, 4);
+      }
+      ctx.stroke();
+      const gores = 6;
+      for (let i = 0; i < gores; i++) {
+        ctx.fillStyle = i % 2 ? '#f2efe6' : '#c8402c';
+        ctx.beginPath();
+        ctx.moveTo(16, -30);
+        ctx.arc(16, -30, 24, Math.PI + (i * Math.PI) / gores, Math.PI + ((i + 1) * Math.PI) / gores);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    // Driver's head out of the hatch.
+    if (t.pilot !== 255) {
+      const rgb = game.players.get(t.pilot)?.rgb ?? 0x7a8a50;
+      ctx.fillStyle = '#e0b48c';
+      ctx.fillRect(12, -1, 4, 3);
+      ctx.fillStyle = `#${rgb.toString(16).padStart(6, '0')}`;
+      ctx.fillRect(11.5, -2.5, 5, 2);
+    }
+    // Cannon (behind the turret dome), recoiling just after a shot.
+    if (hasTankPart(t.parts, TankPart.Cannon)) {
+      const a = local(cannonAngle(faceLeft, aim));
+      ctx.save();
+      ctx.translate(CANNON_PIVOT[0], CANNON_PIVOT[1]);
+      ctx.rotate(a);
+      const kick = t.firedCannon ? -3 : 0;
+      ctx.fillStyle = '#4c5629';
+      ctx.fillRect(kick, -1.5, CANNON_LEN - 2, 3);
+      ctx.fillStyle = '#3a4220';
+      ctx.fillRect(kick + CANNON_LEN - 4, -2, 4, 4);
+      ctx.fillStyle = '#7f8b4a';
+      ctx.fillRect(kick, -1.5, CANNON_LEN - 2, 0.8);
+      ctx.restore();
+    }
+    // Turret dome and hatch.
+    ctx.fillStyle = '#7d8946';
+    ctx.beginPath();
+    ctx.ellipse(14, 8, 9, 6.5, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.fillStyle = '#5d6733';
+    ctx.fillRect(10, 1.5, 8, 1.5);
+    // Hull: sloped glacis at the front.
+    ctx.fillStyle = '#6f7a3c';
+    ctx.beginPath();
+    ctx.moveTo(1, 16);
+    ctx.lineTo(3, 8);
+    ctx.lineTo(25, 8);
+    ctx.lineTo(31, 12);
+    ctx.lineTo(31, 16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#56602e';
+    ctx.fillRect(1.5, 13, 29.5, 3);
+    ctx.fillStyle = '#909c58';
+    ctx.fillRect(3, 8, 22, 1);
+    // Lift-jet nozzles.
+    ctx.fillStyle = '#333';
+    ctx.fillRect(5, 20.5, 4, 2);
+    ctx.fillRect(TANK_W - 9, 20.5, 4, 2);
+    // Treads: a belt with links that crawl as it moves, and road wheels.
+    ctx.fillStyle = '#262626';
+    ctx.beginPath();
+    ctx.roundRect(0.5, 15.5, 31, 6.5, 3);
+    ctx.fill();
+    ctx.fillStyle = '#4a4a4a';
+    const crawl = (((t.x * (faceLeft ? -1 : 1)) % 3) + 3) % 3;
+    for (let x = 2 + crawl; x < 30; x += 3) {
+      ctx.fillRect(x, 15.5, 1, 1);
+      ctx.fillRect(x, 21, 1, 1);
+    }
+    for (const wx of [5, 10.5, 16, 21.5, 27]) {
+      ctx.fillStyle = '#5c5c5c';
+      ctx.beginPath();
+      ctx.arc(wx, 18.7, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#9a9a9a';
+      ctx.fillRect(wx - 0.5, 18.2, 1, 1);
+    }
+    // Armour plate over the nose and roof, riveted.
+    if (hasTankPart(t.parts, TankPart.Armor)) {
+      ctx.fillStyle = '#98a0a4';
+      ctx.beginPath();
+      ctx.moveTo(25, 7.5);
+      ctx.lineTo(29, 7.5);
+      ctx.lineTo(32.5, 11.5);
+      ctx.lineTo(32.5, 15.5);
+      ctx.lineTo(27.5, 15.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(3.5, 6.8, 21.5, 1.8);
+      ctx.fillStyle = '#5e6468';
+      for (let x = 5; x < 25; x += 4) ctx.fillRect(x, 7.3, 0.8, 0.8);
+      ctx.fillRect(29.5, 10, 0.8, 0.8);
+      ctx.fillRect(30.5, 13.5, 0.8, 0.8);
+    }
+    // The vulcan: a housing on the nose, twin barrels toward the aim.
+    if (hasTankPart(t.parts, TankPart.Smg)) {
+      ctx.save();
+      ctx.translate(SMG_PIVOT[0], SMG_PIVOT[1]);
+      ctx.rotate(local(aim));
+      ctx.fillStyle = '#2e2e2e';
+      ctx.fillRect(0, -1.6, SMG_LEN, 1.1);
+      ctx.fillRect(0, 0.5, SMG_LEN, 1.1);
+      if (t.firedSmg && (now / 40) % 2 < 1) {
+        ctx.fillStyle = '#ffe080';
+        ctx.fillRect(SMG_LEN, -2, 2.5, 4);
+      }
+      ctx.restore();
+      ctx.fillStyle = '#444b2a';
+      ctx.fillRect(SMG_PIVOT[0] - 2.5, SMG_PIVOT[1] - 2.5, 5, 5);
+    }
+    // Battered: scorch marks spread as the hull weakens.
+    const wear = 1 - t.hp / TANK_HP;
+    if (wear > 0.3) {
+      ctx.fillStyle = `rgba(20,15,10,${Math.min(0.5, wear * 0.6)})`;
+      ctx.fillRect(6, 9, 6, 4);
+      if (wear > 0.6) ctx.fillRect(18, 10, 5, 3);
+    }
+    ctx.restore();
   }
 
   /** A drop rocket: hull in the passenger's colour, exhaust plume along its axis, damage sparks. */
@@ -761,7 +997,9 @@ export class Renderer {
       ctx.fillText(label, 20 * s, yy + 11 * s);
     };
     bar(14 * s, game.hp, ACTOR_MAX_HP, '#d23c3c', `HP ${game.hp}`);
-    bar(32 * s, game.body.fuel, ACTOR_MAX_FUEL, '#3c8cd2', `JET ${Math.round(game.body.fuel)}`);
+    if (game.drive) bar(32 * s, game.drive.fuel, TANK_MAX_FUEL, '#3c8cd2', `TANK JET ${Math.round(game.drive.fuel)}`);
+    else bar(32 * s, game.body.fuel, ACTOR_MAX_FUEL, '#3c8cd2', `JET ${Math.round(game.body.fuel)}`);
+    if (game.drive && game.myTankState) this.drawTankHud(game, input, s, W, H);
     const me = game.players.get(game.myId);
     ctx.fillStyle = '#ffd34a';
     ctx.fillText(`GOLD ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
@@ -787,7 +1025,7 @@ export class Renderer {
       ctx.fillStyle = sel ? '#000' : '#ddd';
       ctx.fillText(d ? (d.clip > 0 ? `${d.name} ${it.ammo}` : d.name) : '?', x + 10 * s, H - 18 * s);
     }
-    if (game.alive && !touch) {
+    if (game.alive && !touch && !game.drive) {
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.textAlign = 'center';
       ctx.fillText(game.inv.length ? '1/2 switch   3 pick up   4 drop' : 'empty-handed: 3 picks up a weapon', W / 2, H - 42 * s);

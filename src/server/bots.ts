@@ -1,9 +1,10 @@
-import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../shared/actor.ts';
+import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
 import { GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
 import { Team, quantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
 import type { InputCmd, Player, World } from './world.ts';
 
 /** Names for bots (shown with a BOT tag). */
@@ -54,12 +55,20 @@ export class BotBrain {
   private wasAlive = false;
   private readonly react: number;
   private readonly phase: number;
+  /** Some bots go for a tank when one lands near them. */
+  private readonly tanker: boolean;
+  /** Ticks driving without getting anywhere (it shells the way clear, then bails out). */
+  private tankStuck = 0;
+  /** A tank it gave up on, left alone until `abandonUntil`. */
+  private abandoned = -1;
+  private abandonUntil = 0;
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
     this.noise = 0.06 + this.rng.next() * 0.12;
     this.phase = this.rng.int(15);
     this.react = 15 + this.rng.int(25);
+    this.tanker = this.rng.next() < 0.5;
   }
 
   think(world: World, p: Player): InputCmd {
@@ -95,6 +104,8 @@ export class BotBrain {
       if (tgt && tgt.id !== prevTarget) this.holdFire = Math.max(this.holdFire, t + this.react);
     }
 
+    if (p.tank >= 0) return this.driveTank(world, p, tgt, cmd);
+
     const sx = p.body.x + SHOULDER_X;
     const sy = p.body.y + SHOULDER_Y;
     // Unarmed (lost its gun)? Go and get one.
@@ -111,6 +122,22 @@ export class BotBrain {
           goalX = it.x;
           pickup = d < PICKUP_R * PICKUP_R;
         }
+      }
+    }
+
+    // An empty tank landed close by, and nobody to fight right here: take it.
+    const near = tgt ? Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) : Infinity;
+    if (this.tanker && near > 120) {
+      for (let slot = 0; slot < world.tanks.length; slot++) {
+        const k = world.tanks[slot];
+        if (!k || k.pilot !== 255 || k.chute || (slot === this.abandoned && t < this.abandonUntil)) continue;
+        const kx = k.x + TANK_W / 2;
+        if (Math.abs(kx - p.cx) > 260 || Math.abs(k.y + TANK_H / 2 - p.cy) > 80) continue;
+        goalX = kx;
+        const dx = Math.max(k.x - (p.body.x + 8), 0, p.body.x - (k.x + TANK_W));
+        const dy = Math.max(k.y - (p.body.y + 14), 0, p.body.y - (k.y + TANK_H));
+        pickup = dx <= 8 && dy <= 8 && (t & 7) === 0;
+        break;
       }
     }
 
@@ -228,6 +255,66 @@ export class BotBrain {
 
     cmd.buttons = buttons;
     cmd.inv = invByte(want >= 0 ? want : p.slot, p.invVersion, pickup);
+    return cmd;
+  }
+
+  /**
+   * Driving: keep the target at cannon range, jet over whatever blocks the
+   * treads, hose it with the vulcan and lob shells at it. A tank that gets
+   * nowhere for long enough is abandoned (out of the hatch, on foot again).
+   */
+  private driveTank(world: World, p: Player, tgt: Player | null, cmd: InputCmd): InputCmd {
+    const t = world.tick;
+    const k = world.tanks[p.tank];
+    if (!k) return cmd;
+    const cx = k.x + TANK_W / 2;
+    const cy = k.y + 6;
+    const moved = Math.abs(k.x - this.lastX);
+    this.lastX = k.x;
+    let buttons = 0;
+    if (tgt) {
+      const dx = tgt.cx - cx;
+      const dist = Math.hypot(dx, tgt.cy - cy);
+      if ((t + this.phase) % 4 === 0) this.seeTarget = clearLine(world, cx, cy - 4, tgt.cx, tgt.cy);
+      const dir = !this.seeTarget || Math.abs(dx) > 220 ? Math.sign(dx) : Math.abs(dx) < 90 ? -Math.sign(dx) : 0;
+      if (dir > 0) buttons |= BTN_RIGHT;
+      if (dir < 0) buttons |= BTN_LEFT;
+      this.tankStuck = dir !== 0 && moved < 0.3 ? this.tankStuck + 1 : Math.max(0, this.tankStuck - 2);
+      if ((this.tankStuck > 8 || tgt.cy < cy - 60) && k.fuel > 20) buttons |= BTN_UP;
+      // Lead with the vulcan's flight time; shells drop, so lift them.
+      const lead = dist / SMG_SPEED;
+      const ax = tgt.cx + tgt.body.vx * lead;
+      const ay = tgt.cy + tgt.body.vy * lead * 0.5;
+      cmd.aim = quantizeAim(Math.atan2(ay - cy, ax - cx) + (this.rng.next() - 0.5) * 2 * this.noise);
+      // Close but out of sight (a floor or wall between): shell toward it to
+      // open a way; still nothing after a while, go on foot and dig.
+      this.blind = !this.seeTarget && dist < 240 ? this.blind + 1 : 0;
+      if (this.blind > 60 && k.cannonCd <= 0) {
+        cmd.aim = quantizeAim(Math.atan2(tgt.cy - cy, tgt.cx - cx));
+        buttons |= BTN_SCOPE;
+      } else if (this.tankStuck > 45 && dir !== 0) {
+        // Treads and jets get nowhere: shell a way through, ahead and a little down.
+        cmd.aim = quantizeAim(dir > 0 ? 0.25 : Math.PI - 0.25);
+        buttons |= BTN_SCOPE;
+      } else if (t >= this.holdFire && this.seeTarget && dist < 380) {
+        buttons |= BTN_FIRE;
+        const sl = dist / CANNON_SPEED;
+        const lift = 0.5 * GRAVITY * PROJ[4].gravity * sl * sl;
+        if (dist > 60 && Math.abs(Math.atan2(ay - lift - cy, Math.abs(ax - cx))) < 1.1) {
+          cmd.aim = quantizeAim(Math.atan2(ay - lift - cy, ax - cx));
+          buttons |= BTN_SCOPE;
+        }
+      }
+    } else this.tankStuck = 0;
+    cmd.buttons = buttons;
+    const bail = (this.tankStuck > 240 || this.blind > 360) && (t & 7) === 0;
+    if (bail) {
+      this.tankStuck = 0;
+      this.blind = 0;
+      this.abandoned = p.tank;
+      this.abandonUntil = t + 30 * 30;
+    }
+    cmd.inv = invByte(p.slot, p.invVersion, bail);
     return cmd;
   }
 }

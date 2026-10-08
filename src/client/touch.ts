@@ -1,4 +1,4 @@
-import { BTN_RELOAD, BTN_UP } from '../shared/actor.ts';
+import { BTN_RELOAD, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
 import { STICK_R, stickButtons } from './stick.ts';
 import type { InputState } from './input.ts';
 
@@ -167,8 +167,14 @@ export class TouchControls {
           this.input.pressDrop();
           break;
         case 'scope':
-          this.input.touchScope = !this.input.touchScope;
-          b.classList.toggle('on', this.input.touchScope);
+          // In a tank it's the cannon trigger (held); on foot it toggles the scope.
+          if (this.input.driving) {
+            this.held |= BTN_SCOPE;
+            this.sync();
+          } else {
+            this.input.touchScope = !this.input.touchScope;
+            b.classList.toggle('on', this.input.touchScope);
+          }
           break;
         case 'scores':
           this.input.scoreboard = !this.input.scoreboard;
@@ -185,6 +191,10 @@ export class TouchControls {
     });
     const up = () => {
       b.classList.remove('down');
+      if (act === 'scope' && this.held & BTN_SCOPE) {
+        this.held &= ~BTN_SCOPE;
+        this.sync();
+      }
       if (hold) {
         this.held &= ~hold;
         this.sync();

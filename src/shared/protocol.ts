@@ -48,6 +48,14 @@ export const R_ROUND = 22;
 export const R_WAVE = 23;
 /** Team of every slot (MAX_PLAYERS bytes, Team.None for none): sent when teams are drawn, and to newcomers. */
 export const R_TEAMS = 24;
+/** Every tank (few, so all of them, every frame): position, aim, parts, driver. */
+export const R_TANKS = 25;
+/** The tank this client drives, at full precision (prediction rebases on it). */
+export const R_TANK_SELF = 26;
+/** A part blown off a tank: slot, part, where, how fast, fragment seed. */
+export const R_TANK_PART = 27;
+/** A tank exploding. */
+export const R_TANK_BOOM = 28;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -61,7 +69,7 @@ export const F_CLASS_SHIFT = 6;
 export const classOfFlags = (f: number) => (f >> F_CLASS_SHIFT) & 3;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** Free-for-all round phases. */
 export const Phase = {

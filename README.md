@@ -139,6 +139,44 @@ lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then gold, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
+## Tanks
+
+Metal Slug style tanks (`src/shared/tank.ts`). Each wave, **one or two
+come down by parachute** at spread-out spots and land empty.
+- **Getting in and out.** Walk up to an empty tank and press **3 / F**
+  (touch: ⬆) to climb in. The same key climbs back out through the roof
+  hatch. Your clone rides inside; you can see its head poking out of the
+  hatch.
+- **Driving.** **A/D** drive the treads, which climb 6-cell steps. **W**
+  fires the lift jets (their own fuel, weaker than a jetpack). **S** drops
+  you faster while airborne.
+- **Two guns.** **Left mouse** fires the vulcan SMG, which swivels all the
+  way round. **Right mouse / Shift** (touch: hold ◎) fires the cannon: a
+  heavy lobbed shell with a big blast, aimed out the front (25° down to 72°
+  up), with recoil. A tank's own rounds never hit it.
+- **Tough.** The hull holds 15× a clone's health (1500). Penetrating hits
+  wound the part they strike; weak shrapnel only scratches. Explosives do
+  1.5× against it.
+- **Parts that blow off.** The **cannon**, the **SMG** and the **external
+  armour plate** can each be blown off. The plate covers the nose and roof
+  and soaks half of every blast while it lasts. A lost gun can't fire.
+  Every part flies off as real scrap fragments.
+- **When the hull goes** the tank explodes (crater, fragments, a blast that
+  hurts clones, rockets and other tanks) and kills its driver, credited to
+  whoever did it.
+- **Safe inside.** The driver can't be hit directly: bullets, blasts and
+  shrapnel hit the tank. Teammates' fire doesn't hurt a team tank. A tank
+  landing on a clone crushes it, and it shoves clones out of its way.
+- **Bots.** About half the bots go for a nearby empty tank. They drive at
+  cannon range, hose targets with the vulcan, and shell their way through
+  walls, or through floors when the target is hidden. A tank that stays
+  stuck gets abandoned.
+- **Networking.** Tanks go out every frame (`R_TANKS`; there are only a
+  few). The driver's client predicts its own tank from a full-precision
+  `R_TANK_SELF`, the same way it predicts its clone and its drop rocket.
+  Parts blown off and explosions go out as seeded records (`R_TANK_PART`,
+  `R_TANK_BOOM`), so every client throws the same scrap.
+
 ## Bunkers
 
 Every map has bunker complexes on the surface (`src/shared/structures.ts`),

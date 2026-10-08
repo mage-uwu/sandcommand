@@ -5,6 +5,10 @@ export const ProjKind = {
   Rocket: 1,
   Grenade: 2,
   Slug: 3,
+  /** Tank cannon shell. */
+  Shell: 4,
+  /** Tank vulcan round. */
+  TankBullet: 5,
 } as const;
 
 export interface ProjDef {
@@ -29,6 +33,10 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 1, life: 66, damage: 0, mass: 0.6, sharp: 0.1, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45, ballistic: false },
   // Heavy sniper slug: flat, fast, punches through armour.
   { gravity: 0.04, life: 30, damage: 38, mass: 1.1, sharp: 0.95, carveR: 3, coreR: 1, splashR: 0, splashDamage: 0, debris: 3, bounce: 0, ballistic: true },
+  // Tank cannon shell: a heavy lobbed high-explosive round.
+  { gravity: 0.35, life: 120, damage: 50, mass: 3, sharp: 0.6, carveR: 24, coreR: 11, splashR: 40, splashDamage: 90, debris: 56, bounce: 0, ballistic: false },
+  // Tank vulcan: a rifle round, a touch lighter.
+  { gravity: 0.15, life: 40, damage: 14, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -89,6 +97,13 @@ export function fireInterval(def: WeaponDef): number {
 /** The weapon that fires a projectile kind (kill feed names hits by projectile). */
 export function weaponOfProj(kind: number): WeaponDef | undefined {
   return WEAPONS.find((w) => w.proj === kind);
+}
+
+/** Name of what fired a projectile kind: a hand weapon, or a tank's guns. */
+export function projName(kind: number): string {
+  if (kind === ProjKind.Shell) return 'Tank Cannon';
+  if (kind === ProjKind.TankBullet) return 'Tank SMG';
+  return weaponOfProj(kind)?.name ?? '';
 }
 
 /** Shoulder pivot (where the gun arm turns and aim is measured from), relative to the hitbox's top-left. */

@@ -1,6 +1,7 @@
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
 import { CRAFT_PARTS } from './craft.ts';
+import { TANK_PARTS } from './tank.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
@@ -26,6 +27,10 @@ import {
   R_PROJ_SPAWN,
   R_ROUND,
   R_TEAMS,
+  R_TANKS,
+  R_TANK_SELF,
+  R_TANK_PART,
+  R_TANK_BOOM,
   R_ROSTER,
   R_SCORES,
   R_SELF,
@@ -99,6 +104,41 @@ export interface CraftState {
   parts: number; // attached-part mask (craft.ts)
 }
 
+export interface TankState {
+  slot: number;
+  x: number; // top-left
+  y: number;
+  vx: number;
+  vy: number;
+  aim: number;
+  chute: boolean;
+  faceLeft: boolean;
+  jetting: boolean;
+  firedSmg: boolean;
+  firedCannon: boolean;
+  onGround: boolean;
+  parts: number; // attached-part mask (tank.ts)
+  hp: number;
+  pilot: number; // player id or 255
+}
+
+/** The tank this client drives, at full precision: everything stepTank needs, plus its damage. */
+export interface SelfTankState {
+  slot: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  fuel: number;
+  chute: boolean;
+  onGround: boolean;
+  jetting: boolean;
+  parts: number;
+  partHp: number[];
+  /** Ticks until the cannon is loaded. */
+  cannonCd: number;
+}
+
 /** This client's own drop rocket at full precision: everything stepCraft needs. */
 export interface SelfCraftState {
   slot: number;
@@ -167,6 +207,11 @@ export interface FrameHandler {
   craftPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** Drop rocket `slot` blew apart at (x, y); `seed` reproduces its fragments. */
   craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
+  /** Every tank this frame. */
+  tanks(list: TankState[]): void;
+  selfTank(s: SelfTankState): void;
+  tankPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void;
+  tankBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** A body part was torn off actor `id` at (x, y), flying with (vx, vy). */
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void;
 }
@@ -420,6 +465,64 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           partHp: Array.from({ length: CRAFT_PARTS }, () => r.u8()),
         });
         break;
+      case R_TANKS: {
+        const n = r.u8();
+        const list: TankState[] = [];
+        for (let i = 0; i < n; i++) {
+          const slot = r.u8();
+          const x = r.u16() / 16;
+          const y = r.u16() / 16 - Y_BIAS;
+          const vx = r.i16() / 8;
+          const vy = r.i16() / 8;
+          const aim = dequantizeAim(r.u16());
+          const f = r.u8();
+          list.push({
+            slot,
+            x,
+            y,
+            vx,
+            vy,
+            aim,
+            chute: (f & 1) !== 0,
+            faceLeft: (f & 2) !== 0,
+            jetting: (f & 4) !== 0,
+            firedSmg: (f & 8) !== 0,
+            firedCannon: (f & 16) !== 0,
+            onGround: (f & 32) !== 0,
+            parts: r.u8(),
+            hp: r.u16(),
+            pilot: r.u8(),
+          });
+        }
+        h.tanks(list);
+        break;
+      }
+      case R_TANK_SELF: {
+        const slot = r.u8();
+        const x = r.f64();
+        const y = r.f64();
+        const vx = r.f64();
+        const vy = r.f64();
+        const fuel = r.f64();
+        const f = r.u8();
+        const parts = r.u8();
+        const partHp = Array.from({ length: TANK_PARTS }, () => r.u16());
+        h.selfTank({ slot, x, y, vx, vy, fuel, chute: (f & 1) !== 0, onGround: (f & 2) !== 0, jetting: (f & 4) !== 0, parts, partHp, cannonCd: r.u8() });
+        break;
+      }
+      case R_TANK_PART:
+      case R_TANK_BOOM: {
+        const slot = r.u8();
+        const part = type === R_TANK_PART ? r.u8() : 0;
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        const vx = r.i16() / 8;
+        const vy = r.i16() / 8;
+        const seed = r.u32();
+        if (type === R_TANK_PART) h.tankPart(slot, part, x, y, vx, vy, seed);
+        else h.tankBoom(slot, x, y, vx, vy, seed);
+        break;
+      }
       case R_CRAFT_PART: {
         const slot = r.u8();
         const part = r.u8();
@@ -469,4 +572,8 @@ export const nullHandler: FrameHandler = {
   selfCraft() {},
   craftPart() {},
   craftBoom() {},
+  tanks() {},
+  selfTank() {},
+  tankPart() {},
+  tankBoom() {},
 };

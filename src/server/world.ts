@@ -1,5 +1,26 @@
 import { type Body, BTN_FIRE, BTN_RELOAD, BTN_SCOPE, newBody, stepBody } from '../shared/actor.ts';
 import {
+  CANNON_INTERVAL,
+  CANNON_SPEED,
+  MAX_TANKS,
+  SMG_INTERVAL,
+  SMG_SPEED,
+  SMG_SPREAD,
+  TANK_H,
+  TANK_INTEGRITY,
+  TANK_PARTS,
+  TANK_PART_CENTER,
+  TANK_W,
+  type Tank,
+  TankPart,
+  hasTankPart,
+  newTank,
+  stepTank,
+  tankMuzzle,
+  tankPartAt,
+  tankPoint,
+} from '../shared/tank.ts';
+import {
   CRAFT_H,
   CRAFT_INERTIA,
   CRAFT_INTEGRITY,
@@ -63,6 +84,7 @@ import {
   MAX_PLAYERS,
   POS_SCALE,
   RESPAWN_TICKS,
+  TICK_RATE,
   VEL_SCALE,
   VIEW_HALF_H,
   VIEW_HALF_W,
@@ -71,7 +93,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_TANK, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -88,6 +110,10 @@ import {
   R_ROUND,
   R_WAVE,
   R_TEAMS,
+  R_TANKS,
+  R_TANK_SELF,
+  R_TANK_PART,
+  R_TANK_BOOM,
   GameMode,
   Team,
   R_ITEMS,
@@ -115,7 +141,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { generateWorld } from '../shared/worldgen.ts';
 
 export interface ClientLink {
@@ -171,6 +197,8 @@ export class Player {
   spectate = 255;
   /** Team deathmatch: Team.Red / Team.Green for this wave, Team.None outside one. */
   team: number = Team.None;
+  /** Tank slot this clone is driving, -1 on foot. */
+  tank = -1;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
   /** Latest materializer request, applied on this player's next tick. */
@@ -241,6 +269,11 @@ export class World {
   readonly actors = new ActorField(ACTOR_W, ACTOR_H);
   /** Drop rockets in flight, by slot. */
   readonly crafts: (Craft | null)[] = new Array(MAX_CRAFTS).fill(null);
+  /** Tanks: dropped by parachute, driven by whoever climbs in. */
+  readonly tanks: (Tank | null)[] = new Array(MAX_TANKS).fill(null);
+  /** Drop tanks into each wave (round rooms; sandbox rooms only on request). */
+  readonly tankDrops: boolean;
+  private readonly tankMz = { x: 0, y: 0, a: 0 };
   private readonly craftStep = newCraftStep();
   private readonly pt = { x: 0, y: 0 };
   private readonly ext = { x: 0, y: 0 };
@@ -293,9 +326,10 @@ export class World {
   /** Pre-encoded R_WAVE record to open every frame of the tick a new wave's map is made. */
   private waveRecord: Uint8Array | null = null;
 
-  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[] } = {}) {
+  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[]; tanks?: boolean } = {}) {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
+    this.tankDrops = opts.tanks ?? this.mode === 'ffa';
     this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Ffa, GameMode.Tdm];
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
@@ -516,6 +550,8 @@ export class World {
       p.spectate = 255;
       p.waveKills = 0;
     }
+    // One or two tanks come down by parachute for whoever gets to them first.
+    if (this.tankDrops) this.dropTanks(1 + this.rng.int(2));
     this.setPhase(Phase.Live, WAVE_TICKS);
   }
 
@@ -530,6 +566,7 @@ export class World {
     this.mapSeed = this.rng.nextU32();
     generateWorld(this.terrain, this.mapSeed);
     this.crafts.fill(null);
+    this.tanks.fill(null);
     this.items.length = 0;
     this.grains.n = 0;
     this.projectiles.n = 0;
@@ -540,6 +577,7 @@ export class World {
       p.alive = false;
       p.inWave = false;
       p.team = Team.None;
+      p.tank = -1;
       p.pendingSpawn = false;
       p.delivering = -1;
       p.inv = [];
@@ -590,6 +628,7 @@ export class World {
     const p = this.players[id];
     if (!p) return;
     if (p.alive) this.dropAll(p); // a deserter's kit stays behind
+    this.leaveTank(p, false);
     this.players[id] = null;
     this.pendingRoster.delete(id);
     // An empty rocket flies itself home.
@@ -730,7 +769,7 @@ export class World {
     for (const ci of this.gridUsed) this.grid[ci].length = 0;
     this.gridUsed.length = 0;
     for (const p of this.players) {
-      if (!p || !p.alive) continue;
+      if (!p || !p.alive || p.tank >= 0) continue; // drivers are inside their tank's armour
       const x0 = Math.floor(p.body.x);
       const y0 = Math.floor(p.body.y);
       forChunksInRect(x0, y0, x0 + ACTOR_W - 1, y0 + ACTOR_H - 1, (ci) => {
@@ -770,6 +809,16 @@ export class World {
       if (t >= 0 && t < bestT) {
         bestT = t;
         best = CRAFT_ID_BASE + k;
+      }
+    }
+    // Tanks: axis-aligned boxes. A tank's own guns never hit it.
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || (owner === t.pilot && owner !== 255)) continue;
+      const tt = segmentBox(x0, y0, dx, dy, t.x, t.y, t.x + TANK_W, t.y + TANK_H);
+      if (tt >= 0 && tt < bestT) {
+        bestT = tt;
+        best = TANK_ID_BASE + k;
       }
     }
     out.t = bestT;
@@ -840,6 +889,7 @@ export class World {
     victim.alive = false;
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
+    this.leaveTank(victim, false);
     // Everything it carried spills where it fell, for anyone to take.
     this.dropAll(victim);
     // Out of the wave: watch whoever did it.
@@ -878,7 +928,15 @@ export class World {
     const kind = pr.kind[i];
     const owner = pr.owner[i];
     const def = PROJ[kind];
-    if (actor >= CRAFT_ID_BASE) {
+    if (actor >= TANK_ID_BASE) {
+      const t = this.tanks[actor - TANK_ID_BASE];
+      if (t) {
+        const rvx = pr.vx[i] - t.vx;
+        const rvy = pr.vy[i] - t.vy;
+        const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
+        this.hitTank(actor - TANK_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
+      }
+    } else if (actor >= CRAFT_ID_BASE) {
       const c = this.crafts[actor - CRAFT_ID_BASE];
       if (c) {
         const rvx = pr.vx[i] - c.vx;
@@ -919,9 +977,10 @@ export class World {
         this.grains.blast(x, y, def.splashR * 1.6, BLAST_IMPULSE);
         explosionFragments(this.grains, x, y, kind, owner, new Rng(seed));
         this.splashCrafts(x, y, def.splashR, def.splashDamage, owner);
+        this.splashTanks(x, y, def.splashR, def.splashDamage, owner);
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
-          if (!p || !p.alive || this.friendly(owner, p)) continue;
+          if (!p || !p.alive || p.tank >= 0 || this.friendly(owner, p)) continue;
           const dx = p.cx - x;
           const dy = p.cy - y;
           const d = Math.sqrt(dx * dx + dy * dy);
@@ -1076,8 +1135,12 @@ export class World {
       p.slot = invSlot(b);
       this.syncHeld(p);
     }
-    if (b & INV_PICKUP && !(prev & INV_PICKUP)) this.pickUp(p);
-    if (b & INV_DROP && !(prev & INV_DROP)) this.dropHeld(p);
+    // The pick-up key also climbs into an empty tank, and back out.
+    if (b & INV_PICKUP && !(prev & INV_PICKUP)) {
+      if (p.tank >= 0) this.leaveTank(p, true);
+      else if (!this.boardTank(p)) this.pickUp(p);
+    }
+    if (b & INV_DROP && !(prev & INV_DROP) && p.tank < 0) this.dropHeld(p);
   }
 
   /**
@@ -1199,6 +1262,7 @@ export class World {
     const bl = this.blockers;
     bl.length = 0;
     for (const o of this.players) if (o && o.alive) bl.push({ x: o.body.x, y: o.body.y, w: ACTOR_W, h: ACTOR_H });
+    for (const t of this.tanks) if (t) bl.push({ x: t.x, y: t.y, w: TANK_W, h: TANK_H });
     for (const c of this.crafts) {
       if (!c) continue;
       const e = craftHalfExtents(c.a, this.ext);
@@ -1268,13 +1332,18 @@ export class World {
         break;
       }
     }
-    if (this.projectiles.spawn(id, def.proj, p.id, sx, sy, vx, vy) < 0) return;
+    this.spawnProj(id, def.proj, p.id, sx, sy, vx, vy);
+  }
+
+  /** Launch a projectile and tell the clients that will see it. */
+  private spawnProj(id: number, kind: number, owner: number, sx: number, sy: number, vx: number, vy: number): void {
+    if (this.projectiles.spawn(id, kind, owner, sx, sy, vx, vy) < 0) return;
     const i = this.projectiles.n - 1;
     const w = this.tmp.reset();
     w.u8(R_PROJ_SPAWN);
     w.u32(id);
-    w.u8(def.proj);
-    w.u8(p.id);
+    w.u8(kind);
+    w.u8(owner);
     // Send the float32-rounded state the server will simulate from.
     w.f32(this.projectiles.x[i]);
     w.f32(this.projectiles.y[i]);
@@ -1540,9 +1609,10 @@ export class World {
     this.carve(base.x, base.y, 12, 5, 30, owner);
     this.grains.blast(cx, cy, 70, BLAST_IMPULSE * 1.3);
     craftFragments(this.grains, cx, cy, c.vx, c.vy, owner, new Rng(seed));
+    this.splashTanks(cx, cy, 36, 60, owner);
     for (const p of this.players) {
       // The rider is thrown clear by the blast; its fragments can still find them.
-      if (!p || !p.alive || p.id === rider || this.friendly(owner, p)) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.id === rider || this.friendly(owner, p)) continue;
       const dx = p.cx - cx;
       const dy = p.cy - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
@@ -1572,7 +1642,7 @@ export class World {
   /** A rocket slamming into a clone crushes it, credited to the rocket's passenger. */
   private crush(c: Craft): void {
     for (const p of this.players) {
-      if (!p || !p.alive || p.id === c.passenger || p.id === c.delivered) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.id === c.passenger || p.id === c.delivered) continue;
       const b = p.body;
       const l = craftToLocal(c, p.cx, p.cy, this.pt);
       if (Math.abs(l.x) >= (CRAFT_W + ACTOR_W) / 2 || Math.abs(l.y) >= (CRAFT_H + ACTOR_H) / 2) continue;
@@ -1596,6 +1666,304 @@ export class World {
       harm(p.parts, Part.Torso, rs * 0.18, res);
       this.applyStrike(p, res, by, W_CRAFT, p.cx, b.y);
     }
+  }
+
+  // ---------------------------------------------------------------- tanks
+
+  /** Drop `n` tanks by parachute at spread-out spots across the map. */
+  dropTanks(n: number): void {
+    for (let i = 0; i < n; i++) {
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0) return;
+      let x = 120;
+      let bestGap = -1;
+      for (let a = 0; a < 16; a++) {
+        const cx = 120 + this.rng.int(WORLD_W - 240 - TANK_W);
+        let gap = Infinity;
+        for (const t of this.tanks) if (t) gap = Math.min(gap, Math.abs(t.x - cx));
+        if (gap > bestGap) {
+          bestGap = gap;
+          x = cx;
+        }
+      }
+      this.tanks[slot] = newTank(x, -TANK_H - 40 - this.rng.int(160));
+    }
+  }
+
+  /** Climb into an empty, landed tank within reach. */
+  private boardTank(p: Player): boolean {
+    const b = p.body;
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || t.pilot !== 255 || t.chute) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + TANK_W));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + TANK_H));
+      if (dx > BOARD_REACH || dy > BOARD_REACH) continue;
+      t.pilot = p.id;
+      p.tank = k;
+      p.reloadLeft = 0;
+      this.syncPilot(p, t);
+      return true;
+    }
+    return false;
+  }
+
+  /** Out of the tank: through the roof hatch (or beside it) when climbing out; just gone when killed. */
+  private leaveTank(p: Player, climbOut: boolean): void {
+    const t = p.tank >= 0 ? this.tanks[p.tank] : null;
+    p.tank = -1;
+    if (!t) return;
+    if (t.pilot === p.id) t.pilot = 255;
+    if (!climbOut) return;
+    const spots = [
+      [t.x + TANK_W / 2 - ACTOR_W / 2, t.y - ACTOR_H - 1],
+      [t.x - ACTOR_W - 1, t.y + TANK_H - ACTOR_H - 1],
+      [t.x + TANK_W + 1, t.y + TANK_H - ACTOR_H - 1],
+    ];
+    let [x, y] = spots[0];
+    for (const [sx, sy] of spots) {
+      const ix = Math.floor(sx);
+      const iy = Math.floor(sy);
+      if (!this.terrain.rectSolid(ix, iy, ix + ACTOR_W - 1, iy + ACTOR_H - 1)) {
+        x = sx;
+        y = sy;
+        break;
+      }
+    }
+    const b = p.body;
+    b.x = x;
+    b.y = y;
+    b.vx = t.vx;
+    b.vy = Math.min(0, t.vy) - 140;
+    b.onGround = false;
+  }
+
+  /** The driver rides inside: its clone (and its view) go wherever the tank goes. */
+  private syncPilot(p: Player, t: Tank): void {
+    const b = p.body;
+    b.x = t.x + TANK_W / 2 - ACTOR_W / 2;
+    b.y = t.y + 2;
+    b.vx = t.vx;
+    b.vy = t.vy;
+    b.onGround = t.onGround;
+    p.camX = t.x + TANK_W / 2;
+    p.camY = t.y + TANK_H / 2;
+  }
+
+  private stepTanks(): void {
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t) continue;
+      let pilot = t.pilot !== 255 ? this.players[t.pilot] : null;
+      if (pilot && (!pilot.alive || pilot.tank !== k)) {
+        t.pilot = 255;
+        pilot = null;
+      }
+      const buttons = pilot ? pilot.buttons : 0;
+      const impact = stepTank(t, this.terrain, DT, buttons);
+      if (t.y > WORLD_H) {
+        this.destroyTank(k, t.lastHitBy);
+        continue;
+      }
+      if (pilot) {
+        t.aim = dequantizeAim(pilot.aimQ);
+        t.faceLeft = Math.cos(t.aim) < 0;
+      }
+      // Guns: the vulcan on fire, the cannon on right mouse / Shift.
+      // Cooldowns carry fractions so the rates are exact on average.
+      t.firedSmg = t.firedCannon = false;
+      t.smgCd -= DT;
+      t.cannonCd -= DT;
+      if (pilot && buttons & BTN_FIRE && hasTankPart(t.parts, TankPart.Smg)) {
+        while (t.smgCd <= 0) {
+          this.tankShot(t, pilot.id, false);
+          t.smgCd += SMG_INTERVAL;
+        }
+      }
+      if (pilot && buttons & BTN_SCOPE && hasTankPart(t.parts, TankPart.Cannon) && t.cannonCd <= 0) {
+        this.tankShot(t, pilot.id, true);
+        t.cannonCd += CANNON_INTERVAL;
+      }
+      t.smgCd = Math.max(0, t.smgCd);
+      t.cannonCd = Math.max(0, t.cannonCd);
+      if (t.jetting) this.tankJets(t);
+      this.tankCrush(t, impact, pilot ? pilot.id : t.lastHitBy);
+      if (pilot) this.syncPilot(pilot, t);
+    }
+  }
+
+  private tankShot(t: Tank, owner: number, cannon: boolean): void {
+    const m = tankMuzzle(t, cannon, t.aim, this.tankMz);
+    const a = m.a + (this.rng.next() - 0.5) * 2 * (cannon ? 0.01 : SMG_SPREAD);
+    const speed = cannon ? CANNON_SPEED : SMG_SPEED;
+    this.spawnProj(this.nextProjId++, cannon ? ProjKind.Shell : ProjKind.TankBullet, owner, m.x, m.y, Math.cos(a) * speed + t.vx * 0.25, Math.sin(a) * speed + t.vy * 0.25);
+    if (cannon) {
+      t.vx -= Math.cos(a) * 30; // recoil
+      t.firedCannon = true;
+    } else t.firedSmg = true;
+  }
+
+  /** Lift-jet flames under the hull (they burn whoever is beneath) and a downdraft. */
+  private tankJets(t: Tank): void {
+    const owner = t.pilot !== 255 ? t.pilot : NO_OWNER;
+    for (const lx of [7, TANK_W - 7]) {
+      const x = t.x + lx;
+      const y = t.y + TANK_H + 1;
+      for (let i = 0; i < 2; i++) {
+        this.grains.spawn(PK.Flame, x + this.rng.range(-2, 2), y, t.vx * 0.5 + this.rng.range(-30, 30), t.vy * 0.5 + 200 + this.rng.range(0, 120), 8 + this.rng.int(6), 0, 0, owner);
+      }
+    }
+    this.grains.wind(t.x + TANK_W / 2, t.y + TANK_H + 14, 24, 0, 260);
+  }
+
+  /** Clones in the tank's way are shoved aside; one it lands on is crushed. */
+  private tankCrush(t: Tank, impact: number, by: number): void {
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0) continue;
+      const b = p.body;
+      if (b.x + ACTOR_W < t.x - 1 || b.x > t.x + TANK_W + 1 || b.y + ACTOR_H < t.y - 1 || b.y > t.y + TANK_H + 1) continue;
+      const side = p.cx < t.x + TANK_W / 2 ? -1 : 1;
+      b.vx += side * 70 + t.vx * 0.5;
+      if (impact > 90 && p.cy > t.y + TANK_H / 2) {
+        const who = by === 255 ? p.id : by;
+        if (!this.friendly(who, p)) this.damage(p, (impact - 60) * 0.9, who, W_TANK);
+      }
+    }
+  }
+
+  /** Is a hit by `by` on this tank friendly fire (its driver is a teammate)? */
+  private friendlyTank(by: number, t: Tank): boolean {
+    const d = t.pilot !== 255 ? this.players[t.pilot] : null;
+    return !!d && this.friendly(by, d);
+  }
+
+  /**
+   * A penetrating hit at world (wx, wy) travelling along (dx, dy): it damages
+   * the part it struck. Energy below the integrity only scratches the paint.
+   */
+  private hitTank(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
+    const t = this.tanks[slot];
+    if (!t || this.friendlyTank(by, t)) return;
+    const part = tankPartAt(t, wx + dx * 2 - t.x, wy + dy * 2 - t.y);
+    this.hurtTankPart(slot, part, energy > TANK_INTEGRITY ? wound : wound * 0.2, by);
+  }
+
+  /** Damage one part; a part out of hit points is blown off, the hull going is the end. */
+  private hurtTankPart(slot: number, part: number, dmg: number, by: number): void {
+    const t = this.tanks[slot];
+    if (!t || dmg <= 0) return;
+    if (by !== NO_OWNER && by !== 255) t.lastHitBy = by;
+    if (part === TankPart.Hull) t.hp -= dmg;
+    else {
+      t.hp -= dmg * 0.1; // shock through the frame
+      t.partHp[part] -= dmg;
+      if (t.partHp[part] <= 0 && hasTankPart(t.parts, part)) this.detachTankPart(slot, part);
+    }
+    t.partHp[TankPart.Hull] = Math.max(0, t.hp);
+    if (t.hp <= 0) this.destroyTank(slot, t.lastHitBy);
+  }
+
+  /** Blast overpressure: explosives are what armour fears. The plate takes half while it lasts. */
+  private splashTanks(x: number, y: number, r: number, dmg: number, owner: number): void {
+    const pt = this.pt;
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || this.friendlyTank(owner, t)) continue;
+      const nx = Math.max(t.x, Math.min(x, t.x + TANK_W));
+      const ny = Math.max(t.y, Math.min(y, t.y + TANK_H));
+      const d = Math.hypot(nx - x, ny - y);
+      if (d >= r) continue;
+      const amt = dmg * 1.5 * (1 - d / r);
+      for (const part of [TankPart.Cannon, TankPart.Smg]) {
+        if (!hasTankPart(t.parts, part)) continue;
+        tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], pt);
+        const dp = Math.hypot(pt.x - x, pt.y - y);
+        if (dp < r) this.hurtTankPart(k, part, dmg * (1 - dp / r), owner);
+        if (this.tanks[k] !== t) break;
+      }
+      if (this.tanks[k] !== t) continue;
+      if (hasTankPart(t.parts, TankPart.Armor)) {
+        this.hurtTankPart(k, TankPart.Armor, amt * 0.5, owner);
+        this.hurtTankPart(k, TankPart.Hull, amt * 0.5, owner);
+      } else this.hurtTankPart(k, TankPart.Hull, amt, owner);
+      if (this.tanks[k] !== t) continue;
+      const dl = d + 1e-6;
+      const s = 40 * (1 - d / r);
+      t.vx += ((nx - x) / dl) * s;
+      t.vy += ((ny - y) / dl) * s;
+    }
+  }
+
+  /** A part flies off as heavy scrap (real fragments in the particle engine). */
+  private detachTankPart(slot: number, part: number): void {
+    const t = this.tanks[slot]!;
+    t.parts &= ~(1 << part);
+    t.partHp[part] = 0;
+    const pt = tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], this.pt);
+    const x = pt.x;
+    const y = pt.y;
+    const out = (x - (t.x + TANK_W / 2)) >= 0 ? 1 : -1;
+    const vx = t.vx + out * (60 + this.rng.range(0, 60));
+    const vy = t.vy - 120 - this.rng.range(0, 60);
+    const seed = this.rng.nextU32();
+    craftPartFragments(this.grains, x, y, vx, vy, t.lastHitBy === 255 ? NO_OWNER : t.lastHitBy, new Rng(seed));
+    const w = this.tmp.reset();
+    w.u8(R_TANK_PART);
+    w.u8(slot);
+    w.u8(part);
+    w.u16(clampU16(x));
+    w.u16(clampU16(y + Y_BIAS));
+    w.i16(clampI16(vx * VEL_SCALE));
+    w.i16(clampI16(vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x, y });
+  }
+
+  /** The hull gives: the tank explodes, and its driver goes with it. */
+  private destroyTank(slot: number, by: number): void {
+    const t = this.tanks[slot];
+    if (!t) return;
+    this.tanks[slot] = null;
+    const owner = by === 255 ? NO_OWNER : by;
+    const cx = t.x + TANK_W / 2;
+    const cy = t.y + TANK_H / 2;
+    const driver = t.pilot !== 255 ? this.players[t.pilot] : null;
+    t.pilot = 255;
+    if (driver) {
+      driver.tank = -1;
+      this.damage(driver, 999, by === 255 ? driver.id : by, W_TANK, false, true);
+    }
+    const seed = this.rng.nextU32();
+    this.carve(cx, cy + TANK_H / 3, 18, 8, 40, owner);
+    this.grains.blast(cx, cy, 90, BLAST_IMPULSE * 1.5);
+    const rng = new Rng(seed);
+    craftFragments(this.grains, cx, cy, t.vx, t.vy, owner, rng);
+    craftFragments(this.grains, cx, cy, t.vx, t.vy, owner, rng);
+    this.splashCrafts(cx, cy, 48, 80, owner);
+    this.splashTanks(cx, cy, 48, 80, owner);
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0 || this.friendly(owner, p)) continue;
+      const d = Math.hypot(p.cx - cx, p.cy - cy);
+      if (d >= 48) continue;
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      const amt = 80 * (1 - d / 48);
+      for (let part = 0; part < PART_COUNT; part++) {
+        if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+      }
+      this.applyStrike(p, res, owner === NO_OWNER ? p.id : owner, W_TANK, cx, cy);
+    }
+    const w = this.tmp.reset();
+    w.u8(R_TANK_BOOM);
+    w.u8(slot);
+    w.u16(clampU16(cx));
+    w.u16(clampU16(cy + Y_BIAS));
+    w.i16(clampI16(t.vx * VEL_SCALE));
+    w.i16(clampI16(t.vy * VEL_SCALE));
+    w.u32(seed);
+    this.hits.push({ bytes: w.finish(), id: 0, x: cx, y: cy });
   }
 
   // ---------------------------------------------------------------- tick
@@ -1636,7 +2004,7 @@ export class World {
         }
         continue;
       }
-      const impact = stepBody(p.body, p.buttons, terrain, DT);
+      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -1651,6 +2019,11 @@ export class World {
         this.applyStrike(p, res, p.id, 255, p.cx, p.body.y + 12);
       }
       if (!p.alive) continue;
+      if (p.tank >= 0) {
+        // Driving: the tank moves and shoots (stepTanks); the clone rides inside.
+        this.handleInventory(p);
+        continue;
+      }
       if (p.body.y > WORLD_H) this.damage(p, 999, p.id, 255);
       // Open stumps bleed; bleeding out credits whoever did it.
       const n = stumps(p.parts.mask);
@@ -1672,6 +2045,7 @@ export class World {
     }
 
     this.stepCrafts();
+    this.stepTanks();
     this.stepItems();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
@@ -1681,7 +2055,12 @@ export class World {
     this.projectiles.step(this.collider, DT, this.segmentActor, this.onProjEnd);
     const actors = this.actors;
     actors.clear();
-    for (const p of this.players) if (p && p.alive) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    for (const p of this.players) if (p && p.alive && p.tank < 0) actors.add(p.id, p.body.x, p.body.y, p.body.vx, p.body.vy);
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      // Immune to its own jet flames and shell fragments.
+      if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H, TANK_MASS, t.pilot !== 255 ? t.pilot : NO_OWNER, 0.3);
+    }
     for (let k = 0; k < MAX_CRAFTS; k++) {
       const c = this.crafts[k];
       if (!c) continue;
@@ -1693,6 +2072,14 @@ export class World {
     // Apply what particles and fields did to bodies this tick.
     for (let a = 0; a < actors.n; a++) {
       const id = actors.id[a];
+      if (id >= TANK_ID_BASE) {
+        const t = this.tanks[id - TANK_ID_BASE];
+        if (t) {
+          t.vx += actors.dvx[a];
+          t.vy += actors.dvy[a];
+        }
+        continue;
+      }
       if (id >= CRAFT_ID_BASE) {
         const c = this.crafts[id - CRAFT_ID_BASE];
         if (c) {
@@ -1709,6 +2096,11 @@ export class World {
     // Resolve every particle impact against the part of the body it struck.
     for (let h = 0; h < actors.hitN; h++) {
       const hid = actors.id[actors.hitSlot[h]];
+      if (hid >= TANK_ID_BASE) {
+        const t = this.tanks[hid - TANK_ID_BASE];
+        if (t) this.hitTank(hid - TANK_ID_BASE, t.x + actors.hitLx[h], t.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        continue;
+      }
       if (hid >= CRAFT_ID_BASE) {
         const c = this.crafts[hid - CRAFT_ID_BASE];
         if (!c) continue;
@@ -1878,6 +2270,22 @@ export class World {
         for (let part = 0; part < CRAFT_PARTS; part++) w.u8(Math.max(0, Math.min(255, Math.ceil(ride.partHp[part]))));
       }
 
+      // Driving: the tank at full precision, for the client's predictor.
+      const drive = p.alive && p.tank >= 0 ? this.tanks[p.tank] : null;
+      if (drive && drive.pilot === p.id) {
+        w.u8(R_TANK_SELF);
+        w.u8(p.tank);
+        w.f64(drive.x);
+        w.f64(drive.y);
+        w.f64(drive.vx);
+        w.f64(drive.vy);
+        w.f64(drive.fuel);
+        w.u8((drive.chute ? 1 : 0) | (drive.onGround ? 2 : 0) | (drive.jetting ? 4 : 0));
+        w.u8(drive.parts);
+        for (let part = 0; part < TANK_PARTS; part++) w.u16(Math.max(0, Math.ceil(drive.partHp[part])));
+        w.u8(Math.min(255, Math.ceil(drive.cannonCd * TICK_RATE)));
+      }
+
       // Entity interest: full-rate inside the view rect, radar blips outside.
       const vx0 = p.camX - VIEW_HALF_W - ENTITY_INTEREST_MARGIN;
       const vx1 = p.camX + VIEW_HALF_W + ENTITY_INTEREST_MARGIN;
@@ -1958,6 +2366,28 @@ export class World {
         w.u8(c.parts);
       }
       if (nCraft > 0) w.buf[craftAt] = nCraft;
+
+      // Tanks: only a handful, so every one of them, every frame (they matter from afar).
+      let nTank = 0;
+      for (const t of this.tanks) if (t) nTank++;
+      if (nTank > 0) {
+        w.u8(R_TANKS);
+        w.u8(nTank);
+        for (let k = 0; k < MAX_TANKS; k++) {
+          const t = this.tanks[k];
+          if (!t) continue;
+          w.u8(k);
+          w.u16(clampU16(t.x * POS_SCALE));
+          w.u16(clampU16((t.y + Y_BIAS) * POS_SCALE));
+          w.i16(clampI16(t.vx * VEL_SCALE));
+          w.i16(clampI16(t.vy * VEL_SCALE));
+          w.u16(quantizeAim(t.aim));
+          w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0));
+          w.u8(t.parts);
+          w.u16(Math.max(0, Math.ceil(t.hp)));
+          w.u8(t.pilot);
+        }
+      }
 
       this.replicateItems(p, w, vx0, vy0, vx1, vy1);
 
@@ -2073,6 +2503,11 @@ function exhaustOwner(c: Craft): number {
 
 /** Actor-field ids for drop rockets: CRAFT_ID_BASE + craft slot. */
 const CRAFT_ID_BASE = 128;
+/** Actor-field ids for tanks: TANK_ID_BASE + tank slot (above every rocket's). */
+const TANK_ID_BASE = CRAFT_ID_BASE + MAX_CRAFTS;
+const TANK_MASS = 200;
+/** How close (cells, box to box) a clone must be to climb into a tank. */
+const BOARD_REACH = 10;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less
 /** Base parts (armour is reached through them) and their share of blast overpressure. */
 const PARTS_BASE = [true, true, true, true, true, true, false, false, true];
