@@ -20,10 +20,17 @@ npm run deploy       # wrangler deploy (needs a Cloudflare account)
 
 Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
 to go prone; **S** while jetting dashes), **mouse** aim and
-fire, **right mouse / Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
+fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
 drop the one in hand, **Tab** scoreboard, **Enter** chat. With the Materializer out, the wheel or a click
-on the menu picks a fortification and a click builds it. Dig gold with the Digger. Clones gib on
+on the menu picks a fortification and a click builds it. Dig gold with the Digger.
+
+**Keyboard-only aim** (no mouse needed): the **arrow keys** move the
+reticle around your clone (slow at first for fine aim, faster the longer
+you hold). It stays put relative to you as you move, and settles onto an
+enemy it's near, as touch aim does. **Left Shift** scopes and **right Shift**
+fires. Right Shift also clicks, so it builds and picks radio calls at the
+reticle. Moving the mouse hands aim back to it. Clones gib on
 death and spill half their gold as gold rubble that anyone can dig up.
 
 **On phones and tablets** (`src/client/touch.ts`) touch controls switch on
@@ -280,7 +287,7 @@ come down by parachute** at spread-out spots and land empty.
   fires the lift jets (their own fuel, weaker than a jetpack). **S** drops
   you faster while airborne.
 - **Two guns.** **Left mouse** fires the vulcan SMG, which swivels all the
-  way round. **Right mouse / Shift** (touch: hold ◎) fires the cannon: a
+  way round (or **right Shift**). **Right mouse / left Shift** (touch: hold ◎) fires the cannon: a
   heavy lobbed shell with a big blast, aimed out the front (25° down to 72°
   up), with recoil. A tank's own rounds never hit it.
 - **Tough.** The hull holds 75× a clone's health (7500), and every part

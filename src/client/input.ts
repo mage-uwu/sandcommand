@@ -39,6 +39,15 @@ export class InputState {
   tapFire = 0;
   /** A tap or hold aimed at a screen point this tick: the game loop applies aim assist to it. */
   pointAssist = false;
+  /**
+   * Keyboard aim (arrow keys): the reticle is held at an offset (CSS px)
+   * from the clone, so it stays put relative to it as it moves. Any mouse
+   * movement hands aim back to the mouse.
+   */
+  keyAim = false;
+  private keyAimX = 0;
+  private keyAimY = 0;
+  private keyAimHeld = 0;
   /** Set once a touch has come in: mouse events the browser synthesises from it are ignored. */
   private lastTouch = -1e9;
 
@@ -62,7 +71,9 @@ export class InputState {
         if (e.code === 'Digit3' || e.code === 'KeyF') this.pickups++;
         if (e.code === 'Digit4' || e.code === 'KeyG') this.drops++;
       }
-      if (e.code === 'Space') e.preventDefault();
+      // Right shift fires (and clicks: builds, picks radio calls at the reticle).
+      if (e.code === 'ShiftRight' && !e.repeat) this.clicks++;
+      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       this.keys.add(e.code);
     });
     addEventListener('keyup', (e) => {
@@ -78,6 +89,7 @@ export class InputState {
       if (this.fromTouch()) return;
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
+      this.keyAim = false;
     });
     target.addEventListener('mousedown', (e) => {
       if (this.fromTouch()) return;
@@ -148,6 +160,40 @@ export class InputState {
     this.drops++;
   }
 
+  /**
+   * Move the keyboard reticle (once a tick): arrows push it around the clone
+   * at (ox, oy) on screen (CSS px), slow at first for fine aim and faster
+   * the longer they're held. While keyboard aim is on, the pointer follows.
+   */
+  stepKeyAim(dt: number, ox: number, oy: number, w: number, h: number): void {
+    if (this.typing) return;
+    const dx = (this.down('ArrowRight') ? 1 : 0) - (this.down('ArrowLeft') ? 1 : 0);
+    const dy = (this.down('ArrowDown') ? 1 : 0) - (this.down('ArrowUp') ? 1 : 0);
+    if (dx !== 0 || dy !== 0) {
+      if (!this.keyAim) {
+        this.keyAim = true;
+        this.keyAimX = this.mouseX - ox;
+        this.keyAimY = this.mouseY - oy;
+        // A pointer sitting on the clone gives no direction: start out front.
+        if (Math.hypot(this.keyAimX, this.keyAimY) < 20) {
+          this.keyAimX = 120 * (dx || 1);
+          this.keyAimY = 0;
+        }
+      }
+      this.keyAimHeld += dt;
+      const speed = 260 + Math.min(1, this.keyAimHeld / 0.6) * 640;
+      const n = Math.hypot(dx, dy);
+      this.keyAimX += (dx / n) * speed * dt;
+      this.keyAimY += (dy / n) * speed * dt;
+    } else this.keyAimHeld = 0;
+    if (!this.keyAim) return;
+    // Keep it on screen.
+    this.keyAimX = Math.max(-ox + 4, Math.min(w - 4 - ox, this.keyAimX));
+    this.keyAimY = Math.max(-oy + 4, Math.min(h - 4 - oy, this.keyAimY));
+    this.mouseX = ox + this.keyAimX;
+    this.mouseY = oy + this.keyAimY;
+  }
+
   private down(...codes: string[]): boolean {
     for (const c of codes) if (this.keys.has(c)) return true;
     return false;
@@ -177,19 +223,19 @@ export class InputState {
     return true;
   }
 
-  /** Aiming down the scope (right mouse or Shift). */
+  /** Aiming down the scope (right mouse or left Shift). */
   get scoping(): boolean {
-    return !this.typing && (this.scopeDown || (this.touchScope && !this.driving) || this.down('ShiftLeft', 'ShiftRight'));
+    return !this.typing && (this.scopeDown || (this.touchScope && !this.driving) || this.down('ShiftLeft'));
   }
 
   buttons(): number {
     if (this.typing) return 0;
     return (
-      (this.down('KeyA', 'ArrowLeft') ? BTN_LEFT : 0) |
-      (this.down('KeyD', 'ArrowRight') ? BTN_RIGHT : 0) |
-      (this.down('KeyW', 'ArrowUp', 'Space') ? BTN_UP : 0) |
-      (this.down('KeyS', 'ArrowDown') ? BTN_DOWN : 0) |
-      (this.mouseDown || this.tapFire > 0 || this.aimStick?.fire ? BTN_FIRE : 0) |
+      (this.down('KeyA') ? BTN_LEFT : 0) |
+      (this.down('KeyD') ? BTN_RIGHT : 0) |
+      (this.down('KeyW', 'Space') ? BTN_UP : 0) |
+      (this.down('KeyS') ? BTN_DOWN : 0) |
+      (this.mouseDown || this.tapFire > 0 || this.aimStick?.fire || this.down('ShiftRight') ? BTN_FIRE : 0) |
       (this.scoping ? BTN_SCOPE : 0) |
       (this.down('KeyR') ? BTN_RELOAD : 0) |
       this.touchButtons

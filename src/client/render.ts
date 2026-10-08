@@ -935,7 +935,7 @@ export class Renderer {
     ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.65)';
     ctx.textAlign = 'center';
-    const help = input.touch ? 'tap: SMG   ◎ cannon   ▲ jets   ⬆ climb out' : 'LMB: SMG   RMB/Shift: cannon   W: jets   3/F: climb out';
+    const help = input.touch ? 'tap: SMG   ◎ cannon   ▲ jets   ⬆ climb out' : 'LMB/RShift: SMG   RMB/LShift: cannon   W: jets   3/F: climb out';
     ctx.fillText(help, W / 2, y0 - 6 * s);
     ctx.textAlign = 'left';
   }

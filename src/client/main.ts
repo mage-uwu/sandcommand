@@ -1,4 +1,4 @@
-import { ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
+import { ACTOR_H, ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { WEAPONS } from '../shared/weapons.ts';
@@ -226,6 +226,16 @@ function frame(now: number): void {
     while (acc >= TICK_MS) {
       acc -= TICK_MS;
       const dpr = canvas.width / innerWidth;
+      // Arrow keys steer the reticle around the clone (keyboard-only aim).
+      const kx = g.drive ? g.drive.x + TANK_W / 2 : g.body.x + ACTOR_W / 2;
+      const ky = g.drive ? g.drive.y + TANK_H / 3 : g.body.y + ACTOR_H / 3;
+      input.stepKeyAim(
+        TICK_MS / 1000,
+        ((kx - renderer.camX) * renderer.zoom) / dpr + innerWidth / 2,
+        ((ky - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2,
+        innerWidth,
+        innerHeight,
+      );
       const wx = renderer.camX + (input.mouseX * dpr - canvas.width / 2) / renderer.zoom;
       const wy = renderer.camY + (input.mouseY * dpr - canvas.height / 2) / renderer.zoom;
       // Aim from the shoulder, wherever the stance puts it (crouched, prone).
@@ -243,7 +253,7 @@ function frame(now: number): void {
         input.mouseY = ((oy - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2 + Math.sin(aim) * r;
       } else {
         aim = Math.atan2(wy - oy, wx - ox);
-        if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
+        if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
       }
       let buttons = input.buttons();
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
