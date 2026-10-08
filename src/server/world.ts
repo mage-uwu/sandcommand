@@ -87,6 +87,9 @@ import {
   R_BUILD,
   R_ROUND,
   R_WAVE,
+  R_TEAMS,
+  GameMode,
+  Team,
   R_ITEMS,
   R_ITEMS_GONE,
   R_CARVE,
@@ -166,6 +169,10 @@ export class Player {
   inWave = false;
   pendingSpawn = false;
   spectate = 255;
+  /** Team deathmatch: Team.Red / Team.Green for this wave, Team.None outside one. */
+  team: number = Team.None;
+  /** Last team table this client was sent (World.teamsRev). */
+  teamsSeen = -1;
   /** Latest materializer request, applied on this player's next tick. */
   buildReq: { piece: number; gx: number; gy: number } | null = null;
   /** Buttons last tick, for semi-auto triggers and the reload key. */
@@ -270,6 +277,10 @@ export class World {
 
   /** Game mode: 'sandbox' (respawn forever) or 'ffa' (one life per wave, last one standing wins). */
   readonly mode: 'sandbox' | 'ffa';
+  /** Wave modes the round room cycles through (wave 1 plays the first). */
+  readonly rotation: readonly number[];
+  /** Bumped whenever the team table changes (clients are re-sent it). */
+  teamsRev = 0;
   /** FFA: fill the room with bots up to this many clones (humans count first). */
   readonly botFill: number;
   /** Seed of the current map (each wave gets a new one). */
@@ -282,9 +293,10 @@ export class World {
   /** Pre-encoded R_WAVE record to open every frame of the tick a new wave's map is made. */
   private waveRecord: Uint8Array | null = null;
 
-  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number } = {}) {
+  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[] } = {}) {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
+    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Ffa, GameMode.Tdm];
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
     generateWorld(this.terrain, this.mapSeed);
@@ -355,6 +367,7 @@ export class World {
     // In FFA you join between waves (spectating until the next one starts).
     if (this.mode === 'ffa') p.respawn = 0;
     this.players[id] = p;
+    this.teamsRev++; // whoever had this slot before may have had a team
     this.writeRoster(this.broadcast, p, true);
     if (bot) return p;
     // The newcomer needs the whole roster; it gets it in its first frame.
@@ -367,10 +380,32 @@ export class World {
   // ---------------------------------------------------------------- free for all
 
   /** Clones still in the wave: alive, riding in, or waiting for their rocket. */
-  remaining(): number {
+  remaining(team = -1): number {
     let n = 0;
-    for (const p of this.players) if (p && p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn)) n++;
+    for (const p of this.players) if (p && this.inPlay(p) && (team < 0 || p.team === team)) n++;
     return n;
+  }
+
+  private inPlay(p: Player): boolean {
+    return p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn);
+  }
+
+  /** Mode of wave `n` (1-based). */
+  modeOfWave(n: number): number {
+    return this.rotation[(Math.max(1, n) - 1) % this.rotation.length];
+  }
+
+  /** Mode of the wave being played, or (between waves) of the next one. */
+  get waveMode(): number {
+    if (this.mode !== 'ffa') return GameMode.Ffa;
+    return this.modeOfWave(this.phase === Phase.Live || this.phase === Phase.Victory ? this.wave : this.wave + 1);
+  }
+
+  /** Teammates can't hurt each other (your own blasts still hurt you). */
+  friendly(by: number, victim: Player): boolean {
+    if (victim.team === Team.None || by === victim.id) return false;
+    const a = by >= 0 && by < MAX_PLAYERS ? this.players[by] : null;
+    return !!a && a.team === victim.team;
   }
 
   /**
@@ -392,6 +427,10 @@ export class World {
         // Last one standing; or, when time runs out, the survivor with the
         // most kills this wave (so nobody can win by hiding in a bunker).
         const timeUp = --this.phaseTimer <= 0;
+        if (this.modeOfWave(this.wave) === GameMode.Tdm) {
+          this.stepTeamRound(timeUp);
+          break;
+        }
         if (this.remaining() <= 1 || timeUp) {
           let best: Player | null = null;
           for (const p of this.players) {
@@ -413,6 +452,44 @@ export class World {
     }
   }
 
+  /**
+   * Team deathmatch: the last team with a clone standing wins, every member
+   * scoring the win (the fallen too). When time runs out, the team with
+   * more clones left; then the one with more kills this wave.
+   */
+  private stepTeamRound(timeUp: boolean): void {
+    const red = this.remaining(Team.Red);
+    const green = this.remaining(Team.Green);
+    if (red > 0 && green > 0 && !timeUp) return;
+    let winner = 255;
+    if (red !== green) winner = red > green ? Team.Red : Team.Green;
+    else if (red > 0) {
+      const kills = [0, 0];
+      for (const p of this.players) if (p && p.inWave && p.team !== Team.None) kills[p.team] += p.waveKills;
+      if (kills[0] !== kills[1]) winner = kills[0] > kills[1] ? Team.Red : Team.Green;
+    }
+    this.winner = winner;
+    if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /**
+   * Split everyone into two even teams: humans dealt out first (so people
+   * end up on both sides), then bots evening up the numbers.
+   */
+  private drawTeams(tdm: boolean): void {
+    const order: Player[] = [];
+    for (const p of this.players) if (p) order.push(p);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = this.rng.int(i + 1);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    order.sort((a, b) => (a.bot ? 1 : 0) - (b.bot ? 1 : 0));
+    const first = this.rng.int(2);
+    order.forEach((p, i) => (p.team = tdm ? (first + i) & 1 : Team.None));
+    this.teamsRev++;
+  }
+
   private setPhase(phase: number, ticks: number): void {
     this.phase = phase;
     this.phaseTimer = ticks;
@@ -430,6 +507,7 @@ export class World {
   private startWave(): void {
     this.wave++;
     this.winner = 255;
+    this.drawTeams(this.modeOfWave(this.wave) === GameMode.Tdm);
     for (const p of this.players) {
       if (!p) continue;
       p.inWave = true;
@@ -461,6 +539,7 @@ export class World {
       if (!p) continue;
       p.alive = false;
       p.inWave = false;
+      p.team = Team.None;
       p.pendingSpawn = false;
       p.delivering = -1;
       p.inv = [];
@@ -472,6 +551,7 @@ export class World {
       // The client regenerates this map itself (and asks again for any chunk whose hash differs).
       for (let ci = 0; ci < CHUNK_COUNT; ci++) p.known[ci] = this.chunkVersion[ci];
     }
+    this.teamsRev++;
     this.sealMap();
     this.waveRecord = this.mapRecord;
   }
@@ -486,11 +566,14 @@ export class World {
     const next = p.buttons & BTN_FIRE && !(prev & BTN_FIRE);
     if (!t || !t.alive || next) {
       p.spectate = 255;
-      for (let k = 1; k <= MAX_PLAYERS; k++) {
-        const o = this.players[(Math.max(0, t ? t.id : p.id) + k) % MAX_PLAYERS];
-        if (o && o.alive && o !== p) {
-          p.spectate = o.id;
-          break;
+      // On a team, follow your own side while any of it stands.
+      for (let pass = p.team === Team.None ? 1 : 0; pass < 2 && p.spectate === 255; pass++) {
+        for (let k = 1; k <= MAX_PLAYERS; k++) {
+          const o = this.players[(Math.max(0, t ? t.id : p.id) + k) % MAX_PLAYERS];
+          if (o && o.alive && o !== p && (pass === 1 || o.team === p.team)) {
+            p.spectate = o.id;
+            break;
+          }
         }
       }
       t = p.spectate !== 255 ? this.players[p.spectate] : null;
@@ -818,7 +901,7 @@ export class World {
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
-      strike(v.parts, part, energy, def.damage, res);
+      if (!this.friendly(owner, v)) strike(v.parts, part, energy, def.damage, res);
       v.body.vx += (rvx * def.mass) / 8;
       v.body.vy += (rvy * def.mass) / 8;
       this.applyStrike(v, res, owner, kind, x, y);
@@ -838,7 +921,7 @@ export class World {
         this.splashCrafts(x, y, def.splashR, def.splashDamage, owner);
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
-          if (!p || !p.alive) continue;
+          if (!p || !p.alive || this.friendly(owner, p)) continue;
           const dx = p.cx - x;
           const dy = p.cy - y;
           const d = Math.sqrt(dx * dx + dy * dy);
@@ -1233,7 +1316,14 @@ export class World {
   private launchCraft(p: Player): void {
     const slot = this.crafts.indexOf(null);
     if (slot < 0) return; // sky is full; try again next tick
-    const pick = () => 48 + CRAFT_W / 2 + this.rng.int(WORLD_W - 96 - CRAFT_W);
+    // Teams come down on opposite sides of the map: red the left, green the right.
+    let lo = 48 + CRAFT_W / 2;
+    let span = WORLD_W - 96 - CRAFT_W;
+    if (p.team !== Team.None) {
+      span = Math.floor(span * 0.4);
+      if (p.team === Team.Green) lo = WORLD_W - 48 - CRAFT_W / 2 - span;
+    }
+    const pick = () => lo + this.rng.int(span);
     // Of a handful of candidate spots with sky above and ground below, take
     // the one furthest from live clones and other incoming rockets, so a
     // full room doesn't land on top of itself.
@@ -1244,7 +1334,7 @@ export class World {
       const top = this.terrain.surfaceY(Math.floor(cx));
       if (top <= 60 || top >= WORLD_H - 40) continue;
       let gap = Infinity;
-      for (const o of this.players) if (o && o.alive) gap = Math.min(gap, Math.abs(o.cx - cx));
+      for (const o of this.players) if (o && o.alive && (o.team === Team.None || o.team !== p.team)) gap = Math.min(gap, Math.abs(o.cx - cx));
       for (const c of this.crafts) if (c) gap = Math.min(gap, Math.abs(c.x - cx));
       if (gap > bestGap) {
         bestGap = gap;
@@ -1452,7 +1542,7 @@ export class World {
     craftFragments(this.grains, cx, cy, c.vx, c.vy, owner, new Rng(seed));
     for (const p of this.players) {
       // The rider is thrown clear by the blast; its fragments can still find them.
-      if (!p || !p.alive || p.id === rider) continue;
+      if (!p || !p.alive || p.id === rider || this.friendly(owner, p)) continue;
       const dx = p.cx - cx;
       const dy = p.cy - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
@@ -1496,13 +1586,14 @@ export class World {
       b.vx += (rx < 0 ? -1 : 1) * 60 + rvx * 0.5;
       b.vy += rvy * 0.5;
       if (rs < 90) continue;
+      const by = c.passenger !== 255 ? c.passenger : c.lastHitBy !== 255 ? c.lastHitBy : p.id;
+      if (this.friendly(by, p)) continue;
       const res = this.strikeScratch;
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
       harm(p.parts, Part.Head, rs * 0.12, res);
       harm(p.parts, Part.Torso, rs * 0.18, res);
-      const by = c.passenger !== 255 ? c.passenger : c.lastHitBy !== 255 ? c.lastHitBy : p.id;
       this.applyStrike(p, res, by, W_CRAFT, p.cx, b.y);
     }
   }
@@ -1629,6 +1720,7 @@ export class World {
       const p = this.players[hid];
       if (!p || !p.alive) continue;
       const by = actors.hitOwner[h] === NO_OWNER ? p.id : actors.hitOwner[h];
+      if (this.friendly(by, p)) continue;
       const self = by === p.id ? 0.5 : 1; // your own fragments hurt less
       const part = partAt(p.parts.mask, actors.hitLx[h], actors.hitLy[h], this.facingLeft(p));
       const res = this.strikeScratch;
@@ -1726,7 +1818,15 @@ export class World {
         w.u8(this.winner);
         w.u8(this.remaining());
         // 0 not in this wave, 1 in it (alive, riding in, or waiting for a rocket), 2 out.
-        w.u8(!p.inWave ? 0 : p.alive || p.delivering >= 0 || p.pendingSpawn ? 1 : 2);
+        w.u8(!p.inWave ? 0 : this.inPlay(p) ? 1 : 2);
+        w.u8(this.waveMode);
+        w.u8(this.remaining(Team.Red));
+        w.u8(this.remaining(Team.Green));
+        if (p.teamsSeen !== this.teamsRev) {
+          p.teamsSeen = this.teamsRev;
+          w.u8(R_TEAMS);
+          for (let id = 0; id < MAX_PLAYERS; id++) w.u8(this.players[id]?.team ?? Team.None);
+        }
       }
 
       // Own state at full float64 precision: the client's predictor rebases on

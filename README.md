@@ -47,6 +47,34 @@ Every room plays free-for-all waves (`stepRound` in `src/server/world.ts`):
    terrain, with nothing carried over (rockets, dropped weapons, debris in
    flight).
 
+## Team deathmatch
+
+Waves alternate between free-for-all and **team deathmatch**: odd waves
+FFA, even waves TDM (`rotation` in the `World` options; `modeOfWave`).
+The countdown banner says which one is coming.
+
+- **Even teams.** When a TDM wave starts, everyone is dealt into **red** and
+  **green** (`drawTeams`). Humans are dealt first, so two humans end up on
+  opposite sides, then bots even up the numbers.
+- **Opposite sides.** Red's rockets come down on the left 40% of the map,
+  green's on the right 40%.
+- **No friendly fire.** Teammates can't hurt each other with bullets,
+  blasts, shrapnel, debris or rocket crashes (`World.friendly`). Your own
+  blasts still hurt you.
+- **Fight to the last clone.** One life each, as in FFA. The last team with
+  a clone standing wins, and every member scores the win, the fallen
+  included. If the clock runs out, the team with more clones left wins,
+  then the team with more kills that wave.
+- **Bots** only hunt the other team.
+- **Spectating.** When you're out you watch your own side while any of it
+  stands.
+- **On screen.** Clones, name tags and the minimap wear team colours. The
+  top bar shows `RED 12 v 9 GREEN`, with your side marked. Banners announce
+  RED WINS or GREEN WINS.
+- **Wire.** The team table goes out as `R_TEAMS`, only when it changes, and
+  to newcomers. `R_ROUND` carries the wave's mode and each team's clones
+  left.
+
 **Bots fill every seat no human has**, up to 64. When a human joins a full
 room, a bot gives up its seat, a dead one if there is one.
 - **Same rules as humans.** A bot is a `BotBrain` in `src/server/bots.ts`:

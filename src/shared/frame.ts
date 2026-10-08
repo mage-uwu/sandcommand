@@ -4,7 +4,7 @@ import { CRAFT_PARTS } from './craft.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
-import { BLIP_X, BLIP_Y, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X } from './constants.ts';
+import { BLIP_X, BLIP_Y, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, MAX_PLAYERS } from './constants.ts';
 import {
   R_ACTORS,
   R_BLIPS,
@@ -25,6 +25,7 @@ import {
   R_PROJ_END,
   R_PROJ_SPAWN,
   R_ROUND,
+  R_TEAMS,
   R_ROSTER,
   R_SCORES,
   R_SELF,
@@ -119,10 +120,12 @@ export interface RoundState {
   phase: number; // Phase.*
   wave: number;
   timer: number; // ticks left in a countdown / victory
-  winner: number; // player id, 255 none
+  winner: number; // player id (FFA) or Team (TDM), 255 none
   left: number; // clones still in the wave
   inWave: boolean; // are we in it
   out: boolean; // were we in it, and got fragged
+  mode: number; // GameMode of this wave (between waves: the next one)
+  teamLeft: [number, number]; // TDM: red and green clones still in the wave
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -150,6 +153,8 @@ export interface FrameHandler {
   scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void;
   /** FFA round state, every frame. */
   round(s: RoundState): void;
+  /** Every slot's team (Team.*), whenever it changes. */
+  teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
   wave(seed: number, hashes: Uint32Array): void;
   hit(victim: number, x: number, y: number, amount: number): void;
@@ -275,7 +280,16 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const winner = r.u8();
         const left = r.u8();
         const status = r.u8();
-        h.round({ phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2 });
+        const mode = r.u8();
+        const red = r.u8();
+        const green = r.u8();
+        h.round({ phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green] });
+        break;
+      }
+      case R_TEAMS: {
+        const teams = new Uint8Array(MAX_PLAYERS);
+        for (let i = 0; i < MAX_PLAYERS; i++) teams[i] = r.u8();
+        h.teams(teams);
         break;
       }
       case R_WAVE: {
@@ -438,6 +452,7 @@ export const nullHandler: FrameHandler = {
   carved() {},
   chunkLoaded() {},
   round() {},
+  teams() {},
   wave() {},
   items() {},
   itemsGone() {},

@@ -6,7 +6,7 @@ import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET, classOfFlags } from '../shared/protocol.ts';
+import { F_ALIVE, F_FIRING, F_GROUND, F_JET, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
@@ -97,6 +97,12 @@ function playerColor(id: number): { css: string; rgb: number } {
   const b = Math.round(f(4) * 255);
   return { css: `rgb(${r},${g},${b})`, rgb: (r << 16) | (g << 8) | b };
 }
+
+/** Team deathmatch colours: red and green fatigues (Team.Red, Team.Green). */
+export const TEAM_COLORS = [
+  { css: 'rgb(222,64,56)', rgb: 0xde4038 },
+  { css: 'rgb(76,190,72)', rgb: 0x4cbe48 },
+] as const;
 
 export class Game implements FrameHandler {
   readonly terrain = new Terrain();
@@ -590,6 +596,24 @@ export class Game implements FrameHandler {
     this.roundState = s;
   }
 
+  /** Every slot's team this wave (Team.None outside team deathmatch). */
+  teamOf: Uint8Array = new Uint8Array(64).fill(Team.None);
+
+  teams(teams: Uint8Array): void {
+    this.teamOf = teams;
+    // Clones wear their team's colour; without a team, their own.
+    for (const p of this.players.values()) {
+      const c = TEAM_COLORS[teams[p.id]] ?? playerColor(p.id);
+      p.color = c.css;
+      p.rgb = c.rgb;
+    }
+  }
+
+  /** Our team this wave, Team.None if we have none. */
+  get myTeam(): number {
+    return this.myId >= 0 ? this.teamOf[this.myId] : Team.None;
+  }
+
   /**
    * A new wave: the decoder has just regenerated the terrain from the seed.
    * Clear everything left from the last one, rebuild what derives from the
@@ -688,7 +712,7 @@ export class Game implements FrameHandler {
       this.snaps.delete(id);
       return;
     }
-    const c = playerColor(id);
+    const c = TEAM_COLORS[this.teamOf[id]] ?? playerColor(id);
     this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, wins: 0, bot: name.startsWith('BOT '), color: c.css, rgb: c.rgb });
   }
 

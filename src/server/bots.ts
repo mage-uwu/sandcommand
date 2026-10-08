@@ -1,7 +1,7 @@
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../shared/actor.ts';
 import { GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
-import { quantizeAim } from '../shared/protocol.ts';
+import { Team, quantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import type { InputCmd, Player, World } from './world.ts';
@@ -84,7 +84,7 @@ export class BotBrain {
       this.target = -1;
       let best = Infinity;
       for (const o of world.players) {
-        if (!o || o === p || !o.alive) continue;
+        if (!o || o === p || !o.alive || (p.team !== Team.None && o.team === p.team)) continue;
         const d = (o.cx - p.cx) ** 2 + (o.cy - p.cy) ** 2;
         if (d < best) {
           best = d;
