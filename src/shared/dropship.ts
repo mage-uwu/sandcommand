@@ -4,7 +4,8 @@ import type { Terrain } from './terrain.ts';
 /**
  * The dropship: an aerial support gunship, called in by radio. Unlike a drop
  * rocket it hangs from four engine pods on struts above its hull, like a
- * modern drone, and stays on station: it hovers over whoever called it,
+ * modern drone (chunky rocket motors out on pylons past the hull's
+ * ends, open to fire from below), and stays on station: it hovers over whoever called it,
  * strafes enemies with a small turret on either side, and opens the bomb-bay
  * doors in its belly to drop heavy bombs (eight in all) on enemies below.
  *
@@ -16,8 +17,8 @@ import type { Terrain } from './terrain.ts';
  * `stepShip` is pure and shared. The server flies every dropship (they are
  * never piloted); clients just interpolate what they are sent.
  */
-export const SHIP_W = 44;
-export const SHIP_H = 24;
+export const SHIP_W = 80;
+export const SHIP_H = 30;
 export const SHIP_HP = 3750;
 export const MAX_SHIPS = 4;
 export const SHIP_BOMBS = 8;
@@ -39,19 +40,29 @@ export const ALL_SHIP_PARTS = (1 << SHIP_PARTS) - 1;
 export const SHIP_PART_HP = [SHIP_HP, 650, 650, 650, 650, 800, 550, 550];
 export const SHIP_PART_NAMES = ['hull', 'engine', 'engine', 'engine', 'engine', 'bay doors', 'turret', 'turret'];
 
-/** Engine pod centres along the ship (local x), and how high they hang (local y, over the hull). */
-export const ENGINE_X = [5, 15, 29, 39];
-export const ENGINE_Y = 3;
+/** The hull: 44 cells long, centred in the box, its top under the pods' level. */
+export const HULL_X = 18;
+export const HULL_W = 44;
+export const HULL_TOP = 13;
+export const HULL_H = 14;
+/**
+ * The rocket pods (local x centres), two on an outrigger pylon either side,
+ * out past the hull's ends so they're open to fire from below: pod centre
+ * height, and where the nozzles' exhaust comes out.
+ */
+export const ENGINE_X = [5, 15, 65, 75];
+export const ENGINE_Y = 5;
+export const ENGINE_NOZZLE_Y = 11;
 /** Turret pivots (local), port and starboard, under the hull's ends. */
 export const TURRET_AT = [
-  [4, 19],
-  [40, 19],
+  [HULL_X + 4, 25],
+  [HULL_X + 40, 25],
 ] as const;
 /** The bomb bay: centre of its doors in the belly (local). */
-export const BAY_AT = [22, 20] as const;
+export const BAY_AT = [HULL_X + 22, 26] as const;
 /** Part centres (local), for blasts and debris. */
 export const SHIP_PART_CENTER: readonly (readonly [number, number])[] = [
-  [22, 12],
+  [HULL_X + 22, 18],
   [ENGINE_X[0], ENGINE_Y],
   [ENGINE_X[1], ENGINE_Y],
   [ENGINE_X[2], ENGINE_Y],
@@ -138,19 +149,49 @@ export function newShip(x: number, y: number, owner: number, team: number): Ship
 /** Which part is at local (lx, ly) (from the box's top-left, untilted); missing parts expose the hull. */
 export function shipPartAt(mask: number, lx: number, ly: number): number {
   let p: number = ShipPart.Hull;
-  if (ly < 7) {
+  if (ly < HULL_TOP) {
     let best = 99;
     for (let i = 0; i < 4; i++) {
       const d = Math.abs(lx - ENGINE_X[i]);
-      if (d <= 4 && d < best) {
+      if (d <= 5 && d < best) {
         best = d;
         p = ShipPart.EngineA + i;
       }
     }
-  } else if (ly >= 15 && lx < 8) p = ShipPart.TurretL;
-  else if (ly >= 15 && lx >= SHIP_W - 8) p = ShipPart.TurretR;
-  else if (ly >= 17 && Math.abs(lx - BAY_AT[0]) <= 6) p = ShipPart.Doors;
+  } else if (ly >= HULL_TOP + 8 && lx < HULL_X + 8) p = ShipPart.TurretL;
+  else if (ly >= HULL_TOP + 8 && lx >= HULL_X + HULL_W - 8) p = ShipPart.TurretR;
+  else if (ly >= HULL_TOP + 10 && Math.abs(lx - BAY_AT[0]) <= 6) p = ShipPart.Doors;
   return hasShipPart(mask, p) ? p : ShipPart.Hull;
+}
+
+/**
+ * Is there anything solid at local (lx, ly)? The box is mostly air: the
+ * hull in the middle, the pods out on their pylons (open girders shots pass
+ * through), the turrets under the hull's ends.
+ */
+export function shipSolidAt(mask: number, lx: number, ly: number): boolean {
+  if (lx >= HULL_X + 1 && lx < HULL_X + HULL_W - 1 && ly >= HULL_TOP && ly < HULL_TOP + HULL_H) return true;
+  if (ly >= 0 && ly <= ENGINE_NOZZLE_Y) {
+    for (let i = 0; i < 4; i++) if (hasShipPart(mask, ShipPart.EngineA + i) && Math.abs(lx - ENGINE_X[i]) <= 4.5) return true;
+  }
+  for (let s = 0; s < 2; s++) {
+    if (hasShipPart(mask, ShipPart.TurretL + s) && Math.abs(lx - TURRET_AT[s][0]) <= 4 && Math.abs(ly - TURRET_AT[s][1]) <= 4) return true;
+  }
+  return false;
+}
+
+/**
+ * Where a segment (local, from (ax, ay) by (dx, dy)) first meets solid ship,
+ * starting from fraction `t0` (its entry into the box): march in about
+ * one-cell steps. Returns the fraction, or -1 if it passes clean through.
+ */
+export function shipSegmentSolid(mask: number, ax: number, ay: number, dx: number, dy: number, t0: number): number {
+  const n = Math.ceil(Math.hypot(dx, dy)) + 1;
+  for (let k = 0; k <= n; k++) {
+    const t = t0 + ((1 - t0) * k) / n;
+    if (shipSolidAt(mask, ax + dx * t, ay + dy * t)) return t;
+  }
+  return -1;
 }
 
 type Posed = { x: number; y: number; a: number };
@@ -214,14 +255,17 @@ export function stepShip(s: Ship, t: Terrain, dt: number, tx: number, ty: number
     total += f[i];
     torque -= f[i] * (ENGINE_X[i] - SHIP_W / 2);
   }
-  for (let sweep = 0; sweep < 8; sweep++) {
+  // Torque is weighed per 10 cells of lever arm: attitude still comes first,
+  // but the solve stays well conditioned with the pods far out on pylons.
+  const wT = 0.01;
+  for (let sweep = 0; sweep < 16; sweep++) {
     for (let i = 0; i < 4; i++) {
       if (!hasShipPart(s.parts, ShipPart.EngineA + i)) continue;
       const r = ENGINE_X[i] - SHIP_W / 2;
       // Residuals without this engine, then its best throttle against them.
       const eL = lift - (total - f[i]);
       const eT = T - (torque + f[i] * r);
-      const v = Math.max(0, Math.min(ENGINE_MAX, (eL - r * eT) / (1 + r * r)));
+      const v = Math.max(0, Math.min(ENGINE_MAX, (eL - wT * r * eT) / (1 + wT * r * r)));
       total += v - f[i];
       torque -= (v - f[i]) * r;
       f[i] = v;

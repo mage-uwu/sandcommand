@@ -328,7 +328,10 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
   leave it for a teammate.
 - **Dropship** (`src/shared/dropship.ts`). An aerial gunship that hangs
   from four engine pods on struts, like a modern drone. Nobody pilots it.
-  An autopilot tilts the hull to move and shares lift and attitude torque
+  The pods are chunky rocket motors, two on an open-truss pylon either
+  side, out past the hull's ends, so they're exposed to fire from below.
+  Hits are tested against the real hull, pods and turrets, not the ship's
+  bounding box, so shots pass through the open space under the pylons. An autopilot tilts the hull to move and shares lift and attitude torque
   between the engines still attached; it holds attitude first and lift
   second. It flies in, stations about 80 cells over its caller, and does
   three things:
@@ -342,7 +345,12 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
 - **Damage.** The dropship has about half a tank's toughness (3750 hull).
   Each engine, each turret and the bay doors can be shot off separately.
   Without doors it can't bomb. On three engines it leans on the rest and
-  keeps flying; lose more and it flips and crashes. When the hull goes, it
+  keeps flying; lose more and it flips and crashes. **An engine shot loose
+  keeps burning**: it's a runaway rocket (`ProjKind.Engine`) that thrusts
+  along a heading spinning ever faster for 2.5 s. It spins out, tumbles,
+  and blows up like a big rocket on the terrain or the clone it smashes
+  into, credited to whoever shot it off. Its spin and heading come from its
+  projectile id, so every client flies it the same way. When the hull goes, it
   explodes along with whatever bombs it still carries. Its caller's and
   teammates' fire doesn't hurt it.
 - **Networking.** Dropships go out every frame (`R_SHIPS`, 24 bytes each).

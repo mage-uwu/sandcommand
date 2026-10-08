@@ -2,7 +2,7 @@ import { type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, applyFrameRecords } from '../shared/frame.ts';
-import { ENGINE_X, ENGINE_Y, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
+import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
 import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
@@ -17,7 +17,7 @@ import { generateWorld } from '../shared/worldgen.ts';
 import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, shipDownwash, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, shipDownwash, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -288,7 +288,15 @@ export class Game implements FrameHandler {
       if (PROJ[this.projectiles.kind[i]].ballistic) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
     });
     const pr = this.projectiles;
-    for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.Rocket || pr.kind[i] === ProjKind.Shell) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+    for (let i = 0; i < pr.n; i++) {
+      const k = pr.kind[i];
+      if (k === ProjKind.Rocket || k === ProjKind.Shell) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+      else if (k === ProjKind.Engine) {
+        // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
+        const burning = PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0);
+        engineExhaust(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i], pr.ang[i], burning);
+      }
+    }
     for (const [slot, ts] of this.tankSnaps) {
       const t = ts[ts.length - 1];
       if (t && t.jetting && slot !== this.driveSlot) tankJets(this.particles, t.x, t.y, t.vx, t.vy);
@@ -299,7 +307,7 @@ export class Game implements FrameHandler {
       if (!s) continue;
       for (let e = 0; e < 4; e++) {
         if (!(s.parts & (1 << (1 + e)))) continue;
-        const q = shipPoint(s, ENGINE_X[e], ENGINE_Y + 5, this.shipPt);
+        const q = shipPoint(s, ENGINE_X[e], ENGINE_NOZZLE_Y + 1, this.shipPt);
         shipDownwash(this.particles, q.x, q.y, s.vx, s.vy, s.thrust[e]);
       }
     }
@@ -847,7 +855,7 @@ export class Game implements FrameHandler {
     const camDx = k.x - me.x;
     const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
-    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === W_TANK || weapon === W_SHIP;
+    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === W_TANK || weapon === W_SHIP;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
     // Same seed as the server, so the gold shower matches what will settle.

@@ -13,7 +13,7 @@ import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
-import { BAY_AT, ENGINE_X, SHIP_H, SHIP_HP, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
+import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor } from './texture.ts';
@@ -401,7 +401,24 @@ export class Renderer {
       const k = p.kind[i];
       const x = p.x[i];
       const y = p.y[i];
-      if (k === 7) {
+      if (k === 8) {
+        // Runaway engine: the rocket pod tumbling along its heading, its flame out the bell while it burns.
+        const burning = PROJ[k].life - p.life[i] < (PROJ[k].burn ?? 0);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(p.ang[i] + Math.PI / 2); // the pod's nose is up in the sprite; heading points out of the nose
+        if (burning) {
+          const len = 4 + ((now / 31 + i) % 3);
+          ctx.fillStyle = '#ff8a24';
+          ctx.fillRect(-3, 5, 6, len);
+          ctx.fillStyle = '#ffd860';
+          ctx.fillRect(-2, 5, 4, len - 1);
+          ctx.fillStyle = '#fffbe0';
+          ctx.fillRect(-1, 5, 2, len - 2);
+        }
+        ctx.drawImage(this.sprites.shipEngine(), -5, -6);
+        ctx.restore();
+      } else if (k === 7) {
         // Dropship bomb: a dark finned casing, nose down, a red band.
         ctx.fillStyle = '#2a2e30';
         ctx.fillRect(x - 1.5, y - 3, 3, 5);
@@ -827,25 +844,32 @@ export class Renderer {
     ctx.drawImage(sp.shipHull(team), x, y);
     for (let e = 0; e < 4; e++) {
       if (!hasShipPart(sh.parts, ShipPart.EngineA + e)) continue;
-      const ex = x + ENGINE_X[e] - 4;
+      const ex = x + ENGINE_X[e] - 5;
+      // The rocket flame under the bell: longer with the throttle, flickering; white-hot core.
+      const t = sh.thrust[e] * (0.75 + 0.25 * Math.sin(now / 29 + e * 1.7));
+      const len = 1 + Math.round(t * 5);
+      const ny = y + ENGINE_NOZZLE_Y;
+      ctx.fillStyle = '#ff8a24';
+      ctx.fillRect(ex + 2, ny, 6, Math.max(1, len - 2));
+      ctx.fillRect(ex + 3, ny, 4, len);
+      ctx.fillStyle = '#ffd860';
+      ctx.fillRect(ex + 3, ny, 4, Math.max(1, len - 2));
+      ctx.fillStyle = '#fffbe0';
+      ctx.fillRect(ex + 4, ny, 2, Math.max(1, len - 3));
       ctx.drawImage(sp.shipEngine(), ex, y);
-      // The nozzle's glow, brighter with the throttle (and a flicker).
-      const t = sh.thrust[e] * (0.8 + 0.2 * Math.sin(now / 37 + e));
-      ctx.fillStyle = `rgba(120,220,255,${0.35 + 0.6 * t})`;
-      ctx.fillRect(ex + 3, y + 6, 3, 1 + Math.round(t * 2));
     }
     // Bomb bay: closed doors are a seam; open, two flaps hang down.
     if (hasShipPart(sh.parts, ShipPart.Doors)) {
       ctx.fillStyle = '#20262c';
       if (sh.doors) {
-        ctx.fillRect(x + BAY_AT[0] - 5, y + 19, 10, 2);
+        ctx.fillRect(x + BAY_AT[0] - 5, y + BAY_AT[1] - 1, 10, 2);
         ctx.fillStyle = '#4a5560';
-        ctx.fillRect(x + BAY_AT[0] - 6, y + 20, 2, 4);
-        ctx.fillRect(x + BAY_AT[0] + 4, y + 20, 2, 4);
-      } else ctx.fillRect(x + BAY_AT[0], y + 18, 1, 2);
+        ctx.fillRect(x + BAY_AT[0] - 6, y + BAY_AT[1], 2, 4);
+        ctx.fillRect(x + BAY_AT[0] + 4, y + BAY_AT[1], 2, 4);
+      } else ctx.fillRect(x + BAY_AT[0], y + BAY_AT[1] - 2, 1, 2);
     } else {
       ctx.fillStyle = '#111';
-      ctx.fillRect(x + BAY_AT[0] - 5, y + 18, 10, 3); // a torn hole
+      ctx.fillRect(x + BAY_AT[0] - 5, y + BAY_AT[1] - 2, 10, 3); // a torn hole
     }
     // Turrets: a ball mount and twin barrels on the aim (relative to the tilted hull).
     for (const side of [0, 1]) {

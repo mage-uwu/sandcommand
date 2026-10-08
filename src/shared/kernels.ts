@@ -13,6 +13,26 @@ import { PROJ } from './weapons.ts';
 
 const GRAV_BY_KIND = new Float32Array(PROJ.map((p) => p.gravity));
 const BOUNCE_BY_KIND = new Float32Array(PROJ.map((p) => p.bounce));
+const THRUST_BY_KIND = new Float32Array(PROJ.map((p) => p.thrust ?? 0));
+
+/** Deterministic [0, 1) from a projectile id, so server and clients fly a runaway engine the same way. */
+function idHash(id: number, s: number): number {
+  let n = Math.imul(id ^ Math.imul(s, 0x9e3779b1), 0x85ebca6b);
+  n ^= n >>> 13;
+  n = Math.imul(n, 0xc2b2ae35);
+  n ^= n >>> 16;
+  return (n >>> 0) / 4294967296;
+}
+
+/** Initial heading of a self-propelled projectile: roughly up (it was holding a ship up), skewed. */
+function launchHeading(id: number): number {
+  return -Math.PI / 2 + (idHash(id, 1) - 0.5) * 1.2;
+}
+
+/** Spin rate (rad/s) of a self-propelled projectile `age` ticks after launch: it spins out faster and faster. */
+export function runawaySpin(id: number, age: number): number {
+  return (idHash(id, 2) < 0.5 ? -1 : 1) * (1.5 + idHash(id, 3) * 2.5) * (1 + age / 25);
+}
 const hit = newHit();
 const vel = { x: 0.5, y: 0.5 }; // doubles from the start: no boxing
 
@@ -21,7 +41,7 @@ const vel = { x: 0.5, y: 0.5 }; // doubles from the start: no boxing
  * (x0,y0)->(x1,y1) enters. Returns its index and writes the entry fraction to
  * `out.t`, or returns -1.
  */
-export type SegmentQuery = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }) => number;
+export type SegmentQuery = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }, kind: number) => number;
 
 /** Slab test: entry fraction of a segment into an AABB, or -1. */
 export function segmentBox(
@@ -72,6 +92,8 @@ export class Projectiles {
   readonly vx: Float32Array;
   readonly vy: Float32Array;
   readonly life: Uint16Array;
+  /** Heading (radians) of a self-propelled projectile (its thrust axis). */
+  readonly ang: Float32Array;
 
   constructor(readonly cap: number) {
     this.id = new Uint32Array(cap);
@@ -82,6 +104,7 @@ export class Projectiles {
     this.vx = new Float32Array(cap);
     this.vy = new Float32Array(cap);
     this.life = new Uint16Array(cap);
+    this.ang = new Float32Array(cap);
   }
 
   spawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): number {
@@ -95,6 +118,7 @@ export class Projectiles {
     this.vx[i] = vx;
     this.vy[i] = vy;
     this.life[i] = PROJ[kind].life;
+    this.ang[i] = THRUST_BY_KIND[kind] > 0 ? launchHeading(id) : 0;
     return i;
   }
 
@@ -113,6 +137,7 @@ export class Projectiles {
     this.vx[i] = this.vx[last];
     this.vy[i] = this.vy[last];
     this.life[i] = this.life[last];
+    this.ang[i] = this.ang[last];
   }
 
   /**
@@ -125,6 +150,21 @@ export class Projectiles {
     const g = GRAVITY * dt;
     // Pass 1: vector integrate (gather gravity scale by kind).
     for (let i = 0; i < n; i++) vy[i] += g * GRAV_BY_KIND[kind[i]];
+    // Self-propelled (runaway engines): burn along a heading that spins ever faster.
+    for (let i = 0; i < n; i++) {
+      const T = THRUST_BY_KIND[kind[i]];
+      if (T === 0) continue;
+      const def = PROJ[kind[i]];
+      const age = def.life - this.life[i];
+      if (age < (def.burn ?? 0)) {
+        this.ang[i] += runawaySpin(this.id[i], age) * dt;
+        vx[i] += Math.cos(this.ang[i]) * T * dt;
+        vy[i] += Math.sin(this.ang[i]) * T * dt;
+      } else this.ang[i] += runawaySpin(this.id[i], def.burn ?? 0) * 0.5 * dt; // tumbling
+      const d = 1 - Math.min(1, (def.drag ?? 0) * dt);
+      vx[i] *= d;
+      vy[i] *= d;
+    }
 
     // Pass 2: swept collision.
     const q = { t: 0 };
@@ -138,7 +178,7 @@ export class Projectiles {
       col.sweep(px, py, dx, dy, hit);
       // Actors along the part of the path that is actually free.
       if (segment) {
-        const a = segment(px, py, hit.x, hit.y, this.owner[i], q);
+        const a = segment(px, py, hit.x, hit.y, this.owner[i], q, k);
         if (a >= 0) {
           onEnd(i, px + (hit.x - px) * q.t, py + (hit.y - py) * q.t, a, true);
           this.removeAt(i);

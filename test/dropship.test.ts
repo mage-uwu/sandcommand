@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ACTOR_H } from '../src/shared/constants.ts';
 import { Reader } from '../src/shared/codec.ts';
-import { SHIP_BOMBS, SHIP_H, SHIP_HP, SHIP_PART_CENTER, SHIP_W, ShipPart, hasShipPart, newShip, shipPoint } from '../src/shared/dropship.ts';
+import { ENGINE_NOZZLE_Y, ENGINE_X, HULL_W, HULL_X, SHIP_BOMBS, SHIP_H, SHIP_HP, SHIP_PART_CENTER, SHIP_W, ShipPart, hasShipPart, newShip, shipPoint } from '../src/shared/dropship.ts';
 import { WEAPONS, WeaponId, ProjKind, PROJ } from '../src/shared/weapons.ts';
 import { CALL_COST, CallKind } from '../src/shared/protocol.ts';
 import { TANK_HP } from '../src/shared/tank.ts';
@@ -148,6 +148,70 @@ describe('radio and dropship', () => {
     expect(world.ships[slot]).toBeNull();
     void SHIP_PART_CENTER;
     void shipPoint;
+  });
+
+  it('an engine shot off keeps burning: it spins out and blows up on whatever it hits', () => {
+    const { world, a, b } = setup(68);
+    world.call(a.id, CallKind.Dropship);
+    const slot = world.ships.findIndex(Boolean);
+    for (let k = 0; k < 30 * 8; k++) world.step();
+    const pr = world.projectiles;
+    internals(world).hurtShipPart(slot, ShipPart.EngineD, 5000, b.id);
+    const i = Array.from(pr.kind.subarray(0, pr.n)).indexOf(ProjKind.Engine);
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(pr.owner[i]).toBe(b.id); // whoever shot it loose
+    const id = pr.id[i];
+    const speeds: number[] = [];
+    const angs: number[] = [];
+    for (let k = 0; k < PROJ[ProjKind.Engine].life + 2; k++) {
+      const j = pr.indexOf(id);
+      if (j < 0) break;
+      speeds.push(Math.hypot(pr.vx[j], pr.vy[j]));
+      angs.push(pr.ang[j]);
+      world.step();
+    }
+    expect(pr.indexOf(id)).toBe(-1); // it came down and went off
+    expect(speeds.length).toBeGreaterThan(5);
+    // Under its own power for a while, spinning faster and faster.
+    expect(Math.max(...speeds.slice(0, 20))).toBeGreaterThan(speeds[0] + 40);
+    const turn = (k: number) => Math.abs(angs[k + 1] - angs[k]);
+    if (angs.length > 40) expect(turn(35)).toBeGreaterThan(turn(1));
+
+    // Straight into a clone: it goes off like a big rocket.
+    const c = world.addPlayer('target', { send() {} })!;
+    deliverAll(world, [c]);
+    const hp = c.hp;
+    world.projectiles.spawn(9200, ProjKind.Engine, b.id, c.cx - 14, c.cy, 320, 0);
+    for (let k = 0; k < 6; k++) world.step();
+    expect(world.projectiles.indexOf(9200)).toBe(-1);
+    expect(!c.alive || c.hp < hp).toBe(true);
+  });
+
+  it('the rocket pods hang out past the hull: open to fire from below', () => {
+    for (const ex of ENGINE_X) expect(ex < HULL_X || ex > HULL_X + HULL_W).toBe(true);
+    const { world, a, b } = setup(69);
+    world.call(a.id, CallKind.Dropship);
+    const sh = world.ships.find(Boolean)!;
+    for (let k = 0; k < 30 * 8; k++) world.step();
+    // A rifle round straight up the ship's own vertical, under the port outer pod.
+    const from = shipPoint(sh, ENGINE_X[0], SHIP_H + 12, { x: 0, y: 0 });
+    const to = shipPoint(sh, ENGINE_X[0], -10, { x: 0, y: 0 });
+    const d = Math.hypot(to.x - from.x, to.y - from.y);
+    const pod = sh.partHp[ShipPart.EngineA];
+    world.projectiles.spawn(9300, ProjKind.Bullet, b.id, from.x, from.y, ((to.x - from.x) / d) * 900 + sh.vx, ((to.y - from.y) / d) * 900 + sh.vy);
+    world.step();
+    world.step();
+    expect(sh.partHp[ShipPart.EngineA]).toBeLessThan(pod);
+    // Beside the hull, under the pylons, is open air: nothing to hit.
+    const hp = sh.hp;
+    const f2 = shipPoint(sh, HULL_X - 4, SHIP_H + 12, { x: 0, y: 0 });
+    const t2 = shipPoint(sh, HULL_X - 4, ENGINE_NOZZLE_Y + 3, { x: 0, y: 0 });
+    const d2 = Math.hypot(t2.x - f2.x, t2.y - f2.y);
+    world.projectiles.spawn(9301, ProjKind.Bullet, b.id, f2.x, f2.y, ((t2.x - f2.x) / d2) * 300 + sh.vx, ((t2.y - f2.y) / d2) * 300 + sh.vy);
+    world.step();
+    world.step();
+    expect(sh.hp).toBe(hp);
+    void a;
   });
 
   it('clients see the dropship: where, tilt, parts, bombs, guns', () => {

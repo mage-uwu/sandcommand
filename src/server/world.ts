@@ -16,6 +16,8 @@ import {
   newShip,
   shipLocal,
   shipPartAt,
+  shipSegmentSolid,
+  shipSolidAt,
   shipPoint,
   stepShip,
 } from '../shared/dropship.ts';
@@ -944,7 +946,7 @@ export class World {
   }
 
   /** First actor box entered by a swept segment, via the actor spatial hash. */
-  private segmentActor = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }): number => {
+  private segmentActor = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }, kind = -1): number => {
     const dx = x1 - x0;
     const dy = y1 - y0;
     let best = -1;
@@ -993,9 +995,12 @@ export class World {
     for (let k = 0; k < MAX_SHIPS; k++) {
       const sh = this.ships[k];
       if (!sh || owner === sh.owner) continue; // its own guns and bombs (and its caller's) never hit it
+      if (kind === ProjKind.Engine) continue; // a runaway engine is off and away from the hull it left
       const la = shipLocal(sh, x0, y0, this.segA);
       const lb = shipLocal(sh, x1, y1, this.segB);
-      const tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, SHIP_W, SHIP_H);
+      const tb = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, SHIP_W, SHIP_H);
+      // The box is mostly air (the pods hang out past the hull): find where it meets metal.
+      const tt = tb >= 0 && tb < bestT ? shipSegmentSolid(sh.parts, la.x, la.y, lb.x - la.x, lb.y - la.y, tb) : -1;
       if (tt >= 0 && tt < bestT) {
         bestT = tt;
         best = SHIP_ID_BASE + k;
@@ -2359,7 +2364,11 @@ export class World {
   private hitShip(slot: number, wx: number, wy: number, dx: number, dy: number, energy: number, wound: number, by: number): void {
     const sh = this.ships[slot];
     if (!sh || this.friendlyShip(by, sh)) return;
-    const l = shipLocal(sh, wx + dx * 2, wy + dy * 2, this.pt);
+    let l = shipLocal(sh, wx + dx * 2, wy + dy * 2, this.pt);
+    if (!shipSolidAt(sh.parts, l.x, l.y)) {
+      l = shipLocal(sh, wx, wy, this.pt);
+      if (!shipSolidAt(sh.parts, l.x, l.y)) return; // grit through the open pylons
+    }
     this.hurtShipPart(slot, shipPartAt(sh.parts, l.x, l.y), energy > SHIP_INTEGRITY ? wound : wound * 0.2, by);
   }
 
@@ -2412,7 +2421,13 @@ export class World {
     const out = x >= sh.x + SHIP_W / 2 ? 1 : -1;
     const vx = sh.vx + out * (50 + this.rng.range(0, 60));
     const vy = sh.vy - 60 - this.rng.range(0, 60);
-    if (part >= ShipPart.EngineA && part <= ShipPart.EngineD) sh.w += out * 1.2;
+    if (part >= ShipPart.EngineA && part <= ShipPart.EngineD) {
+      sh.w += out * 1.2;
+      // The engine keeps burning on its own: a runaway rocket that spins
+      // out and blows up wherever (or whoever) it hits, credited to whoever
+      // shot it loose.
+      this.spawnProj(this.nextProjId++, ProjKind.Engine, sh.lastHitBy === 255 ? NO_OWNER : sh.lastHitBy, x, y - 2, sh.vx + out * 40, sh.vy - 40);
+    }
     const seed = this.rng.nextU32();
     // Its own scrap is its side's: the pieces it sheds must not chew through the hull they came off.
     craftPartFragments(this.grains, x, y, vx, vy, sh.owner, new Rng(seed));

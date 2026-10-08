@@ -1,3 +1,4 @@
+import { ENGINE_NOZZLE_Y, HULL_H, HULL_TOP, HULL_W, HULL_X, SHIP_H, SHIP_W } from '../shared/dropship.ts';
 /**
  * Pixel-art sprites, authored as character grids and baked to canvases on
  * demand. Body frames and gib pieces are tinted per player color; weapons are
@@ -781,22 +782,42 @@ function shipPalette(team: number): Record<string, number> {
 }
 
 /**
- * The dropship's hull, procedurally laid out on its 44x24 box (its top 7
- * rows hold the engine struts): a rounded gunship body lit from above, a
+ * The dropship's hull, procedurally laid out in the middle of its box, with
+ * the open-truss pylons out to its engine pods: a rounded gunship body lit from above, a
  * canopy at the nose, panel lines and rivets, the caller's team stripe and
  * hazard chevrons around the bomb bay in its belly.
  */
 function shipHullGrid(): Grid {
-  const W = 44;
-  const H = 24;
-  const g: string[][] = Array.from({ length: H }, () => new Array<string>(W).fill('.'));
-  const top = 7;
-  const bottom = 21;
+  const H = SHIP_H;
+  const g: string[][] = Array.from({ length: H }, () => new Array<string>(SHIP_W).fill('.'));
+  // Outrigger pylons: an open truss from each end of the hull out under the
+  // pods (drawn first, so the hull and pods sit over it).
+  const py = ENGINE_NOZZLE_Y - 4;
+  for (const side of [0, 1]) {
+    const x0 = side === 0 ? 1 : HULL_X + HULL_W - 6;
+    const x1 = side === 0 ? HULL_X + 6 : SHIP_W - 1;
+    for (let x = x0; x < x1; x++) {
+      g[py][x] = 'g';
+      g[py + 3][x] = 'g';
+      if ((x + side) % 4 === 0) g[py + 1][x] = g[py + 2][x] = 'g';
+      else if ((x + side) % 4 === 1) g[py + 1][x] = 'g';
+      else if ((x + side) % 4 === 3) g[py + 2][x] = 'g';
+    }
+    // A brace down into the hull's flank.
+    const bx = side === 0 ? HULL_X + 4 : HULL_X + HULL_W - 5;
+    for (let y = py; y < HULL_TOP + 4; y++) g[y][bx] = g[y][bx + 1] = 'g';
+  }
+  const W = HULL_W;
+  const ox = HULL_X;
+  const top = HULL_TOP;
+  const bottom = HULL_TOP + HULL_H;
   const inset = (y: number) => {
     const r = y - top;
     const fromBottom = bottom - 1 - y;
     return Math.max([5, 3, 2, 1, 1][r] ?? 0, [4, 2, 1][fromBottom] ?? 0);
   };
+  const set = (x: number, y: number, c: string) => (g[y][ox + x] = c);
+  const at = (x: number, y: number) => g[y][ox + x];
   for (let y = top; y < bottom; y++) {
     const i = inset(y);
     for (let x = 1 + i; x < W - 1 - i; x++) {
@@ -805,31 +826,37 @@ function shipHullGrid(): Grid {
       let c = r <= 2 ? 'H' : r <= 5 ? 'L' : r <= 9 ? 'M' : 'D';
       if (r === 1 && x > W - 14) c = 'L';
       if (edge) c = 'K';
-      g[y][x] = c;
+      set(x, y, c);
     }
   }
   // Panel lines and rivets.
-  for (const px of [11, 22, 32]) for (let y = top + 2; y < bottom - 1; y++) if (g[y][px] !== 'K') g[y][px] = 'D';
-  for (const px of [6, 16, 27, 37]) if (g[top + 4][px] !== 'K') g[top + 4][px] = 'K';
+  for (const px of [11, 22, 32]) for (let y = top + 2; y < bottom - 1; y++) if (at(px, y) !== 'K') set(px, y, 'D');
+  for (const px of [6, 16, 27, 37]) if (at(px, top + 4) !== 'K') set(px, top + 4, 'K');
   // Canopy at the nose.
-  for (let y = top + 2; y < top + 6; y++) for (let x = W - 12; x < W - 4 - (y - top - 2); x++) g[y][x] = y < top + 4 ? 'C' : 'c';
+  for (let y = top + 2; y < top + 6; y++) for (let x = W - 12; x < W - 4 - (y - top - 2); x++) set(x, y, y < top + 4 ? 'C' : 'c');
   // The caller's team stripe along the flank.
-  for (let x = 4; x < W - 14; x++) if (g[top + 7][x] !== 'K' && g[top + 7][x] !== 'D') g[top + 7][x] = 'T';
+  for (let x = 4; x < W - 14; x++) if (at(x, top + 7) !== 'K' && at(x, top + 7) !== 'D') set(x, top + 7, 'T');
   // Hazard chevrons framing the bay.
-  for (let x = 14; x < 31; x++) if (x < 17 || x > 27) g[bottom - 3][x] = (x & 1) === 0 ? 'Y' : 'k';
-  // Struts up to the engine pods.
-  for (const ex of [5, 15, 29, 39]) for (let y = 6; y < top; y++) g[y][ex] = 'g';
+  for (let x = 14; x < 31; x++) if (x < 17 || x > 27) set(x, bottom - 3, (x & 1) === 0 ? 'Y' : 'k');
   return g.map((r) => r.join(''));
 }
 
-/** An engine pod: a ducted nacelle, intake ring on top, the nozzle below (its glow is drawn live). */
+/**
+ * A rocket pod: a fat riveted motor casing lit from the left, a hazard band,
+ * the throat, and a flared bell nozzle pointing down (its flame is drawn live).
+ */
 const SHIP_ENGINE: Grid = [
-  '..KKKKK..',
-  '.KLHHHLK.',
-  'KLMMMMMLK',
-  'KMDDDDDMK',
-  '.KDdddDK.',
-  '..KKKKK..',
+  '...KKKK...',
+  '..KHHLMK..',
+  '.KHHLLMDK.',
+  '.KHLLMMDK.',
+  '.KYYYYYkK.',
+  '.KHLLMMDK.',
+  '.KLLMMMdK.',
+  '.KDDDDddK.',
+  '..KKggKK..',
+  '..KgkkgK..',
+  '.KgkkkkgK.',
 ];
 
 /** The track under the hull: links that crawl and road wheels whose spoke turns, by frame. */

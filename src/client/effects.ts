@@ -306,6 +306,19 @@ export function tankJets(p: Particles, x: number, y: number, vx: number, vy: num
 }
 
 /** A dropship engine's downwash: a hot glow and a push of dust and haze below the pod. */
+/** A runaway engine's jet: flame and smoke out of the nozzle (behind its heading `a`), or just smoke once it's burnt out. */
+export function engineExhaust(p: Particles, x: number, y: number, vx: number, vy: number, a: number, burning: boolean): void {
+  const bx = x - Math.cos(a) * 5;
+  const by = y - Math.sin(a) * 5;
+  if (burning) {
+    for (let k = 0; k < 2; k++) {
+      const s = rnd(140, 260);
+      p.spawn(PK.Flame, bx + rnd(-1, 1), by + rnd(-1, 1), vx * 0.3 - Math.cos(a) * s + rnd(-20, 20), vy * 0.3 - Math.sin(a) * s + rnd(-20, 20), rnd(3, 6));
+    }
+  }
+  p.spawn(PK.Smoke, bx, by, vx * 0.2 + rnd(-15, 15), vy * 0.2 + rnd(-15, 15), rnd(burning ? 30 : 18, burning ? 55 : 35));
+}
+
 export function shipDownwash(p: Particles, x: number, y: number, vx: number, vy: number, thrust: number): void {
   if (Math.random() < thrust) p.spawn(PK.Flame, x + rnd(-1.5, 1.5), y, vx * 0.5 + rnd(-15, 15), vy * 0.5 + rnd(120, 220) * thrust, rnd(3, 6));
   if (Math.random() < thrust * 0.4) p.spawn(PK.Smoke, x + rnd(-3, 3), y + 4, vx * 0.3 + rnd(-30, 30), rnd(60, 140), rnd(20, 40));

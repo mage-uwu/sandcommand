@@ -13,6 +13,11 @@ export const ProjKind = {
   ShipGun: 6,
   /** Dropship bomb: five times a bazooka rocket's blast. */
   Bomb: 7,
+  /**
+   * A dropship engine shot loose: it keeps burning, spinning out faster and
+   * faster, until it smashes into the ground or someone and blows up.
+   */
+  Engine: 8,
 } as const;
 
 export interface ProjDef {
@@ -29,6 +34,10 @@ export interface ProjDef {
   bounce: number; // >0 bounces off terrain (restitution) and detonates on fuse
   /** Small-arms round: chips terrain only (not bodies it hits), puffs dust, no trail. */
   ballistic: boolean;
+  /** Self-propelled (a runaway engine): thrust (cells/s^2) along its spinning heading for `burn` ticks, against `drag` (1/s). */
+  thrust?: number;
+  burn?: number;
+  drag?: number;
 }
 
 export const PROJ: readonly ProjDef[] = [
@@ -45,6 +54,8 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.15, life: 40, damage: 13, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
   // Dropship bomb: 5x the bazooka's blast (splash damage), a much bigger crater and reach.
   { gravity: 1, life: 240, damage: 120, mass: 4, sharp: 0.4, carveR: 40, coreR: 18, splashR: 64, splashDamage: 350, debris: 140, bounce: 0, ballistic: false },
+  // Runaway dropship engine: still burning for 2.5 s, then it falls; it goes off like a big rocket wherever it lands.
+  { gravity: 1, life: 180, damage: 60, mass: 5, sharp: 0.5, carveR: 22, coreR: 10, splashR: 40, splashDamage: 120, debris: 70, bounce: 0, ballistic: false, thrust: 1.45 * 620, burn: 75, drag: 2.2 },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -118,6 +129,7 @@ export function projName(kind: number): string {
   if (kind === ProjKind.TankBullet) return 'Tank SMG';
   if (kind === ProjKind.ShipGun) return 'Dropship Gun';
   if (kind === ProjKind.Bomb) return 'Dropship Bomb';
+  if (kind === ProjKind.Engine) return 'Runaway Engine';
   return weaponOfProj(kind)?.name ?? '';
 }
 

@@ -996,6 +996,7 @@ const FRAGMENTS: readonly FragmentDef[] = [
   { shrapnel: 0, speed: 0, embers: 0 },
   { shrapnel: 0, speed: 0, embers: 0 },
   { shrapnel: 110, speed: 920, embers: 50 }, // dropship bomb
+  { shrapnel: 50, speed: 800, embers: 34 }, // runaway engine
 ];
 
 /**
