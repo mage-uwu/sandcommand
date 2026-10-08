@@ -15,10 +15,10 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { generateWorld, lastDungeon } from '../shared/worldgen.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
-import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName } from '../shared/weapons.ts';
+import { BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, shipDownwash, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -195,6 +195,10 @@ export class Game implements FrameHandler {
   reloadLeft = 0;
   /** Own gold, exact (from our own record, not the once-a-second scoreboard). */
   gold = 0;
+  /** Scope lock-on (scope.ts): the clone locked onto and the point on it (hitbox-local), and the aim it gives. */
+  scopeLock: { id: number; lx: number; ly: number } | null = null;
+  lockAim: number | null = null;
+
   /** Extraction: this map's labyrinth (built from the seed, like the server's), and which traps have gone off. */
   dungeon: Dungeon | null = null;
   trapSpent: Uint8Array = new Uint8Array(32);
@@ -207,7 +211,16 @@ export class Game implements FrameHandler {
 
   /** Beams to fade out: materializer (builder muzzle to piece centre) and sniper tracers (muzzle to impact). */
   readonly beams: { x0: number; y0: number; x1: number; y1: number; at: number; tracer?: boolean }[] = [];
-  /** Where each sniper slug in flight was fired from, for its tracer. */
+  /** Recent shots by clone id (when, how hard), for the gun kicking back in their hands. */
+  readonly kicks = new Map<number, { at: number; k: number }>();
+  /** How far a clone's gun is kicked back right now (0..1). */
+  kickOf(id: number, now: number): number {
+    const r = this.kicks.get(id);
+    if (!r) return 0;
+    const t = (now - r.at) / 140;
+    return t >= 1 ? 0 : r.k * (1 - t);
+  }
+  /** Where each sniper slug in flight was fired from, for its trail. */
   private slugFrom = new Map<number, { x: number; y: number }>();
   smoothX = 0;
   smoothY = 0;
@@ -828,12 +841,18 @@ export class Game implements FrameHandler {
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void {
     if (this.projectiles.indexOf(id) >= 0) return;
     this.projectiles.spawn(id, kind, owner, x, y, vx, vy);
+    const sp = Math.hypot(vx, vy) || 1;
     if (kind === ProjKind.Slug) {
       this.slugFrom.set(id, { x, y });
       if (this.slugFrom.size > 64) this.slugFrom.delete(this.slugFrom.keys().next().value!);
+      heavyMuzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp);
+    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell);
+    // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
+    const w = weaponOfProj(kind);
+    if (w && owner < 64) {
+      this.kicks.set(owner, { at: performance.now(), k: Math.min(1, 0.25 + (w.kick ?? 0) / 130) });
+      if (owner === this.myId) this.shake = Math.max(this.shake, (w.kick ?? 0) / 22);
     }
-    const sp = Math.hypot(vx, vy) || 1;
-    muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell);
   }
 
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void {
@@ -841,10 +860,14 @@ export class Game implements FrameHandler {
     if (i >= 0) this.projectiles.removeAt(i);
     const from = this.slugFrom.get(id);
     if (from) {
-      // The slug was only on screen a frame or two: leave its streak hanging in the air.
+      // The slug was only on screen a frame or two: what lingers is its
+      // wake, a vapour trail along the whole path, and a heavy strike.
       this.slugFrom.delete(id);
-      this.beams.push({ x0: from.x, y0: from.y, x1: x, y1: y, at: performance.now(), tracer: true });
-      if (this.beams.length > 16) this.beams.shift();
+      const me = this.body;
+      slugTrail(this.particles, from.x, from.y, x, y, me.x, me.y, 700);
+      const len = Math.hypot(x - from.x, y - from.y) || 1;
+      if (detonate) slugImpact(this.particles, x, y, (x - from.x) / len, (y - from.y) / len, this.dustColorAt(x, y));
+      return;
     }
     if (!detonate) return;
     if (PROJ[kind].ballistic) {

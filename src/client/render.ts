@@ -3,7 +3,7 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { segmentBox } from '../shared/kernels.ts';
+import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { PROJ, PROJ_BUILD, REPAIR_REACH, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
@@ -204,8 +204,9 @@ export class Renderer {
       const mx = this.camX + (input.mouseX * (W / innerWidth) - W / 2) / z;
       const my = this.camY + (input.mouseY * (H / innerHeight) - H / 2) / z;
       const sh = shoulderAt(selfX, selfY, b.stance, mx < selfX + ACTOR_W / 2, this.shPt);
-      const aim = Math.atan2(my - sh.y, mx - sh.x);
-      const reach = sightLine(game.terrain, sh.x, sh.y, aim, WEAPONS[game.weapon]?.scope ?? 0);
+      // (Locked on: down the line to them.) Clones stop the line as walls do.
+      const aim = game.lockAim ?? Math.atan2(my - sh.y, mx - sh.x);
+      const reach = lineOfFire(game, sh.x, sh.y, aim, WEAPONS[game.weapon]?.scope ?? 0).dist;
       this.sight = { x: sh.x, y: sh.y, aim, dist: sightLine(game.terrain, sh.x, sh.y, aim, 2000) };
       this.camX += (sh.x + Math.cos(aim) * reach - this.camX) * 0.12;
       this.camY += (sh.y + Math.sin(aim) * reach - this.camY) * 0.12;
@@ -325,18 +326,18 @@ export class Renderer {
       const info = game.players.get(v.id);
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
-      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction);
+      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now));
     }
     // Scoped: the line a shot would take, to the wall it would hit or the
     // first clone in its way (bracketed): only what you can actually hit.
-    if (this.scoped && this.sight) this.drawSightLine(ctx, game, views, now);
+    if (this.scoped && this.sight) this.drawSightLine(ctx, game, now);
 
     // Own clone (hidden inside its tank while driving).
     if (game.alive && !game.drive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
       const mySh = shoulderAt(selfX, selfY, b.stance, wx < selfX + ACTOR_W / 2, this.shPt);
-      const myAim = Math.atan2(wy - mySh.y, wx - mySh.x);
+      const myAim = game.lockAim ?? Math.atan2(wy - mySh.y, wx - mySh.x);
       const reloading = game.reloadLeft > 0;
       const dry = (WEAPONS[game.weapon]?.clip ?? 0) > 0 && game.ammo === 0;
       const flags =
@@ -347,7 +348,7 @@ export class Renderer {
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now));
     }
 
     // Every particle the field engine owns (grains, sparks, flames, smoke,
@@ -628,6 +629,7 @@ export class Renderer {
     stance: number = Stance.Stand,
     lean = 0,
     faction = 0,
+    kick = 0,
   ): void {
     const left = Math.cos(aim) < 0;
     const face = left ? -1 : 1;
@@ -710,8 +712,11 @@ export class Renderer {
       ctx.drawImage(gi.c, sx - gi.r, sy - gi.r);
       return;
     }
-    const g = this.sprites.gun(weapon, aim);
-    ctx.drawImage(g.c, sx - g.r, sy - g.r);
+    // Recoil: the gun jumps back along the barrel (and the muzzle up a touch) as it fires.
+    const back = kick * 3;
+    const lift = kick * 0.18 * (left ? 1 : -1);
+    const g = this.sprites.gun(weapon, aim + lift);
+    ctx.drawImage(g.c, Math.round(sx - g.r - Math.cos(aim) * back), Math.round(sy - g.r - Math.sin(aim) * back));
     if (flags & F_FIRING && WEAPONS[weapon]?.proj !== PROJ_BUILD) {
       // Flash at the weapon's muzzle offset (where the server spawns its shots).
       const m = (WEAPONS[weapon]?.muzzle ?? 8) + 1;
@@ -1049,44 +1054,49 @@ export class Renderer {
     }
   }
 
-  /** Line of sight down the scope (see `sight`): a faint laser, an impact mark, brackets on the clone it would hit. */
-  private drawSightLine(ctx: CanvasRenderingContext2D, game: Game, views: RemoteView[], now: number): void {
+  /**
+   * Line of fire down the scope (see `sight`): a faint laser to the wall or
+   * clone that would take the shot, and brackets on that clone: red on an
+   * enemy (solid, with a lock mark, once the scope has locked onto them),
+   * grey on a teammate.
+   */
+  private drawSightLine(ctx: CanvasRenderingContext2D, game: Game, now: number): void {
     const s = this.sight!;
-    const dx = Math.cos(s.aim) * s.dist;
-    const dy = Math.sin(s.aim) * s.dist;
-    let t = 1;
-    let hit: RemoteView | null = null;
-    for (const v of views) {
-      if (!(v.flags & F_ALIVE) || v.id === game.myId) continue;
-      const k = segmentBox(s.x, s.y, dx, dy, v.x, v.y, v.x + ACTOR_W, v.y + ACTOR_H);
-      if (k >= 0 && k < t) {
-        t = k;
-        hit = v;
-      }
-    }
-    const ex = s.x + dx * t;
-    const ey = s.y + dy * t;
-    const foe = hit && !(game.myTeam !== Team.None && game.teamOf[hit.id] === game.myTeam);
-    ctx.strokeStyle = foe ? 'rgba(255,70,50,0.55)' : 'rgba(255,90,70,0.25)';
+    const lof = lineOfFire(game, s.x, s.y, s.aim, 2000);
+    const ex = s.x + Math.cos(s.aim) * lof.dist;
+    const ey = s.y + Math.sin(s.aim) * lof.dist;
+    const hit = lof.hit;
+    const locked = !!hit && game.scopeLock?.id === hit.id;
+    ctx.strokeStyle = lof.foe ? 'rgba(255,70,50,0.5)' : 'rgba(255,90,70,0.22)';
     ctx.lineWidth = 0.5;
     ctx.beginPath();
     ctx.moveTo(s.x + Math.cos(s.aim) * 8, s.y + Math.sin(s.aim) * 8);
     ctx.lineTo(ex, ey);
     ctx.stroke();
-    ctx.fillStyle = foe ? '#ff4030' : '#ffb0a0';
+    ctx.fillStyle = lof.foe ? '#ff4030' : '#ffb0a0';
     ctx.fillRect(Math.round(ex) - 1, Math.round(ey) - 1, 2, 2);
-    if (hit) {
-      // Brackets on the clone in the line of fire (red: an enemy; grey: a friend).
-      const p = 1 + Math.round(Math.sin(now / 90));
-      const x0 = Math.round(hit.x) - 2 - p;
-      const y0 = Math.round(hit.y) - 2 - p;
-      const x1 = Math.round(hit.x) + ACTOR_W + 1 + p;
-      const y1 = Math.round(hit.y) + ACTOR_H + 1 + p;
-      ctx.fillStyle = foe ? '#ff4030' : '#c0c8d0';
-      for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
-        ctx.fillRect(Math.min(cx, cx + sx * 3), cy, 3, 1);
-        ctx.fillRect(cx, Math.min(cy, cy + sy * 3), 1, 3);
-      }
+    if (!hit) return;
+    const p = locked ? 0 : 1 + Math.round(Math.sin(now / 90));
+    const x0 = Math.round(hit.x) - 2 - p;
+    const y0 = Math.round(hit.y) - 2 - p;
+    const x1 = Math.round(hit.x) + ACTOR_W + 1 + p;
+    const y1 = Math.round(hit.y) + ACTOR_H + 1 + p;
+    ctx.fillStyle = lof.foe ? '#ff4030' : '#c0c8d0';
+    const arm = locked ? 4 : 3;
+    for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+      ctx.fillRect(Math.min(cx, cx + sx * arm), cy, arm, 1);
+      ctx.fillRect(cx, Math.min(cy, cy + sy * arm), 1, arm);
+    }
+    if (locked && game.scopeLock) {
+      // The locked point, and a tag.
+      const lx = Math.round(hit.x + game.scopeLock.lx);
+      const ly = Math.round(hit.y + game.scopeLock.ly);
+      ctx.fillRect(lx - 2, ly, 5, 1);
+      ctx.fillRect(lx, ly - 2, 1, 5);
+      ctx.font = '5px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('LOCK', hit.x + ACTOR_W / 2, y0 - 2);
+      ctx.textAlign = 'left';
     }
   }
 

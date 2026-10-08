@@ -793,9 +793,33 @@ How each field works:
   (`sightLine` in `src/shared/scope.ts`) stops at the first solid cell, so
   a scope never looks through or past terrain. The server moves that
   client's interest area the same way, so it is sent only what the scope
-  can see. While scoped, a faint laser runs from the barrel to where the
-  shot would land. Red brackets mark the first clone in its path (grey for
-  a teammate). What the scope shows is what you can hit.
+  can see. Clones are part of the line too: the first one in it stops it,
+  as it would stop the shot. While scoped, a faint laser runs from the
+  barrel to where the shot would land, and brackets mark the first clone in
+  its path (grey for a teammate). What the scope shows is what you can hit.
+- **Scope lock-on** (`src/client/scope.ts`): scope onto an enemy and the
+  aim locks onto that point on them, head or chest, wherever the line
+  crossed them (solid brackets, a LOCK tag). It follows them while they
+  stay in the line of fire. Sweeping across them moves the locked point.
+  Pulling the aim well off them (about 17°), or losing sight of them,
+  breaks it.
+- **Recoil:** every gun shoves its shooter back along the barrel and climbs
+  the muzzle a little with each shot; the climb settles back over a
+  moment. Crouched you feel about half of the shove, prone under a third.
+  | Weapon | Shove (cells/s) | Climb per shot |
+  | --- | --- | --- |
+  | Rifle | 9 | 0.03 rad (holding the trigger, it walks up) |
+  | Bazooka | 55 | 0.05 rad |
+  | Grenade | 8 | none |
+  | Sniper | 130 | 0.14 rad |
+
+  Every clone's gun visibly jumps back as it fires, and your own shots
+  jolt the view.
+- **The sniper** fires like a .50-cal: a hard muzzle blast with smoke
+  thrown out sideways from the brake. The slug is near instant, so what
+  you see is its wake: a supersonic vapour trail hanging along the whole
+  path, billowing at the muzzle and thinning out, then a heavy strike
+  that throws grit and sparks back out of the hole.
 - **Losing the off arm** makes firing 1.6× slower, reloading 1.5× slower,
   and triples spread.
 

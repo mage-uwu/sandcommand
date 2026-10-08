@@ -56,6 +56,62 @@ export function muzzle(p: Particles, x: number, y: number, dx: number, dy: numbe
   if (heavy) burst(p, PK.Smoke, x, y, 6, 40, 30);
 }
 
+/**
+ * A heavy rifle's muzzle blast, .50-cal style: a hard flash, and the brake
+ * throwing smoke out sideways and back in two jets, a dust kick under it.
+ */
+export function heavyMuzzle(p: Particles, x: number, y: number, dx: number, dy: number): void {
+  for (let k = 0; k < 10; k++) {
+    const s = rnd(120, 340);
+    p.spawn(PK.Flame, x, y, dx * s + rnd(-40, 40), dy * s + rnd(-40, 40), rnd(2, 4));
+  }
+  // The brake: smoke out to either side of the barrel, a little back.
+  for (const side of [-1, 1]) {
+    for (let k = 0; k < 7; k++) {
+      const s = rnd(40, 130);
+      p.spawn(PK.Smoke, x, y, (-dy * side - dx * 0.35) * s + rnd(-10, 10), (dx * side - dy * 0.35) * s + rnd(-10, 10), rnd(30, 55));
+    }
+  }
+  for (let k = 0; k < 8; k++) p.spawn(PK.Smoke, x + dx * rnd(2, 10), y + dy * rnd(2, 10), dx * rnd(20, 70) + rnd(-12, 12), dy * rnd(20, 70) + rnd(-12, 12), rnd(40, 70));
+}
+
+/**
+ * A heavy slug's wake: a supersonic vapour trail hanging along its whole
+ * path, thick at the muzzle and thinning out, drifting and spreading as it
+ * fades. (Only the stretch within `near` of (cx, cy) is spawned.)
+ */
+export function slugTrail(p: Particles, x0: number, y0: number, x1: number, y1: number, cx: number, cy: number, near: number): void {
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  if (len < 1) return;
+  const ux = (x1 - x0) / len;
+  const uy = (y1 - y0) / len;
+  const step = Math.max(1.4, len / 420);
+  for (let d = 4; d < len; d += step) {
+    const x = x0 + ux * d;
+    const y = y0 + uy * d;
+    if (Math.abs(x - cx) > near || Math.abs(y - cy) > near) continue;
+    // Thick and billowing near the muzzle, a tight vapour line further out.
+    const near0 = Math.max(0, 1 - d / 120);
+    const n = 2 + Math.round(near0 * 3);
+    for (let k = 0; k < n; k++) {
+      const off = rnd(-1.5, 1.5) * (1 + near0 * 2);
+      const spread = 6 + near0 * 30;
+      p.spawn(PK.Smoke, x - uy * off, y + ux * off, ux * rnd(4, 24) - uy * rnd(-spread, spread), uy * rnd(4, 24) + ux * rnd(-spread, spread) - rnd(0, 6), rnd(40, 90));
+    }
+  }
+}
+
+/** A heavy slug striking: a burst of grit and sparks thrown back out of the hole, and a puff of dust. */
+export function slugImpact(p: Particles, x: number, y: number, dx: number, dy: number, dustColor: number): void {
+  for (let k = 0; k < 14; k++) {
+    const s = rnd(80, 320);
+    p.spawn(PK.Spark, x, y, -dx * s + rnd(-120, 120), -dy * s + rnd(-120, 120), rnd(6, 14));
+  }
+  burst(p, PK.Dust, x, y, 12, 110, 26, dustColor);
+  burst(p, PK.Smoke, x, y, 6, 40, 40);
+  p.blast(x, y, 14, 180);
+}
+
 /** Rocket exhaust trail. */
 export function rocketTrail(p: Particles, x: number, y: number): void {
   p.spawn(PK.Flame, x, y, rnd(-20, 20), rnd(-20, 20), rnd(3, 5));

@@ -6,7 +6,12 @@ import { Mat } from '../src/shared/materials.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { sightLine } from '../src/shared/scope.ts';
 import { PROJ, ProjKind, WEAPONS, WeaponId } from '../src/shared/weapons.ts';
-import { World } from '../src/server/world.ts';
+import { type Player, World } from '../src/server/world.ts';
+import { lineOfFire, scopeLock } from '../src/client/scope.ts';
+import type { Game } from '../src/client/game.ts';
+import { BTN_DOWN, BTN_FIRE, Stance } from '../src/shared/actor.ts';
+import { ACTOR_H, ACTOR_W } from '../src/shared/constants.ts';
+import { F_ALIVE, Team } from '../src/shared/protocol.ts';
 import { deliverAll } from './helpers.ts';
 
 /** A flat arena with a wall `gap` cells in front of a clone. */
@@ -77,5 +82,118 @@ describe('sniper slug', () => {
 
   it('knocks whoever it hits hard back', () => {
     expect((slug.mass * (slug.knock ?? 1) * WEAPONS[WeaponId.Sniper].speed) / 8).toBeGreaterThan(450);
+  });
+});
+
+/** A client-side view of the world, just what the scope reads. */
+function fakeGame(views: { id: number; x: number; y: number }[], solidX = 1e9, myTeam: number = Team.None, teams: Record<number, number> = {}) {
+  const teamOf = new Uint8Array(64).fill(Team.None);
+  for (const [id, t] of Object.entries(teams)) teamOf[Number(id)] = t;
+  return {
+    terrain: { isSolid: (x: number) => x >= solidX },
+    remoteViews: () => views.map((v) => ({ ...v, flags: F_ALIVE })),
+    myId: 0,
+    myTeam,
+    teamOf,
+    tankPilots: new Set<number>(),
+    scopeLock: null,
+  } as unknown as Game;
+}
+
+describe('scope lock-on', () => {
+  it('clones are part of the line of fire: the first one in it stops it', () => {
+    const g = fakeGame([{ id: 2, x: 200, y: 46 }, { id: 3, x: 120, y: 46 }], 400);
+    const lof = lineOfFire(g, 100, 50, 0, 600);
+    expect(lof.hit?.id).toBe(3);
+    expect(lof.dist).toBeCloseTo(20, 0);
+    // Behind a wall, nobody.
+    expect(lineOfFire(fakeGame([{ id: 2, x: 200, y: 46 }], 150), 100, 50, 0, 600).hit).toBeNull();
+  });
+
+  it('scoped onto an enemy, the aim locks on and follows them; pull well off and it lets go', () => {
+    const views = [{ id: 5, x: 300, y: 40 }];
+    const g = fakeGame(views);
+    const ox = 100;
+    const oy = 50;
+    // The line crosses their head: locked onto the head.
+    let aim = scopeLock(g, ox, oy, Math.atan2(42 - oy, 300 - ox), true);
+    expect(g.scopeLock?.id).toBe(5);
+    expect(g.scopeLock!.ly).toBeLessThan(5);
+    // They move; the mouse doesn't, quite: the aim follows the locked point.
+    views[0].y = 30;
+    aim = scopeLock(g, ox, oy, aim, true);
+    expect(Math.abs(oy + Math.tan(aim) * (300 - ox) - (30 + g.scopeLock!.ly))).toBeLessThan(1.5);
+    // Pulled right off them: the lock breaks.
+    scopeLock(g, ox, oy, aim + 0.6, true);
+    expect(g.scopeLock).toBeNull();
+    // And it never locks onto a teammate.
+    const mates = fakeGame([{ id: 7, x: 300, y: 40 }], 1e9, Team.Red, { 0: Team.Red, 7: Team.Red });
+    scopeLock(mates, ox, oy, Math.atan2(46 - oy, 300 - ox), true);
+    expect(mates.scopeLock).toBeNull();
+    void ACTOR_W;
+    void ACTOR_H;
+  });
+
+  it("the server's scoped view stops at a clone in the line too", () => {
+    const { world, p } = arena(500);
+    const q = world.addPlayer('target', { send() {} })!;
+    deliverAll(world, [p, q]);
+    for (const o of [p, q]) o.body.vx = 0;
+    q.body.x = p.body.x + 80;
+    q.body.y = p.body.y;
+    for (let k = 0; k < 2; k++) {
+      q.body.x = p.body.x + 80;
+      q.body.y = p.body.y;
+      world.input(p.id, { seq: 900 + k, buttons: BTN_SCOPE, aim: quantizeAim(0), inv: world.equip(p, WeaponId.Sniper) });
+      world.step();
+    }
+    expect(p.camX).toBeLessThan(q.body.x + ACTOR_W);
+    expect(p.camX).toBeGreaterThan(q.body.x - 10);
+  });
+});
+
+describe('recoil', () => {
+  /** Fire one shot of `weapon` aiming right from a standstill (in `stance`), and see how the shooter is shoved. */
+  const shove = (weapon: number, stance: number) => {
+    const { world, p } = arena(900);
+    // Get down (held), then fire.
+    const down = stance === Stance.Stand ? 0 : BTN_DOWN;
+    for (let k = 0; k < (stance === Stance.Prone ? 20 : stance === Stance.Crouch ? 2 : 0); k++) {
+      world.input(p.id, { seq: 990 + k, buttons: down, aim: quantizeAim(0), inv: world.equip(p, weapon) });
+      world.step();
+    }
+    expect(p.body.stance).toBe(stance);
+    p.body.vx = 0;
+    p.body.vy = 0;
+    p.cooldown = 0;
+    world.input(p.id, { seq: 1000, buttons: BTN_FIRE | down, aim: quantizeAim(0), inv: world.equip(p, weapon) });
+    const x0 = p.body.x;
+    world.step();
+    return { vx: p.body.vx, dx: p.body.x - x0, p, world };
+  };
+
+  it('every gun kicks its shooter back; the sniper hardest; bracing (crouched, prone) soaks it up', () => {
+    const rifle = shove(WeaponId.Rifle, Stance.Stand).vx;
+    const sniper = shove(WeaponId.Sniper, Stance.Stand).vx;
+    expect(rifle).toBeLessThan(0);
+    expect(sniper).toBeLessThan(rifle * 4);
+    const prone = shove(WeaponId.Sniper, Stance.Prone).vx;
+    expect(prone).toBeGreaterThan(sniper * 0.5);
+    expect(prone).toBeLessThan(0);
+  });
+
+  it('holding the trigger, the muzzle climbs; let go and it settles', () => {
+    const { world, p } = arena(900);
+    for (let k = 0; k < 20; k++) {
+      world.input(p.id, { seq: 1100 + k, buttons: BTN_FIRE, aim: quantizeAim(0), inv: world.equip(p, WeaponId.Rifle) });
+      world.step();
+    }
+    expect(p.climb).toBeGreaterThan(0.04);
+    for (let k = 0; k < 30; k++) {
+      world.input(p.id, { seq: 1200 + k, buttons: 0, aim: quantizeAim(0), inv: world.equip(p, WeaponId.Rifle) });
+      world.step();
+    }
+    expect(p.climb).toBeLessThan(0.01);
+    void (null as unknown as Player);
   });
 });

@@ -242,6 +242,8 @@ export class Player {
   callCd = 0;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
+  /** Muzzle climb from recent shots (radians), settling back each tick. */
+  climb = 0;
   /** Extraction: the trap revision this client last got, and ticks until a spike pit can bite again. */
   trapsSeen = -1;
   spikeCd = 0;
@@ -1516,6 +1518,7 @@ export class World {
     const def = WEAPONS[item.weapon];
     const pressed = (p.buttons & BTN_FIRE) !== 0;
     const fresh = pressed && !(prev & BTN_FIRE);
+    p.climb *= 0.88; // the muzzle settles back
     if (p.reloadLeft > 0 && --p.reloadLeft === 0) item.ammo = def.clip;
     if (def.clip > 0 && p.reloadLeft === 0) {
       const asked = p.buttons & BTN_RELOAD && !(prev & BTN_RELOAD) && item.ammo < def.clip;
@@ -1805,7 +1808,15 @@ export class World {
       return;
     }
     const scoped = p.buttons & BTN_SCOPE ? 0.5 : 1;
-    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * scoped * (p.mob.oneHanded ? 3 : 1);
+    // Recoil: the muzzle climbs with each shot (up, whichever way it faces)...
+    const up = cos < 0 ? 1 : -1;
+    const a = aim + (this.rng.next() - 0.5) * 2 * def.spread * scoped * (p.mob.oneHanded ? 3 : 1) + up * p.climb;
+    p.climb += def.climb ?? 0;
+    // ...and the shot shoves the shooter back (braced less in a crouch, least lying prone).
+    const brace = RECOIL_BRACE[p.body.stance] ?? 1;
+    const kick = (def.kick ?? 0) * brace * (p.mob.oneHanded ? 1.4 : 1);
+    p.body.vx -= cos * kick;
+    p.body.vy -= sin * kick * 0.6;
     const vx = Math.cos(a) * def.speed + p.body.vx * 0.25;
     const vy = Math.sin(a) * def.speed + p.body.vy * 0.25;
     const id = this.nextProjId++;
@@ -1862,6 +1873,7 @@ export class World {
     t.body.jet = t.mob.jet;
   }
   private readonly repairQ = { t: 0 };
+  private readonly scopeQ = { t: 0 };
 
   /** Launch a projectile and tell the clients that will see it. */
   private spawnProj(id: number, kind: number, owner: number, sx: number, sy: number, vx: number, vy: number): void {
@@ -2882,7 +2894,9 @@ export class World {
       if (p.buttons & BTN_SCOPE) {
         const aim = dequantizeAim(p.aimQ);
         const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, Math.cos(aim) < 0, this.shoulderPt);
-        const reach = sightLine(this.terrain, sh.x, sh.y, aim, WEAPONS[p.weapon]?.scope ?? 0);
+        let reach = sightLine(this.terrain, sh.x, sh.y, aim, WEAPONS[p.weapon]?.scope ?? 0);
+        // A clone (or anything else) in the line stops it too.
+        if (this.segmentActor(sh.x, sh.y, sh.x + Math.cos(aim) * reach, sh.y + Math.sin(aim) * reach, p.id, this.scopeQ) >= 0) reach *= this.scopeQ.t;
         p.camX = sh.x + Math.cos(aim) * reach;
         p.camY = sh.y + Math.sin(aim) * reach;
       }
@@ -3447,6 +3461,8 @@ const CALL_COOLDOWN = 30 * 30;
 const BOARD_REACH = 10;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less
 /** Base parts (armour is reached through them) and their share of blast overpressure. */
+/** How much recoil a clone feels, by stance: standing, crouched, prone. */
+const RECOIL_BRACE = [1, 0.55, 0.3];
 /** What nanobots can grow back, in order. */
 const REGROWABLE = [Part.GunArm, Part.OffArm, Part.LegF, Part.LegB, Part.Jetpack];
 const PARTS_BASE = [true, true, true, true, true, true, false, false, true, false];

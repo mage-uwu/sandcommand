@@ -5,6 +5,7 @@ import { WEAPONS } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
 import { assistAim } from './aim.ts';
+import { scopeLock } from './scope.ts';
 import { BTN_FIRE, shoulderAt } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
@@ -255,6 +256,9 @@ function frame(now: number): void {
         aim = Math.atan2(wy - oy, wx - ox);
         if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
       }
+      // Scoped onto someone: the aim locks onto them.
+      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && (WEAPONS[g.weapon]?.scope ?? 0) > 0);
+      g.lockAim = g.scopeLock ? aim : null;
       let buttons = input.buttons();
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
       // a held trigger pulses (fire on alternate ticks) and the gun keeps going.
