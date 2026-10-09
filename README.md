@@ -676,8 +676,17 @@ a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then nee
   It has **twice a tank's hull**. Under the hood it is a `Tank` with a
   `kind`: its design cells are a spider droid's own, scaled by `s` = 3,
   so the tank geometry (hit testing, part centres, muzzles) works
-  unchanged, and the client draws it with the droid's own drawing at that
-  scale, its feet planted in the world, alternating tripods and all. You
+  unchanged. It has its own hand-made pixel art
+  (`src/client/tarantula-grids.ts`, drawn by `tarantula-sprites.ts`), chunkier than a spider droid: an
+  iron hip frame, blued-steel flanks with its owner's stripe and rivets,
+  white ceramic armour plates over its back and segmented abdomen (shot
+  away, scorched iron shows), a ceramic-and-steel camera head with the
+  laser's red lens on an iron mast, and a hazard-striped iron missile rack.
+  The body tilts with the ground and the head and rack turn with the aim,
+  rotated nearest-neighbour so they stay on the pixel grid. Its legs are
+  pixel-drawn: steel thighs up to ceramic-capped knees, iron shins tapering
+  to steel points, the feet planted in the world on the spider droids'
+  tripod gait. You
   get one at a time (a watchdog besides is fine), nobody can climb in, and
   it shuts down if you leave the game.
   - **Its guns.** An **automatic missile launcher**: a twin-tube rack on

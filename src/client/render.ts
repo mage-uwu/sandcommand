@@ -17,10 +17,11 @@ import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '.
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
-import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
+import { RACK_MOUTHS, RACK_PIVOT, TarantulaArt } from './tarantula-sprites.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
@@ -883,6 +884,7 @@ export class Renderer {
   private game: Game | null = null;
   /** Each droid's feet, planted in the world, by player id (see droidFeet). */
   private readonly droidGaits = new Map<number, DroidGait>();
+  private readonly tArt = new TarantulaArt();
 
   /**
    * Where a droid's six feet are this frame (world cells), spider style.
@@ -1026,9 +1028,8 @@ export class Renderer {
     now: number,
     aim = left ? Math.PI : 0,
     id = -1,
-    /** Its scale (a tarantula is one three times over), and a tarantula's kit: the missile rack, and its guns' flashes. */
+    /** Its scale. */
     k = 1,
-    rig?: { rack: boolean; firedLaser: boolean; firedRack: boolean },
   ): void {
     // Its feet are planted in the world (see droidFeet).
     const feet = this.droidFeet(id, x, y, left, grounded, now, k);
@@ -1161,8 +1162,6 @@ export class Renderer {
     ctx.fillStyle = `#${team.toString(16).padStart(6, '0')}`;
     ctx.fillRect(X(8.2) - 0.7, Y(9.6), 1.4, 0.9);
     const head = has(parts, DroidPart.Turret);
-    // (The rack rides the tilted chassis but still turns to the aim.)
-    if (rig?.rack) this.drawSpiderRack(ctx, X(SPIDER_RACK_PIVOT[0]), Y(SPIDER_RACK_PIVOT[1]), left, aim - tilt, rig.firedRack, now);
     ctx.restore();
     // A filled, outlined polygon in droid-local cells (mirrored with the facing).
     const poly = (pts: readonly (readonly [number, number])[], fill: string) => {
@@ -1261,65 +1260,10 @@ export class Renderer {
       ctx.fillRect(3, -3.3, 0.9, 2.9);
       ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
       ctx.fillRect(3.2, -2.6, 0.8, 1.4);
-      if (rig?.firedLaser) {
-        // A tarantula's eye is its laser: white-hot as it fires.
-        ctx.fillStyle = 'rgba(255,90,190,0.55)';
-        ctx.fillRect(3.4, -3.4, 1.8, 3);
-        ctx.fillStyle = '#fff0ff';
-        ctx.fillRect(3.3, -2.4, 1.2, 1);
-      }
       ctx.restore();
     }
     ctx.miterLimit = 10;
     if (k !== 1) ctx.restore();
-  }
-
-  /**
-   * A tarantula's missile rack, on its back (droid-local cells, at its
-   * pivot): a squat twin-tube launcher on a yoke, turning with the aim, a
-   * flash out of the tubes as a missile leaves.
-   */
-  private drawSpiderRack(ctx: CanvasRenderingContext2D, px: number, py: number, left: boolean, aim: number, fired: boolean, now: number): void {
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.lineWidth = 0.35;
-    ctx.strokeStyle = '#121518';
-    // The yoke, down onto the chassis.
-    ctx.fillStyle = '#30353a';
-    ctx.beginPath();
-    ctx.moveTo(-0.9, 0);
-    ctx.lineTo(0.9, 0);
-    ctx.lineTo(1.4, 2.9);
-    ctx.lineTo(-1.4, 2.9);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.rotate(aim);
-    if (left) ctx.scale(1, -1);
-    // The box: two tubes side by side, their mouths at the front.
-    ctx.fillStyle = '#4d5359';
-    ctx.fillRect(-2.4, -1.7, 5, 3.4);
-    ctx.strokeRect(-2.4, -1.7, 5, 3.4);
-    ctx.fillStyle = '#5c6a3c';
-    ctx.fillRect(-2.1, -1.4, 4.4, 0.6);
-    ctx.fillStyle = '#b9bfc4';
-    ctx.fillRect(-1.6, -0.15, 3.4, 0.3);
-    ctx.fillStyle = '#121518';
-    for (const ty of [-0.85, 0.85]) {
-      ctx.beginPath();
-      ctx.arc(2.6, ty, 0.62, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // A warning chevron on the side.
-    ctx.fillStyle = (now / 400) % 2 < 1 ? '#d8b030' : '#8a6a18';
-    ctx.fillRect(-1.9, 0.5, 1.1, 0.6);
-    if (fired) {
-      ctx.fillStyle = '#ffd860';
-      ctx.fillRect(2.6, -1.6, 1.6, 3.2);
-      ctx.fillStyle = '#fffbe0';
-      ctx.fillRect(2.6, -0.8, 1, 1.6);
-    }
-    ctx.restore();
   }
 
   private drawActor(
@@ -2142,10 +2086,14 @@ export class Renderer {
   }
 
   /**
-   * A tarantula: a spider droid three times over (drawDroid, scaled, its feet
-   * planted in the world as a droid's are), the laser its head, the missile
-   * rack on its back. A parachute holds it while it comes down; as the hull
-   * weakens it smokes, then burns.
+   * A tarantula, in its own hand-made pixel art (tarantula-sprites.ts):
+   * the chunky iron, steel and ceramic body tilted with the ground, the
+   * camera head with the laser on an iron neck, the missile rack on its
+   * back, both turning to the aim. Its six legs are pixel-drawn too, each a
+   * steel thigh up to a ceramic-capped knee and an iron shin tapering to a
+   * steel point, the feet planted in the world on the spider droid's gait
+   * (droidFeet, at its scale). A parachute holds it while it comes down; as
+   * the hull weakens it smokes, then burns.
    */
   private drawTarantula(ctx: CanvasRenderingContext2D, t: TankView, faceLeft: boolean, aim: number, game: Game, now: number): void {
     const k = t.s ?? TARANTULA_SCALE;
@@ -2158,22 +2106,117 @@ export class Renderer {
       ctx.restore();
     }
     const rgb = game.players.get(t.owner)?.rgb ?? 0xff4040;
-    let parts = (1 << DroidPart.Chassis) | DROID_LEGS.reduce((m, l) => m | (1 << l), 0);
-    if (hasTankPart(t.parts, TankPart.Smg)) parts |= 1 << DroidPart.Turret;
-    if (hasTankPart(t.parts, TankPart.Armor)) parts |= 1 << DroidPart.Plating;
-    const rig = { rack: hasTankPart(t.parts, TankPart.Cannon), firedLaser: t.firedSmg, firedRack: t.firedCannon };
-    this.drawDroid(ctx, t.x, t.y, faceLeft, t.onGround, parts, rgb, Math.abs(t.vx) > 1, now, aim, 1000 + t.slot, k, rig);
-    // Battle damage: smoke off the chassis as the hull weakens, then fire.
+    const side = faceLeft ? -1 : 1;
+    const feet = this.droidFeet(1000 + t.slot, t.x, t.y, faceLeft, t.onGround, now, k);
+    const tilt = feet.tilt;
+    const tc = Math.cos(tilt);
+    const ts = Math.sin(tilt);
+    const hipX = Math.round(cx);
+    const hipY = Math.round(t.y + 9.6 * k + feet.bob * k);
+    const rot = (px: number, py: number): [number, number] => [hipX + (px - hipX) * tc - (py - hipY) * ts, hipY + (px - hipX) * ts + (py - hipY) * tc];
+    // A pixel strut from (x0, y0) to (x1, y1), `wa` thick tapering to `wb`, in colour `c`.
+    const strut = (x0: number, y0: number, x1: number, y1: number, wa: number, wb: number, c: string, grow = 0) => {
+      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+      ctx.fillStyle = c;
+      for (let i = 0; i <= n; i++) {
+        const f = i / n;
+        const w = Math.max(1, Math.round(wa + (wb - wa) * f) + grow);
+        ctx.fillRect(Math.round(x0 + (x1 - x0) * f - w / 2), Math.round(y0 + (y1 - y0) * f - w / 2), w, w);
+      }
+    };
+    const THIGH = DROID_THIGH * k;
+    const SHIN = DROID_SHIN * k;
+    // Far legs first (they're behind), a shade darker.
+    for (const leg of [1, 4, 0, 2, 3, 5]) {
+      const far = leg === 1 || leg === 4;
+      const [hx, hy] = rot(hipX + side * TARANTULA_HIPS[leg], hipY);
+      const fx = feet.x[leg];
+      const fy = feet.y[leg];
+      const dx = fx - hx;
+      const dy = fy - hy;
+      const d = Math.min(Math.hypot(dx, dy), THIGH + SHIN - 0.5);
+      const a = Math.atan2(dy, dx);
+      const bend = Math.acos(Math.max(-1, Math.min(1, (THIGH * THIGH + d * d - SHIN * SHIN) / (2 * THIGH * d || 1))));
+      const k1 = [hx + Math.cos(a - bend) * THIGH, hy + Math.sin(a - bend) * THIGH];
+      const k2 = [hx + Math.cos(a + bend) * THIGH, hy + Math.sin(a + bend) * THIGH];
+      // (The knee bends up off its back, at any tilt.)
+      const [kx, ky] = (k1[0] - hx) * ts - (k1[1] - hy) * tc > (k2[0] - hx) * ts - (k2[1] - hy) * tc ? k1 : k2;
+      // Outline, then the metal, then a lit edge along the top of the thigh.
+      strut(hx, hy, kx, ky, 5, 4, '#121417', 2);
+      strut(kx, ky, fx, fy, 4, 1, '#121417', 2);
+      strut(hx, hy, kx, ky, 5, 4, far ? '#4a5560' : '#7d8a97');
+      strut(kx, ky, fx, fy, 4, 1, far ? '#2a2725' : '#4a4440');
+      strut(hx, hy - 1, kx, ky - 1, 1, 1, far ? '#6c7884' : '#b6c3ce');
+      strut(kx, ky, fx, fy, 1, 1, far ? '#3e3a37' : '#6a625c');
+      // The steel point it stands on.
+      ctx.fillStyle = far ? '#6c7884' : '#b6c3ce';
+      ctx.fillRect(Math.round(fx) - 1, Math.round(fy) - 2, 2, 2);
+      // The knee: a ceramic cap over the joint.
+      const qx = Math.round(kx) - 3;
+      const qy = Math.round(ky) - 3;
+      ctx.fillStyle = '#121417';
+      ctx.fillRect(qx - 1, qy - 1, 8, 8);
+      ctx.fillStyle = far ? '#9a958a' : '#dfd9cb';
+      ctx.fillRect(qx, qy, 6, 6);
+      ctx.fillStyle = far ? '#b3ad9f' : '#f7f3e8';
+      ctx.fillRect(qx, qy, 4, 2);
+      ctx.fillStyle = far ? '#7a756b' : '#b3ad9f';
+      ctx.fillRect(qx + 1, qy + 4, 5, 2);
+    }
+    // The neck: an iron mast from its back up to the head's mount.
+    const headX = cx;
+    const headY = t.y + SPIDER_LASER_PIVOT[1] * k;
+    const [nx, ny] = rot(hipX + side * 3, hipY - 9);
+    const head = hasTankPart(t.parts, TankPart.Smg);
+    strut(nx, ny, headX, head ? headY : ny - 4, 6, 5, '#121417', 2);
+    strut(nx, ny, headX, head ? headY : ny - 4, 6, 5, '#58514c');
+    strut(nx - 2, ny, headX - 2, head ? headY : ny - 4, 1, 1, '#7c736c');
+    // The body.
+    const b = this.tArt.body(rgb, faceLeft, hasTankPart(t.parts, TankPart.Armor), tilt);
+    ctx.drawImage(b.c, hipX - b.r, hipY - b.r);
+    // The missile rack on its back, turning to the aim.
+    if (hasTankPart(t.parts, TankPart.Cannon)) {
+      const [rx, ry] = rot(faceLeft ? t.x + tankW(t) - SPIDER_RACK_PIVOT[0] * k : t.x + SPIDER_RACK_PIVOT[0] * k, t.y + SPIDER_RACK_PIVOT[1] * k);
+      const r = this.tArt.rack(aim, faceLeft);
+      ctx.drawImage(r.c, Math.round(rx) - r.r, Math.round(ry) - r.r);
+      if (t.firedCannon) {
+        // A flash out of the tubes.
+        const ca = Math.cos(aim);
+        const sa = Math.sin(aim);
+        for (const [mx, my] of RACK_MOUTHS) {
+          const lx = mx - RACK_PIVOT[0];
+          const ly = (my - RACK_PIVOT[1]) * (faceLeft ? -1 : 1);
+          const fxp = rx + lx * ca - ly * sa;
+          const fyp = ry + lx * sa + ly * ca;
+          ctx.fillStyle = '#ffd860';
+          ctx.fillRect(Math.round(fxp) - 1, Math.round(fyp) - 1, 3, 3);
+          ctx.fillStyle = '#fffbe0';
+          ctx.fillRect(Math.round(fxp), Math.round(fyp), 1, 1);
+        }
+      }
+    } else if ((now / 90) % 4 < 1) {
+      ctx.fillStyle = '#ffd060';
+      ctx.fillRect(Math.round(hipX - side * 12), hipY - 12, 2, 2);
+    }
+    // The head on its mast: the laser's camera, turning to the aim.
+    if (head) {
+      const h = this.tArt.head(aim, faceLeft, t.firedSmg);
+      ctx.drawImage(h.c, Math.round(headX) - h.r, Math.round(headY) - h.r);
+    } else if ((now / 80) % 3 < 1) {
+      ctx.fillStyle = '#ffd060';
+      ctx.fillRect(Math.round(nx), Math.round(ny) - 6, 2, 2);
+    }
+    // Battle damage: smoke off the back as the hull weakens, then fire.
     const wear = 1 - t.hp / tankMaxHp(t);
     if (wear > 0.4) {
-      const by = t.y + 8.5 * k;
+      const by = hipY - 8;
       const ph = (now / 70) % 6;
       ctx.fillStyle = 'rgba(30,26,22,0.5)';
-      ctx.fillRect(cx - 6 + ph, by - 4 - ph * 1.5, 3, 3);
+      ctx.fillRect(Math.round(cx - 6 + ph), Math.round(by - 4 - ph * 1.5), 3, 3);
       if (wear > 0.7 && (now / 90) % 3 < 2) {
         ctx.fillStyle = (now / 60) % 2 < 1 ? '#ff9a30' : '#ffd060';
-        ctx.fillRect(cx - 4, by + 1, 2, 2);
-        ctx.fillRect(cx + 5, by + 2, 1.5, 2);
+        ctx.fillRect(Math.round(cx - 4), by + 1, 2, 2);
+        ctx.fillRect(Math.round(cx + 5), by + 2, 2, 2);
       }
     }
   }
@@ -2923,6 +2966,8 @@ const DROID_SHIN = 9;
 /** How far a foot may lag where it belongs before it steps, and how long a step takes (s). */
 const DROID_STRIDE = 3.6;
 const DROID_STEP_TIME = 0.085;
+/** The tarantula's hips along its body (world cells either side of its centre, facing right; DROID_LEGS order). */
+const TARANTULA_HIPS = [-15, -10, -5, 5, 10, 15];
 /** The steepest its body pitches to the ground's slope, and how far it rears up a wall it's climbing (radians). */
 const DROID_MAX_TILT = 0.6;
 const DROID_WALL_TILT = 0.9;
