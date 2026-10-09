@@ -90,6 +90,8 @@ function startMusic(): void {
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
     music = new Music(new Ctx());
+    // Songs take turns: say which one's on.
+    music.onSong = (name) => game?.feed.push({ text: `♪ now playing: ${name}`, color: '#b8a0ff', at: performance.now() });
     music.start();
     sfx = new Sfx(music.ctx);
     if (storageGet('sc.sfx') === 'off') sfx.toggle();

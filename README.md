@@ -140,6 +140,28 @@ gunshots back, and a limiter keeps a 64-player firefight from clipping.
 A voice budget drops the quietest sounds when too many play at once.
 **N** toggles the effects, and the choice is remembered.
 
+### nightttt
+
+The second song, which takes turns with the theme: the theme plays its 48
+bars, then "nightttt" its 64, and round again (`SONGS` in
+`src/client/music.ts`). The feed says "♪ now playing" as each one starts.
+- **Key and tempo.** D Locrian, the darkest mode (a flat second and a flat
+  fifth), at a house tempo of 124 BPM. It runs Dø7 → E♭ → B♭ → A♭, and the
+  A♭ is a tritone off the root.
+- **Octave bass.** Sixteenths that jump between the root and the octave
+  above: a square and a saw through a resonant low-pass that snaps open and
+  shut, a little driven.
+- **Bloops.** Sine blips that drop an octave into their note through a
+  resonant filter sweeping down, scattered on sixteenths into the delay and
+  reverb.
+- **Crushed house beat.** Four on the floor, a clap on two and four, an
+  open hat on the off-beats and closed hats on sixteenths, all through a
+  3-bit crusher. The echo retunes to the tempo.
+- **Arrangement.** It runs in 8-bar sections: a pad intro, the bass coming
+  in, the drop, a bloopier full section, a breakdown, a riser of doubling
+  claps with no kick, the drop again, and a kick-and-bass outro.
+`composeNight(bar, seed)` is pure and tested, like the theme's.
+
 ## Mercenary vendors (factions)
 
 Factions are mercenary vendors: the outfit that built and supplied a clone

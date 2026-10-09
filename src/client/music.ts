@@ -1,5 +1,8 @@
 /**
- * The soundtrack: a dark, lo-fi theme after Crystal Castles and witch house,
+ * The soundtrack: two songs that take turns (see SONGS), all synthesized live
+ * with Web Audio (no audio files).
+ *
+ * The theme: a dark, lo-fi piece after Crystal Castles and witch house,
  * synthesized live with Web Audio (no audio files). A minor progression at a
  * slow half-time tempo: detuned saw pads under a drifting low-pass, bitcrushed
  * square-wave arpeggios through a dotted-eighth delay, an 808 sub, a trap kit
@@ -16,7 +19,7 @@ export const BPM = 70;
 export const BEAT = 60 / BPM;
 export const BAR = BEAT * 4;
 
-export type Part = 'pad' | 'arp' | 'bass' | 'kick' | 'snare' | 'hat' | 'bell';
+export type Part = 'pad' | 'arp' | 'bass' | 'kick' | 'snare' | 'hat' | 'bell' | 'obass' | 'bloop' | 'clap' | 'ohat';
 export interface NoteEvent {
   part: Part;
   /** Start, in beats from the bar's downbeat. */
@@ -119,6 +122,95 @@ export function composeBar(bar: number, seed: number): NoteEvent[] {
   return out;
 }
 
+// ------------------------------------------------------------ nightttt
+
+/**
+ * "nightttt": darker. D Locrian (the darkest mode: a flat second and a flat
+ * fifth) at a house tempo, after Crystal Castles: an octave-jumping bass,
+ * bloopy sine blips, and a crushed four-on-the-floor house beat.
+ */
+export const NIGHT_BPM = 124;
+/** D Locrian, by pitch class: D Eb F G Ab Bb C. */
+export const D_LOCRIAN = new Set([2, 3, 5, 7, 8, 10, 0]);
+/** Dø7 - Eb - Bb - Ab (the last a tritone off the root): a bar each. */
+const NIGHT_PROGRESSION: readonly (readonly number[])[] = [
+  [0, 3, 6, 10], // D half-diminished
+  [1, 5, 8, 13], // Eb
+  [-4, 0, 3, 8], // Bb (with the Ab on top)
+  [-6, -2, 1, 6], // Ab
+];
+/** D Locrian over two octaves, for the bloops. */
+const LOCRIAN_SCALE = [0, 1, 3, 5, 6, 8, 10, 12, 13, 15, 17, 18, 20, 22];
+/** Its 8-bar sections: the bass comes in, then the beat; a breakdown, a riser, and the drop again. */
+const NIGHT_SECTIONS: readonly { pad: boolean; bass: boolean; kick: boolean; beat: boolean; bloops: number; riser: boolean }[] = [
+  { pad: true, bass: false, kick: false, beat: false, bloops: 0.25, riser: false }, // intro: pad and a few bloops
+  { pad: true, bass: true, kick: false, beat: false, bloops: 0.3, riser: false }, // the octave bass
+  { pad: true, bass: true, kick: true, beat: true, bloops: 0.35, riser: false }, // the beat drops
+  { pad: true, bass: true, kick: true, beat: true, bloops: 0.55, riser: false }, // full, bloopier
+  { pad: true, bass: false, kick: false, beat: false, bloops: 0.45, riser: false }, // breakdown
+  { pad: true, bass: true, kick: false, beat: true, bloops: 0.3, riser: true }, // riser: no kick, building
+  { pad: true, bass: true, kick: true, beat: true, bloops: 0.55, riser: false }, // the drop
+  { pad: true, bass: true, kick: true, beat: false, bloops: 0.2, riser: false }, // outro: kick and bass
+];
+
+/** Everything that plays in bar `bar` (0-based) of "nightttt", for a given `seed`. */
+export function composeNight(bar: number, seed: number): NoteEvent[] {
+  const out: NoteEvent[] = [];
+  const sec = NIGHT_SECTIONS[Math.floor(bar / 8) % NIGHT_SECTIONS.length];
+  const chord = NIGHT_PROGRESSION[bar % NIGHT_PROGRESSION.length].map((n) => ROOT + n);
+  const r = (k: number) => hash(bar, seed ^ 0x6e696768, k);
+
+  // A dark pad, low and long.
+  if (sec.pad) out.push({ part: 'pad', beat: 0, dur: 4, notes: chord.map((n) => n - 12), vel: 0.4 });
+
+  if (sec.bass) {
+    // Octave bass: sixteenths jumping between the root and the octave above
+    // (now and then a step rests, or catches the chord's next tone).
+    const root = chord[0] - 24;
+    for (let i = 0; i < 16; i++) {
+      if (i % 4 === 3 && r(i) < 0.3) continue;
+      const up = i % 2 === 1;
+      const note = r(30 + i) < 0.1 ? chord[1] - 24 + (up ? 12 : 0) : root + (up ? 12 : 0);
+      out.push({ part: 'obass', beat: i / 4, dur: 0.22, notes: [note], vel: up ? 0.55 : 0.75 });
+    }
+  }
+
+  if (sec.kick) for (let b = 0; b < 4; b++) out.push({ part: 'kick', beat: b, dur: 0.5, notes: [], vel: b === 0 ? 1 : 0.9 });
+  if (sec.beat) {
+    // House: clap on two and four, open hat on the off-beats, closed hats on sixteenths.
+    out.push({ part: 'clap', beat: 1, dur: 0.25, notes: [], vel: 0.85 });
+    out.push({ part: 'clap', beat: 3, dur: 0.25, notes: [], vel: 0.85 });
+    for (let b = 0; b < 4; b++) out.push({ part: 'ohat', beat: b + 0.5, dur: 0.25, notes: [], vel: 0.5 });
+    for (let i = 0; i < 16; i++) if (i % 2 === 1 || r(50 + i) < 0.5) out.push({ part: 'hat', beat: i / 4, dur: 0.05, notes: [], vel: i % 4 === 2 ? 0.35 : 0.22 });
+  }
+  if (sec.riser) {
+    // The riser: claps doubling up through the section, louder bar by bar.
+    const step = bar % 8 < 4 ? 1 : bar % 8 < 6 ? 0.5 : 0.25;
+    for (let b = 0; b < 4; b += step) out.push({ part: 'clap', beat: b, dur: 0.2, notes: [], vel: 0.35 + 0.08 * (bar % 8) });
+  }
+
+  // Bloops: sine blips dropping into their note through a resonant filter, scattered on sixteenths.
+  for (let i = 0; i < 16; i++) {
+    if (r(70 + i) >= sec.bloops * (i % 2 === 0 ? 0.6 : 0.35)) continue;
+    const note = ROOT + 12 + LOCRIAN_SCALE[Math.floor(r(90 + i) * LOCRIAN_SCALE.length)];
+    out.push({ part: 'bloop', beat: i / 4, dur: 0.3, notes: [note], vel: 0.35 + r(110 + i) * 0.3 });
+  }
+  return out;
+}
+
+/** The playlist: each song in turn, for its length, then the next. */
+export interface Song {
+  name: string;
+  bpm: number;
+  /** Bars before the next song takes over. */
+  bars: number;
+  compose(bar: number, seed: number): NoteEvent[];
+}
+export const SONGS: readonly Song[] = [
+  { name: 'theme', bpm: BPM, bars: 48, compose: composeBar },
+  { name: 'nightttt', bpm: NIGHT_BPM, bars: 64, compose: composeNight },
+];
+
 const freq = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 
 /**
@@ -135,7 +227,16 @@ export class Music {
   private arpBus: GainNode;
   private drumBus: GainNode;
   private bellBus: GainNode;
+  /** nightttt: its house kit, crushed harder, and its octave bass and bloops (each through a resonant low-pass). */
+  private crunchBus: GainNode;
+  private bassBus: GainNode;
+  private bloopBus: GainNode;
+  private delay: DelayNode;
   private noise: AudioBuffer;
+  /** Which song is playing, and how far into it. */
+  private song = 0;
+  /** Called as each song starts (by name). */
+  onSong: ((name: string) => void) | null = null;
   private nextBar = 0;
   private nextBarTime = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -179,6 +280,7 @@ export class Music {
     // Dotted-eighth delay with darkening feedback (for the arp and bells).
     const delay = c.createDelay(2);
     delay.delayTime.value = BEAT * 0.75;
+    this.delay = delay;
     const fb = c.createGain();
     fb.gain.value = 0.38;
     const fbTone = c.createBiquadFilter();
@@ -231,6 +333,28 @@ export class Music {
     this.bellBus.connect(delay);
     this.bellBus.connect(reverb);
 
+    // nightttt's house kit: crushed to 3 bits, a little brighter.
+    const crunch = c.createWaveShaper();
+    crunch.curve = crushCurve(3);
+    const crunchTone = c.createBiquadFilter();
+    crunchTone.type = 'lowpass';
+    crunchTone.frequency.value = 6500;
+    this.crunchBus = c.createGain();
+    this.crunchBus.gain.value = 0.42;
+    this.crunchBus.connect(crunch).connect(crunchTone).connect(comp);
+    crunchTone.connect(reverb);
+    // Its octave bass, a little driven, and its bloops (into the delay and reverb).
+    const bassDrive = c.createWaveShaper();
+    bassDrive.curve = driveCurve(1.8);
+    this.bassBus = c.createGain();
+    this.bassBus.gain.value = 0.25;
+    this.bassBus.connect(bassDrive).connect(comp);
+    this.bloopBus = c.createGain();
+    this.bloopBus.gain.value = 0.2;
+    this.bloopBus.connect(comp);
+    this.bloopBus.connect(delay);
+    this.bloopBus.connect(reverb);
+
     // Tape hiss, always there under everything, very quiet.
     this.noise = this.noiseBuffer(2);
     const hiss = c.createBufferSource();
@@ -253,12 +377,24 @@ export class Music {
     this.pump(this.ctx.currentTime + 0.4);
   }
 
-  /** Schedule every bar that starts before `until` (seconds on the context clock). */
+  /** Schedule every bar that starts before `until` (seconds on the context clock); songs take turns. */
   pump(until: number): void {
     while (this.nextBarTime < until) {
-      for (const e of composeBar(this.nextBar, this.seed)) this.play(e, this.nextBarTime + e.beat * BEAT);
-      this.nextBar++;
-      this.nextBarTime += BAR;
+      const song = SONGS[this.song];
+      const beat = 60 / song.bpm;
+      if (this.nextBar === 0) {
+        // A new song: the echo follows its tempo.
+        this.delay.delayTime.setValueAtTime(beat * 0.75, this.nextBarTime);
+        this.onSong?.(song.name);
+      }
+      // (nightttt's whole kit goes through the harder crush.)
+      const kit = song.name === 'nightttt' ? this.crunchBus : this.drumBus;
+      for (const e of song.compose(this.nextBar, this.seed)) this.play(e, this.nextBarTime + e.beat * beat, beat, kit);
+      this.nextBarTime += beat * 4;
+      if (++this.nextBar >= song.bars) {
+        this.nextBar = 0;
+        this.song = (this.song + 1) % SONGS.length;
+      }
     }
   }
 
@@ -279,8 +415,8 @@ export class Music {
     return this.on;
   }
 
-  private play(e: NoteEvent, t: number): void {
-    const dur = e.dur * BEAT;
+  private play(e: NoteEvent, t: number, beat = BEAT, kit: GainNode = this.drumBus): void {
+    const dur = e.dur * beat;
     switch (e.part) {
       case 'pad':
         for (const n of e.notes) this.padVoice(n, t, dur, e.vel);
@@ -292,18 +428,117 @@ export class Music {
         this.bassVoice(e.notes[0], t, dur, e.vel);
         break;
       case 'kick':
-        this.kick(t, e.vel);
+        this.kick(t, e.vel, kit);
         break;
       case 'snare':
         this.snare(t, e.vel);
         break;
       case 'hat':
-        this.hat(t, e.vel);
+        this.hat(t, e.vel, kit);
         break;
       case 'bell':
         this.bell(e.notes[0], t, dur, e.vel);
         break;
+      case 'obass':
+        this.octaveBass(e.notes[0], t, dur, e.vel);
+        break;
+      case 'bloop':
+        this.bloop(e.notes[0], t, dur, e.vel);
+        break;
+      case 'clap':
+        this.clap(t, e.vel);
+        break;
+      case 'ohat':
+        this.openHat(t, e.vel);
+        break;
     }
+  }
+
+  /** Octave bass: a square and a saw through a resonant low-pass that snaps open and shut (a pluck). */
+  private octaveBass(n: number, t: number, dur: number, vel: number): void {
+    const c = this.ctx;
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = 7;
+    lp.frequency.setValueAtTime(1800, t);
+    lp.frequency.exponentialRampToValueAtTime(220, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vel, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.04);
+    lp.connect(g).connect(this.bassBus);
+    for (const [type, detune] of [
+      ['square', 0],
+      ['sawtooth', 7],
+    ] as const) {
+      const o = c.createOscillator();
+      o.type = type;
+      o.frequency.value = freq(n);
+      o.detune.value = detune;
+      o.connect(lp);
+      o.start(t);
+      o.stop(t + dur + 0.06);
+    }
+  }
+
+  /** A bloop: a sine that drops an octave into its note, through a resonant filter sweeping down. */
+  private bloop(n: number, t: number, dur: number, vel: number): void {
+    const c = this.ctx;
+    const f = freq(n);
+    const o = c.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f * 2, t);
+    o.frequency.exponentialRampToValueAtTime(f, t + 0.05);
+    const bp = c.createBiquadFilter();
+    bp.type = 'lowpass';
+    bp.Q.value = 12;
+    bp.frequency.setValueAtTime(f * 6, t);
+    bp.frequency.exponentialRampToValueAtTime(f * 1.2, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vel, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(bp).connect(g).connect(this.bloopBus);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  /** A house clap: three quick noise bursts and a tail, crushed. */
+  private clap(t: number, vel: number): void {
+    const c = this.ctx;
+    const s = c.createBufferSource();
+    s.buffer = this.noise;
+    const bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1300;
+    bp.Q.value = 1.1;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    for (const k of [0, 0.011, 0.022]) {
+      g.gain.setValueAtTime(vel * 0.8, t + k);
+      g.gain.exponentialRampToValueAtTime(vel * 0.15, t + k + 0.009);
+    }
+    g.gain.setValueAtTime(vel * 0.6, t + 0.033);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    s.connect(bp).connect(g).connect(this.crunchBus);
+    s.start(t, Math.random() * 1.5);
+    s.stop(t + 0.25);
+  }
+
+  /** An open hat on the off-beat: brighter, longer. */
+  private openHat(t: number, vel: number): void {
+    const c = this.ctx;
+    const s = c.createBufferSource();
+    s.buffer = this.noise;
+    const hp = c.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 6500;
+    const g = c.createGain();
+    g.gain.setValueAtTime(vel * 0.4, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    s.connect(hp).connect(g).connect(this.crunchBus);
+    s.start(t, Math.random() * 1.5);
+    s.stop(t + 0.2);
   }
 
   /** Two detuned saws and a sub triangle, slow in and slow out. */
@@ -369,7 +604,7 @@ export class Music {
     o.stop(t + dur + 0.35);
   }
 
-  private kick(t: number, vel: number): void {
+  private kick(t: number, vel: number, bus: GainNode = this.drumBus): void {
     const c = this.ctx;
     const o = c.createOscillator();
     o.frequency.setValueAtTime(150, t);
@@ -377,7 +612,7 @@ export class Music {
     const g = c.createGain();
     g.gain.setValueAtTime(vel, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
-    o.connect(g).connect(this.drumBus);
+    o.connect(g).connect(bus);
     o.start(t);
     o.stop(t + 0.5);
   }
@@ -399,7 +634,7 @@ export class Music {
     s.stop(t + 0.3);
   }
 
-  private hat(t: number, vel: number): void {
+  private hat(t: number, vel: number, bus: GainNode = this.drumBus): void {
     const c = this.ctx;
     const s = c.createBufferSource();
     s.buffer = this.noise;
@@ -409,7 +644,7 @@ export class Music {
     const g = c.createGain();
     g.gain.setValueAtTime(vel * 0.35, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    s.connect(hp).connect(g).connect(this.drumBus);
+    s.connect(hp).connect(g).connect(bus);
     s.start(t, Math.random() * 1.5);
     s.stop(t + 0.06);
   }
