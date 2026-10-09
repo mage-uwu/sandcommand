@@ -735,7 +735,7 @@ export class Game implements FrameHandler {
   /** Enemies our side's dropships have eyes on: where, and when last reported. */
   readonly spottedFoes = new Map<number, { x: number; y: number; at: number }>();
   /** When our dropships last reported contact (for the radio callout). */
-  private lastContact = 0;
+  private lastContact = -Infinity;
 
   spotted(list: { id: number; x: number; y: number }[]): void {
     const now = performance.now();
