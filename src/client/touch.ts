@@ -67,16 +67,16 @@ export class TouchControls {
     root.className = 'hidden';
     root.innerHTML = `
       <div class="stick-base"><div class="stick-knob"></div></div>
-      <div class="fire-pad"><div class="fire-knob"></div><span>FIRE</span></div>
+      <div class="fire-pad"><i class="tick n"></i><i class="tick e"></i><i class="tick s"></i><i class="tick w"></i><div class="fire-knob"></div></div>
       <div class="tbtns">
         <button data-act="prev">◀<small>ITEM</small></button>
-        <button data-act="pick" class="big">⬆<small>PICK UP</small></button>
         <button data-act="next">▶<small>ITEM</small></button>
+        <button data-act="scope">◎<small>ZOOM</small></button>
+        <button data-act="pick">▲<small>PICK</small></button>
       </div>
-      <button data-act="scope" class="tzoom">◎<small>ZOOM</small></button>
       <div class="ttop">
-        <button data-act="scores">☰</button>
-        <button data-act="chat">💬</button>
+        <button data-act="scores">SCORE</button>
+        <button data-act="chat">CHAT</button>
       </div>`;
     document.body.appendChild(root);
     this.root = root;
@@ -86,6 +86,13 @@ export class TouchControls {
     this.padKnob = root.querySelector('.fire-knob') as HTMLDivElement;
 
     for (const b of root.querySelectorAll<HTMLButtonElement>('button')) this.wireButton(b);
+    // Lay out from the visible viewport (not CSS vh, which on phones counts
+    // the hidden browser bars), and again whenever it changes.
+    const relayout = () => this.layout();
+    addEventListener('resize', relayout);
+    addEventListener('orientationchange', relayout);
+    visualViewport?.addEventListener('resize', relayout);
+    this.layout();
 
     canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch') return;
@@ -126,8 +133,8 @@ export class TouchControls {
         this.stickId = -1;
         this.stick = 0;
         this.base.classList.remove('active');
-        this.base.style.left = '';
-        this.base.style.top = '';
+        this.base.style.left = this.restX;
+        this.base.style.top = this.restY;
         this.knob.style.transform = '';
         this.sync();
       } else if (e.pointerId === this.fireId) {
@@ -163,9 +170,50 @@ export class TouchControls {
     this.root.classList.toggle('hidden', !on || !this.enabled);
   }
 
-  /** The fire pad's centre: the middle of the right half (a little below middle, under the thumb). */
+  /** Where the fire pad sits and how big it is (CSS px), from the visible viewport. */
+  private padAt = { x: 0, y: 0, r: 56 };
+
+  /**
+   * Place the controls for the visible viewport: the move stick resting in
+   * the bottom-left; the item block (2 by 2) in the bottom-right corner; the
+   * fire pad centred in the right half, sized and nudged clear of the block.
+   */
+  layout(): void {
+    const w = innerWidth;
+    const h = innerHeight;
+    const btn = h < 430 ? 44 : 52;
+    const gap = 8;
+    const margin = 12;
+    const block = btn * 2 + gap;
+    const r = Math.max(42, Math.min(64, h * 0.16));
+    // The right half's centre, a little low (under the thumb), kept clear of the corner block.
+    let px = w * 0.75;
+    let py = h * 0.58;
+    const blockX = w - margin - block;
+    const blockY = h - margin - block;
+    if (px + r + 10 > blockX && py + r + 10 > blockY) px = Math.min(px, blockX - r - 14);
+    py = Math.min(py, h - r - margin);
+    this.padAt = { x: px, y: py, r };
+    this.pad.style.left = `${px}px`;
+    this.pad.style.top = `${py}px`;
+    this.pad.style.width = this.pad.style.height = `${r * 2}px`;
+    this.pad.style.margin = `${-r}px 0 0 ${-r}px`;
+    const rest = this.root.querySelector('.stick-base') as HTMLDivElement;
+    if (this.stickId < 0) {
+      rest.style.left = `${Math.max(80, w * 0.16)}px`;
+      rest.style.top = `${h - Math.max(76, h * 0.22)}px`;
+    }
+    this.restX = rest.style.left;
+    this.restY = rest.style.top;
+    const tb = this.root.querySelector('.tbtns') as HTMLDivElement;
+    tb.style.setProperty('--btn', `${btn}px`);
+  }
+  private restX = '';
+  private restY = '';
+
+  /** The fire pad's centre (CSS px). */
   private padCentre(): { x: number; y: number } {
-    return { x: innerWidth * 0.75, y: innerHeight * 0.6 };
+    return this.padAt;
   }
 
   private moveStick(x: number, y: number): void {
@@ -191,7 +239,8 @@ export class TouchControls {
       this.dirX = dx / m;
       this.dirY = dy / m;
     }
-    this.padKnob.style.transform = `translate(${this.dirX * STICK_R}px, ${this.dirY * STICK_R}px)`;
+    const reach = this.padAt.r * 0.7;
+    this.padKnob.style.transform = `translate(${this.dirX * reach}px, ${this.dirY * reach}px)`;
     this.pad.classList.add('firing');
     this.input.aimStick = { dx: this.dirX, dy: this.dirY, fire: true };
   }

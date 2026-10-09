@@ -81,12 +81,15 @@ The screen splits down the middle:
   there, and taps on its menu pick the piece. With the radio up, taps pick
   from its menu. Once you're out of the wave, a tap moves to the next clone
   to watch.
-- **Three item buttons (bottom right).** ◀ and ▶ step through what you
-  carry. ⬆ picks up the weapon at your feet; hold it to drop the one in
-  hand. Empty magazines reload themselves.
-- **Zoom.** ◎ above them toggles the scope (in a tank: hold to fire the
-  cannon).
-- **Top-left.** ☰ shows the scoreboard, 💬 opens chat.
+- **Item block (bottom-right corner, 2 by 2).** ◀ and ▶ step through what
+  you carry. ▲ PICK picks up the weapon at your feet; hold it to drop the
+  one in hand. ◎ ZOOM toggles the scope (in a tank: hold to fire the
+  cannon). Empty magazines reload themselves.
+- **Layout.** Everything is placed from the visible viewport (not CSS `vh`,
+  which on phones counts the browser's hidden bars), and re-placed when it
+  changes. The fire pad is sized to the screen and kept clear of the item
+  block.
+- **Top-left.** SCORE shows the scoreboard, CHAT opens chat.
 - **Screen layout.** The HUD shrinks on small screens. The minimap moves to
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
