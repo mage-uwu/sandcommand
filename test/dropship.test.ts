@@ -189,6 +189,58 @@ describe('radio and dropship', () => {
     expect(hurt).toBe(true);
   });
 
+  it('rival dropships ram each other: they bounce apart and both hulls take the hit; teammates pass through', () => {
+    const world = new World(74);
+    const collide = () => (world as unknown as { shipCollisions: () => void }).shipCollisions();
+    const a = newShip(1000, 150, 1, Team.None);
+    const b = newShip(1060, 150, 2, Team.None);
+    a.vx = 110;
+    b.vx = -110;
+    world.ships[0] = a;
+    world.ships[1] = b;
+    collide();
+    expect(b.x - a.x).toBeGreaterThanOrEqual(SHIP_W * 0.9 - 1); // pushed apart
+    expect(a.vx).toBeLessThan(0); // bounced
+    expect(b.vx).toBeGreaterThan(0);
+    expect(a.hp).toBeLessThan(SHIP_HP);
+    expect(b.hp).toBeLessThan(SHIP_HP);
+    expect(a.lastHitBy).toBe(2); // credited to the other's caller
+    // Two of one team's ships overlap harmlessly.
+    const c = newShip(2000, 150, 3, Team.Red);
+    const d = newShip(2030, 150, 4, Team.Red);
+    c.vx = 110;
+    d.vx = -110;
+    world.ships[2] = c;
+    world.ships[3] = d;
+    collide();
+    expect(c.hp).toBe(SHIP_HP);
+    expect(d.x - c.x).toBe(30);
+  });
+
+  it('bots fight back: they shoot at an enemy dropship overhead, its engine pods first', () => {
+    const world = new World(75);
+    const enemy = world.addPlayer('caller', { send() {} })!;
+    const bot = world.addBot()!;
+    deliverAll(world, [enemy, bot]);
+    world.step();
+    // The caller far off; their dropship hovering over the bot (guns and bombs silenced so the bot lives to shoot).
+    internals(world).placeClone(enemy, bot.body.x + 1500, world.terrain.surfaceY(Math.floor(bot.body.x + 1504)) - ACTOR_H, 0, 0);
+    const sh = newShip(bot.body.x - 40 + 4, world.terrain.surfaceY(Math.floor(bot.body.x + 4)) - 150, enemy.id, enemy.team);
+    world.ships[0] = sh;
+    const pods0 = [1, 2, 3, 4].reduce((s2, part) => s2 + sh.partHp[part], 0);
+    let hit = false;
+    for (let k = 0; k < 30 * 8 && !hit; k++) {
+      sh.gunCd[0] = sh.gunCd[1] = 99;
+      sh.bombs = 0;
+      enemy.hp = 100;
+      world.step();
+      if (!world.ships.includes(sh)) break;
+      const pods = [1, 2, 3, 4].reduce((s2, part) => s2 + sh.partHp[part], 0);
+      if ((pods < pods0 || sh.hp < SHIP_HP) && sh.lastHitBy === bot.id) hit = true;
+    }
+    expect(hit || !world.ships.includes(sh)).toBe(true);
+  });
+
   it("it spots enemies for its side: they're marked on the caller's screen", () => {
     const frames: Uint8Array[] = [];
     const world = new World(72);

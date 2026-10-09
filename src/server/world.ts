@@ -3120,6 +3120,50 @@ export class World {
     }
   }
 
+  /**
+   * Rival dropships ram each other: hulls that overlap are pushed apart and
+   * bounce, and both take hull damage by how fast they closed (credited to
+   * the other's caller), with a spin kick. A ship's own side passes through.
+   */
+  private shipCollisions(): void {
+    for (let i = 0; i < MAX_SHIPS; i++) {
+      for (let j = i + 1; j < MAX_SHIPS; j++) {
+        const a = this.ships[i];
+        const b = this.ships[j];
+        if (!a || !b || !this.shipEnemy(a, b)) continue;
+        // The hulls (the pods out on their pylons count too: the ships are SHIP_W wide).
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const ox = SHIP_W * 0.9 - Math.abs(dx);
+        const oy = SHIP_H * 0.8 - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        // Push apart along the shallower overlap, and bounce.
+        const sideways = ox / SHIP_W < oy / SHIP_H;
+        const nx = sideways ? Math.sign(dx) || 1 : 0;
+        const ny = sideways ? 0 : Math.sign(dy) || 1;
+        const push = (sideways ? ox : oy) / 2 + 0.5;
+        a.x -= nx * push;
+        a.y -= ny * push;
+        b.x += nx * push;
+        b.y += ny * push;
+        const closing = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+        if (closing <= 0) continue;
+        const j2 = closing * (1 + SHIP_BOUNCE) / 2;
+        a.vx -= nx * j2;
+        a.vy -= ny * j2;
+        b.vx += nx * j2;
+        b.vy += ny * j2;
+        const spin = (this.rng.next() - 0.5) * closing * 0.03;
+        a.w += spin;
+        b.w -= spin;
+        if (closing < SHIP_RAM_MIN) continue;
+        const dmg = (closing - SHIP_RAM_MIN) * SHIP_RAM_DAMAGE;
+        this.hurtShipPart(i, ShipPart.Hull, dmg, b.owner);
+        if (this.ships[j] === b) this.hurtShipPart(j, ShipPart.Hull, dmg, a.owner);
+      }
+    }
+  }
+
   /** Is a hit by `by` on this dropship friendly fire (its caller or a teammate of theirs)? */
   private friendlyShip(by: number, sh: Ship): boolean {
     if (by === sh.owner) return true;
@@ -3353,6 +3397,7 @@ export class World {
     this.stepCrafts();
     this.stepTanks();
     this.stepShips();
+    this.shipCollisions();
     this.shipSpotting();
     this.stepItems();
     this.stepTraps();
@@ -3955,6 +4000,10 @@ const SHIP_SIGHT = 620;
 const SHIP_INTERCEPT_R = 700;
 const SHIP_STANDOFF = 170;
 const SHIP_AA_RANGE = 460;
+/** Dropships ramming: how much of their closing speed they bounce back with, the speed below which it's only a nudge, and hull damage per unit of closing speed beyond that. */
+const SHIP_BOUNCE = 0.5;
+const SHIP_RAM_MIN = 25;
+const SHIP_RAM_DAMAGE = 9;
 const SPOT_TICKS = 30 * 4;
 const SHIP_GUN_RANGE = 300;
 const CALL_COOLDOWN = 30 * 30;

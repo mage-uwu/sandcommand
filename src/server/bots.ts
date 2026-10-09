@@ -7,6 +7,7 @@ import { MAT_HARD, Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
+import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
 import { cellCentreX, cellOfFeet, inShaftUnder, mazeDistances, nextHop } from './maze.ts';
@@ -35,6 +36,9 @@ const RANGE: Record<number, number> = {
   [WeaponId.Laser]: 230,
 };
 const MAX_SHOT = 340; // won't shoot at anything further than this
+/** Anti-air: how far off a bot will shoot at an enemy dropship, and with what (not grenades, tools or the radio). */
+const AA_RANGE = 360;
+const ANTI_AIR: number[] = [WeaponId.Rifle, WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Gatling, WeaponId.Laser];
 /** How far around itself a prospecting bot looks for gold (half-width, and depth from just above its head). */
 const GOLD_SCAN_W = 220;
 const GOLD_SCAN_H = 280;
@@ -107,6 +111,9 @@ export class BotBrain {
   private goldBanked = 0;
   private goldGainAt = 0;
   private readonly badGold: { x: number; y: number }[] = [];
+  /** Anti-air: the enemy dropship point it's shooting at (re-picked a few times a second), and its velocity. */
+  private air: { x: number; y: number; vx: number; vy: number } | null = null;
+  private readonly airPt = { x: 0, y: 0 };
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -159,6 +166,34 @@ export class BotBrain {
       }
     }
     return this.gold;
+  }
+
+  /**
+   * Anti-air: the best point to shoot on an enemy dropship in sight and
+   * reach, if it's nearer than the clone it's fighting (`fight`): an engine
+   * pod still on its pylon first (they hang out, and losing two brings it
+   * down), else the hull.
+   */
+  private airTarget(world: World, p: Player, sx: number, sy: number, fight: number): { x: number; y: number; vx: number; vy: number } | null {
+    let best: { x: number; y: number; vx: number; vy: number } | null = null;
+    let bestD = Math.min(AA_RANGE, fight * 1.2);
+    for (const sh of world.ships) {
+      if (!sh || sh.leaving || sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)) continue;
+      const cx = sh.x + SHIP_W / 2;
+      const cy = sh.y + SHIP_H / 2;
+      if (Math.hypot(cx - sx, cy - sy) > bestD + SHIP_W) continue;
+      for (let e = 0; e <= 4; e++) {
+        // Pods first: a pod counts as a little nearer than the hull.
+        const pod = e < 4;
+        if (pod && !hasShipPart(sh.parts, ShipPart.EngineA + e)) continue;
+        const q = pod ? shipPoint(sh, ENGINE_X[e], ENGINE_NOZZLE_Y - 4, this.airPt) : { x: cx, y: cy };
+        const d = Math.hypot(q.x - sx, q.y - sy) * (pod ? 0.85 : 1);
+        if (d >= bestD || !clearLine(world, sx, sy, q.x, q.y)) continue;
+        bestD = d;
+        best = { x: q.x, y: q.y, vx: sh.vx, vy: sh.vy };
+      }
+    }
+    return best;
   }
 
   think(world: World, p: Player): InputCmd {
@@ -402,14 +437,27 @@ export class BotBrain {
       // (in concrete only the beam's core bites).
       if (this.stuck <= 150) sweep = Math.sin(t * 0.35) * 0.65;
     }
+    // Anti-air: an enemy dropship overhead, nearer than whoever it's fighting: shoot it down.
+    const antiAir = !digging && !healing && !calling && !!def && ANTI_AIR.includes(weapon);
+    if (!antiAir) this.air = null;
+    else if ((t + this.phase) % 6 === 0) this.air = this.airTarget(world, p, sx, sy, tgt && this.seeTarget ? dist : Infinity);
+    const air = this.air;
+    if (air && def) {
+      const lead = Math.hypot(air.x - sx, air.y - sy) / (def.speed || 400);
+      ax = air.x + air.vx * lead;
+      ay = air.y + air.vy * lead;
+      if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
+      sweep = 0;
+    }
     const aim = Math.atan2(ay - sy, ax - sx) + sweep + (rng.next() - 0.5) * 2 * this.noise;
     cmd.aim = quantizeAim(aim);
 
     // Fire: with a clear line (or digging), in range; semi-auto weapons get a fresh press each shot.
     // No point-blank blasts, unless cornered with nothing else.
     const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade || weapon === WeaponId.GrenadeLauncher ? 50 : 0;
-    const shoot =
-      weapon === WeaponId.RepairKit
+    const shoot = air
+      ? t >= this.holdFire
+      : weapon === WeaponId.RepairKit
         ? healing
         : weapon === WeaponId.Digger
         ? digging

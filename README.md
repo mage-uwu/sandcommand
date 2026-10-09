@@ -524,6 +524,10 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
     dogfight usually ends with pods shot off and the loser spinning down,
     in around 15–20 s. Remote pilots can fight other dropships by hand
     too, since gun rounds hit an enemy ship's hull, pods and turrets.
+  - **Ramming.** Rival dropships collide. Hulls that meet are pushed apart
+    and bounce, and both take hull damage by how fast they closed (a
+    nudge below 25 cells/s is free), credited to the other's caller, with
+    a spin kick. Ships on one side pass through each other.
   - **Covering.** When an enemy is close to an ally, it flies over that
     enemy. It picks the ally under the most pressure: nearest the threat,
     hurt, and its caller first.
@@ -563,6 +567,11 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
   - **Ending it.** Piloting ends when the ship goes down or heads home, or
     when your clone dies. Whenever nobody is flying it, the autopilot's own
     brain (covering, striking, scouting, spotting) is back in charge.
+- **Bots fight back.** When an enemy dropship is in sight within 360
+  cells, and nearer than the clone it's fighting, a bot turns its gun on
+  the ship. It aims for an engine pod still on its pylon (else the hull)
+  and leads the ship's motion. It won't use grenades, tools or the radio
+  for this.
 - **Bots buy air support too.** Now and then a bot takes on a rare
   objective: prospecting. Each life it has a 15% chance.
   - **Finding gold.** When no enemy is close and in sight, it looks for
