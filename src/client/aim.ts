@@ -15,7 +15,16 @@ const wrap = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.P
  * enemy nearest the aim line inside the cone (in range and in sight), or
  * the raw aim if there is none. Nearer misses win; distance breaks ties.
  */
-export function assistAim(ox: number, oy: number, aim: number, targets: readonly { x: number; y: number }[], sight: (x0: number, y0: number, x1: number, y1: number) => boolean, range = ASSIST_RANGE): number {
+export function assistAim(
+  ox: number,
+  oy: number,
+  aim: number,
+  targets: readonly { x: number; y: number }[],
+  sight: (x0: number, y0: number, x1: number, y1: number) => boolean,
+  range = ASSIST_RANGE,
+  /** Set to the point it snapped onto (`on` false if none): for the target marker. */
+  mark?: { x: number; y: number; on: boolean },
+): number {
   let best = aim;
   let bestScore = Infinity;
   for (const t of targets) {
@@ -31,6 +40,11 @@ export function assistAim(ox: number, oy: number, aim: number, targets: readonly
     if (score >= bestScore || !sight(ox, oy, t.x, t.y)) continue;
     bestScore = score;
     best = a;
+    if (mark) {
+      mark.x = t.x;
+      mark.y = t.y;
+      mark.on = true;
+    }
   }
   return best;
 }

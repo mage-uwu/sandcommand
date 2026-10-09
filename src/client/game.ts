@@ -241,6 +241,8 @@ export class Game implements FrameHandler {
 
   /** Scope lock-on (scope.ts): the clone locked onto and the point on it (hitbox-local), and the aim it gives. */
   scopeLock: { id: number; lx: number; ly: number } | null = null;
+  /** What the aim assist (or the scope's lock) has snapped onto: the little target marker's world point. */
+  aimMark: { x: number; y: number } | null = null;
   lockAim: number | null = null;
 
   /** Extraction: this map's labyrinth (built from the seed, like the server's), and which traps have gone off. */

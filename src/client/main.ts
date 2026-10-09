@@ -1,7 +1,7 @@
 import { ACTOR_H, ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
-import { SHIP_H, SHIP_W } from '../shared/dropship.ts';
+import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import { WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
@@ -179,7 +179,7 @@ async function join(): Promise<void> {
           g.carved(x, y, r, 1, 0, removed, detached);
           return detached.length / 3;
         };
-        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve };
+        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve, mark, targets: () => assistTargets(g) };
       }
       g.myId = w.id;
       g.room = w.room;
@@ -252,11 +252,25 @@ chatInput.addEventListener('blur', () => {
   chatInput.classList.add('hidden');
 });
 
-/** Enemies the touch aim assist may settle on: clones in view and driven tanks (never teammates). */
+/**
+ * What the aim assist may snap onto: enemy clones in view, driven tanks,
+ * and enemy dropships (their hull, and each engine pod still on its pylon,
+ * so aiming near a pod picks that pod). Never teammates or their gear.
+ */
+const podPt = { x: 0, y: 0 };
 function assistTargets(g: Game): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
   const mine = g.myTeam;
   const foe = (id: number) => id !== g.myId && (mine === Team.None || g.teamOf[id] !== mine);
+  for (const s of g.shipViews()) {
+    if (s.owner === g.myId || (mine !== Team.None && s.team === mine)) continue;
+    for (let e = 0; e < 4; e++) {
+      if (!hasShipPart(s.parts, ShipPart.EngineA + e)) continue;
+      const q = shipPoint(s, ENGINE_X[e], ENGINE_NOZZLE_Y - 4, podPt);
+      out.push({ x: q.x, y: q.y });
+    }
+    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2 });
+  }
   for (const v of g.remoteViews()) {
     if (v.flags & F_ALIVE && !g.tankPilots.has(v.id) && foe(v.id)) out.push({ x: v.x + ACTOR_W / 2, y: v.y + 6 });
   }
@@ -294,6 +308,8 @@ addEventListener('keydown', (e) => {
   net.call(CallKind.Pilot);
 });
 let pulse = 0;
+/** Where the assist snapped this tick (for the target marker). */
+const mark = { x: 0, y: 0, on: false };
 const shoulderPt = { x: 0, y: 0 };
 
 // Main loop: fixed 30 Hz simulation/input ticks, render every animation frame.
@@ -333,21 +349,24 @@ function frame(now: number): void {
       const ox = flying ? flying.x + SHIP_W / 2 : sh.x;
       const oy = flying ? flying.y + SHIP_H / 2 : sh.y;
       let aim: number;
+      mark.on = false;
+      // Scoped, the assist reaches as far as the scope sees.
+      const scopeReach = input.scoping ? 2000 : 0;
       const st = input.aimStick;
       if (st && (st.dx !== 0 || st.dy !== 0)) {
         // Touch aim stick: aim along it (assisted), and park the pointer out
         // along the aim so the crosshair, the arm and the camera follow.
-        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
+        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
         const r = Math.min(innerWidth, innerHeight) * 0.3;
         input.mouseX = ((ox - renderer.camX) * renderer.zoom) / dpr + innerWidth / 2 + Math.cos(aim) * r;
         input.mouseY = ((oy - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2 + Math.sin(aim) * r;
       } else {
         aim = Math.atan2(wy - oy, wx - ox);
-        if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1));
+        if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
         else if (mouseAssist && !g.drive && (flying || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
-          const reach = Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80));
-          aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach);
+          const reach = Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80)));
+          aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach, mark);
         }
       }
       const raw = Math.atan2(wy - oy, wx - ox);
@@ -355,6 +374,9 @@ function frame(now: number): void {
       aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
       // Locked or assisted onto someone: the arm and the aim line show the snap.
       g.lockAim = g.scopeLock || Math.abs(aim - raw) > 1e-4 ? aim : null;
+      // The little target on what we're snapped to: the scope's lock (a clone) if any, else the assist's pick.
+      const locked = g.scopeLock ? g.remoteViews().find((v) => v.id === g.scopeLock!.id) : undefined;
+      g.aimMark = locked ? { x: locked.x + g.scopeLock!.lx, y: locked.y + g.scopeLock!.ly } : mark.on && g.alive ? { x: mark.x, y: mark.y } : null;
       let buttons = input.buttons();
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
       // a held trigger pulses (fire on alternate ticks) and the gun keeps going.

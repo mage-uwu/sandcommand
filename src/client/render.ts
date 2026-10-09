@@ -637,6 +637,25 @@ export class Renderer {
       }
     }
 
+    // The aim assist's target: a small red reticle on whatever the aim has snapped to.
+    const am = game.alive ? game.aimMark : null;
+    if (am) {
+      const tx = offX + am.x * z;
+      const ty = offY + am.y * z;
+      const r = (5 + Math.sin(now / 120)) * dpr;
+      ctx.strokeStyle = 'rgba(255,70,50,0.95)';
+      ctx.lineWidth = Math.max(1, 1.5 * dpr);
+      ctx.beginPath();
+      ctx.arc(tx, ty, r, 0, Math.PI * 2);
+      for (const [kx, ky] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        ctx.moveTo(tx + kx * (r + 1 * dpr), ty + ky * (r + 1 * dpr));
+        ctx.lineTo(tx + kx * (r + 4 * dpr), ty + ky * (r + 4 * dpr));
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,70,50,0.95)';
+      ctx.fillRect(tx - dpr, ty - dpr, 2 * dpr, 2 * dpr);
+    }
+
     // Crosshair.
     if (game.alive) {
       const mx = input.mouseX * dpr;

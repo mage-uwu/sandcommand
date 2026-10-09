@@ -36,7 +36,11 @@ reticle. Moving the mouse hands aim back to it.
 is near-effortless: point anywhere within 90° either side of an enemy you
 can see, scoped or not, and the aim snaps straight onto them. With several
 in that half-circle it takes the one nearest your aim line, and distance
-breaks ties. It works for mouse, touch and keyboard aim. It reaches 650
+breaks ties. A small pulsing red reticle sits on whatever it has snapped
+to. Enemy dropships are targets too: the hull, and each engine pod still on
+its pylons, so aiming near a pod picks that pod. Scoped, it reaches as far
+as the scope sees, and the scope's lock-on works on dropships too. It works
+for mouse, touch and keyboard aim. It reaches 650
 cells, or as far as the pointer with the mouse, up to 900. Your arm and the
 aim line show the snap. Teammates are ignored, and so are tools aimed at
 the ground or at friends (digger, materializer, radio, repair kit).

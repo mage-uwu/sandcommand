@@ -31,6 +31,14 @@ describe('touch aim assist', () => {
     expect(assistAim(0, 0, 0.05, [{ x: 800, y: 0 }], open)).toBe(0.05);
     expect(assistAim(0, 0, 0.05, [{ x: 800, y: 0 }], open, 900)).toBeCloseTo(0, 5);
   });
+  it('reports what it snapped onto (for the target marker), and nothing when it lets the aim be', () => {
+    const mark = { x: 0, y: 0, on: false };
+    assistAim(0, 0, 0.3, [{ x: 150, y: 20 }], open, undefined, mark);
+    expect(mark).toEqual({ x: 150, y: 20, on: true });
+    const none = { x: 0, y: 0, on: false };
+    assistAim(0, 0, Math.PI, [{ x: 150, y: 20 }], open, undefined, none);
+    expect(none.on).toBe(false);
+  });
   it('prefers the target closest to the aim line', () => {
     const a = assistAim(0, 0, 0, [
       { x: 200, y: 30 },
