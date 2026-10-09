@@ -4,11 +4,24 @@ import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { type Complex, placeStructures } from './structures.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
+import { type CaveNet, carveCaves } from './caves.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
 export let lastComplexes: Complex[] = [];
 /** The labyrinth of the most recently generated map, if it is an Extraction map. */
 export let lastDungeon: Dungeon | null = null;
+/** The cave network of the most recently generated map, if it is a cave map. */
+export let lastCaves: CaveNet | null = null;
+
+/**
+ * Is this a cave map (caves.ts: a tunnel highway under the bunkers, with
+ * citadels in great caverns along it)? About two maps in five, ordinary or
+ * Regicide's; never the labyrinth (it's underground already).
+ */
+export function cavesOf(seed: number, kind: number): boolean {
+  if (kind === MapKind.Dungeon) return false;
+  return hash2(seed & 0xffff, seed >>> 16, 0xca7e) % 100 < 40;
+}
 
 /**
  * Biomes: the lie of the land, picked per map from its seed.
@@ -303,6 +316,9 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     lastComplexes = placeStructures(m, heights, seed, mapKind === MapKind.Fortress, backdrop, extraTowers);
     lastDungeon = null;
   }
+  // Cave maps: the highway under it all, its citadels, and the shafts down to it from every bunker.
+  lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
+  if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   frost(m, biome, seed);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the

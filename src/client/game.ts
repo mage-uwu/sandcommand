@@ -13,7 +13,7 @@ import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { generateWorld, lastBiome, lastDungeon } from '../shared/worldgen.ts';
+import { generateWorld, lastBiome, lastCaves, lastDungeon } from '../shared/worldgen.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
@@ -261,6 +261,8 @@ export class Game implements FrameHandler {
   gold = 0;
   /** The current map's biome (worldgen Biome). */
   biome = 0;
+  /** Is the current map a cave map (a tunnel highway and citadels under it)? */
+  caves = false;
 
   /** Scope lock-on (scope.ts): the clone locked onto and the point on it (hitbox-local), and the aim it gives. */
   scopeLock: { id: number; lx: number; ly: number } | null = null;
@@ -994,6 +996,7 @@ export class Game implements FrameHandler {
   wave(seed: number, hashes: Uint32Array, kind: number): void {
     generateWorld(this.terrain, seed, kind, this.backdrop);
     this.biome = lastBiome;
+    this.caves = lastCaves !== null;
     this.dungeon = lastDungeon;
     this.trapSpent = new Uint8Array(32);
     this.particles.n = 0;

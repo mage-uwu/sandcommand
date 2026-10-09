@@ -208,7 +208,8 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
+import type { CaveNet } from '../shared/caves.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
 
@@ -417,6 +418,8 @@ export class World {
   mapKind: number = MapKind.Plain;
   /** Extraction: the labyrinth of this map. */
   dungeon: Dungeon | null = null;
+  /** A cave map's tunnel network (caves.ts), for the bots to find their way through. */
+  caves: CaveNet | null = null;
   /** Weapons the map's bunkers hold at the start of a wave (sniper rifles up the towers, heavy guns in the halls). */
   mapLoot: { x: number; y: number; weapon: number }[] = [];
   /** Extraction: mines gone off (bit per trap id), its revision, and every trap's rearm timer. */
@@ -486,6 +489,7 @@ export class World {
     this.fortresses = [];
     for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
     this.dungeon = lastDungeon;
+    this.caves = lastCaves;
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
     this.trapSpent.fill(0);
     this.trapCd.fill(0);

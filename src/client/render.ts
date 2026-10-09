@@ -2603,7 +2603,7 @@ export class Renderer {
           : teams
             ? 'last team standing · red vs green · one life each'
             : 'last man standing · one life each · every clone for itself') +
-          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map`),
+          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`),
         '#ffd34a',
       );
     } else if (rs.phase === Phase.Victory && extraction) {

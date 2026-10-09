@@ -24,13 +24,13 @@ import { WeaponId } from './weapons.ts';
 export const SCALE = 2;
 export const MOD_W = 32 * SCALE;
 export const MOD_H = 24 * SCALE;
-const WALL = 3 * SCALE; // wall thickness
+export const WALL = 3 * SCALE; // wall thickness
 export const SLAB = 3 * SCALE; // floor / ceiling thickness
-const DOOR_H = (ACTOR_H + 3) * SCALE; // doorways
-const HOLE_W = 12 * SCALE; // floor holes and shafts a clone can jet through
+export const DOOR_H = (ACTOR_H + 3) * SCALE; // doorways
+export const HOLE_W = 12 * SCALE; // floor holes and shafts a clone can jet through
 const MARGIN = 96; // keep clear of the world's edge walls
 const MAX_FOUNDATION = 90 * SCALE;
-const LINING = 2 * SCALE; // tunnel and shaft lining
+export const LINING = 2 * SCALE; // tunnel and shaft lining
 
 export interface Complex {
   x0: number; // footprint, cells
@@ -229,7 +229,7 @@ function tower(m: Uint8Array, heights: Int32Array, cx: number, rng: Rng, rugged 
 }
 
 /** Every module's box, roof to deepest basement floor, gets a back wall (the king's vault, steelworks and bank vaults in steel). */
-function markBackdrop(bd: Uint8Array, c: Complex): void {
+export function markBackdrop(bd: Uint8Array, c: Complex): void {
   if (c.tower) return;
   if (c.style === Style.Steelworks) {
     for (let k = 0; k < c.heights.length; k++) {
@@ -252,7 +252,7 @@ function markBackdrop(bd: Uint8Array, c: Complex): void {
   for (const v of c.vaults ?? []) markBox(bd, v.x0, v.y0, v.x1, v.y1, Backdrop.Steel);
 }
 
-function fill(m: Uint8Array, x0: number, y0: number, x1: number, y1: number, mat: number): void {
+export function fill(m: Uint8Array, x0: number, y0: number, x1: number, y1: number, mat: number): void {
   const xa = Math.max(4, x0);
   const xb = Math.min(WORLD_W - 4, x1);
   const ya = Math.max(0, y0);
@@ -268,7 +268,11 @@ interface FortPlan {
   team: number;
 }
 
-function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: number, rng: Rng, plan?: FortPlan, style: number = Style.Concrete): Complex | null {
+/**
+ * One complex of `len` modules from `x0`, levelled on `heights`. `cap`: the
+ * most storeys any module may rise (a citadel under a cavern roof).
+ */
+export function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: number, rng: Rng, plan?: FortPlan, style: number = Style.Concrete, cap = 3): Complex | null {
   const x1 = x0 + len * MOD_W;
   // Level the site at the median ground height under it (snapped to 4).
   const hs: number[] = [];
@@ -281,11 +285,11 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
   const storeys: number[] = [];
   const basements: number[] = [];
   for (let k = 0; k < len; k++) {
-    storeys.push(plan ? plan.storeys[k] : [1, 1, 1, 1, 2, 2, 3][rng.int(7)]);
+    storeys.push(plan ? plan.storeys[k] : Math.min(cap, [1, 1, 1, 1, 2, 2, 3][rng.int(7)]));
     basements.push(plan ? plan.basements[k] : [0, 0, 1, 1, 1, 2][rng.int(6)]);
   }
   // A grand hall over two neighbouring modules (each at least two storeys tall for it).
-  const hallK = !plan && len >= 2 && rng.next() < 0.45 ? rng.int(len - 1) : -1;
+  const hallK = !plan && cap >= 2 && len >= 2 && rng.next() < 0.45 ? rng.int(len - 1) : -1;
   if (hallK >= 0) {
     storeys[hallK] = Math.max(2, storeys[hallK]);
     storeys[hallK + 1] = Math.max(2, storeys[hallK + 1]);

@@ -11,6 +11,7 @@ import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipP
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
 import { cellCentreX, cellOfFeet, inShaftUnder, mazeDistances, nextHop } from './maze.ts';
+import { type Ramp, caveLevel, onPassage } from '../shared/caves.ts';
 
 /** Names for bots (shown with a BOT tag). */
 const NAMES = [
@@ -311,6 +312,9 @@ export class BotBrain {
     if (this.prospector) for (const o of world.players) if (o && o.alive && o !== p && (p.team === Team.None || o.team !== p.team)) foesLeft++;
     const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.regicideLive && world.isKing(p)) && p.gold < CALL_COST && gunSlot >= 0 ? this.findGold(world, p) : null;
     if (goldAt) goalX = goldAt.x;
+    // A cave map, and the target somewhere else in the caves (or up top): the way there.
+    const cave = !nav && !goldAt && !calling && tgt && !this.seeTarget ? this.caveNav(world, p, tgt) : null;
+    if (cave) goalX = cave.goalX;
 
     // Moving and getting nowhere: stuck against a wall.
     const moved = Math.abs(p.body.x - this.lastX);
@@ -383,6 +387,7 @@ export class BotBrain {
     // On the objective unless someone's right in our face (a carrier never stops to brawl).
     const onTask = nav && !(tgt && this.seeTarget && dist < 100 && !nav.urgent);
     if (onTask) dir = Math.abs(dx) < 2.5 || nav.fall ? 0 : Math.sign(dx);
+    else if (cave) dir = Math.abs(dx) < 2.5 ? 0 : Math.sign(dx);
     else if (goldAt) dir = Math.abs(gdx) < 3 || (mining && Math.abs(gdx) < 6) ? 0 : Math.sign(gdx);
     else if (calling) dir = 0;
     else if (gunSlot < 0 || !tgt) dir = Math.sign(dx);
@@ -403,6 +408,8 @@ export class BotBrain {
     if (dir !== 0 && this.stuck > 6 && headClear) buttons |= BTN_UP;
     if (onTask) {
       if (nav.up) buttons |= BTN_UP;
+    } else if (cave) {
+      if (cave.up) buttons |= BTN_UP;
     } else if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
     if (b.vy > 260 && b.fuel > 5) buttons |= BTN_UP;
 
@@ -617,6 +624,65 @@ export class BotBrain {
     }
     out.goalX = cellCentreX(nxt);
     return out;
+  }
+
+  /**
+   * A cave map (caves.ts), its target on another level (the surface, the
+   * highway, the deep run) and out of sight: which way to go. Up a level by
+   * the nearest way up from here (a ramp or link passage, walked; a shaft,
+   * jetted up its middle, resting on the floor beside it when the jetpack
+   * runs low); down by the nearest passage, or by dropping down a shaft it's
+   * standing over. Halfway along a passage or up a shaft, it carries on.
+   */
+  private caveNav(world: World, p: Player, tgt: Player): { goalX: number; up: boolean } | null {
+    const net = world.caves;
+    if (!net) return null;
+    const b = p.body;
+    const feet = b.y + ACTOR_H;
+    const me = caveLevel(net, p.cx, feet);
+    const it = caveLevel(net, tgt.cx, tgt.body.y + ACTOR_H);
+    const up = it < me || (it === me && tgt.cy < p.cy - 80);
+    // Partway along a passage: on to its far end.
+    for (const r of [...net.ramps, ...net.links]) {
+      if (!onPassage(r, p.cx, feet)) continue;
+      const end = up ? r.top : r.bottom;
+      const dir = Math.sign(end.x - (up ? r.bottom.x : r.top.x));
+      if (Math.abs(p.cx - end.x) > 6) return { goalX: end.x + dir * 30, up: false };
+    }
+    // In a shaft: up its middle (resting when low), or down it.
+    for (const s of net.shafts) {
+      if (Math.abs(p.cx - s.x) > 14 || feet <= s.top + 2 || feet >= s.bottom - 2) continue;
+      if (this.resting && b.fuel > 90) this.resting = false;
+      if (!this.resting && b.fuel < 12) this.resting = true;
+      return { goalX: s.x, up: up && !this.resting };
+    }
+    if (me === it) return null;
+    // The ways off this level, up or down, nearest first (weighed toward the target).
+    let best: { goalX: number; up: boolean } | null = null;
+    let bestD = Infinity;
+    const consider = (x: number, go: { goalX: number; up: boolean }) => {
+      const d = Math.abs(x - p.cx) + Math.abs(x - tgt.cx) * 0.5;
+      if (d < bestD) {
+        bestD = d;
+        best = go;
+      }
+    };
+    const passages: Ramp[] = me === 2 || (me === 1 && !up) ? net.links : net.ramps;
+    for (const r of passages) {
+      const from = up ? r.bottom : r.top;
+      if (caveLevel(net, from.x, from.y) !== me && !(me === 0 && !up)) continue;
+      consider(from.x, { goalX: from.x, up: false });
+    }
+    for (const s of net.shafts) {
+      // Up: from the tunnel at its foot. Down: only standing in the room it opens out of.
+      if (up && caveLevel(net, s.x, s.bottom) === me) {
+        const under = Math.abs(p.cx - s.x) < 10;
+        if (this.resting && b.fuel > 90) this.resting = false;
+        if (!this.resting && b.fuel < 12) this.resting = true;
+        consider(s.x, { goalX: this.resting ? s.x + 24 : s.x, up: under && !this.resting });
+      } else if (!up && Math.abs(feet - s.top) < 8 && Math.abs(p.cx - s.x) < 80) consider(s.x, { goalX: s.x, up: false });
+    }
+    return best;
   }
 
   private driveTank(world: World, p: Player, tgt: Player | null, cmd: InputCmd): InputCmd {

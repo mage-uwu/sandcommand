@@ -869,6 +869,41 @@ countdown banner names it.
 Fortress maps are only Dunes or Meadows, so the forts have room to stand.
 Extraction's labyrinth is always Dunes.
 
+**Cave maps** (`src/shared/caves.ts`). About two maps in five (ordinary
+or Regicide, never the labyrinth; `cavesOf` by the seed) are cave maps:
+under the bunkers runs a vast tunnel system, the underground battle
+highway, and the countdown banner says so.
+- **The highway**: one tunnel 60–80 cells high the length of the map,
+  following the land above it some 210 cells down, wandering, always below
+  every bunker's deepest basement, and never steeper than you can walk or
+  roll. Its walls are rimmed with basalt; stalactites hang from its roof,
+  boulders and rubble mounds lie on its floor.
+- **Citadels**: two or three huge domed caverns on it, each holding an
+  underground fortress (a fortified or steel-built bunker complex, as tall
+  as the dome allows, halls, vaults and loot included), a paved road across
+  the cavern floor, and a gatehouse on the highway at either side: square
+  posts, a lintel banded in steel, battlements, and a gate a tarantula can
+  walk through.
+- **The deep run**: a second tunnel some 100–170 cells under the highway
+  (and under the citadels' basements), wherever there's room above the
+  bedrock, joined to it by three to five long sloping passages.
+- **Shafts**: every bunker complex and sniper tower sinks a concrete-lined
+  shaft, wide enough for a tarantula, from its deepest basement (or ground
+  floor) straight down into the highway; every citadel one on down into the
+  deep run. They never go through a king's vault or a bank vault. So every
+  bunker on the map is connected underground.
+- **Ramps**: two or three long sloping tunnels from open ground down into
+  the highway, for tanks and anything else that can't jet. Where one passes
+  under a bunker, it stays well below its basements.
+- **Galleries**: winding side tunnels off the highway, each ending in a
+  chamber with a seam of gold in its floor.
+
+Bots find their way through it (`caveNav` in `src/server/bots.ts`): with
+their target on another level (the surface, the highway, the deep run) and
+out of sight, they take the nearest way there, walking ramps and passages,
+jetting up shafts (resting beside one when the jetpack runs low), and
+dropping down the shaft in a basement they stand in.
+
 **The ground** (`src/shared/materials.ts`, `soilAt` in worldgen). The soil
 is rust red (iron oxide), and a soil noise threads its varieties through
 it: **ochre** (yellow-orange) in pockets within 90 cells of the surface,
