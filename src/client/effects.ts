@@ -275,19 +275,37 @@ export function craftExhaust(p: Particles, cx: number, cy: number, a: number, vx
 
 const CRAFT_PART_GIB = [GIB_PLATE, GIB_NOSE, GIB_FIN, GIB_FIN, GIB_NOZZLE];
 
+/** Drop-rocket scrap: brushed gunmetal. */
+const CRAFT_SCRAP = 0x8a9096;
+
 /**
- * A part shot off a drop rocket: mirror the server's hull fragments from the
- * seed (they hurt and settle as scrap), plus the part itself tumbling away.
+ * A part shot off a drop rocket gibs: mirror the server's hull fragments
+ * from the seed (they hurt and settle as scrap), and the part itself comes
+ * apart. What's left of it tumbles away, torn plate and nozzle shards burst
+ * out of it, with sparks, a lick of flame and smoke.
  */
 export function craftPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
   craftPartFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
-  const i = p.n;
-  if (p.spawn(PK.Gib, x, y, vx, vy, rnd(600, 750), (CRAFT_PART_GIB[part] ?? GIB_PLATE) | GIB_INORGANIC, 0x8a9096)) {
-    p.spin[i] = Math.floor(Math.random() * 4);
-    p.spinRate[i] = (Math.random() - 0.5) * 0.15;
+  // The part itself, mangled, tumbling off.
+  scrapGib(p, x, y, vx + rnd(-30, 30), vy - rnd(20, 60), CRAFT_PART_GIB[part] ?? GIB_PLATE, CRAFT_SCRAP, 0.15);
+  // ...and the shards it sheds.
+  const n = 6 + Math.floor(Math.random() * 3);
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = rnd(80, 230);
+    scrapGib(p, x + rnd(-2, 2), y + rnd(-2, 2), vx * 0.6 + Math.cos(a) * sp, vy * 0.6 + Math.sin(a) * sp - 60, k % 3 === 0 ? GIB_NOZZLE : GIB_PLATE, CRAFT_SCRAP, 0.2);
   }
-  burst(p, PK.Flame, x, y, 8, 120, 12, 0, vx * 0.5, vy * 0.5);
-  burst(p, PK.Smoke, x, y, 10, 50, 60);
+  burst(p, PK.Spark, x, y, 18, 220, 14, 0, vx * 0.4, vy * 0.4);
+  burst(p, PK.Flame, x, y, 10, 130, 12, 0, vx * 0.5, vy * 0.5);
+  burst(p, PK.Smoke, x, y, 12, 55, 60);
+}
+
+/** A tumbling piece of scrap (an inorganic gib in `color`), spinning up to `spin`. */
+function scrapGib(p: Particles, x: number, y: number, vx: number, vy: number, piece: number, color: number, spin: number): void {
+  const i = p.n;
+  if (!p.spawn(PK.Gib, x, y, vx, vy, rnd(600, 750), piece | GIB_INORGANIC, color)) return;
+  p.spin[i] = Math.floor(Math.random() * 4);
+  p.spinRate[i] = (Math.random() - 0.5) * spin;
 }
 
 /**

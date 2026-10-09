@@ -1226,8 +1226,10 @@ What each loss does:
 - **Hull:** the end.
 
 A part that comes off flies away with the velocity of where it was on the
-spinning hull, as heavy `Hull` fragments in the particle engine plus a
-tumbling sprite gib, and the recoil spins the rocket.
+spinning hull, as heavy `Hull` fragments in the particle engine, and the
+recoil spins the rocket. The part itself gibs: what's left of it tumbles
+off, six to eight torn plate and nozzle shards burst out of it, and sparks,
+a lick of flame and smoke go with them.
 
 **Everything composes with the field engine:**
 
