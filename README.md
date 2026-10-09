@@ -987,7 +987,9 @@ carries, picks up, switches and reloads like any clone).
   (up a shaft, say), it walks straight up it and over the top (`CLIMB_SPEED`
   in the shared `stepBody`, so prediction stays exact). It has no jetpack,
   and it never crouches or lies down.
-- **Its look.** Drawn procedurally, walking on a tripod gait keyed to the
+- **Its look.** Drawn procedurally. Each leg is a sharp **^**: a tapered tin
+  strut up to a hard knee peaking above the chassis, and a shin dropping
+  almost straight to a needle point. It walks on a tripod gait keyed to the
   distance it covers (so its feet don't skate), with legs dangling in the
   air. It has a running light in its owner's colour and a red sensor eye.
   Lost legs leave sparking sockets, and with its plating gone the chassis

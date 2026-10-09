@@ -869,7 +869,6 @@ export class Renderer {
       [DroidPart.R2, 6.2, 1, 1],
       [DroidPart.R1, 7.6, 1, 2],
     ];
-    ctx.lineCap = 'round';
     for (const [part, hip, side, i] of legs) {
       const hx = hip;
       const hy = 7.6;
@@ -888,32 +887,51 @@ export class Renderer {
       const ph = phase + group * Math.PI;
       const swing = moving && grounded ? Math.sin(ph) * 1.6 : 0;
       const lift = moving && grounded ? Math.max(0, Math.cos(ph)) * 1.6 : 0;
-      const reach = 3.6 + i * 1.7;
+      const reach = 4 + i * 1.8;
+      // A sharp ^: the knee peaks well above the chassis, out over the foot's
+      // way, and the shin drops almost straight down to a needle point.
       let fx = hx + side * reach + swing;
-      let fy = grounded ? ACTOR_H - lift : ACTOR_H - 1 + i * 0.4;
-      if (!grounded) fx = hx + side * (2.6 + i * 1.2); // dangling
-      const kx = hx + side * (1.8 + i * 0.9) + swing * 0.4;
-      const ky = hy - 3.4 + (grounded ? 0 : 1.6) - lift * 0.3;
-      // Outline, then the tin strut, then joints.
-      for (const [w, col] of [
-        [1.9, K],
-        [1.05, i === 1 ? TIN : TIN_DK],
-      ] as const) {
-        ctx.strokeStyle = col;
-        ctx.lineWidth = w;
+      const fy = grounded ? ACTOR_H - lift : ACTOR_H - 1 + i * 0.5;
+      if (!grounded) fx = hx + side * (3 + i * 1.3); // dangling
+      const kx = hx + side * (reach * 0.62) + swing * 0.6;
+      const ky = grounded ? hy - 6 - i * 0.7 - lift * 0.5 : hy - 3.2 - i * 0.3;
+      // Tapered struts as hard-edged polygons: thick at the hip, a point at the foot.
+      const strut = (ax: number, ay: number, bx: number, by: number, wa: number, wb: number) => {
+        const x1 = X(ax);
+        const y1 = Y(ay);
+        const x2 = X(bx);
+        const y2 = Y(by);
+        const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+        const nx = -(y2 - y1) / len;
+        const ny = (x2 - x1) / len;
         ctx.beginPath();
-        ctx.moveTo(X(hx), Y(hy));
-        ctx.lineTo(X(kx), Y(ky));
-        ctx.lineTo(X(fx), Y(fy));
+        ctx.moveTo(x1 + nx * wa, y1 + ny * wa);
+        ctx.lineTo(x2 + nx * wb, y2 + ny * wb);
+        ctx.lineTo(x2 - nx * wb, y2 - ny * wb);
+        ctx.lineTo(x1 - nx * wa, y1 - ny * wa);
+        ctx.closePath();
+        ctx.fill();
         ctx.stroke();
-      }
-      ctx.fillStyle = TIN;
-      ctx.fillRect(X(kx) - 0.5, Y(ky) - 0.5, 1, 1);
-      fy += 0;
+      };
+      ctx.lineJoin = 'miter';
+      ctx.miterLimit = 8;
+      ctx.lineWidth = 0.35;
+      ctx.strokeStyle = K;
+      ctx.fillStyle = i === 1 ? TIN : TIN_DK;
+      strut(hx, hy, kx, ky, 0.95, 0.6); // thigh, narrowing to the knee
+      ctx.fillStyle = i === 1 ? TIN_DK : TIN;
+      strut(kx, ky, fx, fy, 0.65, 0.05); // shin, to a point
+      // The knee: a hard angular joint at the peak.
       ctx.fillStyle = K;
-      ctx.fillRect(X(fx) - 0.5, Y(fy) - 0.6, 1, 0.8);
+      ctx.beginPath();
+      ctx.moveTo(X(kx), Y(ky) - 0.8);
+      ctx.lineTo(X(kx) + 0.6, Y(ky));
+      ctx.lineTo(X(kx), Y(ky) + 0.6);
+      ctx.lineTo(X(kx) - 0.6, Y(ky));
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.lineCap = 'butt';
+    ctx.miterLimit = 10; // (back to the canvas defaults)
     // The chassis: a squat armoured pod, wider than it is tall.
     const plated = has(parts, DroidPart.Plating);
     const x0 = Math.min(X(-1.5), X(9.5));
