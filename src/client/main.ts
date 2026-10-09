@@ -332,7 +332,7 @@ function frame(now: number): void {
     while (acc >= TICK_MS) {
       acc -= TICK_MS;
       const dpr = canvas.width / innerWidth;
-      // Arrow keys steer the reticle around the clone (keyboard-only aim).
+      // Arrow keys pick an aim direction from the clone (keyboard-only aim).
       const kx = g.drive ? g.drive.x + TANK_W / 2 : g.body.x + ACTOR_W / 2;
       const ky = g.drive ? g.drive.y + TANK_H / 3 : g.body.y + ACTOR_H / 3;
       input.stepKeyAim(
@@ -364,7 +364,10 @@ function frame(now: number): void {
         input.mouseY = ((oy - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2 + Math.sin(aim) * r;
       } else {
         aim = Math.atan2(wy - oy, wx - ox);
-        if (input.pointAssist || input.keyAim) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
+        const kd = input.keyDir;
+        // Arrow keys: the direction they point, snapped onto the enemy nearest that way.
+        if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
+        else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
         else if (mouseAssist && !g.drive && (flying || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
           const reach = Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80)));

@@ -47,7 +47,6 @@ export class InputState {
   keyAim = false;
   private keyAimX = 0;
   private keyAimY = 0;
-  private keyAimHeld = 0;
   /** Set once a touch has come in: mouse events the browser synthesises from it are ignored. */
   private lastTouch = -1e9;
 
@@ -161,37 +160,31 @@ export class InputState {
   }
 
   /**
-   * Move the keyboard reticle (once a tick): arrows push it around the clone
-   * at (ox, oy) on screen (CSS px), slow at first for fine aim and faster
-   * the longer they're held. While keyboard aim is on, the pointer follows.
+   * Keyboard aim (once a tick), like the phone's fire pad: the arrows pick a
+   * direction from the clone at (ox, oy) on screen (CSS px), any of eight,
+   * and the aim assist snaps it onto the enemy nearest that way. The
+   * direction holds when the arrows are let go, and the pointer sits out
+   * along it (so the crosshair, the arm and the camera follow).
    */
-  stepKeyAim(dt: number, ox: number, oy: number, w: number, h: number): void {
+  stepKeyAim(_dt: number, ox: number, oy: number, w: number, h: number): void {
     if (this.typing) return;
     const dx = (this.down('ArrowRight') ? 1 : 0) - (this.down('ArrowLeft') ? 1 : 0);
     const dy = (this.down('ArrowDown') ? 1 : 0) - (this.down('ArrowUp') ? 1 : 0);
     if (dx !== 0 || dy !== 0) {
-      if (!this.keyAim) {
-        this.keyAim = true;
-        this.keyAimX = this.mouseX - ox;
-        this.keyAimY = this.mouseY - oy;
-        // A pointer sitting on the clone gives no direction: start out front.
-        if (Math.hypot(this.keyAimX, this.keyAimY) < 20) {
-          this.keyAimX = 120 * (dx || 1);
-          this.keyAimY = 0;
-        }
-      }
-      this.keyAimHeld += dt;
-      const speed = 260 + Math.min(1, this.keyAimHeld / 0.6) * 640;
+      this.keyAim = true;
       const n = Math.hypot(dx, dy);
-      this.keyAimX += (dx / n) * speed * dt;
-      this.keyAimY += (dy / n) * speed * dt;
-    } else this.keyAimHeld = 0;
+      this.keyAimX = dx / n;
+      this.keyAimY = dy / n;
+    }
     if (!this.keyAim) return;
-    // Keep it on screen.
-    this.keyAimX = Math.max(-ox + 4, Math.min(w - 4 - ox, this.keyAimX));
-    this.keyAimY = Math.max(-oy + 4, Math.min(h - 4 - oy, this.keyAimY));
-    this.mouseX = ox + this.keyAimX;
-    this.mouseY = oy + this.keyAimY;
+    const r = Math.min(w, h) * 0.3;
+    this.mouseX = Math.max(4, Math.min(w - 4, ox + this.keyAimX * r));
+    this.mouseY = Math.max(4, Math.min(h - 4, oy + this.keyAimY * r));
+  }
+
+  /** The keyboard aim's direction (unit vector, screen axes), while keyboard aim is on. */
+  get keyDir(): { x: number; y: number } | null {
+    return this.keyAim ? { x: this.keyAimX, y: this.keyAimY } : null;
   }
 
   private down(...codes: string[]): boolean {

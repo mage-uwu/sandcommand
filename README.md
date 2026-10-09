@@ -25,12 +25,14 @@ through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
 drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** mute all sound, **N** sound effects, **V** aim assist. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
-**Keyboard-only aim** (no mouse needed): the **arrow keys** move the
-reticle around your clone (slow at first for fine aim, faster the longer
-you hold). It stays put relative to you as you move, and settles onto an
-enemy it's near, as touch aim does. **Left Shift** scopes and **right Shift**
-fires. Right Shift also clicks, so it builds and picks radio calls at the
-reticle. Moving the mouse hands aim back to it.
+**Keyboard-only aim** (no mouse needed), like the phone's fire pad: the
+**arrow keys** pick an aim direction from your clone (any of eight, with
+diagonals), and the aim assist snaps it at once onto the enemy nearest that
+way (within 90°), with the laser and LOCK on them. Tap an arrow toward
+someone and you're locked on. The direction holds when you let go, and the
+crosshair sits out along it as you move. **Left Shift** scopes and **right
+Shift** fires. Right Shift also clicks, so it builds and picks radio calls.
+Moving the mouse hands aim back to it.
 
 **Aim assist** (`src/client/aim.ts`). The bots aim like machines, so aiming
 is near-effortless: point anywhere within 90° either side of an enemy you

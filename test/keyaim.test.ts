@@ -14,33 +14,32 @@ const key = (type: 'keydown' | 'keyup', code: string) => fire(win, type, { code 
 const { InputState } = await import('../src/client/input.ts');
 
 describe('keyboard-only aim', () => {
-  it('arrows steer the reticle around the clone instead of moving it', () => {
+  it('arrows pick an aim direction (eight ways) instead of moving the clone, and it holds', () => {
     const input = new InputState(target);
     fire(tgt, 'mousemove', { clientX: 500, clientY: 300 });
     key('keydown', 'ArrowLeft');
     expect(input.buttons() & BTN_LEFT).toBe(0);
     input.stepKeyAim(1 / 30, 400, 300, 1000, 600);
     expect(input.keyAim).toBe(true);
-    expect(input.mouseX).toBeLessThan(500);
-    // It keeps its offset from the clone as the clone moves.
-    key('keyup', 'ArrowLeft');
-    const off = input.mouseX - 400;
-    input.stepKeyAim(1 / 30, 450, 320, 1000, 600);
-    expect(input.mouseX - 450).toBeCloseTo(off);
-    expect(input.mouseY).toBe(320);
-    // Held longer, it speeds up; it never leaves the screen.
+    expect(input.keyDir).toEqual({ x: -1, y: 0 });
+    expect(input.mouseX).toBeLessThan(400); // out along the direction
+    expect(input.mouseY).toBe(300);
+    // Diagonal.
     key('keydown', 'ArrowUp');
-    const ys: number[] = [];
-    for (let k = 0; k < 60; k++) {
-      input.stepKeyAim(1 / 30, 450, 320, 1000, 600);
-      ys.push(input.mouseY);
-    }
-    expect(ys[1] - ys[2]).toBeLessThan(ys[8] - ys[9]);
-    expect(input.mouseY).toBeGreaterThanOrEqual(4);
+    input.stepKeyAim(1 / 30, 400, 300, 1000, 600);
+    expect(input.keyDir!.x).toBeCloseTo(-Math.SQRT1_2);
+    expect(input.keyDir!.y).toBeCloseTo(-Math.SQRT1_2);
+    // Let go: the direction holds, following the clone.
+    key('keyup', 'ArrowLeft');
     key('keyup', 'ArrowUp');
+    input.stepKeyAim(1 / 30, 450, 320, 1000, 600);
+    expect(input.keyDir!.x).toBeCloseTo(-Math.SQRT1_2);
+    expect(input.mouseX).toBeLessThan(450);
+    expect(input.mouseY).toBeLessThan(320);
     // The mouse takes aim back.
     fire(tgt, 'mousemove', { clientX: 10, clientY: 10 });
     expect(input.keyAim).toBe(false);
+    expect(input.keyDir).toBeNull();
   });
 
   it('left shift scopes, right shift fires (and clicks)', () => {
