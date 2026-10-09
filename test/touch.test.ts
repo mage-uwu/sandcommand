@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
 import { stickButtons } from '../src/client/stick.ts';
-import { assistAim } from '../src/client/aim.ts';
+import { assistAim, leadPoint } from '../src/client/aim.ts';
 
 describe('touch joystick', () => {
   it('maps deflection to run, jet and crouch, with a dead zone', () => {
@@ -34,7 +34,7 @@ describe('touch aim assist', () => {
   it('reports what it snapped onto (for the target marker), and nothing when it lets the aim be', () => {
     const mark = { x: 0, y: 0, on: false };
     assistAim(0, 0, 0.3, [{ x: 150, y: 20 }], open, undefined, mark);
-    expect(mark).toEqual({ x: 150, y: 20, on: true });
+    expect(mark).toEqual({ x: 150, y: 20, vx: 0, vy: 0, on: true });
     const none = { x: 0, y: 0, on: false };
     assistAim(0, 0, Math.PI, [{ x: 150, y: 20 }], open, undefined, none);
     expect(none.on).toBe(false);
@@ -57,5 +57,23 @@ describe('touch aim assist', () => {
       { x: 200, y: -8 },
     ], open);
     expect(a).toBeCloseTo(Math.atan2(-8, 200), 5);
+  });
+});
+
+describe('leading moving targets', () => {
+  it('aims where a moving target will be when the shot arrives', () => {
+    // 400 cells off, running at 100 cells/s across; a 400 cells/s shot takes about a second.
+    const p = leadPoint(0, 0, { x: 400, y: 0, vx: 0, vy: 100 }, 400, 0);
+    expect(p.x).toBeCloseTo(400, 0);
+    expect(p.y).toBeGreaterThan(95);
+    expect(p.y).toBeLessThan(115);
+    // The flight time is refined: a target running away is led further.
+    const away = leadPoint(0, 0, { x: 400, y: 0, vx: 100, vy: 0 }, 400, 0);
+    expect(away.x).toBeGreaterThan(520);
+  });
+  it('aims high for a shot that falls, and not at all for an instant one', () => {
+    const lob = leadPoint(0, 0, { x: 300, y: 0, vx: 0, vy: 0 }, 300, 120);
+    expect(lob.y).toBeLessThan(-40); // above it (screen y is down)
+    expect(leadPoint(0, 0, { x: 300, y: 0, vx: 50, vy: 50 }, 0, 0)).toEqual({ x: 300, y: 0 });
   });
 });

@@ -221,8 +221,12 @@ export class Renderer {
       const aim = game.lockAim ?? mouseAim;
       const reach = lineOfFire(game, sh.x, sh.y, aim, WEAPONS[game.weapon]?.scope ?? 0).dist;
       this.sight = { x: sh.x, y: sh.y, aim, mouseAim, cone: WEAPONS[game.weapon]?.lockCone ?? 0, dist: sightLine(game.terrain, sh.x, sh.y, aim, 2000) };
-      this.camX += (sh.x + Math.cos(aim) * reach - this.camX) * 0.12;
-      this.camY += (sh.y + Math.sin(aim) * reach - this.camY) * 0.12;
+      // Snapped onto someone (auto-aim or the scope's lock): the scope goes to them, however far.
+      const am = game.aimMark;
+      const tx = am ? am.x : sh.x + Math.cos(aim) * reach;
+      const ty = am ? am.y : sh.y + Math.sin(aim) * reach;
+      this.camX += (tx - this.camX) * 0.12;
+      this.camY += (ty - this.camY) * 0.12;
     } else if (game.alive) {
       // Look ahead toward the mouse a little, like CC's aim-follow camera.
       const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;

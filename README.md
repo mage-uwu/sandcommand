@@ -44,7 +44,15 @@ headshot, a touch low for the body. Crouched or prone clones have both
 points lower. A small pulsing red reticle sits on whatever it has snapped
 to. The snap is shown the way the scope shows a lock, scoped or not: a red
 laser runs from the gun to the target, brackets close on a snapped clone,
-and a LOCK tag marks it (on a dropship, at the hull or pod it picked). Enemy dropships are targets too: the hull, and each engine pod still on
+and a LOCK tag marks it (on a dropship, at the hull or pod it picked).
+**Zoom and aim are one.** Snapped onto someone when you scope, the scope
+goes straight to them, however far out (past the weapon's usual scope
+distance), and the reticle stays on them. **It leads them:** the aim (and
+the laser) points where a moving target will be when the shot gets there,
+from their velocity and your round's speed, and a touch high for a round
+that drops (`leadPoint` in `src/client/aim.ts`). That holds for auto-aim
+and the scope's lock alike. Instant weapons (the laser) need no lead, and
+the sniper's 24000-cell/s slug hardly any. Enemy dropships are targets too: the hull, and each engine pod still on
 its pylons, so aiming near a pod picks that pod. Scoped, it reaches as far
 as the scope sees, and the scope's lock-on works on dropships too. It works
 for mouse, touch and keyboard aim. It reaches 650
@@ -1018,7 +1026,7 @@ exists everywhere.
 | Shotgun | 9 pellets, 900 | 14 | 75 rpm | semi | 6 | 3.3 s | 80 |
 | GL | bomblet, 340 | 13 | 150 rpm | semi | 6 | 3.5 s | 110 |
 | Gatling | heavy round, 960 | 17 | 1100 rpm (after spin-up) | auto | 100 | 5 s | 120 |
-| Laser | instant beam (see below) | 15 | hold, release | charge | 8 | 4 s | 220 |
+| Laser | instant beam (see below) | 15 | hold, release | charge | 8 | 4 s | 400 |
 | AT Cannon | heat-seeking missile, 200 → 430 | 16 | 20 rpm | semi | 1 | 9 s | 160 |
 
 Four heavier guns are in the spawn pool too:

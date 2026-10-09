@@ -1,11 +1,11 @@
-import { ACTOR_H, ACTOR_W, CHUNK_COUNT, TICK_RATE } from '../shared/constants.ts';
+import { ACTOR_H, ACTOR_W, CHUNK_COUNT, GRAVITY, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
 import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
-import { WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
-import { ASSIST_RANGE, assistAim } from './aim.ts';
+import { ASSIST_RANGE, assistAim, leadPoint } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
@@ -254,8 +254,8 @@ chatInput.addEventListener('blur', () => {
  * so aiming near a pod picks that pod). Never teammates or their gear.
  */
 const podPt = { x: 0, y: 0 };
-function assistTargets(g: Game): { x: number; y: number }[] {
-  const out: { x: number; y: number }[] = [];
+function assistTargets(g: Game): { x: number; y: number; vx: number; vy: number }[] {
+  const out: { x: number; y: number; vx: number; vy: number }[] = [];
   const mine = g.myTeam;
   const foe = (id: number) => id !== g.myId && (mine === Team.None || g.teamOf[id] !== mine);
   for (const s of g.shipViews()) {
@@ -263,9 +263,9 @@ function assistTargets(g: Game): { x: number; y: number }[] {
     for (let e = 0; e < 4; e++) {
       if (!hasShipPart(s.parts, ShipPart.EngineA + e)) continue;
       const q = shipPoint(s, ENGINE_X[e], ENGINE_NOZZLE_Y - 4, podPt);
-      out.push({ x: q.x, y: q.y });
+      out.push({ x: q.x, y: q.y, vx: s.vx, vy: s.vy });
     }
-    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2 });
+    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2, vx: s.vx, vy: s.vy });
   }
   for (const v of g.remoteViews()) {
     if (!(v.flags & F_ALIVE) || g.tankPilots.has(v.id) || !foe(v.id)) continue;
@@ -273,10 +273,10 @@ function assistTargets(g: Game): { x: number; y: number }[] {
     // headshot) and centre mass; crouched or prone, both sit lower.
     const h = STANCE_H[v.stance] ?? ACTOR_H;
     const top = v.y + ACTOR_H - h;
-    out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5 });
-    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5 });
+    out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5, vx: v.vx, vy: v.vy });
+    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy });
   }
-  for (const t of g.tankViews()) if (t.pilot !== 255 && foe(t.pilot)) out.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
+  for (const t of g.tankViews()) if (t.pilot !== 255 && foe(t.pilot)) out.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2, vx: t.vx, vy: t.vy });
   return out;
 }
 
@@ -311,7 +311,7 @@ addEventListener('keydown', (e) => {
 });
 let pulse = 0;
 /** Where the assist snapped this tick (for the target marker). */
-const mark = { x: 0, y: 0, on: false };
+const mark = { x: 0, y: 0, vx: 0, vy: 0, on: false };
 const shoulderPt = { x: 0, y: 0 };
 
 // Main loop: fixed 30 Hz simulation/input ticks, render every animation frame.
@@ -381,7 +381,17 @@ function frame(now: number): void {
       g.lockAim = g.scopeLock || Math.abs(aim - raw) > 1e-4 ? aim : null;
       // The little target on what we're snapped to: the scope's lock (a clone) if any, else the assist's pick.
       const locked = g.scopeLock ? g.remoteViews().find((v) => v.id === g.scopeLock!.id) : undefined;
-      g.aimMark = locked ? { x: locked.x + g.scopeLock!.lx, y: locked.y + g.scopeLock!.ly } : mark.on && g.alive ? { x: mark.x, y: mark.y } : null;
+      const tgt = locked ? { x: locked.x + g.scopeLock!.lx, y: locked.y + g.scopeLock!.ly, vx: locked.vx, vy: locked.vy } : mark.on && g.alive ? { x: mark.x, y: mark.y, vx: mark.vx, vy: mark.vy } : null;
+      g.aimMark = tgt ? { x: tgt.x, y: tgt.y } : null;
+      if (tgt) {
+        // Lead it: aim where it will be when the shot gets there (and high for a lobbed one).
+        const def = WEAPONS[g.weapon];
+        const proj = flying ? ProjKind.ShipGun : (def?.proj ?? -1);
+        const speed = flying ? 900 : (def?.speed ?? 0);
+        const p = leadPoint(ox, oy, tgt, speed, proj >= 0 ? GRAVITY * PROJ[proj].gravity : 0);
+        aim = Math.atan2(p.y - oy, p.x - ox);
+        g.lockAim = aim;
+      }
       let buttons = input.buttons();
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
       // a held trigger pulses (fire on alternate ticks) and the gun keeps going.

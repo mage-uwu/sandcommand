@@ -194,7 +194,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Shotgun', proj: ProjKind.Pellet, muzzle: 14, rpm: 75, auto: false, speed: 900, spread: 0.13, clip: 6, reload: 100, scope: 80, kick: 50, climb: 0.09, lockCone: 0.08, pellets: 9 },
   { name: 'GL', proj: ProjKind.Bomblet, muzzle: 13, rpm: 150, auto: false, speed: 340, spread: 0.03, clip: 6, reload: 105, scope: 110, kick: 16, climb: 0.04 },
   { name: 'Gatling', proj: ProjKind.Heavy, muzzle: 17, rpm: 1100, auto: true, speed: 960, spread: 0.08, clip: 100, reload: 150, scope: 120, kick: 3.5, climb: 0.012, lockCone: 0.06, spinUp: 14 },
-  { name: 'Laser', proj: PROJ_LASER, muzzle: 15, rpm: 120, auto: false, speed: 0, spread: 0, clip: 8, reload: 120, scope: 220, kick: 10, climb: 0, lockCone: 0.12 },
+  { name: 'Laser', proj: PROJ_LASER, muzzle: 15, rpm: 120, auto: false, speed: 0, spread: 0, clip: 8, reload: 120, scope: 400, kick: 10, climb: 0, lockCone: 0.12 },
   // One missile, nine seconds to load the next.
   { name: 'AT Cannon', proj: ProjKind.Missile, muzzle: 16, rpm: 20, auto: false, speed: 200, spread: 0.01, clip: 1, reload: 270, scope: 160, kick: 70, climb: 0.06, lockCone: 0.08 },
 ];
