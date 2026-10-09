@@ -504,7 +504,13 @@ export class World {
       this.removePlayer(bot.id);
       id = bot.id;
     }
-    const clean = name.replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 16) || `Clone${id}`;
+    // (The BOT tag is the bots' alone: clients tell humans from bots by it.)
+    const clean =
+      name
+        .replace(/[^\p{L}\p{N} _\-.]/gu, '')
+        .trim()
+        .replace(/^(bot\s+)+/i, '')
+        .slice(0, 16) || `Clone${id}`;
     return this.join(id, clean, link, null);
   }
 

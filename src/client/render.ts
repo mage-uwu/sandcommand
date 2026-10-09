@@ -1771,7 +1771,20 @@ export class Renderer {
     const mh = this.mini.height * s;
     const mx = W - mw - 14 * s;
     const my = touch ? 10 * s : H - mh - 14 * s;
-    if (!touch) lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (20 + i * 15) * s));
+    // How many real people are in the game (everyone else is a bot).
+    let humans = 0;
+    for (const [, pl] of game.players) if (!pl.bot) humans++;
+    const online = `${humans} ${humans === 1 ? 'human' : 'humans'} online`;
+    ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+    const ox = touch ? mx - 10 * s : W - 14 * s;
+    const oy = touch ? my + 14 * s : 22 * s;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillText(online, ox + s, oy + s);
+    ctx.fillStyle = '#9fe870';
+    ctx.fillText(online, ox, oy);
+    ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    if (!touch) lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (40 + i * 15) * s));
 
     // Kill feed.
     const now = performance.now();

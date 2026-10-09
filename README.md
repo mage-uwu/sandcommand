@@ -782,6 +782,9 @@ whatever room a client asks for, so everyone plays together and the cost is
 a single room's. The match holds 64. Bots fill every slot no human has and
 give theirs up as humans arrive, so the 65th human is turned away with
 "room full". The room stops ticking when its last human leaves.
+The top-right corner shows how many humans are on (bots aside; on a phone,
+beside the minimap). Clients tell bots by their **BOT** tag, which the
+server reserves for bots: a human who calls themselves "BOT …" loses it.
 
 | Path | Role |
 | --- | --- |
