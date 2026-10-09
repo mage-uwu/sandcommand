@@ -871,7 +871,7 @@ export class Renderer {
     ];
     for (const [part, hip, side, i] of legs) {
       const hx = hip;
-      const hy = 10.4;
+      const hy = 11;
       if (!has(parts, part)) {
         // A sparking socket where the leg was.
         ctx.fillStyle = K;
@@ -938,14 +938,14 @@ export class Renderer {
     // point, where the shots leave: the head is built round it.)
     const plated = has(parts, DroidPart.Plating);
     const x0 = Math.min(X(-1.5), X(9.5));
-    const cy0 = Y(7.2);
+    const cy0 = Y(8.2);
     ctx.fillStyle = K;
-    ctx.fillRect(x0, cy0, 11, 4.6);
-    ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 6.2);
+    ctx.fillRect(x0, cy0, 11, 4);
+    ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 5.6);
     ctx.fillStyle = plated ? GUN : '#3a3530';
-    ctx.fillRect(x0 + 1, cy0 + 0.4, 9, 3.6);
+    ctx.fillRect(x0 + 1, cy0 + 0.4, 9, 3);
     ctx.fillStyle = plated ? GUN_DK : '#251f1a';
-    ctx.fillRect(x0 + 1, cy0 + 2.9, 9, 1.1);
+    ctx.fillRect(x0 + 1, cy0 + 2.4, 9, 1);
     // Tin trim along the top, rivets; the plating gone, scorched seams instead.
     ctx.fillStyle = plated ? TIN : '#5a4a3a';
     ctx.fillRect(x0 + 1.5, cy0 + 0.4, 8, 0.7);
@@ -957,33 +957,78 @@ export class Renderer {
     }
     // Its owner's colour on a running light at the front of the chassis.
     ctx.fillStyle = `#${team.toString(16).padStart(6, '0')}`;
-    ctx.fillRect(X(8.2) - 0.7, Y(8.6), 1.4, 0.9);
+    ctx.fillRect(X(8.2) - 0.7, Y(9.6), 1.4, 0.9);
     const head = has(parts, DroidPart.Turret);
-    // The neck: a ribbed post from the chassis up to the head (just a stub, the head shot off).
-    const nx = X(4) - 0.9;
-    ctx.fillStyle = K;
-    ctx.fillRect(nx - 0.4, Y(head ? 5.2 : 6.2), 2.6, head ? 2.4 : 1.4);
-    ctx.fillStyle = TIN_DK;
-    ctx.fillRect(nx + 0.2, Y(head ? 5.4 : 6.4), 1.4, head ? 2 : 1);
+    // A filled, outlined polygon in droid-local cells (mirrored with the facing).
+    const poly = (pts: readonly (readonly [number, number])[], fill: string) => {
+      ctx.beginPath();
+      ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
+      for (let k = 1; k < pts.length; k++) ctx.lineTo(X(pts[k][0]), Y(pts[k][1]));
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.stroke();
+    };
+    ctx.lineJoin = 'miter';
+    ctx.lineWidth = 0.4;
+    ctx.strokeStyle = K;
+    // The head on a narrow steel T: a thin stem up from the chassis to a
+    // crossbar (the header), and on it the camera, the gun mounted along it.
+    // (Just a stub of the stem, the head shot off.)
+    poly(
+      [
+        [3.55, head ? 6.6 : 7.3],
+        [4.45, head ? 6.6 : 7.3],
+        [4.6, 8.4],
+        [3.4, 8.4],
+      ],
+      TIN_DK,
+    );
     if (head) {
+      // The header: a flat steel crossbar across the top of the stem.
+      // (Below the gun's mount, so the T shows: stem, bar, then camera and gun.)
+      poly(
+        [
+          [1, 5.8],
+          [7, 5.8],
+          [6.5, 6.7],
+          [1.5, 6.7],
+        ],
+        GUN,
+      );
       ctx.fillStyle = TIN;
-      ctx.fillRect(nx + 0.2, Y(6.2), 1.4, 0.4);
-      // The head: an armoured dome round the gun's mount, a red sensor eye
-      // looking out the front over the barrel.
-      const hx0 = X(4) - 2.8;
-      ctx.fillStyle = K;
-      ctx.fillRect(hx0 - 0.5, Y(2.2), 6.6, 3.6);
-      ctx.fillRect(hx0 + 0.5, Y(1.2), 4.6, 1.4);
-      ctx.fillStyle = GUN;
-      ctx.fillRect(hx0 + 0.2, Y(2.6), 5.2, 2.8);
-      ctx.fillRect(hx0 + 1.1, Y(1.7), 3.4, 1.2);
-      ctx.fillStyle = GUN_DK;
-      ctx.fillRect(hx0 + 0.2, Y(4.6), 5.2, 0.8);
+      ctx.fillRect(Math.min(X(1.6), X(6.4)), Y(5.95), 4.8, 0.3);
+      // The camera <]: a boxy body at the back, its snout tapering forward to the lens.
+      poly(
+        [
+          [0.6, 0.6],
+          [4, 0.6],
+          [7.2, 1.8],
+          [7.2, 3.1],
+          [4, 3.8],
+          [0.6, 3.8],
+        ],
+        GUN,
+      );
+      // A darker underside, a tin highlight along the top edge.
+      poly(
+        [
+          [0.6, 2.9],
+          [4, 2.9],
+          [7.2, 2.6],
+          [7.2, 3.1],
+          [4, 3.8],
+          [0.6, 3.8],
+        ],
+        GUN_DK,
+      );
       ctx.fillStyle = TIN;
-      ctx.fillRect(hx0 + 1.1, Y(1.9), 1.8, 0.5);
+      ctx.fillRect(Math.min(X(1), X(3.8)), Y(0.9), 2.8, 0.35);
+      // The lens: a red eye at the snout's tip.
       ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
-      ctx.fillRect(X(6) - 0.6, Y(2.6), 1.2, 0.9);
+      ctx.fillRect(X(7) - 0.55, Y(1.95), 1.1, 1);
     }
+    ctx.miterLimit = 10;
   }
 
   private drawActor(

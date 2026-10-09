@@ -993,8 +993,10 @@ heavy, 7% droid), shown on the sprite and in the HUD:
 
 **The spider droid** (`ClassId.Droid`) is a body class of its own, not
 anthropomorphic: a squat gunmetal chassis slung low between **six tin
-legs**, three either side, and above it on a neck **its head: the turret**,
-which takes **any gun** so the gun is its face (it carries, picks up,
+legs**, three either side, and above it on a narrow steel **T** (a thin
+stem up to a crossbar header) **its head: the turret**, a camera shape (a
+boxy back, a snout tapering forward to a red lens, `<]`) with **any gun**
+slung under it, so the gun is its face (it carries, picks up,
 switches and reloads like any clone). The head is built round the point the
 shots leave from, so it fires exactly from its face.
 
