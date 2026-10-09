@@ -878,12 +878,27 @@ highway, and the countdown banner says so.
   every bunker's deepest basement, and never steeper than you can walk or
   roll. Its walls are rimmed with basalt; stalactites hang from its roof,
   boulders and rubble mounds lie on its floor.
-- **Citadels**: two or three huge domed caverns on it, each holding an
+- **Citadels**: two or three huge domed caverns on it. About half hold an
   underground fortress (a fortified or steel-built bunker complex, as tall
   as the dome allows, halls, vaults and loot included), a paved road across
-  the cavern floor, and a gatehouse on the highway at either side: square
-  posts, a lintel banded in steel, battlements, and a gate a tarantula can
-  walk through.
+  the cavern floor, and a gatehouse on the highway at either side: a wall
+  down from the cavern roof to a steel-headed gate the highway runs under
+  (portcullis teeth along its foot, tall enough for a tarantula), with a
+  guard room in it over the gate (a hole up into it from the gateway,
+  firing slits both ways).
+- **Natural citadels**: the other half are nature's fortresses, no masonry
+  at all. A vast mass of basalt hangs from the dome over the middle (the
+  keep), its underside a low arch the highway runs under, with chambers
+  inside it one over another: a hole up into the lowest from beneath, a
+  chimney between them, windows out each side, gold in their walls. Either
+  side, a curtain of rock hangs from the roof over the highway (the gates).
+  Rock ledges jut from the walls high enough for a tarantula to walk under,
+  great stalactites hang from the dome, low stalagmites dot the rolling
+  floor.
+- Everything in a cavern hangs or stands clear of the way through: the
+  highway stays walkable end to end, under every gate and keep. Wherever a
+  tunnel or cavern floor would open into a natural cave below it, a bed of
+  rock bridges it.
 - **The deep run**: a second tunnel some 100–170 cells under the highway
   (and under the citadels' basements), wherever there's room above the
   bedrock, joined to it by three to five long sloping passages.

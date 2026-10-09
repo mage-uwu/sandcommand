@@ -36,6 +36,11 @@ describe('cave maps', () => {
     let steep = 0;
     for (let x = 60; x < WORLD_W - 60; x++) {
       expect(net.floor[x] - net.ceil[x]).toBeGreaterThanOrEqual(36);
+      // (A natural citadel's keep and gates stand on its floor: the way is through them.)
+      if (net.caverns.some((c) => c.natural && Math.abs(x - c.x) < c.hw)) {
+        open++;
+        continue;
+      }
       if (air(x, (net.floor[x] + net.ceil[x]) / 2) && air(x, net.floor[x] - 16)) open++;
       if (Math.abs(net.floor[x + 8] - net.floor[x]) > 10) steep++;
     }
@@ -86,6 +91,14 @@ describe('cave maps', () => {
         expect(air((c.x0 + c.x1) / 2, roof - 16)).toBe(true);
         // On the highway: its floor is the highway's there.
         expect(caveLevel(net, (c.x0 + c.x1) / 2, c.floor)).toBe(1);
+        // Its gates hang over the road: walkable under them, either side of it.
+        // (Through the gate wall's outer edge, clear of the hole up into its guard room.)
+        for (const x of [c.x0 - 24, c.x1 + 24]) {
+          let clear = 0;
+          for (let y = net.floor[x] - 1; y > net.floor[x] - 60 && air(x, y); y--) clear++;
+          expect(clear).toBeGreaterThanOrEqual(44);
+          expect(t.get(x, net.floor[x] - 52)).toBe(Mat.Metal); // (and a gate there: its steel header)
+        }
       }
       for (let x = 0; x < WORLD_W; x++) if (net.lowFloor[x]) deep++;
       expect(net.links.length).toBeGreaterThanOrEqual(1);
@@ -94,8 +107,50 @@ describe('cave maps', () => {
         expect(caveLevel(net, l.bottom.x, l.bottom.y)).toBe(2);
       }
     }
-    expect(citadels).toBeGreaterThanOrEqual(4);
+    expect(citadels).toBeGreaterThanOrEqual(2);
     expect(deep / (4 * WORLD_W)).toBeGreaterThan(0.5);
+  });
+
+  it('natural citadels: no fort, a rock keep hanging over the highway with chambers in it, rock curtains for gates', () => {
+    let natural = 0;
+    let forts = 0;
+    for (let seed = caveSeed(MapKind.Plain), tries = 0; tries < 8; tries++, seed = caveSeed(MapKind.Plain, seed + 1)) {
+      generateWorld(t, seed, MapKind.Plain);
+      const net = lastCaves!;
+      forts += net.caverns.filter((c) => !c.natural).length;
+      expect(net.caverns.filter((c) => !c.natural).length).toBe(net.citadels.length);
+      for (const c of net.caverns.filter((c) => c.natural)) {
+        natural++;
+        // No masonry in it.
+        for (const f of net.citadels) expect(f.x1 < c.x - c.hw || f.x0 > c.x + c.hw).toBe(true);
+        // The keep: rock hanging over the middle, the highway open under it, a chamber inside.
+        const fl = net.floor[c.x];
+        expect(air(c.x, fl - 20)).toBe(true);
+        let rock = 0;
+        let rooms = 0;
+        // (Several columns across it: one might run straight up the hole into a chamber.)
+        for (let x = c.x - 30; x <= c.x + 30; x += 10) {
+          let wasRock = false;
+          for (let y = fl - 60; y > net.ceil[x]; y--) {
+            const solid = !air(x, y);
+            if (solid) rock++;
+            if (wasRock && !solid) rooms++; // air over rock: a chamber's floor
+            wasRock = solid;
+          }
+        }
+        expect(rock).toBeGreaterThan(100);
+        expect(rooms).toBeGreaterThanOrEqual(3);
+        // Walkable from end to end along its floor: nothing across it under a tarantula's height.
+        for (let x = c.x - c.hw + 8; x < c.x + c.hw - 8; x += 3) {
+          let clear = 0;
+          // (Above the odd low stalagmite, which you step over.)
+          for (let y = net.floor[x] - 14; y > net.floor[x] - 60 && air(x, y); y--) clear++;
+          expect(clear).toBeGreaterThan(28);
+        }
+      }
+    }
+    expect(natural).toBeGreaterThanOrEqual(3);
+    expect(forts).toBeGreaterThanOrEqual(3);
   });
 
   it('Regicide fortresses get them too, connected underground (never through the king\'s vault)', () => {

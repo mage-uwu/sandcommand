@@ -173,7 +173,7 @@ export function placeStructures(m: Uint8Array, heights: Int32Array, seed: number
   return out;
 }
 
-function markBox(bd: Uint8Array, x0: number, y0: number, x1: number, y1: number, kind: number): void {
+export function markBox(bd: Uint8Array, x0: number, y0: number, x1: number, y1: number, kind: number): void {
   for (let y = Math.max(0, y0); y < Math.min(WORLD_H, y1); y++) bd.fill(kind, y * WORLD_W + Math.max(0, x0), y * WORLD_W + Math.min(WORLD_W, x1));
 }
 
