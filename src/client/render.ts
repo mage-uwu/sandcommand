@@ -849,7 +849,7 @@ export class Renderer {
    * its feet don't skate; in the air the legs hang. Legs shot off leave
    * sparking sockets; with its plating gone the chassis shows scorched.
    */
-  private drawDroid(ctx: CanvasRenderingContext2D, x: number, y: number, left: boolean, grounded: boolean, parts: number, team: number, moving: boolean, now: number): void {
+  private drawDroid(ctx: CanvasRenderingContext2D, x: number, y: number, left: boolean, grounded: boolean, parts: number, team: number, moving: boolean, now: number, aim = left ? Math.PI : 0): void {
     // Droid-local (as facing right, from the hitbox's top-left) to world.
     const X = (dx: number) => (left ? x + ACTOR_W - dx : x + dx);
     const Y = (dy: number) => y + dy;
@@ -998,35 +998,59 @@ export class Renderer {
       );
       ctx.fillStyle = TIN;
       ctx.fillRect(Math.min(X(1.6), X(6.4)), Y(5.95), 4.8, 0.3);
-      // The camera <]: a boxy body at the back, its snout tapering forward to the lens.
-      poly(
+      // The camera: its flat face to the front, looking where the gun points
+      // (it pivots with the aim, on the gun's mount), the body tapering away
+      // behind it, ]< . Drawn in the aim's own frame: +x along the barrel,
+      // -y up (mirrored aiming left, so it stays the right way up).
+      const px = X(4);
+      const py = Y(4);
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(aim);
+      if (left) ctx.scale(1, -1);
+      ctx.lineWidth = 0.4;
+      ctx.strokeStyle = K;
+      const cam = (pts: readonly (readonly [number, number])[], fill: string) => {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.stroke();
+      };
+      // Body: the flat face at the front, a box behind it, tapering to the back.
+      cam(
         [
-          [0.6, 0.6],
-          [4, 0.6],
-          [7.2, 1.8],
-          [7.2, 3.1],
-          [4, 3.8],
-          [0.6, 3.8],
+          [3.4, -3.5],
+          [3.4, -0.2],
+          [0.2, -0.2],
+          [-3.2, -1.3],
+          [-3.2, -2.5],
+          [0.2, -3.5],
         ],
         GUN,
       );
       // A darker underside, a tin highlight along the top edge.
-      poly(
+      cam(
         [
-          [0.6, 2.9],
-          [4, 2.9],
-          [7.2, 2.6],
-          [7.2, 3.1],
-          [4, 3.8],
-          [0.6, 3.8],
+          [3.4, -1.1],
+          [3.4, -0.2],
+          [0.2, -0.2],
+          [-3.2, -1.3],
+          [-3.2, -1.6],
+          [0.2, -1.1],
         ],
         GUN_DK,
       );
       ctx.fillStyle = TIN;
-      ctx.fillRect(Math.min(X(1), X(3.8)), Y(0.9), 2.8, 0.35);
-      // The lens: a red eye at the snout's tip.
+      ctx.fillRect(0.4, -3.3, 2.8, 0.35);
+      // The flat face: a steel bezel round the red lens, looking out along the gun.
+      ctx.fillStyle = K;
+      ctx.fillRect(3, -3.3, 0.9, 2.9);
       ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
-      ctx.fillRect(X(7) - 0.55, Y(1.95), 1.1, 1);
+      ctx.fillRect(3.2, -2.6, 0.8, 1.4);
+      ctx.restore();
     }
     ctx.miterLimit = 10;
   }
@@ -1054,7 +1078,7 @@ export class Renderer {
     // A spider droid: no clone at all (its chassis, legs and turret are drawn whole; the gun goes on the turret below).
     const droid = classOfFlags(flags) === ClassId.Droid;
     if (droid) {
-      this.drawDroid(ctx, x, y, left, (flags & F_GROUND) !== 0, parts, team, moving, now);
+      this.drawDroid(ctx, x, y, left, (flags & F_GROUND) !== 0, parts, team, moving, now, aim);
       lean = 0;
       stance = Stance.Stand;
     }
