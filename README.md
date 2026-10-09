@@ -45,10 +45,27 @@ On the enemy it picked, the point goes by angle alone. A head is a target
 of its own beside centre mass: aim a touch high for the headshot, a touch
 low for the body. On a dropship, nudge between its hull and pods.
 
-**Sticky.** Once snapped onto someone, the aim stays on them while they're
-still reasonably lined up: within about 17° of the best-lined-up enemy.
-A jittery thumb or a sweeping mouse doesn't flick between targets. Swing
-clearly onto another and it follows.
+**Locked on, it stays on.** Once the aim has locked onto someone it stays
+on them while they're in sight, whoever else comes into view. Changing
+targets takes a deliberate act:
+- **Touch.** A tap or a hold on the fire pad, anywhere roughly their way
+  (within 90°), fires at the target you're locked onto. A **swipe** (the
+  finger travelling ~36 px) picks a new one, the way it swiped.
+- **Mouse.** Swing the pointer well off them (about 30°).
+- **Keys.** Point the arrow keys a new way.
+
+Lose sight of them and it moves on to the next at once. This is what makes
+scoping easy: lock on and stay focused on your mark.
+
+**Lock first, then fire.** A thumb coming down on the fire pad locks on
+before a round goes. A target not already locked waits a moment (~0.1 s)
+for the lock to settle and the scope to arrive, so a snap shot with a
+sniper lands on the mark, not where the thumb happened to point. A quick
+tap's shot waits with it. A target already locked (by AUTO, or from
+before) fires at once.
+
+**Never fires for you.** The aim assist only ever aims. Firing is always
+your tap, hold or click.
 
 **Fire goes down the laser.** Snapped on (or scope-locked), the client
 flags its input as locked (`BTN_LOCK`). The server then holds the muzzle on
@@ -114,15 +131,13 @@ The screen splits down the middle:
   choice is remembered).** With no thumb on the fire pad, the gun finds the
   nearest enemy in sight by itself, in any direction and within its
   weapon's reach. It aims at their centre mass, leading them (on the arc,
-  for a lob), and fires once it has a shot that will land. So you can just
-  move with the left stick and let it fight.
+  for a lob), and **stays locked on**. It never fires for you: a tap or
+  hold on the fire pad fires at once at the target it's on (no lock-on
+  wait).
   - **Keeping a target.** It stays on the enemy it has unless another comes
     well closer.
-  - **What it won't fire.** No rocket or grenade in your own face, no lob
-    that can't reach, and not the laser (which wants a held charge; it
-    still aims it).
-  - **Taking over.** Touch the fire pad and you aim by hand, assisted as
-    above.
+  - **Taking over.** Tap or hold the fire pad and you fire at that lock; a
+    swipe picks another target.
 - **Taps on a spot.** With the Materializer out, a tap on the right builds
   there, and taps on its menu pick the piece. With the radio up, taps pick
   from its menu. Once you're out of the wave, a tap moves to the next clone

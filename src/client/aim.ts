@@ -63,6 +63,13 @@ export function assistAim(
   mark?: { x: number; y: number; vx?: number; vy?: number; g?: number; on: boolean },
   /** What it was snapped onto last (`g`): it stays on that while it reasonably can. */
   prev?: number,
+  /**
+   * A hard lock: stay on `prev` (while it's in range and in sight) as long as
+   * it's within this many radians of the aim, whoever else is better lined
+   * up; only a deliberate swing past it lets go. Without it, the softer
+   * stickiness (ASSIST_STICKY) applies.
+   */
+  hold?: number,
 ): number {
   // Everything in the cone and in range, best lined up first.
   const cand: { t: AssistTarget; a: number; err: number; d: number; g: number; seen: number }[] = [];
@@ -86,7 +93,7 @@ export function assistAim(
   if (!first) return aim;
   // Still on what it had last, if that's reasonably lined up: stay on it.
   let pick = first;
-  const held = prev === undefined ? undefined : cand.find((c) => c.g === prev && c.err <= first.err + ASSIST_STICKY && visible(c));
+  const held = prev === undefined ? undefined : cand.find((c) => c.g === prev && c.err <= (hold ?? first.err + ASSIST_STICKY) && visible(c));
   if (held) pick = held;
   // Otherwise the ambiguous ones (about as well lined up): the closest of them wins...
   else
@@ -112,6 +119,9 @@ export function assistAim(
   }
   return best.a;
 }
+
+/** How far the mouse has to swing off a locked target to let go of it (radians, ~30 degrees): a deliberate move, not a wobble. */
+export const MOUSE_LOCK_BREAK = 0.52;
 
 /** Auto mode keeps its target until another is this much closer (as a fraction of the held one's distance). */
 export const AUTO_SWITCH = 0.7;

@@ -207,3 +207,25 @@ describe('touch trigger', () => {
   });
 });
 
+describe('hard lock', () => {
+  const open = () => true;
+  const a = { x: 200, y: 0, g: 1 };
+  const b = { x: Math.cos(0.5) * 150, y: Math.sin(0.5) * 150, g: 2 };
+  it('a tap or hold stays on the locked target, even pointed straight at another', async () => {
+    const { ASSIST_CONE } = await import('../src/client/aim.ts');
+    // Locked on a, the thumb taps right at b (30 degrees off a): still a.
+    expect(assistAim(0, 0, 0.5, [a, b], open, undefined, undefined, 1, ASSIST_CONE)).toBeCloseTo(0, 5);
+    // A swipe (no lock carried) picks b.
+    expect(assistAim(0, 0, 0.5, [a, b], open)).toBeCloseTo(0.5, 5);
+    // The locked target gone from sight: the next best, at once.
+    expect(assistAim(0, 0, 0.5, [a, b], (_x0, _y0, _x1, y1) => y1 !== 0, undefined, undefined, 1, ASSIST_CONE)).toBeCloseTo(0.5, 5);
+  });
+  it('the mouse lets go only when swung well off the target', async () => {
+    const { MOUSE_LOCK_BREAK } = await import('../src/client/aim.ts');
+    // Wobbling 20 degrees toward b: stays on a.
+    expect(assistAim(0, 0, 0.35, [a, b], open, undefined, undefined, 1, MOUSE_LOCK_BREAK)).toBeCloseTo(0, 5);
+    // Swung right onto b, 0.6 rad off a: b.
+    expect(assistAim(0, 0, 0.6, [a, b], open, undefined, undefined, 1, MOUSE_LOCK_BREAK)).toBeCloseTo(0.5, 5);
+  });
+});
+

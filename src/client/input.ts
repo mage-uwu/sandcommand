@@ -39,10 +39,11 @@ export class InputState {
   /** Driving a tank (set each tick by the game loop): the scope button fires the cannon instead. */
   driving = false;
   /**
-   * The touch aim stick: direction (screen axes, deflection 0..1) and
-   * whether it's pushed far enough to fire. Null when no thumb is on it.
+   * The touch fire pad: the direction it's pointed (screen axes), firing,
+   * and whether it was just swiped (to re-target; main.ts clears it). Null
+   * when no thumb is on it.
    */
-  aimStick: { dx: number; dy: number; fire: boolean } | null = null;
+  aimStick: { dx: number; dy: number; fire: boolean; swipe?: boolean } | null = null;
   /** Ticks left holding fire for a quick tap (so even a tap shorter than a tick shoots). */
   tapFire = 0;
   /** A tap or hold aimed at a screen point this tick: the game loop applies aim assist to it. */

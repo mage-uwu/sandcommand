@@ -12,6 +12,12 @@ export interface TouchHooks {
 
 /** Below this distance (CSS px) from the fire pad's centre, a touch keeps the last direction. */
 const FIRE_DEAD = 18;
+/**
+ * A finger on the fire pad that travels this far (CSS px) is a swipe: it
+ * picks a new target that way. Short of it, a tap or a hold keeps the
+ * target the aim is locked onto.
+ */
+export const SWIPE_PX = 36;
 
 /**
  * Phone and tablet controls, drawn over the canvas and feeding the same
@@ -48,6 +54,9 @@ export class TouchControls {
   private stickY = 0;
   private fireId = -1;
   private fireT0 = 0;
+  /** Where the fire finger was when it last chose a target (a swipe is measured from here). */
+  private anchorX = 0;
+  private anchorY = 0;
   /** The finger on the right is pointing at a spot (point mode) rather than firing. */
   private pointing = false;
   private dirX = 1;
@@ -121,6 +130,8 @@ export class TouchControls {
         this.fireId = e.pointerId;
         this.fireT0 = performance.now();
         this.pointing = hooks.pointMode();
+        this.anchorX = x;
+        this.anchorY = y;
         if (this.pointing) input.touchTap(x, y);
         else this.moveFire(x, y);
       }
@@ -256,7 +267,14 @@ export class TouchControls {
     const reach = this.padAt.r * 0.7;
     this.padKnob.style.transform = `translate(${this.dirX * reach}px, ${this.dirY * reach}px)`;
     this.pad.classList.add('firing');
-    this.input.aimStick = { dx: this.dirX, dy: this.dirY, fire: true };
+    // Swiped (moved far enough since the last pick): pick a new target that way.
+    let swipe = this.input.aimStick?.swipe ?? false;
+    if (Math.hypot(x - this.anchorX, y - this.anchorY) > SWIPE_PX) {
+      swipe = true;
+      this.anchorX = x;
+      this.anchorY = y;
+    }
+    this.input.aimStick = { dx: this.dirX, dy: this.dirY, fire: true, swipe };
   }
 
   private endFire(): void {
