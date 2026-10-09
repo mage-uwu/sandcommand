@@ -6,7 +6,7 @@ import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/p
 import { MAT_HARD, Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, tankH, tankW } from '../shared/tank.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, surfCapacity, tankH, tankW } from '../shared/tank.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -75,6 +75,9 @@ export class BotBrain {
   private strafe = 1;
   private strafeUntil = 0;
   private stuck = 0;
+  /** Tank surfing: ticks its ride has been heading away from the fight, or standing still. */
+  private surfAway = 0;
+  private surfStill = 0;
   /** Ticks a nearby target has been out of sight (a floor or wall between us). */
   private blind = 0;
   private lastX = 0;
@@ -286,6 +289,37 @@ export class BotBrain {
         const dx = Math.max(k.x - (p.body.x + 8), 0, p.body.x - (k.x + TANK_W));
         const dy = Math.max(k.y - (p.body.y + 14), 0, p.body.y - (k.y + TANK_H));
         pickup = dx <= 8 && dy <= 8 && (t & 7) === 0;
+        break;
+      }
+    }
+
+    // Tank surfing: a friendly vehicle rolling toward a fight that's still a
+    // way off is a faster, safer ride than walking: get on (the pick-up key),
+    // shoot from its deck, and hop off when the fight's close, or the ride
+    // stops or turns away.
+    let riding = p.surf >= 0;
+    if (riding) {
+      const k = world.tanks[p.surf];
+      const away = k && tgt ? Math.sign(tgt.cx - p.cx) * k.vx : 0;
+      this.surfAway = away < -5 ? this.surfAway + 1 : 0;
+      this.surfStill = k && Math.abs(k.vx) < 3 ? this.surfStill + 1 : 0;
+      if (!k || near < 100 || this.surfAway > 45 || this.surfStill > 150) {
+        pickup = (t & 3) === 0;
+        riding = false;
+      }
+    } else if (!world.extractionLive && tgt && near > 220 && gunSlot >= 0 && p.tank < 0) {
+      for (let slot = 0; slot < world.tanks.length; slot++) {
+        const k = world.tanks[slot];
+        if (!k || !world.surfable(p, k)) continue;
+        const kx = k.x + tankW(k) / 2;
+        // Near enough, on the way, going (or about to go) toward the fight.
+        if (Math.abs(kx - p.cx) > 160 || Math.abs(k.y + tankH(k) / 2 - p.cy) > 70) continue;
+        if (Math.sign(tgt.cx - kx) !== Math.sign(tgt.cx - p.cx) || k.vx * Math.sign(tgt.cx - kx) < -5) continue;
+        if (world.players.filter((o) => o && o.surf === slot).length >= surfCapacity(k)) continue;
+        goalX = kx;
+        const dx = Math.max(k.x - (p.body.x + 8), 0, p.body.x - (k.x + tankW(k)));
+        const dy = Math.max(k.y - (p.body.y + 14), 0, p.body.y - (k.y + tankH(k)));
+        pickup = dx <= 12 && dy <= 12 && (t & 3) === 0;
         break;
       }
     }
@@ -508,6 +542,8 @@ export class BotBrain {
       if (want === digSlot && gunSlot >= 0) want = gunSlot;
       pickup = false;
     }
+    // Riding: feet still (a jump would take it off), the guns as ever.
+    if (riding) buttons &= ~(BTN_LEFT | BTN_RIGHT | BTN_UP);
     cmd.buttons = buttons;
     cmd.inv = invByte(want >= 0 ? want : p.slot, p.invVersion, pickup);
     return cmd;

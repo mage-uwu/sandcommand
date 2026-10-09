@@ -79,6 +79,8 @@ export interface SelfState {
   pilot: number;
   /** The watchdog (tank slot) we're driving by remote (255: none). */
   rc: number;
+  /** Tank surfing: (tank slot | seat << 4) we ride on, or 255. */
+  surf: number;
 }
 
 export interface RemoteActor {
@@ -333,6 +335,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           faction: 0,
           pilot: 255,
           rc: 255,
+          surf: 255,
         };
         const st = r.u8();
         self.stance = st & 3;
@@ -340,6 +343,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         self.faction = st >> 6;
         self.pilot = r.u8();
         self.rc = r.u8();
+        self.surf = r.u8();
         h.self(self);
         break;
       }

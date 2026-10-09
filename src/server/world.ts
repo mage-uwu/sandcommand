@@ -54,6 +54,8 @@ import {
   isDog,
   isPet,
   isSpider,
+  surfCapacity,
+  surfSeat,
   designW,
   hitH,
   partCenter,
@@ -276,6 +278,9 @@ export class Player {
   pilot = -1;
   /** Remote-driving our watchdog (its tank slot), or -1. The clone stands inert meanwhile too. */
   rc = -1;
+  /** Tank surfing: the vehicle (tank slot) this clone rides on top of, or -1; and its seat on it. */
+  surf = -1;
+  seat = 0;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
   /** Muzzle climb from recent shots (radians), settling back each tick. */
@@ -1188,6 +1193,7 @@ export class World {
       p.tank = -1;
       p.pilot = -1;
       p.rc = -1;
+      p.surf = -1;
       p.pendingSpawn = false;
       p.delivering = -1;
       p.inv = [];
@@ -1405,6 +1411,11 @@ export class World {
         const id = bucket[k];
         if (id === owner) continue;
         const o = this.players[id]!;
+        // (A vehicle's guns fire over its own riders.)
+        if (o.surf >= 0 && owner !== 255) {
+          const rt = this.tanks[o.surf];
+          if (rt && (rt.pilot === owner || (isPet(rt) && rt.owner === owner))) continue;
+        }
         const b = o.body;
         // A driver whose shield is gone: only the head and shoulders stick out.
         const t = o.tank >= 0 ? segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + EXPOSED_H) : segmentBox(x0, y0, dx, dy, b.x, o.top, b.x + ACTOR_W, b.y + ACTOR_H);
@@ -1431,6 +1442,8 @@ export class World {
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
       if (!t || (owner === (t.pilot !== 255 ? t.pilot : t.owner) && owner !== 255)) continue;
+      // (Nor do its riders' shots hit it.)
+      if (owner < MAX_PLAYERS && this.players[owner]?.surf === k) continue;
       // In the tank's own frame its (tilted) hull is an axis-aligned box.
       const la = tankLocal(t, x0, y0, this.segA);
       const lb = tankLocal(t, x1, y1, this.segB);
@@ -1836,10 +1849,12 @@ export class World {
       p.slot = invSlot(b);
       this.syncHeld(p);
     }
-    // The pick-up key also climbs into an empty tank, and back out.
+    // The pick-up key also climbs into an empty tank, and back out; and up
+    // onto a friendly vehicle to ride on top of it (tank surfing), and off.
     if (b & INV_PICKUP && !(prev & INV_PICKUP)) {
       if (p.tank >= 0) this.leaveTank(p, true);
-      else if (!this.boardTank(p)) this.pickUp(p);
+      else if (p.surf >= 0) this.dismount(p, true);
+      else if (!this.boardTank(p) && !this.mount(p)) this.pickUp(p);
     }
     if (b & INV_DROP && !(prev & INV_DROP) && p.tank < 0) this.dropHeld(p);
   }
@@ -2555,6 +2570,103 @@ export class World {
     }
   }
 
+  /**
+   * Whose side a vehicle is on, for riding it: a tank its driver's, a
+   * watchdog or tarantula its owner's. May `p` ride on it? A teammate's,
+   * yes; without teams (free for all), only its own watchdog or tarantula.
+   * An empty tank nobody's side (climb in instead).
+   */
+  surfable(p: Player, t: Tank): boolean {
+    if (t.chute) return false;
+    const who = isPet(t) ? t.owner : t.pilot;
+    if (who === 255 || who === p.id) return who === p.id && isPet(t);
+    const o = this.players[who];
+    return !!o && p.team !== Team.None && o.team === p.team;
+  }
+
+  /** Riders on vehicle `slot` (by seat), for a free seat. */
+  private ridersOf(slot: number): Player[] {
+    const out: Player[] = [];
+    for (const o of this.players) if (o && o.alive && o.surf === slot) out.push(o);
+    return out;
+  }
+
+  /**
+   * Tank surfing: up onto a friendly vehicle within reach, into the free
+   * seat on it nearest the clone (a watchdog carries two, a tank three, a
+   * tarantula five).
+   */
+  mount(p: Player): boolean {
+    if (p.tank >= 0 || p.pilot >= 0 || p.rc >= 0) return false;
+    const b = p.body;
+    let best = -1;
+    let bestSeat = 0;
+    let bestD = Infinity;
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t || !this.surfable(p, t)) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
+      if (dx > SURF_REACH || dy > SURF_REACH) continue;
+      const taken = this.ridersOf(k).map((o) => o.seat);
+      for (let i = 0; i < surfCapacity(t); i++) {
+        if (taken.includes(i)) continue;
+        const s = surfSeat(t, i, this.pt);
+        const d = Math.abs(s.x - p.cx) + Math.abs(s.y - (b.y + ACTOR_H)) * 0.5;
+        if (d < bestD) {
+          bestD = d;
+          best = k;
+          bestSeat = i;
+        }
+      }
+    }
+    if (best < 0) return false;
+    p.surf = best;
+    p.seat = bestSeat;
+    p.body.stance = 0;
+    this.seatRider(p, this.tanks[best]!);
+    return true;
+  }
+
+  /** Off the vehicle: a hop clear (`jump`), or just let go (it's gone). */
+  dismount(p: Player, jump: boolean): void {
+    const t = p.surf >= 0 ? this.tanks[p.surf] : null;
+    p.surf = -1;
+    const b = p.body;
+    b.onGround = false;
+    if (t) {
+      b.vx = t.vx;
+      b.vy = Math.min(0, t.vy);
+    }
+    if (jump) b.vy -= 190;
+  }
+
+  private seatRider(p: Player, t: Tank): void {
+    const s = surfSeat(t, p.seat, this.pt);
+    const b = p.body;
+    b.x = s.x - ACTOR_W / 2;
+    b.y = s.y - ACTOR_H;
+    b.vx = t.vx;
+    b.vy = t.vy;
+    b.onGround = true;
+    b.jetting = false;
+  }
+
+  /** Every rider onto its seat, wherever its vehicle went this tick; thrown off if it's gone (or no longer friendly). */
+  private seatRiders(): void {
+    for (const p of this.players) {
+      if (!p || p.surf < 0) continue;
+      const t = this.tanks[p.surf];
+      if (!p.alive || !t || !this.surfable(p, t) || p.tank >= 0) {
+        this.dismount(p, !!t);
+        continue;
+      }
+      this.seatRider(p, t);
+      p.camX = p.cx;
+      p.camY = p.cy;
+    }
+  }
+
   /** Climb into an empty, landed tank within reach. */
   private boardTank(p: Player): boolean {
     const b = p.body;
@@ -2575,6 +2687,7 @@ export class World {
 
   /** Out of the tank: through the roof hatch (or beside it) when climbing out; just gone when killed. */
   private leaveTank(p: Player, climbOut: boolean): void {
+    p.surf = -1;
     const t = p.tank >= 0 ? this.tanks[p.tank] : null;
     p.tank = -1;
     if (!t) return;
@@ -2771,7 +2884,7 @@ export class World {
   /** Clones in the tank's way are shoved aside; one it lands on is crushed. */
   private tankCrush(t: Tank, impact: number, by: number): void {
     for (const p of this.players) {
-      if (!p || !p.alive || p.tank >= 0) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.surf >= 0) continue;
       // A watchdog slips past its own owner (and its owner's side) rather than shoving them about.
       if (isPet(t) && (p.id === t.owner || (p.team !== Team.None && p.team === this.players[t.owner]?.team))) continue;
       const b = p.body;
@@ -3489,7 +3602,7 @@ export class World {
    */
   private bodyCollisions(): void {
     const ps = this.players;
-    const live = (p: Player | null): p is Player => !!p && p.alive && p.tank < 0 && p.delivering < 0;
+    const live = (p: Player | null): p is Player => !!p && p.alive && p.tank < 0 && p.surf < 0 && p.delivering < 0;
     for (let i = 0; i < ps.length; i++) {
       const a = ps[i];
       if (!live(a)) continue;
@@ -3768,7 +3881,9 @@ export class World {
       }
       // Remote control: still at the controls? (The watchdog may be gone.)
       if (p.rc >= 0 && this.tanks[p.rc]?.pilot !== p.id) p.rc = -1;
-      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT);
+      // Surfing: jump (W) to leap off; otherwise the vehicle carries it (seatRiders, after the vehicles move).
+      if (p.surf >= 0 && p.buttons & BTN_UP && !(prev & BTN_UP) && p.rc < 0 && p.pilot < 0) this.dismount(p, true);
+      const impact = p.tank >= 0 || p.surf >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -3830,6 +3945,7 @@ export class World {
 
     this.stepCrafts();
     this.stepTanks();
+    this.seatRiders();
     this.stepShips();
     this.shipCollisions();
     this.bodyCollisions();
@@ -4107,6 +4223,7 @@ export class World {
       w.u8(b.stance | (b.downTicks << 2) | (b.faction << 6));
       w.u8(p.pilot >= 0 ? p.pilot : 255);
       w.u8(p.rc >= 0 ? p.rc : 255);
+      w.u8(p.surf >= 0 ? p.surf | (p.seat << 4) : 255);
 
       // Riding in: the rocket at full precision too, since the client
       // predicts it from this state the same way it predicts its clone.
@@ -4470,6 +4587,8 @@ const SHIP_GUN_RANGE = 300;
 const CALL_COOLDOWN = 30 * 30;
 /** How close (cells, box to box) a clone must be to climb into a tank. */
 const BOARD_REACH = 10;
+/** How close (cells, box to box) a clone must be to a friendly vehicle to climb up and ride it. */
+const SURF_REACH = 14;
 /** A laid landmine: where it sits (on the ground cell at x, y), who laid it and their side, and ticks until it's armed. */
 interface Mine {
   id: number;

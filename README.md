@@ -324,8 +324,11 @@ Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
    Big messages (WAVE 3 IN 2, FRAGGED, HAWKINS WINS) are retro console
    banners: block letters made of █, glowing in the message's colour. They
    slide in on a dark, scanlined band edged in that colour. Under the title
-   is a terminal prompt with a blinking cursor: the status line
-   (`> REDEPLOYING IN 0:04_`), then dim green hints. Everything is sized and
+   is a terminal prompt with a blinking cursor: the status line, then dim
+   green hints. Dead, the status line is how you died, in the kill feed's
+   terms (`> KILLED BY REX [SNIPER]_`, `> BURIED IN A CAVE-IN_`, `> CRUSHED
+   BY FALLING ROCK [REX BROUGHT IT DOWN]_`), and the countdown to your next
+   clone comes after it (`causeOfDeath` in `src/client/game.ts`). Everything is sized and
    wrapped to fit any screen (`src/client/banner.ts`).
 5. **A new wave on a fresh map.** The next wave gets a new seed: new
    terrain, with nothing carried over (rockets, dropped weapons, debris in
@@ -714,6 +717,18 @@ a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then nee
 
 - **Tank.** An empty tank is parachuted onto your position. Climb in, or
   leave it for a teammate.
+- **Tank surfing.** Press **3** beside a friendly vehicle to climb up and
+  ride on top of it, and **3** again (or jump) to get off. A teammate's tank,
+  watchdog or tarantula is friendly; in a free-for-all, only your own
+  watchdog or tarantula is. A watchdog carries two riders, a tank three, a
+  tarantula five, standing on its deck (the tank's rear deck and glacis, the
+  tarantula's back) and going wherever it goes, so vehicles become convoys.
+  Riders aim and shoot as ever: their shots pass over their own vehicle, and
+  its guns fire over them. They're thrown clear when it's destroyed.
+  Bots use it: with a fight still a way off and a friendly vehicle near them
+  heading for it, they get on, shoot from the deck, and hop off when the
+  fight is close, or the ride stops or turns away (`World.mount`,
+  `seatRiders`; seats in `surfSeat`, `src/shared/tank.ts`).
 - **Dropship** (`src/shared/dropship.ts`). An aerial gunship that hangs
   from four engine pods on struts, like a modern drone. Nobody pilots it.
   The pods are chunky rocket motors, two on an open-truss pylon either

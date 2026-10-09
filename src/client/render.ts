@@ -455,10 +455,11 @@ export class Renderer {
     }
 
     // Over an empty tank in reach: how to climb in.
-    const boardable = game.boardableTank();
+    const surfable = game.boardableTank() ? null : game.surfableTank();
+    const boardable = game.boardableTank() ?? surfable;
     if (boardable) {
       ctx.font = `${Math.max(4, Math.round(11 / z))}px ui-monospace, monospace`;
-      const label = `${input.touch ? '⬆' : '[3]'} climb in`;
+      const label = surfable ? `${input.touch ? '⬆' : '[3]'} ride on top` : `${input.touch ? '⬆' : '[3]'} climb in`;
       const tx = boardable.x + tankW(boardable) / 2;
       const tw = ctx.measureText(label).width;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -2554,9 +2555,15 @@ export class Renderer {
         ctx.fillStyle = status.length > 1 || ride.hp < 70 ? '#ff9060' : '#a0ffa0';
         ctx.fillText(status.join('   '), W / 2, 84 * s);
       } else {
-        ctx.fillRect(W / 2 - 220 * s, H / 2 - 40 * s, 440 * s, 60 * s);
+        const cause = !game.myCraft() && game.deathCause ? game.deathCause : '';
+        ctx.fillRect(W / 2 - 220 * s, H / 2 - 40 * s, 440 * s, (cause ? 76 : 60) * s);
         ctx.fillStyle = '#fff';
         ctx.fillText(game.myCraft() ? 'Drop rocket inbound…' : secs > 0 ? `New clone in ${secs}…` : 'Launching drop rocket…', W / 2, H / 2 - 2 * s);
+        if (cause) {
+          // How we died, under it.
+          ctx.fillStyle = '#ff8070';
+          ctx.fillText(cause, W / 2, H / 2 + 22 * s);
+        }
       }
     }
 
@@ -2729,10 +2736,12 @@ export class Renderer {
       this.drawMatchCard(`WAVE ${rs.wave} · ${modeName}`, clock, secs <= 30 ? '#ff8070' : '#ffd34a', parts, extra, s);
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
-        if (rs.out) big('FRAGGED', `out for this wave · ${watching}`, '#ff4d3d');
+        // (How we died leads: who, with what; or what happened.)
+        const cause = game.deathCause ? `${game.deathCause} · ` : '';
+        if (rs.out) big('FRAGGED', `${cause}out for this wave · ${watching}`, '#ff4d3d');
         else if ((regicide || extraction || pvp) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
-          big('FRAGGED', back > 0 ? `redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · by drop rocket · ${watching}` : `drop rocket inbound · ${watching}`, '#ff4d3d');
+          big('FRAGGED', back > 0 ? `${cause}redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · ${watching}` : `${cause}drop rocket inbound · ${watching}`, '#ff4d3d');
         }
         else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${watching}`, '#c8d0d8');
         else if (teams && game.myTeam !== Team.None) big('INBOUND', `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · drop rocket on its way`, teamCss(game.myTeam));

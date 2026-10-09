@@ -110,6 +110,28 @@ export const TANK_PART_CENTER: readonly (readonly [number, number])[] = [
 
 export const hasTankPart = (mask: number, part: number) => (mask & (1 << part)) !== 0;
 
+/**
+ * Tank surfing: friendly soldiers riding on top of a vehicle. Its seats, in
+ * design cells (facing right, x along it, the y of the deck they stand on):
+ * a tank's rear deck behind the dome and its glacis, a watchdog's the same
+ * two, a tarantula's back either side of its head's mast.
+ */
+const TANK_SEATS = [4, 22, 27];
+const DOG_SEATS = [4, 24];
+const SPIDER_SEATS = [-1.2, 0.6, 2.2, 5.9, 7.6];
+const SPIDER_DECK = 6.6;
+/** How many soldiers can ride on it. */
+export const surfCapacity = (t: Kinded) => (isSpider(t) ? SPIDER_SEATS.length : isDog(t) ? DOG_SEATS.length : TANK_SEATS.length);
+const seatPt = { x: 0, y: 0 };
+/** Where rider `i` stands on it (world): its centre x, and its feet. */
+export function surfSeat(t: Posed, i: number, out: { x: number; y: number }): { x: number; y: number } {
+  const seats = isSpider(t) ? SPIDER_SEATS : isDog(t) ? DOG_SEATS : TANK_SEATS;
+  const p = tankPoint(t, seats[Math.min(i, seats.length - 1)], isSpider(t) ? SPIDER_DECK : 0, seatPt);
+  out.x = p.x;
+  out.y = p.y;
+  return out;
+}
+
 /** Where to shoot a tank (its middle; a tarantula's chassis, not the air between its legs), and where its guns turn (world y). */
 export const tankCoreY = (t: Kinded & { y: number }) => t.y + tankH(t) * (isSpider(t) ? 0.7 : 0.5);
 export const gunPivotY = (t: Kinded & { y: number }) => t.y + (isSpider(t) ? SPIDER_LASER_PIVOT[1] : CANNON_PIVOT[1]) * (t.s ?? 1);

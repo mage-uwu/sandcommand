@@ -3,7 +3,7 @@ import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, applyFrameRecords } from '../shared/frame.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
-import { TANK_W, type Tank, isDog, isSpider, newTank, stepTank, tankH, tankW } from '../shared/tank.ts';
+import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
@@ -398,7 +398,17 @@ export class Game implements FrameHandler {
     // The laser's charge, as the server counts it (for the meter and the glow).
     const charging = this.alive && !this.drive && this.weapon === WeaponId.Laser && (buttons & BTN_FIRE) !== 0 && this.reloadLeft === 0 && this.ammo > 0;
     this.laserCharge = charging ? Math.min(LASER_MAX, this.laserCharge + 1) : 0;
-    if (this.alive && this.drive) {
+    const ridden = this.alive && this.surf >= 0 ? this.tankViews().find((v) => v.slot === this.surf) : undefined;
+    if (ridden) {
+      // Riding on top of a vehicle: wherever it is, on our seat.
+      const sp = surfSeat(ridden, this.surfSeatNo, { x: 0, y: 0 });
+      this.body.x = sp.x - ACTOR_W / 2;
+      this.body.y = sp.y - ACTOR_H;
+      this.body.vx = ridden.vx;
+      this.body.vy = ridden.vy;
+      this.body.onGround = true;
+      this.body.jetting = false;
+    } else if (this.alive && this.drive) {
       stepTank(this.drive, this.terrain, DT, buttons);
       this.seat(this.drive);
       if (this.drive.jetting) tankJets(this.particles, this.drive.x, this.drive.y, this.drive.vx, this.drive.vy);
@@ -670,6 +680,12 @@ export class Game implements FrameHandler {
       this.smoothX = this.smoothY = 0;
       return;
     }
+    if (this.surf >= 0) {
+      // Surfing: the vehicle carries us (localTick seats us on it).
+      b.x = rawX;
+      b.y = rawY;
+      return;
+    }
     if (this.lastSelfTank) {
       // Driving: the clone rides in the seat; reconcileTank rebases the tank.
       b.x = rawX;
@@ -738,11 +754,16 @@ export class Game implements FrameHandler {
   pilot = -1;
   /** The watchdog (tank slot) we're driving by remote, or -1 (the clone stands inert meanwhile too). */
   rc = -1;
+  /** Tank surfing: the vehicle (tank slot) we ride on top of, or -1, and our seat on it. */
+  surf = -1;
+  surfSeatNo = 0;
 
   self(s: SelfState): void {
     this.lastSelf = s;
     this.pilot = s.pilot === 255 ? -1 : s.pilot;
     this.rc = s.rc === 255 ? -1 : s.rc;
+    this.surf = s.surf === 255 ? -1 : s.surf & 15;
+    this.surfSeatNo = s.surf === 255 ? 0 : s.surf >> 4;
   }
 
   /** The watchdog we're driving by remote, if we are. */
@@ -1000,6 +1021,7 @@ export class Game implements FrameHandler {
     generateWorld(this.terrain, seed, kind, this.backdrop);
     this.biome = lastBiome;
     this.caves = lastCaves !== null;
+    this.deathCause = '';
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.dungeon = lastDungeon;
     this.trapSpent = new Uint8Array(32);
@@ -1144,6 +1166,9 @@ export class Game implements FrameHandler {
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 400) * 8);
   }
 
+  /** How we died last (the death banner's headline): "killed by Rex [Sniper]", "buried in a cave-in"... */
+  deathCause = '';
+
   /** Our career record, across sessions (kept in this browser). */
   readonly career = loadCareer();
 
@@ -1166,6 +1191,7 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
+    if (victim === this.myId) this.deathCause = causeOfDeath(kn, killer, victim, weapon, how);
     const droid = this.isDroid(victim);
     if (droid) text += ' (droid scrapped)';
     else if (!has(k.parts, Part.Head)) text += ' (headshot)';
@@ -1386,10 +1412,31 @@ export class Game implements FrameHandler {
     const b = this.body;
     for (const [, s] of this.tankSnaps) {
       const t = s[s.length - 1];
-      if (t.pilot !== 255 || t.chute || isDog(t)) continue;
+      if (t.pilot !== 255 || t.chute || isPet(t)) continue;
       const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
       const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
       if (dx <= 10 && dy <= 10) return t;
+    }
+    return null;
+  }
+
+  /**
+   * The friendly vehicle we could ride on top of right now (tank surfing;
+   * the server's rule: a teammate's tank, watchdog or tarantula, or our own
+   * watchdog or tarantula), if any.
+   */
+  surfableTank(): TankView | null {
+    if (!this.alive || this.drive || this.surf >= 0) return null;
+    const b = this.body;
+    const team = this.myTeam;
+    for (const t of this.tankViews()) {
+      if (t.chute) continue;
+      const who = isPet(t) ? t.owner : t.pilot;
+      const ok = who === this.myId ? isPet(t) : who !== 255 && team !== Team.None && this.teamOf[who] === team;
+      if (!ok) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
+      if (dx <= 14 && dy <= 14) return t;
     }
     return null;
   }
@@ -1466,4 +1513,22 @@ export class Game implements FrameHandler {
   colorOf(id: number): string {
     return this.players.get(id)?.color ?? '#ccc';
   }
+}
+
+/**
+ * What killed us, for the death banner, in the kill feed's terms: who, and
+ * with what ("killed by Rex [Sniper]"), or what happened ("buried in a
+ * cave-in", "crushed by falling rock", "fell to your death").
+ */
+export function causeOfDeath(killerName: string, killer: number, victim: number, weapon: number, how: string): string {
+  const by = killer !== victim && killer !== 255 ? killerName : '';
+  if (weapon === 255) return 'fell to your death';
+  if (weapon === W_TRAP) return 'impaled on the spikes';
+  if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
+  if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';
+  if (weapon === W_ROCKFALL) return by ? `crushed by falling rock [${by} brought it down]` : 'crushed by falling rock';
+  if (weapon === W_DEBRIS) return by ? `buried in a cave-in [${by}'s doing]` : 'buried in a cave-in';
+  if (weapon === W_BURN) return by ? `burned to death [${by}]` : 'burned to death';
+  if (!by) return weapon === W_CRAFT ? 'crushed by a drop rocket' : weapon === W_TANK ? 'went down with the tank' : 'killed yourself';
+  return `killed by ${by} [${weapon === W_LASER ? 'Laser' : how}]`;
 }
