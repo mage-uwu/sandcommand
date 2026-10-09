@@ -254,10 +254,16 @@ describe('radio and dropship', () => {
     world.step();
     world.call(a.id, CallKind.Dropship);
     frames.length = 0;
-    for (let k = 0; k < 30 * 6; k++) {
+    // Until it's spotted (then a few ticks for the sighting to go out): the
+    // ship's guns and bombs may well kill it after, and the dead aren't spotted.
+    let spotted = -1;
+    for (let k = 0; k < 30 * 6 && (spotted < 0 || k < spotted + 4); k++) {
       b.body.vx = 0;
+      b.hp = 100;
       world.step();
+      if (spotted < 0 && world.spots.get(a.id)?.has(b.id)) spotted = k;
     }
+    expect(spotted).toBeGreaterThanOrEqual(0);
     expect(world.spots.get(a.id)?.has(b.id)).toBe(true);
     const game = new Game();
     game.myId = a.id;

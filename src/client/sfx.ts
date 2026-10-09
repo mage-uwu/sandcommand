@@ -144,6 +144,7 @@ export class Sfx {
         return;
       }
       case ProjKind.Rocket:
+      case ProjKind.Missile:
       case ProjKind.Shell: {
         // Bazooka: a thump and a roaring whoosh. Tank cannon: a heavy boom.
         const v = this.voice(x, y, 0.65, 0.9, 1.2);

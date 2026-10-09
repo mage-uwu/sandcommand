@@ -14,6 +14,9 @@ import { PROJ } from './weapons.ts';
 const GRAV_BY_KIND = new Float32Array(PROJ.map((p) => p.gravity));
 const BOUNCE_BY_KIND = new Float32Array(PROJ.map((p) => p.bounce));
 const THRUST_BY_KIND = new Float32Array(PROJ.map((p) => p.thrust ?? 0));
+const SEEK_BY_KIND = new Float32Array(PROJ.map((p) => p.seek ?? 0));
+/** A heat seeker flies straight this long before it starts to home (clear of the tube). */
+const SEEK_ARM = 6;
 
 /** Deterministic [0, 1) from a projectile id, so server and clients fly a runaway engine the same way. */
 function idHash(id: number, s: number): number {
@@ -82,6 +85,32 @@ export interface ProjEnd {
 }
 
 /** Bullets, rockets and grenades. */
+/** Heat seeking: how far a seeker sees, and how far off its heading (radians) it will turn to chase. */
+export const HEAT_RANGE = 700;
+export const HEAT_CONE = 1.2;
+
+/**
+ * The best of `targets` (hot enemy vehicles, world points) for a seeker at
+ * (x, y) heading `a`: within range and its view cone, the nearest, with
+ * those nearer its heading counting as nearer. Written to `out`.
+ */
+export function pickHeat(x: number, y: number, a: number, targets: readonly { x: number; y: number }[], out: { x: number; y: number }): boolean {
+  let best = Infinity;
+  for (const t of targets) {
+    const d = Math.hypot(t.x - x, t.y - y);
+    if (d > HEAT_RANGE) continue;
+    const off = Math.abs(Math.atan2(Math.sin(Math.atan2(t.y - y, t.x - x) - a), Math.cos(Math.atan2(t.y - y, t.x - x) - a)));
+    if (off > HEAT_CONE) continue;
+    const score = d * (1 + off);
+    if (score < best) {
+      best = score;
+      out.x = t.x;
+      out.y = t.y;
+    }
+  }
+  return best < Infinity;
+}
+
 export class Projectiles {
   n = 0;
   readonly id: Uint32Array;
@@ -94,6 +123,13 @@ export class Projectiles {
   readonly life: Uint16Array;
   /** Heading (radians) of a self-propelled projectile (its thrust axis). */
   readonly ang: Float32Array;
+  /**
+   * Heat seekers' eyes: where projectile i should home (the hottest enemy
+   * vehicle it can see), written to `out`; false for nothing to chase. Each
+   * side supplies its own (the server from the world, a client from its views).
+   */
+  seeker: ((i: number, out: { x: number; y: number }) => boolean) | null = null;
+  private readonly seekPt = { x: 0, y: 0 };
 
   constructor(readonly cap: number) {
     this.id = new Uint32Array(cap);
@@ -164,6 +200,24 @@ export class Projectiles {
       const d = 1 - Math.min(1, (def.drag ?? 0) * dt);
       vx[i] *= d;
       vy[i] *= d;
+    }
+    // Heat seekers: burn up to cruise speed, turning (at most so fast) toward their target.
+    for (let i = 0; i < n; i++) {
+      const turn = SEEK_BY_KIND[kind[i]];
+      if (turn === 0) continue;
+      const def = PROJ[kind[i]];
+      let a = Math.atan2(vy[i], vx[i]);
+      let s = Math.hypot(vx[i], vy[i]);
+      if (this.seeker && def.life - this.life[i] > SEEK_ARM && this.seeker(i, this.seekPt)) {
+        const want = Math.atan2(this.seekPt.y - y[i], this.seekPt.x - x[i]);
+        const off = Math.atan2(Math.sin(want - a), Math.cos(want - a));
+        const m = turn * dt;
+        a += off > m ? m : off < -m ? -m : off;
+      }
+      s += ((def.cruise ?? s) - s) * Math.min(1, 1.2 * dt);
+      vx[i] = Math.cos(a) * s;
+      vy[i] = Math.sin(a) * s;
+      this.ang[i] = a;
     }
 
     // Pass 2: swept collision.

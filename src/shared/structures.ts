@@ -390,7 +390,7 @@ function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len: numbe
       fill(m, hx0, floor - MOD_H, hx0 + LEDGE, floor - MOD_H + SLAB, Mat.Concrete);
       fill(m, hx1 - LEDGE, floor - MOD_H, hx1, floor - MOD_H + SLAB, Mat.Concrete);
       halls.push({ x0: hx0, y0: hy0, x1: hx1, y1: floor });
-      const heavy = [WeaponId.Gatling, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Laser];
+      const heavy = [WeaponId.Gatling, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Laser, WeaponId.ATCannon];
       loot.push({ x: (hx0 + hx1) >> 1, y: floor - 2, weapon: heavy[rng.int(heavy.length)] });
     }
   }

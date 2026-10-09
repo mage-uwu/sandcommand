@@ -281,6 +281,20 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 1,
   },
+  {
+    // AT cannon: a fat launch tube on the shoulder, a sight block on top, the missile's red nose in the muzzle
+    grid: [
+      '....KKKK...........',
+      '...KMVVMK..........',
+      '.KKKKKKKKKKKKKKKKK.',
+      'KAAKOOOOOOOOOOOOOrK',
+      'KAAKOooOOOOOOOOOOrK',
+      '.KKKKKKoKKKKKKKKKK.',
+      '......KK...........',
+    ],
+    px: 1,
+    py: 3,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.

@@ -464,6 +464,22 @@ export class Renderer {
         }
         ctx.drawImage(this.sprites.shipEngine(), -5, -6);
         ctx.restore();
+      } else if (k === 14) {
+        // AT missile: an olive body with a red seeker head and fins, a flame out the back.
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(p.ang[i] || Math.atan2(p.vy[i], p.vx[i]));
+        const len = 3 + ((now / 29 + i) % 3);
+        ctx.fillStyle = '#ff8a24';
+        ctx.fillRect(-5 - len, -1, len, 2);
+        ctx.fillStyle = '#fffbe0';
+        ctx.fillRect(-5 - len + 1, -0.5, len - 1, 1);
+        ctx.fillStyle = '#3c4628';
+        ctx.fillRect(-5, -1.5, 8, 3);
+        ctx.fillRect(-5, -2.5, 2, 5);
+        ctx.fillStyle = (now / 90) % 2 < 1 ? '#ff3030' : '#a01010';
+        ctx.fillRect(3, -1, 2, 2);
+        ctx.restore();
       } else if (k === 7) {
         // Dropship bomb: a dark finned casing, nose down, a red band.
         ctx.fillStyle = '#2a2e30';

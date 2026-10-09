@@ -34,11 +34,12 @@ const RANGE: Record<number, number> = {
   [WeaponId.GrenadeLauncher]: 150,
   [WeaponId.Gatling]: 140,
   [WeaponId.Laser]: 230,
+  [WeaponId.ATCannon]: 240,
 };
 const MAX_SHOT = 340; // won't shoot at anything further than this
 /** Anti-air: how far off a bot will shoot at an enemy dropship, and with what (not grenades, tools or the radio). */
 const AA_RANGE = 360;
-const ANTI_AIR: number[] = [WeaponId.Rifle, WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Gatling, WeaponId.Laser];
+const ANTI_AIR: number[] = [WeaponId.Rifle, WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Gatling, WeaponId.Laser, WeaponId.ATCannon];
 /** How far around itself a prospecting bot looks for gold (half-width, and depth from just above its head). */
 const GOLD_SCAN_W = 220;
 const GOLD_SCAN_H = 280;

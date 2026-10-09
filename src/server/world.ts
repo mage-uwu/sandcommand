@@ -10,6 +10,7 @@ import {
   SHIP_INTEGRITY,
   SHIP_PARTS,
   SHIP_PART_CENTER,
+  SHIP_HP,
   SHIP_W,
   type Ship,
   ShipMission,
@@ -35,6 +36,7 @@ import {
   TANK_INTEGRITY,
   TANK_PARTS,
   TANK_PART_CENTER,
+  TANK_HP,
   TANK_W,
   EXPOSED_H,
   EXPOSED_SEAT_Y,
@@ -122,7 +124,7 @@ import {
   WORLD_W,
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
-import { Projectiles, segmentBox } from '../shared/kernels.ts';
+import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
 import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
@@ -349,6 +351,8 @@ export class World {
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
   readonly projectiles = new Projectiles(4096);
+  /** Scratch for the heat seekers' target list. */
+  private readonly heat: { x: number; y: number }[] = [];
   readonly chunkVersion = new Uint32Array(CHUNK_COUNT);
   readonly players: (Player | null)[] = new Array(MAX_PLAYERS).fill(null);
   readonly rng: Rng;
@@ -415,6 +419,7 @@ export class World {
     this.mode = opts.mode ?? 'sandbox';
     this.tankDrops = opts.tanks ?? this.mode === 'ffa';
     this.rotation = opts.rotation?.length ? opts.rotation : DEFAULT_ROTATION;
+    this.projectiles.seeker = (i, out) => this.heatTarget(i, out);
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
     this.makeMap(this.mapKindFor(1));
@@ -1472,6 +1477,7 @@ export class World {
         const rvy = pr.vy[i] - sh.vy;
         const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
         this.hitShip(actor - SHIP_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
+        if (def.antiArmor && this.ships[actor - SHIP_ID_BASE] === sh && !this.friendlyShip(owner, sh)) this.hurtShipPart(actor - SHIP_ID_BASE, ShipPart.Hull, SHIP_HP * def.antiArmor * 0.67, owner);
       }
     } else if (actor >= TANK_ID_BASE) {
       const t = this.tanks[actor - TANK_ID_BASE];
@@ -1480,6 +1486,8 @@ export class World {
         const rvy = pr.vy[i] - t.vy;
         const sp = Math.sqrt(pr.vx[i] * pr.vx[i] + pr.vy[i] * pr.vy[i]) + 1e-6;
         this.hitTank(actor - TANK_ID_BASE, x, y, pr.vx[i] / sp, pr.vy[i] / sp, def.mass * def.sharp * Math.sqrt(rvx * rvx + rvy * rvy), def.damage, owner);
+        // A shaped charge: a share of the whole hull, straight through the armour.
+        if (def.antiArmor && this.tanks[actor - TANK_ID_BASE] === t && !this.friendlyTank(owner, t)) this.hurtTankPart(actor - TANK_ID_BASE, TankPart.Hull, TANK_HP * def.antiArmor, owner);
       }
     } else if (actor >= CRAFT_ID_BASE) {
       const c = this.crafts[actor - CRAFT_ID_BASE];
@@ -3162,6 +3170,24 @@ export class World {
         if (this.ships[j] === b) this.hurtShipPart(j, ShipPart.Hull, dmg, a.owner);
       }
     }
+  }
+
+  /**
+   * A heat seeker's target: the hottest enemy vehicle it can see, i.e. a tank
+   * someone drives, a dropship, a drop rocket with a clone aboard, none of
+   * them its shooter's or their team's.
+   */
+  private heatTarget(i: number, out: { x: number; y: number }): boolean {
+    const pr = this.projectiles;
+    const owner = pr.owner[i];
+    const team = owner < MAX_PLAYERS ? (this.players[owner]?.team ?? Team.None) : Team.None;
+    const foe = (id: number, t: number) => id !== owner && !(team !== Team.None && t === team);
+    const list = this.heat;
+    list.length = 0;
+    for (const t of this.tanks) if (t && t.pilot !== 255 && foe(t.pilot, this.players[t.pilot]?.team ?? Team.None)) list.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
+    for (const sh of this.ships) if (sh && !sh.leaving && foe(sh.owner, sh.team)) list.push({ x: sh.x + SHIP_W / 2, y: sh.y + SHIP_H / 2 });
+    for (const c of this.crafts) if (c && c.passenger !== 255 && foe(c.passenger, this.players[c.passenger]?.team ?? Team.None)) list.push({ x: c.x, y: c.y });
+    return pickHeat(pr.x[i], pr.y[i], pr.ang[i] || Math.atan2(pr.vy[i], pr.vx[i]), list, out);
   }
 
   /** Is a hit by `by` on this dropship friendly fire (its caller or a teammate of theirs)? */

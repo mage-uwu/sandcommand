@@ -1002,6 +1002,7 @@ exists everywhere.
 | GL | bomblet, 340 | 13 | 150 rpm | semi | 6 | 3.5 s | 110 |
 | Gatling | heavy round, 960 | 17 | 1100 rpm (after spin-up) | auto | 100 | 5 s | 120 |
 | Laser | instant beam (see below) | 15 | hold, release | charge | 8 | 4 s | 220 |
+| AT Cannon | heat-seeking missile, 200 → 430 | 16 | 20 rpm | semi | 1 | 9 s | 160 |
 
 Four heavier guns are in the spawn pool too:
 - **Shotgun:** a military combat shotgun. Each shell is a spread of nine
@@ -1025,6 +1026,23 @@ Four heavier guns are in the spawn pool too:
     enough to cut through the body whatever it hits first).
   - A strong beam burns a crater where it lands, and kicks you back.
   - Beams go out as `R_BEAM` records and kills show as Laser in the feed.
+
+The **AT Cannon** (anti-tank) is not in the spawn pool as a primary. About
+one clone in nine carries one as its backup gun, and it lies in the
+bunkers' grand halls with the other heavy guns.
+- **The missile.** It fires a single missile that leaves the tube slowly,
+  then burns up to 430 cells/s.
+- **Heat seeking.** After a brief arming delay it turns (up to about
+  140°/s) toward the hottest enemy vehicle it can see within 700 cells and
+  70° of its heading: a tank someone is driving, a dropship, or a drop
+  rocket with a clone aboard. Never its own side's. With nothing hot in
+  view it flies straight, like a heavy rocket. The server and each client
+  steer it from their own view of the vehicles, and the server's word is
+  final where it lands.
+- **Shaped charge.** A direct hit puts 46% of a tank's whole hull straight
+  through the armour (dropships take less), on top of the warhead and its
+  blast. One missile takes about half a tank (47.6% in the tests).
+- **The cost.** One missile a load, and **nine seconds** to load the next.
 
 The **sniper** is near instant: its slug flies 800 cells a tick and crosses
 the whole map in about five ticks, so you point and click. It's light for

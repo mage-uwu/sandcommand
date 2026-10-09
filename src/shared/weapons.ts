@@ -28,6 +28,8 @@ export const ProjKind = {
   Bomblet: 12,
   /** A Gatling round: a heavy machine-gun bullet. */
   Heavy: 13,
+  /** An AT cannon's heat-seeking missile: homes on enemy vehicles; a direct hit guts a tank. */
+  Missile: 14,
 } as const;
 
 export interface ProjDef {
@@ -50,6 +52,11 @@ export interface ProjDef {
   drag?: number;
   /** Knockback on a direct hit, as a multiple of its momentum's (default 1). */
   knock?: number;
+  /** Heat seeking: how fast it turns toward a hot target (rad/s), and the speed it accelerates to (cells/s). */
+  seek?: number;
+  cruise?: number;
+  /** Shaped charge: on a direct hit, this fraction of a tank's full hull (and less of a dropship's) goes straight through its armour. */
+  antiArmor?: number;
 }
 
 export const PROJ: readonly ProjDef[] = [
@@ -82,6 +89,8 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 1, life: 50, damage: 0, mass: 0.4, sharp: 0.1, carveR: 13, coreR: 5, splashR: 26, splashDamage: 30, debris: 22, bounce: 0.5, ballistic: false },
   // Gatling round: heavier than a rifle round, hits harder.
   { gravity: 0.12, life: 40, damage: 24, mass: 0.7, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.3 },
+  // AT missile: slow off the tube, then it burns up to cruise and homes on the nearest hot enemy vehicle.
+  { gravity: 0, life: 150, damage: 120, mass: 6, sharp: 0.6, carveR: 20, coreR: 9, splashR: 36, splashDamage: 110, debris: 56, bounce: 0, ballistic: false, seek: 2.4, cruise: 430, antiArmor: 0.46 },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -130,6 +139,8 @@ export const WeaponId = {
   Gatling: 11,
   /** Laser: hold to charge (up to 8 s), release to fire a beam through every soldier in its way. */
   Laser: 12,
+  /** Anti-tank cannon: one heat-seeking missile a load, an age to reload, and half a tank gone if it hits. */
+  ATCannon: 13,
 } as const;
 
 /**
@@ -184,6 +195,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'GL', proj: ProjKind.Bomblet, muzzle: 13, rpm: 150, auto: false, speed: 340, spread: 0.03, clip: 6, reload: 105, scope: 110, kick: 16, climb: 0.04 },
   { name: 'Gatling', proj: ProjKind.Heavy, muzzle: 17, rpm: 1100, auto: true, speed: 960, spread: 0.08, clip: 100, reload: 150, scope: 120, kick: 3.5, climb: 0.012, lockCone: 0.06, spinUp: 14 },
   { name: 'Laser', proj: PROJ_LASER, muzzle: 15, rpm: 120, auto: false, speed: 0, spread: 0, clip: 8, reload: 120, scope: 220, kick: 10, climb: 0, lockCone: 0.12 },
+  // One missile, nine seconds to load the next.
+  { name: 'AT Cannon', proj: ProjKind.Missile, muzzle: 16, rpm: 20, auto: false, speed: 200, spread: 0.01, clip: 1, reload: 270, scope: 160, kick: 70, climb: 0.06, lockCone: 0.08 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */

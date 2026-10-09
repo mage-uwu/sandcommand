@@ -47,7 +47,8 @@ export function newItem(weapon: number): InvItem {
 
 /**
  * A fresh clone's kit: always a primary, a digger, a materializer, a
- * radio and a repair kit; often grenades, sometimes a second gun.
+ * radio and a repair kit; often grenades, sometimes a second gun (or an
+ * AT cannon).
  */
 export function spawnLoadout(rng: Rng): InvItem[] {
   const primary = PRIMARIES[rng.int(PRIMARIES.length)];
@@ -56,6 +57,9 @@ export function spawnLoadout(rng: Rng): InvItem[] {
   if (rng.next() < 0.25) {
     const others = PRIMARIES.filter((w) => w !== primary);
     inv.push(newItem(others[rng.int(others.length)]));
+  } else if (rng.next() < 0.15) {
+    // ...or, now and then, an AT cannon as the backup instead, for the tanks.
+    inv.push(newItem(WeaponId.ATCannon));
   }
   inv.push(newItem(WeaponId.Digger), newItem(WeaponId.Materializer), newItem(WeaponId.Radio), newItem(WeaponId.RepairKit));
   return inv;

@@ -6,7 +6,7 @@ import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, shipPoint } from '../shared/
 import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
-import { Projectiles } from '../shared/kernels.ts';
+import { Projectiles, pickHeat } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
@@ -175,6 +175,24 @@ export class Game implements FrameHandler {
    */
   readonly skyline = new Int16Array(WORLD_W).fill(WORLD_H);
   readonly projectiles = new Projectiles(2048);
+  /** Scratch for the heat seekers' target list (as this client sees the vehicles). */
+  private readonly heat: { x: number; y: number }[] = [];
+  /** (Wire the seekers to this client's eyes.) */
+  private readonly seekerWired = (this.projectiles.seeker = (i, out) => this.heatTarget(i, out));
+
+  /** A heat seeker's target, from this client's view of the vehicles (the server's word is final where it lands). */
+  private heatTarget(i: number, out: { x: number; y: number }): boolean {
+    const pr = this.projectiles;
+    const owner = pr.owner[i];
+    const team = owner < 64 ? (this.teamOf[owner] ?? Team.None) : Team.None;
+    const foe = (id: number, t: number) => id !== owner && !(team !== Team.None && t === team);
+    const list = this.heat;
+    list.length = 0;
+    for (const t of this.tankViews()) if (t.pilot !== 255 && foe(t.pilot, this.teamOf[t.pilot] ?? Team.None)) list.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
+    for (const sh of this.shipViews()) if (!sh.leaving && foe(sh.owner, sh.team)) list.push({ x: sh.x + SHIP_W / 2, y: sh.y + SHIP_H / 2 });
+    for (const c of this.craftViews()) if (c.passenger !== 255 && foe(c.passenger, this.teamOf[c.passenger] ?? Team.None)) list.push({ x: c.x, y: c.y });
+    return pickHeat(pr.x[i], pr.y[i], pr.ang[i] || Math.atan2(pr.vy[i], pr.vx[i]), list, out);
+  }
   /**
    * One field-engine instance for everything that flies on this client:
    * mirrored terrain grains plus every spark, flame, smoke puff, blood drop
@@ -399,7 +417,7 @@ export class Game implements FrameHandler {
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) {
       const k = pr.kind[i];
-      if (k === ProjKind.Rocket || k === ProjKind.Shell) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+      if (k === ProjKind.Rocket || k === ProjKind.Shell || k === ProjKind.Missile) rocketTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.Engine) {
         // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
         const burning = PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0);
@@ -1016,7 +1034,7 @@ export class Game implements FrameHandler {
       this.slugFrom.set(id, { x, y });
       if (this.slugFrom.size > 64) this.slugFrom.delete(this.slugFrom.keys().next().value!);
       heavyMuzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp);
-    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell);
+    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile);
     this.sfx?.shot(kind, x, y, owner);
     // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
     const w = weaponOfProj(kind);
