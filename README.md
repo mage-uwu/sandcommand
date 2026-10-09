@@ -1062,7 +1062,14 @@ shots leave from, so it fires exactly from its face.
   other), so the body glides while the legs tick, with a slight bob as each
   tripod lifts. Feet find the ground under them (up a step, down a ledge);
   on a wall they grip the face, front legs reaching up it; in the air they
-  tuck in. It has a running light in its owner's colour and a red sensor
+  tuck in. It **follows the lie of the land**: the chassis pitches to the
+  slope between its outer feet (nose up a rise, down a fall, rearing up a
+  wall it climbs), its feet spread along the slope, its knees bend off its
+  back whatever the angle, and its strides shorten climbing and lengthen
+  going down. The head stays on the gun's pivot, where shots leave, its
+  neck bending to the tilted body. (All of it drawing only: its hitbox
+  stays upright.) A tarantula walks exactly the same way, three times
+  over. It has a running light in its owner's colour and a red sensor
   eye. Lost legs leave sparking sockets, and with its plating gone the
   chassis shows scorched. The HUD's paper doll becomes the droid's own.
 A rifle round stops at a heavy's plate, two shots to a medium's head kill,
