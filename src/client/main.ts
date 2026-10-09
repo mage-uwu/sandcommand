@@ -2,7 +2,7 @@ import { ACTOR_H, ACTOR_W, CHUNK_COUNT, GRAVITY, TICK_RATE } from '../shared/con
 import { applyCarve } from '../shared/particles.ts';
 import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
-import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MIN, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { CANNON_PIVOT, SMG_SPEED, TANK_W, TANK_H, isDog, tankH, tankW } from '../shared/tank.ts';
 import { ASSIST_RANGE, type AssistTarget, assistAim, autoTarget, ballisticAim } from './aim.ts';
@@ -16,6 +16,7 @@ import { InputState } from './input.ts';
 import { Net } from './net.ts';
 import { Renderer } from './render.ts';
 import { TouchControls } from './touch.ts';
+import { touchPulses } from './stick.ts';
 import { registerServiceWorker, setupInstall, takeRejoin, watchForUpdates } from './pwa.ts';
 
 const snapAt = { x: 0, y: 0 };
@@ -469,6 +470,9 @@ function frame(now: number): void {
         g.aimReach = b?.reach ?? true;
         g.lockAim = aim;
       }
+      // A quick tap with the laser: held just long enough to fire its least
+      // charge (a tap is otherwise two ticks of trigger, too short to charge).
+      if (input.tapFire === 2 && g.weapon === WeaponId.Laser) input.tapFire = LASER_MIN + 2;
       let buttons = input.buttons();
       // Auto mode fires for you, once it has a shot that will land (a lob that
       // can reach; no rocket or bomb in your own face; not the laser, which
@@ -478,7 +482,8 @@ function frame(now: number): void {
       if (tgt && g.lockAim !== null) buttons |= BTN_LOCK;
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
       // a held trigger pulses (fire on alternate ticks) and the gun keeps going.
-      if (input.touch && buttons & BTN_FIRE && !g.drive && !(WEAPONS[g.weapon]?.auto ?? true) && (pulse++ & 1)) buttons &= ~BTN_FIRE;
+      // (Not the laser: holding is its charge.)
+      if (input.touch && buttons & BTN_FIRE && !g.drive && touchPulses(WEAPONS[g.weapon]) && (pulse++ & 1)) buttons &= ~BTN_FIRE;
       if (input.tapFire > 0) input.tapFire--;
       // Inventory: rotate, pick up, drop.
       g.cycle(input.takeCycle());

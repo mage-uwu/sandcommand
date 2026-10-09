@@ -194,3 +194,16 @@ describe('ballistic aim (shots that drop)', () => {
     expect(-up.aim).toBeGreaterThan(Math.PI / 4);
   });
 });
+
+describe('touch trigger', () => {
+  it('a held finger pulses a semi-automatic, never the laser (holding is its charge), nor an automatic', async () => {
+    const { touchPulses } = await import('../src/client/stick.ts');
+    const { WEAPONS, WeaponId } = await import('../src/shared/weapons.ts');
+    expect(touchPulses(WEAPONS[WeaponId.Sniper])).toBe(true);
+    expect(touchPulses(WEAPONS[WeaponId.LightRifle])).toBe(true);
+    expect(touchPulses(WEAPONS[WeaponId.Laser])).toBe(false);
+    expect(touchPulses(WEAPONS[WeaponId.Rifle])).toBe(false);
+    expect(touchPulses(undefined)).toBe(false);
+  });
+});
+
