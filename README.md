@@ -207,6 +207,23 @@ ground and the clone goes prone (`stepBody` in `src/shared/actor.ts`).
   velocity, flags), so every client poses every clone alike, with no extra
   traffic and nothing to desync.
 
+## Collisions
+
+Clones bump into enemy clones and enemy dropships; your own side passes
+through (`World.bodyCollisions`).
+- **Clone on clone.** Overlapping enemies are pushed apart, sideways or one
+  off the other's head. They trade momentum along the push, so a charge
+  shoves the other on and slows you. The test is swept: a clone fast enough
+  to cross another's whole width in a tick still hits them.
+- **Clone on dropship.** A clone in an enemy dropship's hull or pods is
+  thrown clear: along the ship's motion when it sweeps into you, else out
+  away from the hull. The ship barely gives, being far heavier.
+- **Damage.** A gentle bump or a sprint into someone is only a shove. Past
+  260 cells/s of closing speed (a jetpack ram, a fall onto someone's head),
+  both take wounds by how hard, each credited to the other. Past 160 cells/s
+  into a dropship, the clone takes wounds and the hull takes damage. The
+  kill feed calls these kills **Ram**.
+
 ## Last Man Standing
 
 Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):

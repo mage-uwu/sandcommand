@@ -7,7 +7,7 @@ import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts'
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -1090,7 +1090,7 @@ export class Game implements FrameHandler {
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
-    const how = weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
+    const how = weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (weapon === W_LASER && killer !== victim) text = `${kn} [Laser] ${vn}`;

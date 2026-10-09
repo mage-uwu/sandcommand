@@ -125,7 +125,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -3190,6 +3190,115 @@ export class World {
     return pickHeat(pr.x[i], pr.y[i], pr.ang[i] || Math.atan2(pr.vy[i], pr.vx[i]), list, out);
   }
 
+  /**
+   * Clones bump into enemy clones and enemy dropships (their own side passes
+   * through). Overlapping clones are pushed apart and trade momentum along
+   * the push; a clone hitting a dropship's hull bounces off it (and nudges it
+   * a little: it's far heavier). Hard enough (a jetpack ram, a fall onto
+   * someone, a dropship sweeping into you), both take damage, credited to
+   * the other.
+   */
+  private bodyCollisions(): void {
+    const ps = this.players;
+    const live = (p: Player | null): p is Player => !!p && p.alive && p.tank < 0 && p.delivering < 0;
+    for (let i = 0; i < ps.length; i++) {
+      const a = ps[i];
+      if (!live(a)) continue;
+      // Clone on clone.
+      for (let j = i + 1; j < ps.length; j++) {
+        const b = ps[j];
+        if (!live(b) || (a.team !== Team.None && a.team === b.team)) continue;
+        // Where they are now, and where they were at the tick's start (a fast
+        // clone can cross another's whole width in one tick: sweep it).
+        const rx = b.body.x - a.body.x;
+        const ry = b.top - a.top;
+        const rx0 = rx - (b.body.vx - a.body.vx) * DT;
+        const ry0 = ry - (b.body.vy - a.body.vy) * DT;
+        const oy = Math.min(a.body.y + ACTOR_H, b.body.y + ACTOR_H) - Math.max(a.top, b.top);
+        if (oy <= 0) continue;
+        const crossed = Math.abs(rx0) >= ACTOR_W && Math.sign(rx0) !== Math.sign(rx);
+        if (Math.abs(rx) >= ACTOR_W && !crossed) continue;
+        // Apart the way they came together: sideways, or one landing on the other.
+        const side = crossed || Math.abs(rx0) >= ACTOR_W - 0.5 || ACTOR_W - Math.abs(rx) < oy;
+        const nx = side ? Math.sign(rx0) || Math.sign(rx) || 1 : 0;
+        const ny = side ? 0 : Math.sign(ry0) || Math.sign(ry) || 1;
+        // Separate them to just touching, each taking half.
+        const push = side ? (ACTOR_W - rx * nx) / 2 + 0.25 : oy / 2 + 0.25;
+        this.shoveBody(a, -nx * push, -ny * push);
+        this.shoveBody(b, nx * push, ny * push);
+        const closing = (a.body.vx - b.body.vx) * nx + (a.body.vy - b.body.vy) * ny;
+        if (closing <= 0) continue;
+        const jx = closing * (1 + BODY_BOUNCE) * 0.5;
+        a.body.vx -= nx * jx;
+        a.body.vy -= ny * jx;
+        b.body.vx += nx * jx;
+        b.body.vy += ny * jx;
+        if (closing > BODY_RAM_MIN) {
+          const dmg = (closing - BODY_RAM_MIN) * BODY_RAM_DAMAGE;
+          this.damage(a, dmg, b.id, W_RAM);
+          this.damage(b, dmg, a.id, W_RAM);
+        }
+      }
+      if (!a.alive) continue;
+      // Clone on dropship hull.
+      for (let k = 0; k < MAX_SHIPS; k++) {
+        const sh = this.ships[k];
+        if (!sh || sh.owner === a.id || (sh.team !== Team.None && sh.team === a.team)) continue;
+        const cx = a.body.x + ACTOR_W / 2;
+        const cy = (a.top + a.body.y + ACTOR_H) / 2;
+        if (Math.abs(cx - (sh.x + SHIP_W / 2)) > SHIP_W / 2 + ACTOR_W || Math.abs(cy - (sh.y + SHIP_H / 2)) > SHIP_H / 2 + ACTOR_H) continue;
+        // Any of the clone's corners or centre inside the hull (or a pod)?
+        let inside = false;
+        for (const [px, py] of [[a.body.x, a.top], [a.body.x + ACTOR_W, a.top], [a.body.x, a.body.y + ACTOR_H], [a.body.x + ACTOR_W, a.body.y + ACTOR_H], [cx, cy]]) {
+          const l = shipLocal(sh, px, py, this.pt);
+          if (shipSolidAt(sh.parts, l.x, l.y)) {
+            inside = true;
+            break;
+          }
+        }
+        if (!inside) continue;
+        // Which way it's thrown: along the ship's motion into it, when the
+        // ship is moving into the clone; else (slow, or the clone flying into
+        // the hull) out away from the hull's centre (mostly up or down).
+        const rvx = sh.vx - a.body.vx;
+        const rvy = sh.vy - a.body.vy;
+        const rv = Math.hypot(rvx, rvy);
+        const c = shipPoint(sh, SHIP_W / 2, SHIP_H / 2, this.pt);
+        let nx = cx - c.x;
+        let ny = (cy - c.y) * 2.5;
+        if (rv > 40 && rvx * nx + rvy * ny <= 0) {
+          nx = rvx;
+          ny = rvy;
+        }
+        const nl = Math.hypot(nx, ny) || 1;
+        nx /= nl;
+        ny /= nl;
+        this.shoveBody(a, nx * 3, ny * 3);
+        const closing = (sh.vx - a.body.vx) * nx + (sh.vy - a.body.vy) * ny;
+        if (closing <= 0) continue;
+        a.body.vx += nx * closing * (1 + BODY_BOUNCE);
+        a.body.vy += ny * closing * (1 + BODY_BOUNCE);
+        sh.vx -= nx * closing * SHIP_BODY_SHOVE;
+        sh.vy -= ny * closing * SHIP_BODY_SHOVE;
+        if (closing > SHIP_RAM_BODY_MIN) {
+          const hard = closing - SHIP_RAM_BODY_MIN;
+          this.damage(a, hard * SHIP_RAM_BODY_DAMAGE, sh.owner, W_RAM);
+          this.hurtShipPart(k, ShipPart.Hull, hard * SHIP_RAM_HULL_DAMAGE, a.id);
+        }
+        if (!a.alive) break;
+      }
+    }
+  }
+
+  /** Nudge a clone by (dx, dy) cells, but never into terrain. */
+  private shoveBody(p: Player, dx: number, dy: number): void {
+    const b = p.body;
+    const top = ACTOR_H - STANCE_H[b.stance];
+    const free = (x: number, y: number) => !this.terrain.rectSolid(Math.floor(x), Math.floor(y + top), Math.floor(x + ACTOR_W - 1), Math.floor(y + ACTOR_H - 1));
+    if (dx !== 0 && free(b.x + dx, b.y)) b.x += dx;
+    if (dy !== 0 && free(b.x, b.y + dy)) b.y += dy;
+  }
+
   /** Is a hit by `by` on this dropship friendly fire (its caller or a teammate of theirs)? */
   private friendlyShip(by: number, sh: Ship): boolean {
     if (by === sh.owner) return true;
@@ -3424,6 +3533,7 @@ export class World {
     this.stepTanks();
     this.stepShips();
     this.shipCollisions();
+    this.bodyCollisions();
     this.shipSpotting();
     this.stepItems();
     this.stepTraps();
@@ -4030,6 +4140,15 @@ const SHIP_AA_RANGE = 460;
 const SHIP_BOUNCE = 0.5;
 const SHIP_RAM_MIN = 25;
 const SHIP_RAM_DAMAGE = 9;
+/** Clones colliding: how much of their closing speed they bounce back with, the closing speed below which it's only a shove (a sprint into someone is), and wounds per unit beyond. */
+const BODY_BOUNCE = 0.3;
+const BODY_RAM_MIN = 260;
+const BODY_RAM_DAMAGE = 0.12;
+/** A clone and an enemy dropship's hull: how little the ship gives, the closing speed below which it's only a bounce, and the damage to the clone and to the hull beyond it. */
+const SHIP_BODY_SHOVE = 0.03;
+const SHIP_RAM_BODY_MIN = 160;
+const SHIP_RAM_BODY_DAMAGE = 0.25;
+const SHIP_RAM_HULL_DAMAGE = 1.5;
 const SPOT_TICKS = 30 * 4;
 const SHIP_GUN_RANGE = 300;
 const CALL_COOLDOWN = 30 * 30;

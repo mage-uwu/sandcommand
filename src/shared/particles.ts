@@ -134,6 +134,7 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_RAM = 247; // clones (and dropships) slamming into each other
 export const W_LASER = 248; // laser beams
 export const W_TRAP = 249; // spike pits
 export const W_SHIP = 250; // dropship crashes and explosions
