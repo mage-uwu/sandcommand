@@ -183,6 +183,7 @@ export class Renderer {
   private miniDirty = false;
 
   draw(game: Game, input: InputState, net: Net, alpha: number): void {
+    this.game = game;
     const now = performance.now();
     this.fps = this.fps * 0.95 + (1000 / Math.max(1, now - this.lastFrame)) * 0.05;
     this.lastFrame = now;
@@ -373,7 +374,7 @@ export class Renderer {
       const info = game.players.get(v.id);
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
-      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now));
+      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id);
       // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
       if (v.weapon === WeaponId.Laser && v.flags & F_FIRING) {
         const sh = shoulderAt(v.x, v.y, v.stance, Math.cos(aimR) < 0, this.shPt);
@@ -401,7 +402,7 @@ export class Renderer {
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now));
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId);
       if (game.laserCharge > 0) {
         const m = WEAPONS[WeaponId.Laser].muzzle;
         this.drawLaserCharge(ctx, mySh.x + Math.cos(myAim) * m, mySh.y + Math.sin(myAim) * m, game.laserCharge / LASER_MAX, now);
@@ -849,7 +850,118 @@ export class Renderer {
    * its feet don't skate; in the air the legs hang. Legs shot off leave
    * sparking sockets; with its plating gone the chassis shows scorched.
    */
-  private drawDroid(ctx: CanvasRenderingContext2D, x: number, y: number, left: boolean, grounded: boolean, parts: number, team: number, moving: boolean, now: number, aim = left ? Math.PI : 0): void {
+  /** The game being drawn (for the droids' feet to find the ground). */
+  private game: Game | null = null;
+  /** Each droid's feet, planted in the world, by player id (see droidFeet). */
+  private readonly droidGaits = new Map<number, DroidGait>();
+
+  /**
+   * Where a droid's six feet are this frame (world cells), spider style.
+   * Each foot stays planted where it landed until the body has moved on far
+   * enough from it; then it steps: a quick lifted arc onto a new hold ahead,
+   * on the ground or, clinging, the wall. The legs step in two alternating
+   * tripods (as a real spider's do), never all at once. In the air the feet
+   * curl in under it. Also how much the body dips as its weight shifts.
+   */
+  private droidFeet(id: number, x: number, y: number, left: boolean, grounded: boolean, now: number): { x: Float32Array; y: Float32Array; bob: number } {
+    let gait = this.droidGaits.get(id);
+    if (!gait) {
+      gait = { x: new Float32Array(6), y: new Float32Array(6), fx: new Float32Array(6), fy: new Float32Array(6), t: new Float32Array(6).fill(1), at: now, init: false, lx: x, ly: y, bob: 0 };
+      this.droidGaits.set(id, gait);
+      if (this.droidGaits.size > 80) this.droidGaits.delete(this.droidGaits.keys().next().value!);
+    }
+    const dt = Math.min(0.1, Math.max(0, (now - gait.at) / 1000));
+    gait.at = now;
+    const vx = dt > 0 ? (x - gait.lx) / dt : 0;
+    gait.lx = x;
+    gait.ly = y;
+    const terrain = this.game?.terrain;
+    const solid = (cx: number, cy: number) => !!terrain && terrain.isSolid(Math.floor(cx), Math.floor(cy));
+    const cx = x + ACTOR_W / 2;
+    // On a wall (in the air, a wall at its side): its feet grip the wall.
+    let wall = 0;
+    if (!grounded) {
+      for (const side of [1, -1]) {
+        const wx = side > 0 ? x + ACTOR_W : x - 1;
+        if (solid(wx, y + 4) || solid(wx, y + 10)) {
+          wall = side;
+          break;
+        }
+      }
+    }
+    const tx = (leg: number): [number, number] => {
+      const rest = DROID_REST[leg] * (left ? -1 : 1);
+      if (wall !== 0) {
+        // Up and down the wall, the front legs reaching up it.
+        const wx = wall > 0 ? x + ACTOR_W + 0.5 : x - 0.5;
+        const along = DROID_REST[leg] * 0.85;
+        return [wx, y + 9 - along];
+      }
+      if (!grounded) return [cx + rest * 0.45, y + ACTOR_H + 1.5]; // tucked in, dangling
+      // Ahead of where it's going (more the faster), down to the ground there.
+      const fx = cx + rest + vx * 0.07;
+      let fy = y + ACTOR_H;
+      for (let yy = Math.floor(y + 6); yy < y + 26; yy++) {
+        if (solid(fx, yy)) {
+          fy = yy;
+          break;
+        }
+      }
+      return [fx, fy];
+    };
+    let stepping = 0;
+    for (let leg = 0; leg < 6; leg++) if (gait.t[leg] < 1) stepping++;
+    const busy = [0, 0];
+    for (let leg = 0; leg < 6; leg++) if (gait.t[leg] < 1) busy[DROID_TRIPOD[leg]]++;
+    for (let leg = 0; leg < 6; leg++) {
+      const [gx, gy] = tx(leg);
+      if (!gait.init || (!grounded && wall === 0)) {
+        // First sight of it, or in the air: the feet go straight where they belong.
+        const k = gait.init ? Math.min(1, dt * 14) : 1;
+        gait.x[leg] += (gx - gait.x[leg]) * k;
+        gait.y[leg] += (gy - gait.y[leg]) * k;
+        if (!gait.init) {
+          gait.x[leg] = gx;
+          gait.y[leg] = gy;
+        }
+        gait.t[leg] = 1;
+        continue;
+      }
+      if (gait.t[leg] < 1) {
+        // Mid-step: an arc from where it lifted to the hold ahead.
+        gait.t[leg] = Math.min(1, gait.t[leg] + dt / DROID_STEP_TIME);
+        const t = gait.t[leg];
+        const e = t * t * (3 - 2 * t);
+        const lift = Math.sin(Math.PI * t) * 2.2;
+        gait.x[leg] = gait.fx[leg] + (gx - gait.fx[leg]) * e + (wall !== 0 ? -wall * lift : 0);
+        gait.y[leg] = gait.fy[leg] + (gy - gait.fy[leg]) * e - (wall !== 0 ? 0 : lift);
+        continue;
+      }
+      const off = Math.hypot(gait.x[leg] - gx, gait.y[leg] - gy);
+      // Way off (it teleported, or fell): just put it there.
+      if (off > 14) {
+        gait.x[leg] = gx;
+        gait.y[leg] = gy;
+        continue;
+      }
+      // Strayed too far from where it belongs: step, if the other tripod's planted.
+      const other = 1 - DROID_TRIPOD[leg];
+      // (Left far behind, at a sprint, it steps whatever the others are doing.)
+      if ((off > DROID_STRIDE && busy[other] === 0) || off > DROID_STRIDE * 2.2) {
+        gait.fx[leg] = gait.x[leg];
+        gait.fy[leg] = gait.y[leg];
+        gait.t[leg] = 0;
+        busy[DROID_TRIPOD[leg]]++;
+      }
+    }
+    gait.init = true;
+    // The body dips a touch as it shifts its weight onto the planted legs.
+    const target = stepping > 0 ? 0.35 : 0;
+    gait.bob += (target - gait.bob) * Math.min(1, dt * 18);
+    return { x: gait.x, y: gait.y, bob: gait.bob };
+  }
+
+  private drawDroid(ctx: CanvasRenderingContext2D, x: number, y: number, left: boolean, grounded: boolean, parts: number, team: number, moving: boolean, now: number, aim = left ? Math.PI : 0, id = -1): void {
     // Droid-local (as facing right, from the hitbox's top-left) to world.
     const X = (dx: number) => (left ? x + ACTOR_W - dx : x + dx);
     const Y = (dy: number) => y + dy;
@@ -858,76 +970,72 @@ export class Renderer {
     const TIN = '#b9bfc4';
     const TIN_DK = '#7d858c';
     const K = '#121518';
-    // Legs first (behind the chassis): hips along its belly, knees up and out, feet on the ground.
-    const stride = 7;
-    const phase = ((left ? -x : x) / stride) * Math.PI * 2;
-    const legs: [part: number, hip: number, side: number, i: number][] = [
-      [DroidPart.L1, 0.4, -1, 2],
-      [DroidPart.L2, 1.8, -1, 1],
-      [DroidPart.L3, 3.1, -1, 0],
-      [DroidPart.R3, 4.9, 1, 0],
-      [DroidPart.R2, 6.2, 1, 1],
-      [DroidPart.R1, 7.6, 1, 2],
-    ];
-    for (const [part, hip, side, i] of legs) {
-      const hx = hip;
-      const hy = 11;
+    // Legs first (behind the chassis), each a two-bone limb with its foot
+    // planted in the world (see droidFeet): a short thigh rising steeply from
+    // the hip to a high, sharp knee, and a long shin down to the foot, set
+    // wide of the body.
+    const feet = this.droidFeet(id, x, y, left, grounded, now);
+    const bob = feet.bob;
+    const HIP_Y = 9.6 + bob;
+    const strut = (x1: number, y1: number, x2: number, y2: number, wa: number, wb: number) => {
+      const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+      const nx = -(y2 - y1) / len;
+      const ny = (x2 - x1) / len;
+      ctx.beginPath();
+      ctx.moveTo(x1 + nx * wa, y1 + ny * wa);
+      ctx.lineTo(x2 + nx * wb, y2 + ny * wb);
+      ctx.lineTo(x2 - nx * wb, y2 - ny * wb);
+      ctx.lineTo(x1 - nx * wa, y1 - ny * wa);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    };
+    ctx.lineJoin = 'miter';
+    ctx.miterLimit = 8;
+    ctx.lineWidth = 0.35;
+    ctx.strokeStyle = K;
+    for (let leg = 0; leg < 6; leg++) {
+      const part = DROID_LEGS[leg];
+      const hx = X(DROID_HIP_X[leg]);
+      const hy = Y(HIP_Y);
       if (!has(parts, part)) {
         // A sparking socket where the leg was.
         ctx.fillStyle = K;
-        ctx.fillRect(X(hx) - 0.6, Y(hy) - 0.4, 1.2, 1.2);
+        ctx.fillRect(hx - 0.6, hy - 0.4, 1.2, 1.2);
         if ((now / 90 + part) % 4 < 1) {
           ctx.fillStyle = '#ffd060';
-          ctx.fillRect(X(hx + side * 0.8) - 0.4, Y(hy + 0.8), 0.8, 0.8);
+          ctx.fillRect(hx - 0.4, hy + 0.8, 0.8, 0.8);
         }
         continue;
       }
-      // Tripod gait: legs alternate between two groups, half a cycle apart.
-      const group = (part + (side > 0 ? 1 : 0)) & 1;
-      const ph = phase + group * Math.PI;
-      const swing = moving && grounded ? Math.sin(ph) * 1.6 : 0;
-      const lift = moving && grounded ? Math.max(0, Math.cos(ph)) * 1.6 : 0;
-      const reach = 4 + i * 1.8;
-      // A sharp ^: the knee peaks well above the chassis, out over the foot's
-      // way, and the shin drops almost straight down to a needle point.
-      let fx = hx + side * reach + swing;
-      const fy = grounded ? ACTOR_H - lift : ACTOR_H - 1 + i * 0.5;
-      if (!grounded) fx = hx + side * (3 + i * 1.3); // dangling
-      const kx = hx + side * (reach * 0.62) + swing * 0.6;
-      const ky = grounded ? hy - 5.4 - i * 0.8 - lift * 0.5 : hy - 3 - i * 0.3;
-      // Tapered struts as hard-edged polygons: thick at the hip, a point at the foot.
-      const strut = (ax: number, ay: number, bx: number, by: number, wa: number, wb: number) => {
-        const x1 = X(ax);
-        const y1 = Y(ay);
-        const x2 = X(bx);
-        const y2 = Y(by);
-        const len = Math.hypot(x2 - x1, y2 - y1) || 1;
-        const nx = -(y2 - y1) / len;
-        const ny = (x2 - x1) / len;
-        ctx.beginPath();
-        ctx.moveTo(x1 + nx * wa, y1 + ny * wa);
-        ctx.lineTo(x2 + nx * wb, y2 + ny * wb);
-        ctx.lineTo(x2 - nx * wb, y2 - ny * wb);
-        ctx.lineTo(x1 - nx * wa, y1 - ny * wa);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      };
-      ctx.lineJoin = 'miter';
-      ctx.miterLimit = 8;
-      ctx.lineWidth = 0.35;
-      ctx.strokeStyle = K;
-      ctx.fillStyle = i === 1 ? TIN : TIN_DK;
-      strut(hx, hy, kx, ky, 0.95, 0.6); // thigh, narrowing to the knee
-      ctx.fillStyle = i === 1 ? TIN_DK : TIN;
-      strut(kx, ky, fx, fy, 0.65, 0.05); // shin, to a point
+      const fx = feet.x[leg];
+      const fy = feet.y[leg];
+      // Two-bone IK, the knee bent up (away from the ground, or the wall).
+      const dx = fx - hx;
+      const dy = fy - hy;
+      const d = Math.min(Math.hypot(dx, dy), DROID_THIGH + DROID_SHIN - 0.05);
+      const a = Math.atan2(dy, dx);
+      const cosA = (DROID_THIGH * DROID_THIGH + d * d - DROID_SHIN * DROID_SHIN) / (2 * DROID_THIGH * d || 1);
+      const bend = Math.acos(Math.max(-1, Math.min(1, cosA)));
+      // (Of the two ways the knee can bend, the higher: a spider's ^.)
+      const k1x = hx + Math.cos(a - bend) * DROID_THIGH;
+      const k1y = hy + Math.sin(a - bend) * DROID_THIGH;
+      const k2x = hx + Math.cos(a + bend) * DROID_THIGH;
+      const k2y = hy + Math.sin(a + bend) * DROID_THIGH;
+      const [kx, ky] = k1y < k2y ? [k1x, k1y] : [k2x, k2y];
+      // The far legs (every other one) a shade darker.
+      const far = leg === 1 || leg === 4;
+      ctx.fillStyle = far ? TIN_DK : TIN;
+      strut(hx, hy, kx, ky, 0.85, 0.55); // thigh, narrowing to the knee
+      ctx.fillStyle = far ? '#5d656c' : TIN_DK;
+      strut(kx, ky, fx, fy, 0.6, 0.05); // shin, to a needle point
       // The knee: a hard angular joint at the peak.
       ctx.fillStyle = K;
       ctx.beginPath();
-      ctx.moveTo(X(kx), Y(ky) - 0.8);
-      ctx.lineTo(X(kx) + 0.6, Y(ky));
-      ctx.lineTo(X(kx), Y(ky) + 0.6);
-      ctx.lineTo(X(kx) - 0.6, Y(ky));
+      ctx.moveTo(kx, ky - 0.8);
+      ctx.lineTo(kx + 0.6, ky);
+      ctx.lineTo(kx, ky + 0.6);
+      ctx.lineTo(kx - 0.6, ky);
       ctx.closePath();
       ctx.fill();
     }
@@ -938,7 +1046,7 @@ export class Renderer {
     // point, where the shots leave: the head is built round it.)
     const plated = has(parts, DroidPart.Plating);
     const x0 = Math.min(X(-1.5), X(9.5));
-    const cy0 = Y(8.2);
+    const cy0 = Y(8.2 + bob);
     ctx.fillStyle = K;
     ctx.fillRect(x0, cy0, 11, 4);
     ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 5.6);
@@ -1070,6 +1178,8 @@ export class Renderer {
     lean = 0,
     faction = 0,
     kick = 0,
+    /** Who it is (a droid's feet are remembered per droid). */
+    id = -1,
   ): void {
     const left = Math.cos(aim) < 0;
     const face = left ? -1 : 1;
@@ -1078,7 +1188,7 @@ export class Renderer {
     // A spider droid: no clone at all (its chassis, legs and turret are drawn whole; the gun goes on the turret below).
     const droid = classOfFlags(flags) === ClassId.Droid;
     if (droid) {
-      this.drawDroid(ctx, x, y, left, (flags & F_GROUND) !== 0, parts, team, moving, now, aim);
+      this.drawDroid(ctx, x, y, left, (flags & F_GROUND) !== 0, parts, team, moving, now, aim, id);
       lean = 0;
       stance = Stance.Stand;
     }
@@ -2579,3 +2689,29 @@ function countLoaded(game: Game): number {
   for (let i = 0; i < CHUNK_COUNT; i++) n += game.loaded[i];
   return n;
 }
+
+/** A spider droid's remembered feet (world cells), each foot's step (from, and progress 0..1; 1 = planted). */
+interface DroidGait {
+  x: Float32Array;
+  y: Float32Array;
+  fx: Float32Array;
+  fy: Float32Array;
+  t: Float32Array;
+  at: number;
+  init: boolean;
+  lx: number;
+  ly: number;
+  bob: number;
+}
+/** Droid legs (in DROID_LEGS order: back outer to front outer): hips along the chassis (droid-local x, facing right). */
+const DROID_HIP_X = [0.6, 1.9, 3.2, 4.8, 6.1, 7.4];
+/** Where each foot rests, out from the body's centre (cells, + ahead): wide, a spider's stance. */
+const DROID_REST = [-11.5, -7.8, -4.2, 4.2, 7.8, 11.5];
+/** Which of the two alternating tripods each leg steps with (outer and inner one side, middle the other). */
+const DROID_TRIPOD = [0, 1, 0, 1, 0, 1];
+/** Thigh and shin lengths (cells): a short rise to the knee, a long reach down. */
+const DROID_THIGH = 5.2;
+const DROID_SHIN = 9;
+/** How far a foot may lag where it belongs before it steps, and how long a step takes (s). */
+const DROID_STRIDE = 3.6;
+const DROID_STEP_TIME = 0.085;

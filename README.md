@@ -1021,13 +1021,18 @@ shots leave from, so it fires exactly from its face.
   (up a shaft, say), it walks straight up it and over the top (`CLIMB_SPEED`
   in the shared `stepBody`, so prediction stays exact). It has no jetpack,
   and it never crouches or lies down.
-- **Its look.** Drawn procedurally. Each leg is a sharp **^**: a tapered tin
-  strut up to a hard knee peaking above the chassis, and a shin dropping
-  almost straight to a needle point. It walks on a tripod gait keyed to the
-  distance it covers (so its feet don't skate), with legs dangling in the
-  air. It has a running light in its owner's colour and a red sensor eye.
-  Lost legs leave sparking sockets, and with its plating gone the chassis
-  shows scorched. The HUD's paper doll becomes the droid's own.
+- **Its look.** Drawn procedurally, like a real spider. Six long legs
+  splay wide from hips along the chassis, each a two-bone limb (a short
+  thigh, a long needle shin) solved so the knee rides high above the body
+  in a sharp **^**. Its feet are planted: each stays where it set down until
+  the body has moved past it, then lifts in a quick arc to a hold ahead,
+  alternating tripods (front and back of one side with the middle of the
+  other), so the body glides while the legs tick, with a slight bob as each
+  tripod lifts. Feet find the ground under them (up a step, down a ledge);
+  on a wall they grip the face, front legs reaching up it; in the air they
+  tuck in. It has a running light in its owner's colour and a red sensor
+  eye. Lost legs leave sparking sockets, and with its plating gone the
+  chassis shows scorched. The HUD's paper doll becomes the droid's own.
 A rifle round stops at a heavy's plate, two shots to a medium's head kill,
 and shrapnel goes straight through a scout's helmet. Class rides in two
 spare bits of the actor flags, and movement scaling lives in the shared
