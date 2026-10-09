@@ -207,6 +207,10 @@ export class TouchControls {
     this.restY = rest.style.top;
     const tb = this.root.querySelector('.tbtns') as HTMLDivElement;
     tb.style.setProperty('--btn', `${btn}px`);
+    // Scores and chat: just under the HUD's match card (and Extraction's idol
+    // line beneath it), at the HUD's own scale (render.ts drawHud).
+    const hud = Math.min(1, h / 560, w / 1000);
+    (this.root.querySelector('.ttop') as HTMLDivElement).style.top = `${Math.round(126 * hud)}px`;
   }
   private restX = '';
   private restY = '';

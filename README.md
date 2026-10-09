@@ -256,8 +256,8 @@ Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
    the next one.
 4. **Last clone standing wins.** The winner gets a win on the scoreboard
    (Tab: wins, kills, deaths) and a 7-second victory lap. A wave has a
-   4-minute clock. The **match card** shows it, top left on the same rows as
-   HP and JET: the wave, the mode and the clock (red in the last 30 s),
+   4-minute clock. The **match card** shows it, top left under the HP and
+   JET bars (where the clone's vendor and class used to be): the wave, the mode and the clock (red in the last 30 s),
    and beneath them how the sides stand (kings, clones left, the PvP
    leader). If time runs out, the survivor with
    the most kills that wave wins, so nobody wins by hiding in a bunker.

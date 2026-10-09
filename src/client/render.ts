@@ -13,9 +13,8 @@ import type { RoundState } from '../shared/frame.ts';
 import { bannerLines, layoutSub } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
-import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
+import { PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
-import { FACTIONS } from '../shared/factions.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
@@ -1707,11 +1706,7 @@ export class Renderer {
     const me = game.players.get(game.myId);
     ctx.fillStyle = '#ffd34a';
     ctx.fillText(`GOLD ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
-    if (game.alive) {
-      ctx.fillStyle = '#c8d0d8';
-      // Who supplied this body, and what kind of body it is.
-      ctx.fillText(`${FACTIONS[game.body.faction]?.name.toUpperCase() ?? ''} ${CLASSES[game.body.cls]?.name.toUpperCase() ?? ''}`, 14 * s, 78 * s);
-    }
+    // (Under it, where the clone's vendor and class used to be: the match card, drawn with the round.)
     if (game.building) this.drawBuildMenu(game, input, s, H);
     else this.menuRects.length = 0;
     if (game.calling) this.drawCallMenu(game, input, s, H);
@@ -2129,15 +2124,14 @@ export class Renderer {
   }
 
   /**
-   * The match card: on the same rows as the HP and JET bars, to their right
-   * (past the paper doll). Wave and mode, the clock (red in the last 30 s), and beneath them
+   * The match card: top left, under the HP and JET bars and the gold line,
+   * as wide as the bars (wider if it must). Wave and mode, the clock (red in the last 30 s), and beneath them
    * how the sides stand; Extraction adds where the idol is under the card.
    */
   private drawMatchCard(title: string, clock: string, clockColor: string, parts: { t: string; c: string }[], extra: { t: string; c: string } | null, s: number): void {
     const ctx = this.ctx;
-    // (Past the paper doll, which sits just right of the bars.)
-    const x = 234 * s;
-    const y = 14 * s;
+    const x = 14 * s;
+    const y = 70 * s;
     const h = 32 * s;
     const pad = 8 * s;
     const small = `${Math.round(11 * s)}px ui-monospace, monospace`;
@@ -2149,7 +2143,7 @@ export class Renderer {
     const cw = ctx.measureText(clock).width;
     ctx.font = small;
     const pw = parts.reduce((w, p) => w + ctx.measureText(p.t).width, 0);
-    const w = Math.max(tw + cw + pad * 3, pw + pad * 2, 170 * s);
+    const w = Math.max(tw + cw + pad * 3, pw + pad * 2, 180 * s);
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(x, y, w, h);
     ctx.fillStyle = clockColor;
