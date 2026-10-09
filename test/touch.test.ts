@@ -39,15 +39,24 @@ describe('touch aim assist', () => {
     assistAim(0, 0, Math.PI, [{ x: 150, y: 20 }], open, undefined, none);
     expect(none.on).toBe(false);
   });
-  it('competing targets go by angle alone: the one nearest the natural aim, however far', () => {
+  it('a clear aim at someone still picks them, however far', () => {
     // A close enemy 30 degrees off, a far one only 5 degrees off: the far one.
     const near = { x: Math.cos(0.52) * 80, y: Math.sin(0.52) * 80 };
     const far = { x: Math.cos(0.09) * 500, y: Math.sin(0.09) * 500 };
     expect(assistAim(0, 0, 0, [near, far], open)).toBeCloseTo(0.09, 5);
   });
+  it('when it is ambiguous, the closer enemy wins', () => {
+    // Both roughly where we aim (15 and 5 degrees off): the near one.
+    const near = { x: Math.cos(0.26) * 120, y: Math.sin(0.26) * 120 };
+    const far = { x: Math.cos(-0.09) * 450, y: Math.sin(-0.09) * 450 };
+    expect(assistAim(0, 0, 0, [near, far], open)).toBeCloseTo(0.26, 5);
+    // ...unless the near one is behind a wall.
+    expect(assistAim(0, 0, 0, [near, far], (_x0, _y0, x1) => x1 > 200)).toBeCloseTo(-0.09, 5);
+  });
   it('a head is its own target: aim a touch high for it, a touch low for the body', () => {
-    const head = { x: 200, y: -12 };
-    const body = { x: 200, y: -6 };
+    // (One clone: on it, the point goes by angle, distance aside.)
+    const head = { x: 200, y: -12, g: 7 };
+    const body = { x: 200, y: -6, g: 7 };
     expect(assistAim(0, 0, Math.atan2(-14, 200), [head, body], open)).toBeCloseTo(Math.atan2(-12, 200), 5);
     expect(assistAim(0, 0, Math.atan2(-4, 200), [head, body], open)).toBeCloseTo(Math.atan2(-6, 200), 5);
   });

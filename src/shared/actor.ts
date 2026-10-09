@@ -26,6 +26,12 @@ export const BTN_FIRE = 16;
 /** Hold to aim down the scope: the view pushes out along the barrel. */
 export const BTN_SCOPE = 32;
 export const BTN_RELOAD = 64;
+/**
+ * The aim is locked onto a target by the aim assist (or the scope's lock):
+ * the shooter holds the muzzle on it, so shots go down the sight line (no
+ * recoil climb, and braced: half the spread, as when scoped).
+ */
+export const BTN_LOCK = 128;
 
 /**
  * Stance: hold down to crouch; keep holding on the ground to go prone.

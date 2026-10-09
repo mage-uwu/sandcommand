@@ -221,7 +221,7 @@ export class Renderer {
       // It stops where the line of sight does: never through or past terrain.
       const mx = this.camX + (input.mouseX * (W / innerWidth) - W / 2) / z;
       const my = this.camY + (input.mouseY * (H / innerHeight) - H / 2) / z;
-      const sh = shoulderAt(selfX, selfY, b.stance, mx < selfX + ACTOR_W / 2, this.shPt);
+      const sh = shoulderAt(selfX, selfY, b.stance, game.aimMark ? game.aimMark.x < selfX + ACTOR_W / 2 : mx < selfX + ACTOR_W / 2, this.shPt);
       // (Locked on: down the line to them.) Clones stop the line as walls do.
       const mouseAim = Math.atan2(my - sh.y, mx - sh.x);
       const aim = game.lockAim ?? mouseAim;
@@ -265,7 +265,7 @@ export class Renderer {
     // Snapped by the aim assist (unscoped): the same laser and lock the scope shows.
     this.assistSight = false;
     if (!this.scoped && !flying && !dogged && game.alive && !game.drive && game.lockAim !== null && game.aimMark) {
-      const sh = shoulderAt(selfX, selfY, b.stance, Math.cos(game.lockAim) < 0, this.shPt);
+      const sh = shoulderAt(selfX, selfY, b.stance, game.aimMark.x < selfX + ACTOR_W / 2, this.shPt);
       this.sight = { x: sh.x, y: sh.y, aim: game.lockAim, mouseAim: game.lockAim, cone: 0, dist: 0 };
       this.assistSight = true;
     }
@@ -388,7 +388,8 @@ export class Renderer {
     if (game.alive && !game.drive) {
       const wx = (input.mouseX * (W / innerWidth) - offX) / z;
       const wy = (input.mouseY * (H / innerHeight) - offY) / z;
-      const mySh = shoulderAt(selfX, selfY, b.stance, wx < selfX + ACTOR_W / 2, this.shPt);
+      // (Snapped onto someone: facing them, the gun on that shoulder, as the shot will leave it.)
+      const mySh = shoulderAt(selfX, selfY, b.stance, game.aimMark ? game.aimMark.x < selfX + ACTOR_W / 2 : wx < selfX + ACTOR_W / 2, this.shPt);
       const myAim = game.lockAim ?? Math.atan2(wy - mySh.y, wx - mySh.x);
       const reloading = game.reloadLeft > 0;
       const dry = (WEAPONS[game.weapon]?.clip ?? 0) > 0 && game.ammo === 0;

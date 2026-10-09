@@ -1,4 +1,4 @@
-import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_LOCK, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import { FACTION_SHIFT, STANCE_SHIFT } from '../shared/protocol.ts';
 import { FACTIONS, rollFaction } from '../shared/factions.ts';
 import {
@@ -2005,10 +2005,14 @@ export class World {
       p.gold += this.terrain.removedByMat[Mat.Gold];
       return;
     }
-    const scoped = p.buttons & BTN_SCOPE ? 0.5 : 1;
-    // Recoil: the muzzle climbs with each shot (up, whichever way it faces)...
+    // Scoped, or locked on by the aim assist: braced, half the spread.
+    const locked = (p.buttons & BTN_LOCK) !== 0;
+    const scoped = p.buttons & BTN_SCOPE || locked ? 0.5 : 1;
+    // Recoil: the muzzle climbs with each shot (up, whichever way it faces),
+    // unless it's locked on: then the shooter holds it on the target, and
+    // the shots go down the sight line...
     const up = cos < 0 ? 1 : -1;
-    const climbed = up * p.climb;
+    const climbed = locked ? 0 : up * p.climb;
     p.climb += def.climb ?? 0;
     // ...and the shot shoves the shooter back (braced less in a crouch, least lying prone).
     const brace = RECOIL_BRACE[p.body.stance] ?? 1;

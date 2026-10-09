@@ -36,11 +36,22 @@ Moving the mouse hands aim back to it.
 
 **Aim assist** (`src/client/aim.ts`). The bots aim like machines, so aiming
 is near-effortless: point anywhere within 90° either side of an enemy you
-can see, scoped or not, and the aim snaps straight onto them. When targets
-compete it takes the one nearest your own aim angle, however near or far
-(distance only breaks exact ties), so nudging the aim chooses between them.
-A head is a target of its own beside centre mass: aim a touch high for the
-headshot, a touch low for the body. Crouched or prone clones have both
+can see, scoped or not, and the aim snaps straight onto them. When enemies
+compete it takes the one best lined up with your aim. When it's ambiguous,
+with another about as well lined up (within about 23° of it), it takes the
+**closest** of them, the more immediate threat. So a rough point goes to
+whoever is nearest, and a clear point at someone still picks them.
+On the enemy it picked, the point goes by angle alone. A head is a target
+of its own beside centre mass: aim a touch high for the headshot, a touch
+low for the body. On a dropship, nudge between its hull and pods.
+
+**Fire goes down the laser.** Snapped on (or scope-locked), the client
+flags its input as locked (`BTN_LOCK`). The server then holds the muzzle on
+the target: no recoil climb, and the braced (halved) spread of a scope.
+The shot leaves from the shoulder the clone turns to: the one facing the
+target, even with the pointer on the other side. The aim, the drawn arm
+and the laser are all taken from that shoulder too, so the shots go where
+the laser points. Crouched or prone clones have both
 points lower. A small pulsing red reticle sits on whatever it has snapped
 to. The snap is shown the way the scope shows a lock, scoped or not: a red
 laser runs from the gun to the target, brackets close on a snapped clone,

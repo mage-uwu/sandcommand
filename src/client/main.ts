@@ -5,11 +5,11 @@ import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipP
 import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { CANNON_PIVOT, SMG_SPEED, TANK_W, TANK_H, isDog, tankH, tankW } from '../shared/tank.ts';
-import { ASSIST_RANGE, assistAim, ballisticAim } from './aim.ts';
+import { ASSIST_RANGE, type AssistTarget, assistAim, ballisticAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
-import { BTN_FIRE, STANCE_H, shoulderAt } from '../shared/actor.ts';
+import { BTN_FIRE, BTN_LOCK, STANCE_H, shoulderAt } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
@@ -254,8 +254,8 @@ chatInput.addEventListener('blur', () => {
  * so aiming near a pod picks that pod). Never teammates or their gear.
  */
 const podPt = { x: 0, y: 0 };
-function assistTargets(g: Game): { x: number; y: number; vx: number; vy: number }[] {
-  const out: { x: number; y: number; vx: number; vy: number }[] = [];
+function assistTargets(g: Game): AssistTarget[] {
+  const out: AssistTarget[] = [];
   const mine = g.myTeam;
   const foe = (id: number) => id !== g.myId && (mine === Team.None || g.teamOf[id] !== mine);
   for (const s of g.shipViews()) {
@@ -263,9 +263,9 @@ function assistTargets(g: Game): { x: number; y: number; vx: number; vy: number 
     for (let e = 0; e < 4; e++) {
       if (!hasShipPart(s.parts, ShipPart.EngineA + e)) continue;
       const q = shipPoint(s, ENGINE_X[e], ENGINE_NOZZLE_Y - 4, podPt);
-      out.push({ x: q.x, y: q.y, vx: s.vx, vy: s.vy });
+      out.push({ x: q.x, y: q.y, vx: s.vx, vy: s.vy, g: 1000 + s.slot });
     }
-    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2, vx: s.vx, vy: s.vy });
+    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2, vx: s.vx, vy: s.vy, g: 1000 + s.slot });
   }
   for (const v of g.remoteViews()) {
     if (!(v.flags & F_ALIVE) || g.tankPilots.has(v.id) || !foe(v.id)) continue;
@@ -273,13 +273,13 @@ function assistTargets(g: Game): { x: number; y: number; vx: number; vy: number 
     // headshot) and centre mass; crouched or prone, both sit lower.
     const h = STANCE_H[v.stance] ?? ACTOR_H;
     const top = v.y + ACTOR_H - h;
-    out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5, vx: v.vx, vy: v.vy });
-    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy });
+    out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5, vx: v.vx, vy: v.vy, g: v.id });
+    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy, g: v.id });
   }
   for (const t of g.tankViews()) {
     // A tank by its driver; a watchdog by its owner, driven or not.
     const who = isDog(t) ? t.owner : t.pilot;
-    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2, vx: t.vx, vy: t.vy });
+    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2, vx: t.vx, vy: t.vy, g: 2000 + t.slot });
   }
   return out;
 }
@@ -361,8 +361,8 @@ function frame(now: number): void {
       const flying = g.pilotedShip();
       // Driving our watchdog by remote: aim from its turret.
       const dogged = flying ? null : g.remoteDog();
-      const ox = flying ? flying.x + SHIP_W / 2 : dogged ? dogged.x + tankW(dogged) / 2 : sh.x;
-      const oy = flying ? flying.y + SHIP_H / 2 : dogged ? dogged.y + CANNON_PIVOT[1] * dogged.s : sh.y;
+      let ox = flying ? flying.x + SHIP_W / 2 : dogged ? dogged.x + tankW(dogged) / 2 : sh.x;
+      let oy = flying ? flying.y + SHIP_H / 2 : dogged ? dogged.y + CANNON_PIVOT[1] * dogged.s : sh.y;
       let aim: number;
       mark.on = false;
       // Scoped, the assist reaches as far as the scope sees.
@@ -396,6 +396,18 @@ function frame(now: number): void {
       const locked = g.scopeLock ? g.remoteViews().find((v) => v.id === g.scopeLock!.id) : undefined;
       const tgt = locked ? { x: locked.x + g.scopeLock!.lx, y: locked.y + g.scopeLock!.ly, vx: locked.vx, vy: locked.vy } : mark.on && g.alive ? { x: mark.x, y: mark.y, vx: mark.vx, vy: mark.vy } : null;
       g.aimMark = tgt ? { x: tgt.x, y: tgt.y } : null;
+      // Snapped onto someone on the other side of us from the pointer: the
+      // clone turns to face them, and (as the server does, by the aim) the
+      // shot leaves from the shoulder on that side. Aim from there, so the
+      // shot goes down the very line the laser shows.
+      if (tgt && !flying && !dogged) {
+        const left = tgt.x < g.body.x + ACTOR_W / 2;
+        if (left !== wx < g.body.x + ACTOR_W / 2) {
+          const s2 = shoulderAt(g.body.x, g.body.y, g.body.stance, left, shoulderPt);
+          ox = s2.x;
+          oy = s2.y;
+        }
+      }
       if (tgt) {
         // Lead it: aim where it will be when the shot gets there, and for a
         // shot that falls (a GL bomb, a grenade), along the arc that lands on it.
@@ -410,6 +422,8 @@ function frame(now: number): void {
         g.lockAim = aim;
       }
       let buttons = input.buttons();
+      // Locked on (assist or scope): the server holds the muzzle on the target, shots down the sight line.
+      if (tgt && g.lockAim !== null) buttons |= BTN_LOCK;
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so
       // a held trigger pulses (fire on alternate ticks) and the gun keeps going.
       if (input.touch && buttons & BTN_FIRE && !g.drive && !(WEAPONS[g.weapon]?.auto ?? true) && (pulse++ & 1)) buttons &= ~BTN_FIRE;

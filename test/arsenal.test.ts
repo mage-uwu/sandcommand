@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BTN_FIRE } from '../src/shared/actor.ts';
+import { BTN_FIRE, BTN_LOCK } from '../src/shared/actor.ts';
 import { ClassId, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H, ACTOR_W, WORLD_W } from '../src/shared/constants.ts';
 import { spawnLoadout, PRIMARIES, INV_MAX } from '../src/shared/items.ts';
@@ -187,3 +187,33 @@ describe('landmines', () => {
     expect(world.layMine(a)).toBe(false);
   });
 });
+
+describe('locked-on fire', () => {
+  /** Hold the rifle's trigger for a second and a half, level; the worst angle (off the aim line) of the rounds it fires. */
+  const worst = (lock: boolean) => {
+    const { world, a } = yard(221, 600);
+    world.equip(a, WeaponId.Rifle);
+    a.aimQ = quantizeAim(0);
+    for (let k = 0; k < 15; k++) world.step();
+    const pr = world.projectiles;
+    const seen = new Set<number>();
+    let off = 0;
+    for (let k = 0; k < 45; k++) {
+      a.buttons = BTN_FIRE | (lock ? BTN_LOCK : 0);
+      world.step();
+      for (let i = 0; i < pr.n; i++) {
+        if (pr.kind[i] !== ProjKind.Bullet || pr.owner[i] !== a.id || seen.has(pr.id[i])) continue;
+        seen.add(pr.id[i]);
+        off = Math.max(off, Math.abs(Math.atan2(pr.vy[i], pr.vx[i] - a.body.vx * 0.25)));
+      }
+    }
+    expect(seen.size).toBeGreaterThan(8);
+    return off;
+  };
+  it('goes down the sight line: no recoil climb, braced spread', () => {
+    const spread = WEAPONS[WeaponId.Rifle].spread;
+    expect(worst(true)).toBeLessThan(spread * 0.5 + 0.02);
+    expect(worst(false)).toBeGreaterThan(spread + 0.025); // (unlocked, the muzzle climbs)
+  });
+});
+
