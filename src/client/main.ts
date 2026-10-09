@@ -5,7 +5,7 @@ import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipP
 import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { TANK_W, TANK_H } from '../shared/tank.ts';
-import { ASSIST_RANGE, assistAim, leadPoint } from './aim.ts';
+import { ASSIST_RANGE, assistAim, ballisticAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
@@ -384,12 +384,16 @@ function frame(now: number): void {
       const tgt = locked ? { x: locked.x + g.scopeLock!.lx, y: locked.y + g.scopeLock!.ly, vx: locked.vx, vy: locked.vy } : mark.on && g.alive ? { x: mark.x, y: mark.y, vx: mark.vx, vy: mark.vy } : null;
       g.aimMark = tgt ? { x: tgt.x, y: tgt.y } : null;
       if (tgt) {
-        // Lead it: aim where it will be when the shot gets there (and high for a lobbed one).
+        // Lead it: aim where it will be when the shot gets there, and for a
+        // shot that falls (a GL bomb, a grenade), along the arc that lands on it.
         const def = WEAPONS[g.weapon];
         const proj = flying ? ProjKind.ShipGun : (def?.proj ?? -1);
         const speed = flying ? 900 : (def?.speed ?? 0);
-        const p = leadPoint(ox, oy, tgt, speed, proj >= 0 ? GRAVITY * PROJ[proj].gravity : 0);
-        aim = Math.atan2(p.y - oy, p.x - ox);
+        const own = flying ? { vx: flying.vx * 0.3, vy: flying.vy * 0.3 } : { vx: g.body.vx * 0.25, vy: g.body.vy * 0.25 };
+        const b = ballisticAim(ox, oy, tgt, speed, proj >= 0 ? GRAVITY * PROJ[proj].gravity : 0, own, flying ? 9 : (def?.muzzle ?? 0));
+        if (b) aim = b.aim;
+        else aim = Math.atan2(tgt.y - oy, tgt.x - ox);
+        g.aimReach = b?.reach ?? true;
         g.lockAim = aim;
       }
       let buttons = input.buttons();

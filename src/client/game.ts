@@ -261,6 +261,8 @@ export class Game implements FrameHandler {
   scopeLock: { id: number; lx: number; ly: number } | null = null;
   /** What the aim assist (or the scope's lock) has snapped onto: the little target marker's world point. */
   aimMark: { x: number; y: number } | null = null;
+  /** Can the shot in hand reach the mark? (A lobbed one falls short of anything too far or too high.) */
+  aimReach = true;
   lockAim: number | null = null;
 
   /** Extraction: this map's labyrinth (built from the seed, like the server's), and which traps have gone off. */

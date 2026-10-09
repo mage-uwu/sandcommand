@@ -1,4 +1,4 @@
-import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE } from '../shared/constants.ts';
+import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
@@ -1241,6 +1241,12 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    const def = WEAPONS[game.weapon];
+    const fall = def && def.proj >= 0 && def.proj < PROJ.length ? PROJ[def.proj].gravity : 0;
+    if (def && fall >= 0.3 && def.speed > 0) {
+      this.drawArc(ctx, game, s.x, s.y, s.aim, def.speed, GRAVITY * fall, def.muzzle);
+      return;
+    }
     const lof = lineOfFire(game, s.x, s.y, s.aim, 2000);
     const ex = s.x + Math.cos(s.aim) * lof.dist;
     const ey = s.y + Math.sin(s.aim) * lof.dist;
@@ -1288,6 +1294,54 @@ export class Renderer {
       ctx.font = '5px ui-monospace, monospace';
       ctx.textAlign = 'center';
       ctx.fillText('LOCK', hit.x + ACTOR_W / 2, y0 - 2);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  /**
+   * A lobbed weapon's sight: the arc its shot will fly (stepped as the game
+   * steps it), dotted, out to where it lands, and the mark it's aimed at.
+   */
+  private drawArc(ctx: CanvasRenderingContext2D, game: Game, ox: number, oy: number, aim: number, speed: number, g: number, muzzle: number): void {
+    const mark = this.assistSight || game.scopeLock ? game.aimMark : null;
+    const dt = 1 / 30;
+    let x = ox + Math.cos(aim) * muzzle;
+    let y = oy + Math.sin(aim) * muzzle;
+    let vx = Math.cos(aim) * speed;
+    let vy = Math.sin(aim) * speed;
+    const hot = !!mark;
+    ctx.fillStyle = hot ? 'rgba(255,70,50,0.75)' : 'rgba(255,140,110,0.4)';
+    let near = Infinity;
+    let end = false;
+    for (let i = 0; i < 90 && !end; i++) {
+      vy += g * dt;
+      // Dots every couple of cells along the step, stopping at the ground.
+      const n = Math.max(1, Math.ceil((Math.hypot(vx, vy) * dt) / 3));
+      for (let j = 0; j < n; j++) {
+        x += (vx * dt) / n;
+        y += (vy * dt) / n;
+        if (game.terrain.isSolid(Math.floor(x), Math.floor(y))) {
+          end = true;
+          break;
+        }
+        if ((i * n + j) % 2 === 0) ctx.fillRect(x - 0.4, y - 0.4, 0.8, 0.8);
+        if (mark) {
+          const d = Math.hypot(x - mark.x, y - mark.y);
+          if (d > near + 6) end = true; // past the target: that's the arc that matters
+          near = Math.min(near, d);
+        }
+      }
+    }
+    ctx.fillStyle = hot ? '#ff4030' : '#ffb0a0';
+    ctx.fillRect(Math.round(x) - 1, Math.round(y) - 1, 2, 2);
+    if (mark) {
+      const lx = Math.round(mark.x);
+      const ly = Math.round(mark.y);
+      ctx.fillRect(lx - 2, ly, 5, 1);
+      ctx.fillRect(lx, ly - 2, 1, 5);
+      ctx.font = '5px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(game.aimReach ? 'LOCK' : 'OUT OF RANGE', mark.x, mark.y - 8);
       ctx.textAlign = 'left';
     }
   }

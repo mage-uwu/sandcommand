@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
 import { stickButtons } from '../src/client/stick.ts';
-import { assistAim, leadPoint } from '../src/client/aim.ts';
+import { assistAim, leadPoint, ballisticAim } from '../src/client/aim.ts';
 
 describe('touch joystick', () => {
   it('maps deflection to run, jet and crouch, with a dead zone', () => {
@@ -72,8 +72,78 @@ describe('leading moving targets', () => {
     expect(away.x).toBeGreaterThan(520);
   });
   it('aims high for a shot that falls, and not at all for an instant one', () => {
-    const lob = leadPoint(0, 0, { x: 300, y: 0, vx: 0, vy: 0 }, 300, 120);
-    expect(lob.y).toBeLessThan(-40); // above it (screen y is down)
+    const lob = leadPoint(0, 0, { x: 150, y: 0, vx: 0, vy: 0 }, 340, 620);
+    expect(lob.y).toBeLessThan(-20); // above it (screen y is down)
     expect(leadPoint(0, 0, { x: 300, y: 0, vx: 50, vy: 50 }, 0, 0)).toEqual({ x: 300, y: 0 });
+  });
+});
+
+/** Fly a shot the way the game does (velocity, then position, each 30 Hz tick) and report its nearest pass to a moving target. */
+function flyMiss(ox: number, oy: number, aim: number, speed: number, g: number, t: { x: number; y: number; vx: number; vy: number }, muzzle = 0, own = { vx: 0, vy: 0 }): number {
+  const dt = 1 / 30;
+  let x = ox + Math.cos(aim) * muzzle;
+  let y = oy + Math.sin(aim) * muzzle;
+  let vx = Math.cos(aim) * speed + own.vx;
+  let vy = Math.sin(aim) * speed + own.vy;
+  let tx = t.x;
+  let ty = t.y;
+  let best = Infinity;
+  for (let i = 0; i < 300; i++) {
+    vy += g * dt;
+    // Nearest pass over the tick, shot and target both moving straight (as the game sweeps them).
+    const rx = x - tx;
+    const ry = y - ty;
+    const dvx = (vx - t.vx) * dt;
+    const dvy = (vy - t.vy) * dt;
+    const k = Math.max(0, Math.min(1, -(rx * dvx + ry * dvy) / (dvx * dvx + dvy * dvy || 1)));
+    best = Math.min(best, Math.hypot(rx + dvx * k, ry + dvy * k));
+    x += vx * dt;
+    y += vy * dt;
+    tx += t.vx * dt;
+    ty += t.vy * dt;
+  }
+  return best;
+}
+
+describe('ballistic aim (shots that drop)', () => {
+  const GL = { speed: 340, g: 620, muzzle: 13 };
+  it('lands a GL bomb on a still target, level, above and below', () => {
+    for (const [x, y] of [[140, 0], [-160, 0], [100, -40], [150, 70], [-40, -60], [30, 120], [-90, 160]]) {
+      const b = ballisticAim(0, 0, { x, y, vx: 0, vy: 0 }, GL.speed, GL.g, undefined, GL.muzzle)!;
+      expect(b.reach).toBe(true);
+      expect(flyMiss(0, 0, b.aim, GL.speed, GL.g, { x, y, vx: 0, vy: 0 }, GL.muzzle)).toBeLessThan(2);
+    }
+  });
+  it('takes the low arc', () => {
+    const b = ballisticAim(0, 0, { x: 140, y: 0, vx: 0, vy: 0 }, GL.speed, GL.g)!;
+    expect(-b.aim).toBeLessThan(Math.PI / 4);
+    expect(-b.aim).toBeGreaterThan(0);
+  });
+  it('leads a running target along the arc, from a running thrower', () => {
+    const t = { x: 150, y: 0, vx: -70, vy: 0 };
+    const own = { vx: 40 * 0.25, vy: 0 };
+    const b = ballisticAim(0, 0, t, GL.speed, GL.g, own, GL.muzzle)!;
+    expect(flyMiss(0, 0, b.aim, GL.speed, GL.g, t, GL.muzzle, own)).toBeLessThan(3);
+    // The old straight-line guess misses by a mile.
+    const naive = Math.atan2(t.y, t.x);
+    expect(flyMiss(0, 0, naive, GL.speed, GL.g, t, GL.muzzle, own)).toBeGreaterThan(20);
+  });
+  it('lands a grenade and a tank shell too', () => {
+    const t = { x: 150, y: 20, vx: 30, vy: 0 };
+    for (const [speed, g] of [[330, 620], [520, 0.35 * 620]]) {
+      const b = ballisticAim(0, 0, t, speed, g)!;
+      expect(flyMiss(0, 0, b.aim, speed, g, t)).toBeLessThan(3);
+    }
+  });
+  it('throws as far as it can toward a target out of reach', () => {
+    const b = ballisticAim(0, 0, { x: 600, y: 0, vx: 0, vy: 0 }, GL.speed, GL.g)!;
+    expect(b.reach).toBe(false);
+    expect(b.aim).toBeCloseTo(-Math.PI / 4, 1);
+    const back = ballisticAim(0, 0, { x: -600, y: 0, vx: 0, vy: 0 }, GL.speed, GL.g)!;
+    expect(back.aim).toBeCloseTo((-3 * Math.PI) / 4, 1);
+    // Up a cliff out of reach: steeper than 45.
+    const up = ballisticAim(0, 0, { x: 100, y: -200, vx: 0, vy: 0 }, GL.speed, GL.g)!;
+    expect(up.reach).toBe(false);
+    expect(-up.aim).toBeGreaterThan(Math.PI / 4);
   });
 });

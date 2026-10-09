@@ -49,10 +49,16 @@ and a LOCK tag marks it (on a dropship, at the hull or pod it picked).
 goes straight to them, however far out (past the weapon's usual scope
 distance), and the reticle stays on them. **It leads them:** the aim (and
 the laser) points where a moving target will be when the shot gets there,
-from their velocity and your round's speed, and a touch high for a round
-that drops (`leadPoint` in `src/client/aim.ts`). That holds for auto-aim
-and the scope's lock alike. Instant weapons (the laser) need no lead, and
-the sniper's 24000-cell/s slug hardly any. Enemy dropships are targets too: the hull, and each engine pod still on
+from their velocity and your round's speed (`ballisticAim` in
+`src/client/aim.ts`). **Rounds that drop are aimed along their arc:** for
+the GL, grenades and the like it solves the launch angle that lands the
+round on the target. It takes the low arc, and it counts the game's
+30 Hz stepping, the muzzle and the speed your own running lends the shot.
+The laser becomes a dotted arc out to where the round comes down, tagged
+LOCK, or OUT OF RANGE when the target is too far or too high to reach. Then
+it throws as far as it can their way. That holds for auto-aim and the
+scope's lock alike. Instant weapons (the laser) need no lead, and the
+sniper's 24000-cell/s slug hardly any. Enemy dropships are targets too: the hull, and each engine pod still on
 its pylons, so aiming near a pod picks that pod. Scoped, it reaches as far
 as the scope sees, and the scope's lock-on works on dropships too. It works
 for mouse, touch and keyboard aim. It reaches 650
