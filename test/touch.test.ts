@@ -22,7 +22,8 @@ describe('touch aim assist', () => {
     expect(a).toBeCloseTo(0, 5);
   });
   it('leaves the aim alone when nothing is near the line, too far, or behind a wall', () => {
-    expect(assistAim(0, 0, 0, [{ x: 0, y: 200 }], open)).toBe(0); // 90 degrees off
+    expect(assistAim(0, 0, 0, [{ x: -100, y: 173 }], open)).toBe(0); // 120 degrees off
+    expect(assistAim(0, 0, 0, [{ x: 20, y: 200 }], open)).toBeCloseTo(Math.atan2(200, 20), 5); // 84 degrees off: still snaps
     expect(assistAim(0, 0, 0, [{ x: 900, y: 0 }], open)).toBe(0); // out of range
     expect(assistAim(0, 0, 0.1, [{ x: 200, y: 0 }], () => false)).toBe(0.1); // no line of sight
   });

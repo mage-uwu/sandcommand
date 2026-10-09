@@ -1,12 +1,12 @@
 /**
- * Aim assist. The bots aim like machines, so when the aim (touch stick,
- * tap, arrow keys or mouse) points loosely at an enemy in sight, it snaps
- * straight onto them.
+ * Aim assist. The bots aim like machines, so aiming is near-effortless:
+ * point anywhere within 90 degrees of an enemy in sight (touch stick, tap,
+ * arrow keys or mouse, scoped or not) and the aim snaps straight onto them.
  */
 
-/** Half-angle of the cone the assist looks in (radians), and how far. */
-export const ASSIST_CONE = 0.2;
-export const ASSIST_RANGE = 420;
+/** Half-angle of the cone the assist looks in (radians: 90 degrees either side of the aim), and how far. */
+export const ASSIST_CONE = Math.PI / 2;
+export const ASSIST_RANGE = 650;
 
 const wrap = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.PI * 2));
 
@@ -25,8 +25,7 @@ export function assistAim(ox: number, oy: number, aim: number, targets: readonly
     if (d < 4 || d > range) continue;
     const a = Math.atan2(dy, dx);
     const err = Math.abs(wrap(a - aim));
-    // Close targets subtend more: widen the cone a little for them.
-    const cone = ASSIST_CONE + Math.min(0.2, 6 / d);
+    const cone = ASSIST_CONE;
     if (err > cone) continue;
     const score = err / cone + d / range / 4;
     if (score >= bestScore || !sight(ox, oy, t.x, t.y)) continue;

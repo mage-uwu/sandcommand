@@ -32,11 +32,12 @@ enemy it's near, as touch aim does. **Left Shift** scopes and **right Shift**
 fires. Right Shift also clicks, so it builds and picks radio calls at the
 reticle. Moving the mouse hands aim back to it.
 
-**Aim assist** (`src/client/aim.ts`). The bots aim like machines, so to
-even things up, whenever your aim points loosely at an enemy, it snaps
-straight onto them. That's within about 11° (wider up close), with a clear
-line of sight. It works for mouse, touch and keyboard aim. With the mouse
-it reaches out as far as the pointer, up to 900 cells. Your arm and the
+**Aim assist** (`src/client/aim.ts`). The bots aim like machines, so aiming
+is near-effortless: point anywhere within 90° either side of an enemy you
+can see, scoped or not, and the aim snaps straight onto them. With several
+in that half-circle it takes the one nearest your aim line, and distance
+breaks ties. It works for mouse, touch and keyboard aim. It reaches 650
+cells, or as far as the pointer with the mouse, up to 900. Your arm and the
 aim line show the snap. Teammates are ignored, and so are tools aimed at
 the ground or at friends (digger, materializer, radio, repair kit).
 **V** turns it off or on for the mouse, and the choice is remembered.
@@ -59,8 +60,8 @@ on a touch-first device.
 - **Aim stick (anywhere else).** Put a thumb down and drag. The clone aims
   along the drag, and pushed past halfway it fires; the ring turns red.
   Semi-automatic weapons keep firing as fast as they cycle while you hold.
-- **Aim assist.** When the stick, a tap or a hold points within about 11°
-  of an enemy in sight and in range, the aim settles on it
+- **Aim assist.** When the stick, a tap or a hold points within 90° of an
+  enemy in sight and in range, the aim snaps onto it
   (`src/client/aim.ts`). Teammates are ignored.
 - **Quick tap.** Shoots once at that spot. With the Materializer out, a tap
   builds there, and taps on its menu pick the piece. Once you're out of the
