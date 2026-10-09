@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BTN_RIGHT } from '../src/shared/actor.ts';
+import { BTN_FIRE, BTN_RIGHT } from '../src/shared/actor.ts';
 import { ClassId, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
-import { CallKind, WATCHDOG_COST } from '../src/shared/protocol.ts';
+import { CallKind, WATCHDOG_COST, quantizeAim } from '../src/shared/protocol.ts';
 import { TANK_W, WATCHDOG_SCALE, isDog, tankMaxHp, tankW } from '../src/shared/tank.ts';
-import { WeaponId } from '../src/shared/weapons.ts';
+import { ProjKind, WeaponId } from '../src/shared/weapons.ts';
+import { Game } from '../src/client/game.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -130,5 +131,53 @@ describe('the watchdog', () => {
     world.removePlayer(a.id);
     world.step();
     expect(world.tanks[slot]).toBe(null);
+  });
+
+  /** Vulcan rounds fired for `owner` over `ticks` (new projectile ids seen), stepping with `each` before every tick. */
+  const vulcanShots = (world: World, owner: Player, ticks: number, each: () => void = () => {}) => {
+    const pr = world.projectiles;
+    const seen = new Set<number>();
+    for (let k = 0; k < ticks; k++) {
+      each();
+      world.step();
+      for (let i = 0; i < pr.n; i++) if (pr.kind[i] === ProjKind.TankBullet && pr.owner[i] === owner.id) seen.add(pr.id[i]);
+    }
+    return seen.size;
+  };
+
+  it('fires its vulcan on its own at an enemy in range', () => {
+    const { world, a, b } = yard(307, 1200);
+    callDog(world, a);
+    const n = vulcanShots(world, a, 30 * 3, () => {
+      // (A tough target that keeps getting up, to keep shooting at.)
+      b.body.x = 1200;
+      b.alive = true;
+      b.hp = 100;
+      resetBody(b.parts, ClassId.Heavy, 0);
+    });
+    expect(n).toBeGreaterThan(10);
+  });
+
+  it('fires its vulcan when its owner pulls the trigger at the remote (radio still in hand)', () => {
+    const { world, a } = yard(308);
+    callDog(world, a);
+    expect(a.weapon).toBe(WeaponId.Radio);
+    world.call(a.id, CallKind.Pilot);
+    a.aimQ = quantizeAim(-0.2);
+    const n = vulcanShots(world, a, 30, () => {
+      a.buttons = BTN_FIRE;
+    });
+    expect(n).toBeGreaterThan(10);
+  });
+
+  it("at the remote, a click is the watchdog's trigger, not the radio menu's", () => {
+    const g = new Game();
+    g.myId = 0;
+    g.alive = true;
+    g.inv = [{ weapon: WeaponId.Radio, ammo: 0 }];
+    g.slot = 0;
+    expect(g.calling).toBe(true);
+    g.rc = 3;
+    expect(g.calling).toBe(false);
   });
 });

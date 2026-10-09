@@ -927,7 +927,7 @@ export class Game implements FrameHandler {
 
   /** Holding the materializer? */
   get building(): boolean {
-    return this.alive && !this.drive && this.pilot < 0 && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
+    return this.alive && !this.drive && this.pilot < 0 && this.rc < 0 && WEAPONS[this.weapon]?.proj === PROJ_BUILD;
   }
 
   itemsGone(ids: number[]): void {
@@ -1321,7 +1321,8 @@ export class Game implements FrameHandler {
 
   /** The radio is in hand: the call-in menu is up. */
   get calling(): boolean {
-    return this.alive && !this.drive && this.pilot < 0 && this.weapon === WeaponId.Radio;
+    // (Not while at a remote: then clicks are the dropship's or the watchdog's guns.)
+    return this.alive && !this.drive && this.pilot < 0 && this.rc < 0 && this.weapon === WeaponId.Radio;
   }
 
   /** Tanks at the render time, interpolated between snapshots (ours from prediction). */
