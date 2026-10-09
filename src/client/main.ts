@@ -4,7 +4,7 @@ import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import { LASER_MIN, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
-import { CANNON_PIVOT, SMG_SPEED, TANK_W, TANK_H, isDog, tankH, tankW } from '../shared/tank.ts';
+import { SMG_SPEED, TANK_W, TANK_H, gunPivotY, isPet, isSpider, tankCoreY, tankW } from '../shared/tank.ts';
 import { ASSIST_CONE, ASSIST_RANGE, type AssistTarget, MOUSE_LOCK_BREAK, assistAim, autoTarget, ballisticAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
@@ -293,9 +293,9 @@ function assistTargets(g: Game): AssistTarget[] {
     out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy, g: v.id, core: true });
   }
   for (const t of g.tankViews()) {
-    // A tank by its driver; a watchdog by its owner, driven or not.
-    const who = isDog(t) ? t.owner : t.pilot;
-    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2, vx: t.vx, vy: t.vy, g: 2000 + t.slot, core: true });
+    // A tank by its driver; a watchdog or tarantula by its owner, driven or not.
+    const who = isPet(t) ? t.owner : t.pilot;
+    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: tankCoreY(t), vx: t.vx, vy: t.vy, g: 2000 + t.slot, core: true });
   }
   return out;
 }
@@ -396,7 +396,7 @@ function frame(now: number): void {
       // Driving our watchdog by remote: aim from its turret.
       const dogged = flying ? null : g.remoteDog();
       let ox = flying ? flying.x + SHIP_W / 2 : dogged ? dogged.x + tankW(dogged) / 2 : sh.x;
-      let oy = flying ? flying.y + SHIP_H / 2 : dogged ? dogged.y + CANNON_PIVOT[1] * dogged.s : sh.y;
+      let oy = flying ? flying.y + SHIP_H / 2 : dogged ? gunPivotY(dogged) : sh.y;
       let aim: number;
       mark.on = false;
       // Scoped, the assist reaches as far as the scope sees.
@@ -476,8 +476,10 @@ function frame(now: number): void {
         // Lead it: aim where it will be when the shot gets there, and for a
         // shot that falls (a GL bomb, a grenade), along the arc that lands on it.
         const def = WEAPONS[g.weapon];
-        const proj = flying ? ProjKind.ShipGun : dogged ? ProjKind.TankBullet : (def?.proj ?? -1);
-        const speed = flying ? 900 : dogged ? SMG_SPEED : (def?.speed ?? 0);
+        // (A tarantula's laser is a beam: straight there, no leading.)
+        const beam = !!dogged && isSpider(dogged);
+        const proj = flying ? ProjKind.ShipGun : beam ? -1 : dogged ? ProjKind.TankBullet : (def?.proj ?? -1);
+        const speed = flying ? 900 : beam ? 1e6 : dogged ? SMG_SPEED : (def?.speed ?? 0);
         const own = flying ? { vx: flying.vx * 0.3, vy: flying.vy * 0.3 } : dogged ? { vx: dogged.vx * 0.25, vy: dogged.vy * 0.25 } : { vx: g.body.vx * 0.25, vy: g.body.vy * 0.25 };
         const b = ballisticAim(ox, oy, tgt, speed, proj >= 0 ? GRAVITY * PROJ[proj].gravity : 0, own, flying ? 9 : dogged ? 0 : (def?.muzzle ?? 0));
         if (b) aim = b.aim;

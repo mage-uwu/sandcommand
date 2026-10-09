@@ -35,7 +35,6 @@ import {
   TANK_H,
   TANK_INTEGRITY,
   TANK_PARTS,
-  TANK_PART_CENTER,
   TANK_HP,
   TANK_W,
   EXPOSED_H,
@@ -53,9 +52,22 @@ import {
   tankW,
   tankH,
   isDog,
+  isPet,
+  isSpider,
+  designW,
+  hitH,
+  partCenter,
+  newTarantula,
+  SPIDER_BEAM_ENERGY,
+  SPIDER_BEAM_WIDTH,
+  SPIDER_BEAM_WOUND,
+  SPIDER_LASER_INTERVAL,
+  SPIDER_MISSILE_INTERVAL,
+  SPIDER_MISSILE_SPEED,
+  TARANTULA_SCALE,
   WATCHDOG_SCALE,
 } from '../shared/tank.ts';
-import { type DogFoe, type DogMemory, dogThink, newDogMemory } from './watchdog.ts';
+import { DOG_KIT, type DogFoe, type DogMemory, SPIDER_KIT, dogThink, newDogMemory } from './watchdog.ts';
 import {
   CRAFT_H,
   CRAFT_INERTIA,
@@ -160,6 +172,7 @@ import {
   R_SHIP_BOOM,
   CALL_COST,
   WATCHDOG_COST,
+  TARANTULA_COST,
   CallKind,
   R_TANK_PART,
   R_TANK_BOOM,
@@ -1417,7 +1430,7 @@ export class World {
       // In the tank's own frame its (tilted) hull is an axis-aligned box.
       const la = tankLocal(t, x0, y0, this.segA);
       const lb = tankLocal(t, x1, y1, this.segB);
-      const tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, TANK_W, TANK_H);
+      const tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, designW(t), hitH(t));
       if (tt >= 0 && tt < bestT) {
         bestT = tt;
         best = TANK_ID_BASE + k;
@@ -2057,20 +2070,39 @@ export class World {
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
-    const x0 = sh.x + cos * def.muzzle;
-    const y0 = sh.y + sin * def.muzzle;
+    this.beam(p.id, sh.x + cos * def.muzzle, sh.y + sin * def.muzzle, aim, laserWidth(power), laserEnergy(power), laserWound(power), power, power, p.id);
+    // Its kick, the stronger the charge.
+    const brace = RECOIL_BRACE[p.body.stance] ?? 1;
+    p.body.vx -= cos * (10 + 110 * power) * brace;
+    p.body.vy -= sin * (10 + 110 * power) * brace * 0.6;
+  }
+
+  /** A tarantula's laser: a thin beam out of its head, at whatever it's aimed at. */
+  private spiderBeam(t: Tank, by: number): void {
+    const m = tankMuzzle(t, false, t.aim, this.tankMz);
+    this.beam(by, m.x, m.y, m.a, SPIDER_BEAM_WIDTH, SPIDER_BEAM_ENERGY, SPIDER_BEAM_WOUND, 0.12, 0, 255);
+    t.firedSmg = true;
+  }
+
+  /**
+   * A laser beam fired for `by` from (x0, y0) along `aim` (`w` wide, hitting
+   * with `energy` and `wound`): it goes straight through every soldier in its
+   * way, and stops at terrain or a vehicle, which it hits; with `burn`, it
+   * burns a crater where it lands. `power` (0..1) is how it looks; `shooter`
+   * is whose gun kicks on clients (255: nobody's).
+   */
+  private beam(by: number, x0: number, y0: number, aim: number, w: number, energy: number, wound: number, power: number, burn: number, shooter: number): void {
+    const cos = Math.cos(aim);
+    const sin = Math.sin(aim);
     // Out to the first solid cell (or a vehicle, which takes the hit and stops it).
     let len = sightLine(this.terrain, x0, y0, aim, 2400);
-    const vehicle = this.segmentActor(x0, y0, x0 + cos * len, y0 + sin * len, p.id, this.laserQ, LASER_VEHICLES_ONLY);
+    const vehicle = this.segmentActor(x0, y0, x0 + cos * len, y0 + sin * len, by, this.laserQ, LASER_VEHICLES_ONLY);
     if (vehicle >= 0) len *= this.laserQ.t;
     const x1 = x0 + cos * len;
     const y1 = y0 + sin * len;
-    const w = laserWidth(power);
-    const energy = laserEnergy(power);
-    const wound = laserWound(power);
     // Every soldier along it, no matter how many.
     for (const v of this.players) {
-      if (!v || !v.alive || v === p || v.tank >= 0) continue;
+      if (!v || !v.alive || v.id === by || v.tank >= 0) continue;
       const b = v.body;
       const t = segmentBox(x0, y0, x1 - x0, y1 - y0, b.x - w, v.top - w, b.x + ACTOR_W + w, b.y + ACTOR_H + w);
       if (t < 0) continue;
@@ -2080,23 +2112,19 @@ export class World {
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
-      if (!this.friendly(p.id, v)) {
+      if (!this.friendly(by, v)) {
         strike(v.parts, this.partHit(v, hx - b.x, hy - v.top), energy, wound, res);
         // A wide beam cuts through the body too, whatever it went in by.
         if (power > 0.45 && v.parts.mask & (1 << Part.Torso)) strike(v.parts, Part.Torso, energy, wound * 0.6, res);
       }
       b.vx += cos * 70 * power;
       b.vy += sin * 70 * power - 20 * power;
-      this.applyStrike(v, res, p.id, W_LASER, hx, hy);
+      this.applyStrike(v, res, by, W_LASER, hx, hy);
     }
-    if (vehicle >= SHIP_ID_BASE) this.hitShip(vehicle - SHIP_ID_BASE, x1, y1, cos, sin, energy, wound * 2, p.id);
-    else if (vehicle >= TANK_ID_BASE) this.hitTank(vehicle - TANK_ID_BASE, x1, y1, cos, sin, energy, wound * 2, p.id);
-    else if (vehicle >= CRAFT_ID_BASE) this.hitCraft(vehicle - CRAFT_ID_BASE, x1, y1, cos, sin, energy, wound * 2, p.id);
-    else if (power >= 0.1 && len < 2400) this.carve(x1 + cos * 2, y1 + sin * 2, Math.round(2 + 10 * power), Math.round(1 + 6 * power), Math.round(8 + 50 * power), p.id);
-    // Its kick, the stronger the charge.
-    const brace = RECOIL_BRACE[p.body.stance] ?? 1;
-    p.body.vx -= cos * (10 + 110 * power) * brace;
-    p.body.vy -= sin * (10 + 110 * power) * brace * 0.6;
+    if (vehicle >= SHIP_ID_BASE) this.hitShip(vehicle - SHIP_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
+    else if (vehicle >= TANK_ID_BASE) this.hitTank(vehicle - TANK_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
+    else if (vehicle >= CRAFT_ID_BASE) this.hitCraft(vehicle - CRAFT_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
+    else if (burn >= 0.1 && len < 2400) this.carve(x1 + cos * 2, y1 + sin * 2, Math.round(2 + 10 * burn), Math.round(1 + 6 * burn), Math.round(8 + 50 * burn), by);
     // Every client near either end sees the beam.
     const w2 = this.tmp.reset();
     w2.u8(R_BEAM);
@@ -2106,7 +2134,7 @@ export class World {
     w2.u16(clampU16(x1));
     w2.u16(clampU16(y1 + Y_BIAS));
     w2.u8(Math.round(power * 255));
-    w2.u8(p.id);
+    w2.u8(shooter);
     const bytes = w2.finish();
     this.hits.push({ bytes, id: 0, x: x0, y: y0 });
     if (len > 300) this.hits.push({ bytes, id: 0, x: x1, y: y1 });
@@ -2528,7 +2556,7 @@ export class World {
     const b = p.body;
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
-      if (!t || t.pilot !== 255 || t.chute || isDog(t)) continue;
+      if (!t || t.pilot !== 255 || t.chute || isPet(t)) continue;
       const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
       const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
       if (dx > BOARD_REACH || dy > BOARD_REACH) continue;
@@ -2602,13 +2630,13 @@ export class World {
         t.pilot = 255;
         pilot = null;
       }
-      // A watchdog whose owner is gone shuts down.
-      if (isDog(t) && !this.players[t.owner]) {
+      // A watchdog (or a tarantula) whose owner is gone shuts down.
+      if (isPet(t) && !this.players[t.owner]) {
         this.destroyTank(k, 255);
         continue;
       }
       // A watchdog with nobody at the remote drives itself.
-      const brain = !pilot && isDog(t) && !t.chute ? this.dogBrain(k, t) : null;
+      const brain = !pilot && isPet(t) && !t.chute ? this.dogBrain(k, t) : null;
       const buttons = pilot ? pilot.buttons : brain ? brain.buttons : 0;
       // (stepTank only takes a driver's buttons: the watchdog's brain counts as one.)
       if (brain) t.pilot = t.owner;
@@ -2632,20 +2660,24 @@ export class World {
       t.firedSmg = t.firedCannon = false;
       t.smgCd -= DT;
       t.cannonCd -= DT;
+      const spider = isSpider(t);
       if (gunner >= 0 && buttons & BTN_FIRE && hasTankPart(t.parts, TankPart.Smg)) {
+        // (A tarantula's is its laser: a beam a fifth of a second.)
         while (t.smgCd <= 0) {
-          this.tankShot(t, gunner, false);
-          t.smgCd += SMG_INTERVAL;
+          if (spider) this.spiderBeam(t, gunner);
+          else this.tankShot(t, gunner, false);
+          t.smgCd += spider ? SPIDER_LASER_INTERVAL : SMG_INTERVAL;
         }
       }
       if (gunner >= 0 && buttons & BTN_SCOPE && hasTankPart(t.parts, TankPart.Cannon) && t.cannonCd <= 0) {
+        // (A tarantula's rack: missiles for as long as it's held.)
         this.tankShot(t, gunner, true);
-        t.cannonCd += CANNON_INTERVAL * (isDog(t) ? 1.3 : 1);
+        t.cannonCd += spider ? SPIDER_MISSILE_INTERVAL : CANNON_INTERVAL * (isDog(t) ? 1.3 : 1);
       }
       t.smgCd = Math.max(0, t.smgCd);
       t.cannonCd = Math.max(0, t.cannonCd);
       if (t.jetting) this.tankJets(t);
-      this.tankCrush(t, impact, pilot ? pilot.id : isDog(t) ? t.owner : t.lastHitBy);
+      this.tankCrush(t, impact, pilot ? pilot.id : isPet(t) ? t.owner : t.lastHitBy);
       if (pilot && pilot.tank === k) this.syncPilot(pilot, t);
     }
   }
@@ -2684,7 +2716,7 @@ export class World {
       const sy = sh.y + SHIP_H / 2;
       if (near(sx, sy)) foes.push({ x: sx, y: sy, vx: sh.vx, vy: sh.vy, vehicle: true });
     }
-    return dogThink(t, mem, owner ? { cx: owner.cx, cy: owner.cy, alive: owner.alive } : null, foes, (x0, y0, x1, y1) => this.lineClear(x0, y0, x1, y1));
+    return dogThink(t, mem, owner ? { cx: owner.cx, cy: owner.cy, alive: owner.alive } : null, foes, (x0, y0, x1, y1) => this.lineClear(x0, y0, x1, y1), isSpider(t) ? SPIDER_KIT : DOG_KIT);
   }
 
   /** Is the straight line between two points free of terrain? */
@@ -2698,6 +2730,16 @@ export class World {
 
   private tankShot(t: Tank, owner: number, cannon: boolean): void {
     const m = tankMuzzle(t, cannon, t.aim, this.tankMz);
+    if (isSpider(t)) {
+      // A missile off the rack, from one tube or the other (they take turns), a little ragged.
+      const a = m.a + (this.rng.next() - 0.5) * 0.06;
+      const side = (t.tube = (t.tube ?? 0) ^ 1) ? 1 : -1;
+      const ox = -Math.sin(m.a) * side * 2.2;
+      const oy = Math.cos(m.a) * side * 2.2;
+      this.spawnProj(this.nextProjId++, ProjKind.SpiderMissile, owner, m.x + ox, m.y + oy, Math.cos(a) * SPIDER_MISSILE_SPEED, Math.sin(a) * SPIDER_MISSILE_SPEED);
+      t.firedCannon = true;
+      return;
+    }
     const a = m.a + (this.rng.next() - 0.5) * 2 * (cannon ? 0.01 : SMG_SPREAD);
     const speed = cannon ? CANNON_SPEED : SMG_SPEED;
     this.spawnProj(this.nextProjId++, cannon ? ProjKind.Shell : ProjKind.TankBullet, owner, m.x, m.y, Math.cos(a) * speed + t.vx * 0.25, Math.sin(a) * speed + t.vy * 0.25);
@@ -2727,7 +2769,7 @@ export class World {
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0) continue;
       // A watchdog slips past its own owner (and its owner's side) rather than shoving them about.
-      if (isDog(t) && (p.id === t.owner || (p.team !== Team.None && p.team === this.players[t.owner]?.team))) continue;
+      if (isPet(t) && (p.id === t.owner || (p.team !== Team.None && p.team === this.players[t.owner]?.team))) continue;
       const b = p.body;
       if (b.x + ACTOR_W < t.x - 1 || b.x > t.x + tankW(t) + 1 || b.y + ACTOR_H < t.y - 1 || b.y > t.y + tankH(t) + 1) continue;
       const side = p.cx < t.x + tankW(t) / 2 ? -1 : 1;
@@ -2749,9 +2791,9 @@ export class World {
   /** Is a hit by `by` on this tank friendly fire (its driver is a teammate)? */
   private friendlyTank(by: number, t: Tank): boolean {
     // A watchdog is its owner's (whoever is at the remote).
-    const id = isDog(t) ? t.owner : t.pilot;
+    const id = isPet(t) ? t.owner : t.pilot;
     const d = id !== 255 ? this.players[id] : null;
-    return !!d && (by === d.id ? isDog(t) : this.friendly(by, d));
+    return !!d && (by === d.id ? isPet(t) : this.friendly(by, d));
   }
 
   /**
@@ -2795,7 +2837,8 @@ export class World {
       const amt = dmg * 1.5 * (1 - d / r);
       for (const part of [TankPart.Cannon, TankPart.Smg, TankPart.Shield]) {
         if (!hasTankPart(t.parts, part)) continue;
-        tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], pt);
+        const c = partCenter(t, part);
+        tankPoint(t, c[0], c[1], pt);
         const dp = Math.hypot(pt.x - x, pt.y - y);
         if (dp < r) this.hurtTankPart(k, part, dmg * (1 - dp / r), owner);
         if (this.tanks[k] !== t) break;
@@ -2822,7 +2865,8 @@ export class World {
     const t = this.tanks[slot]!;
     t.parts &= ~(1 << part);
     t.partHp[part] = 0;
-    const pt = tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], this.pt);
+    const c = partCenter(t, part);
+    const pt = tankPoint(t, c[0], c[1], this.pt);
     const x = pt.x;
     const y = pt.y;
     const out = (x - (t.x + tankW(t) / 2)) >= 0 ? 1 : -1;
@@ -2902,11 +2946,27 @@ export class World {
   call(id: number, kind: number): boolean {
     if (kind === CallKind.Pilot) return this.togglePilot(id);
     const p = this.players[id];
-    if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < (kind === CallKind.Watchdog ? WATCHDOG_COST : CALL_COST)) return false;
+    const cost = kind === CallKind.Watchdog ? WATCHDOG_COST : kind === CallKind.Tarantula ? TARANTULA_COST : CALL_COST;
+    if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < cost) return false;
+    if (kind === CallKind.Tarantula) {
+      // One tarantula each (a watchdog besides is fine).
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0 || this.tanks.some((t) => t !== null && isSpider(t) && t.owner === p.id)) return false;
+      const w = ACTOR_W * TARANTULA_SCALE;
+      const x = Math.max(60, Math.min(WORLD_W - 60 - w, p.cx - w / 2 + this.rng.range(-30, 30)));
+      this.tanks[slot] = newTarantula(x, -ACTOR_H * TARANTULA_SCALE - 40, p.id);
+      this.dogMem.delete(slot);
+      p.gold -= TARANTULA_COST;
+      p.callCd = CALL_COOLDOWN;
+      this.broadcast.u8(R_CHAT);
+      this.broadcast.u8(p.id);
+      this.broadcast.str('*radio* tarantula inbound, stand clear');
+      return true;
+    }
     if (kind === CallKind.Watchdog) {
       // One watchdog each.
       const slot = this.tanks.indexOf(null);
-      if (slot < 0 || p.gold < WATCHDOG_COST || this.tanks.some((t) => t?.owner === p.id)) return false;
+      if (slot < 0 || this.tanks.some((t) => t !== null && isDog(t) && t.owner === p.id)) return false;
       const w = Math.round(TANK_W * WATCHDOG_SCALE);
       const x = Math.max(60, Math.min(WORLD_W - 60 - w, p.cx - w / 2 + this.rng.range(-30, 30)));
       this.tanks[slot] = newTank(x, -TANK_H - 40, WATCHDOG_SCALE, p.id);
@@ -2949,10 +3009,17 @@ export class World {
   togglePilot(id: number): boolean {
     const p = this.players[id];
     if (!p) return false;
-    // The remote cycles: our dropship, then our watchdog, then back to the clone.
-    const dog = this.tanks.findIndex((t) => t !== null && isDog(t) && t.owner === id && !t.chute && t.pilot === 255);
+    // The remote cycles: our dropship, then our watchdog, then our tarantula, then back to the clone.
+    const pets: number[] = [];
+    for (const which of [isDog, isSpider]) {
+      const k = this.tanks.findIndex((t) => t !== null && which(t) && t.owner === id && !t.chute && (t.pilot === 255 || t.pilot === id));
+      if (k >= 0) pets.push(k);
+    }
+    const dog = pets.find((k) => this.tanks[k]!.pilot === 255) ?? -1;
     if (p.rc >= 0) {
+      const next = pets[pets.indexOf(p.rc) + 1];
       this.endRemote(p);
+      if (next !== undefined && p.alive) this.startRemote(p, next);
       return true;
     }
     if (p.pilot >= 0) {
@@ -4178,6 +4245,7 @@ export class World {
           w.u16(Math.max(0, Math.ceil(t.hp)));
           w.u8(t.pilot);
           w.u8(t.owner);
+          w.u8(t.kind);
         }
       }
 

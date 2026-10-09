@@ -1,6 +1,6 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { CALL_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, TARANTULA_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES } from '../shared/worldgen.ts';
@@ -17,7 +17,7 @@ import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '.
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
-import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor, frostColor, grassBlade } from './texture.ts';
 import { Backdrop } from './backdrop.ts';
@@ -360,8 +360,9 @@ export class Renderer {
     for (const t of game.tankViews(alpha)) {
       const mine = (t.slot === game.driveSlot && !!game.drive) || (t.slot === game.rc && game.alive);
       // (Driving it ourselves: the guns follow our mouse now, not the last word from the server.)
-      const aim = mine ? (game.rc === t.slot && game.lockAim !== null ? game.lockAim : Math.atan2(wmy - (t.y + CANNON_PIVOT[1] * t.s), wmx - (t.x + tankW(t) / 2))) : t.aim;
-      this.drawTank(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
+      const aim = mine ? (game.rc === t.slot && game.lockAim !== null ? game.lockAim : Math.atan2(wmy - gunPivotY(t), wmx - (t.x + tankW(t) / 2))) : t.aim;
+      if (isSpider(t)) this.drawTarantula(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
+      else this.drawTank(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
     }
 
     // Dropships.
@@ -508,6 +509,25 @@ export class Renderer {
         ctx.fillRect(-5, -2.5, 2, 5);
         ctx.fillStyle = (now / 90) % 2 < 1 ? '#ff3030' : '#a01010';
         ctx.fillRect(3, -1, 2, 2);
+        ctx.restore();
+      } else if (k === ProjKind.SpiderMissile) {
+        // Tarantula missile: a slim grey dart, a yellow nose band, a flame out the back.
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.atan2(p.vy[i], p.vx[i]));
+        const len = 2 + ((now / 27 + i) % 3);
+        ctx.fillStyle = '#ff8a24';
+        ctx.fillRect(-4 - len, -0.75, len, 1.5);
+        ctx.fillStyle = '#fffbe0';
+        ctx.fillRect(-4 - len + 1, -0.35, len - 1, 0.7);
+        ctx.fillStyle = '#8a9096';
+        ctx.fillRect(-4, -1, 6, 2);
+        ctx.fillStyle = '#4d5359';
+        ctx.fillRect(-4, -1.8, 1.5, 3.6);
+        ctx.fillStyle = '#d8b030';
+        ctx.fillRect(1, -1, 1, 2);
+        ctx.fillStyle = '#30353a';
+        ctx.fillRect(2, -0.6, 1, 1.2);
         ctx.restore();
       } else if (k === 7) {
         // Dropship bomb: a dark finned casing, nose down, a red band.
@@ -681,12 +701,12 @@ export class Renderer {
     // Tanks: who's driving, and how much hull is left.
     for (const t of game.tankViews(alpha)) {
       const sx = offX + (t.x + tankW(t) / 2) * z;
-      const sy = offY + (t.y - (isDog(t) ? 14 : 8)) * z - 10 * dpr;
-      // A watchdog wears its owner's name; a tank its driver's.
-      const who = isDog(t) ? t.owner : t.pilot;
-      if (who !== 255 && (who !== game.myId || isDog(t))) {
+      const sy = offY + (t.y - (isDog(t) ? 14 : isSpider(t) ? 4 : 8)) * z - 10 * dpr;
+      // A watchdog (or a tarantula) wears its owner's name; a tank its driver's.
+      const who = isPet(t) ? t.owner : t.pilot;
+      if (who !== 255 && (who !== game.myId || isPet(t))) {
         const info = game.players.get(who);
-        const tag = isDog(t) ? `${who === game.myId ? 'your' : `${info?.name ?? '?'}'s`} watchdog` : (info?.name ?? '?');
+        const tag = isPet(t) ? `${who === game.myId ? 'your' : `${info?.name ?? '?'}'s`} ${isSpider(t) ? 'tarantula' : 'watchdog'}` : (info?.name ?? '?');
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
         ctx.fillText(tag, sx + dpr, sy + dpr);
         ctx.fillStyle = info?.color ?? '#ccc';
@@ -694,7 +714,7 @@ export class Renderer {
       }
       const max = tankMaxHp(t);
       if (t.hp < max) {
-        const w = (isDog(t) ? 28 : 40) * dpr;
+        const w = (isDog(t) ? 28 : isSpider(t) ? 48 : 40) * dpr;
         ctx.fillStyle = '#300';
         ctx.fillRect(sx - w / 2, sy + 3 * dpr, w, 3 * dpr);
         ctx.fillStyle = t.hp > max * 0.35 ? '#d8c040' : '#e33';
@@ -863,7 +883,8 @@ export class Renderer {
    * tripods (as a real spider's do), never all at once. In the air the feet
    * curl in under it. Also how much the body dips as its weight shifts.
    */
-  private droidFeet(id: number, x: number, y: number, left: boolean, grounded: boolean, now: number): { x: Float32Array; y: Float32Array; bob: number } {
+  private droidFeet(id: number, x: number, y: number, left: boolean, grounded: boolean, now: number, k = 1): { x: Float32Array; y: Float32Array; bob: number } {
+    // (`k`: its scale. A tarantula is a droid three times over: longer strides, slower steps.)
     let gait = this.droidGaits.get(id);
     if (!gait) {
       gait = { x: new Float32Array(6), y: new Float32Array(6), fx: new Float32Array(6), fy: new Float32Array(6), t: new Float32Array(6).fill(1), at: now, init: false, lx: x, ly: y, bob: 0 };
@@ -877,31 +898,31 @@ export class Renderer {
     gait.ly = y;
     const terrain = this.game?.terrain;
     const solid = (cx: number, cy: number) => !!terrain && terrain.isSolid(Math.floor(cx), Math.floor(cy));
-    const cx = x + ACTOR_W / 2;
+    const cx = x + (ACTOR_W * k) / 2;
     // On a wall (in the air, a wall at its side): its feet grip the wall.
     let wall = 0;
     if (!grounded) {
       for (const side of [1, -1]) {
-        const wx = side > 0 ? x + ACTOR_W : x - 1;
-        if (solid(wx, y + 4) || solid(wx, y + 10)) {
+        const wx = side > 0 ? x + ACTOR_W * k : x - 1;
+        if (solid(wx, y + 4 * k) || solid(wx, y + 10 * k)) {
           wall = side;
           break;
         }
       }
     }
     const tx = (leg: number): [number, number] => {
-      const rest = DROID_REST[leg] * (left ? -1 : 1);
+      const rest = DROID_REST[leg] * (left ? -1 : 1) * k;
       if (wall !== 0) {
         // Up and down the wall, the front legs reaching up it.
-        const wx = wall > 0 ? x + ACTOR_W + 0.5 : x - 0.5;
-        const along = DROID_REST[leg] * 0.85;
-        return [wx, y + 9 - along];
+        const wx = wall > 0 ? x + ACTOR_W * k + 0.5 : x - 0.5;
+        const along = DROID_REST[leg] * 0.85 * k;
+        return [wx, y + 9 * k - along];
       }
-      if (!grounded) return [cx + rest * 0.45, y + ACTOR_H + 1.5]; // tucked in, dangling
+      if (!grounded) return [cx + rest * 0.45, y + (ACTOR_H + 1.5) * k]; // tucked in, dangling
       // Ahead of where it's going (more the faster), down to the ground there.
       const fx = cx + rest + vx * 0.07;
-      let fy = y + ACTOR_H;
-      for (let yy = Math.floor(y + 6); yy < y + 26; yy++) {
+      let fy = y + ACTOR_H * k;
+      for (let yy = Math.floor(y + 6 * k); yy < y + 26 * k; yy++) {
         if (solid(fx, yy)) {
           fy = yy;
           break;
@@ -929,17 +950,17 @@ export class Renderer {
       }
       if (gait.t[leg] < 1) {
         // Mid-step: an arc from where it lifted to the hold ahead.
-        gait.t[leg] = Math.min(1, gait.t[leg] + dt / DROID_STEP_TIME);
+        gait.t[leg] = Math.min(1, gait.t[leg] + dt / (DROID_STEP_TIME * Math.sqrt(k)));
         const t = gait.t[leg];
         const e = t * t * (3 - 2 * t);
-        const lift = Math.sin(Math.PI * t) * 2.2;
+        const lift = Math.sin(Math.PI * t) * 2.2 * k;
         gait.x[leg] = gait.fx[leg] + (gx - gait.fx[leg]) * e + (wall !== 0 ? -wall * lift : 0);
         gait.y[leg] = gait.fy[leg] + (gy - gait.fy[leg]) * e - (wall !== 0 ? 0 : lift);
         continue;
       }
       const off = Math.hypot(gait.x[leg] - gx, gait.y[leg] - gy);
       // Way off (it teleported, or fell): just put it there.
-      if (off > 14) {
+      if (off > 14 * k) {
         gait.x[leg] = gx;
         gait.y[leg] = gy;
         continue;
@@ -947,7 +968,7 @@ export class Renderer {
       // Strayed too far from where it belongs: step, if the other tripod's planted.
       const other = 1 - DROID_TRIPOD[leg];
       // (Left far behind, at a sprint, it steps whatever the others are doing.)
-      if ((off > DROID_STRIDE && busy[other] === 0) || off > DROID_STRIDE * 2.2) {
+      if ((off > DROID_STRIDE * k && busy[other] === 0) || off > DROID_STRIDE * k * 2.2) {
         gait.fx[leg] = gait.x[leg];
         gait.fy[leg] = gait.y[leg];
         gait.t[leg] = 0;
@@ -961,7 +982,34 @@ export class Renderer {
     return { x: gait.x, y: gait.y, bob: gait.bob };
   }
 
-  private drawDroid(ctx: CanvasRenderingContext2D, x: number, y: number, left: boolean, grounded: boolean, parts: number, team: number, moving: boolean, now: number, aim = left ? Math.PI : 0, id = -1): void {
+  private drawDroid(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    left: boolean,
+    grounded: boolean,
+    parts: number,
+    team: number,
+    moving: boolean,
+    now: number,
+    aim = left ? Math.PI : 0,
+    id = -1,
+    /** Its scale (a tarantula is one three times over), and a tarantula's kit: the missile rack, and its guns' flashes. */
+    k = 1,
+    rig?: { rack: boolean; firedLaser: boolean; firedRack: boolean },
+  ): void {
+    // Its feet are planted in the world (see droidFeet).
+    const feet = this.droidFeet(id, x, y, left, grounded, now, k);
+    const ox = x;
+    const oy = y;
+    if (k !== 1) {
+      // Bigger: the whole droid drawn in its own scaled frame (from its box's top-left).
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(k, k);
+      x = 0;
+      y = 0;
+    }
     // Droid-local (as facing right, from the hitbox's top-left) to world.
     const X = (dx: number) => (left ? x + ACTOR_W - dx : x + dx);
     const Y = (dy: number) => y + dy;
@@ -974,7 +1022,6 @@ export class Renderer {
     // planted in the world (see droidFeet): a short thigh rising steeply from
     // the hip to a high, sharp knee, and a long shin down to the foot, set
     // wide of the body.
-    const feet = this.droidFeet(id, x, y, left, grounded, now);
     const bob = feet.bob;
     const HIP_Y = 9.6 + bob;
     const strut = (x1: number, y1: number, x2: number, y2: number, wa: number, wb: number) => {
@@ -1008,8 +1055,8 @@ export class Renderer {
         }
         continue;
       }
-      const fx = feet.x[leg];
-      const fy = feet.y[leg];
+      const fx = x + (feet.x[leg] - ox) / k;
+      const fy = y + (feet.y[leg] - oy) / k;
       // Two-bone IK, the knee bent up (away from the ground, or the wall).
       const dx = fx - hx;
       const dy = fy - hy;
@@ -1067,6 +1114,7 @@ export class Renderer {
     ctx.fillStyle = `#${team.toString(16).padStart(6, '0')}`;
     ctx.fillRect(X(8.2) - 0.7, Y(9.6), 1.4, 0.9);
     const head = has(parts, DroidPart.Turret);
+    if (rig?.rack) this.drawSpiderRack(ctx, X(SPIDER_RACK_PIVOT[0]), Y(SPIDER_RACK_PIVOT[1]), left, aim, rig.firedRack, now);
     // A filled, outlined polygon in droid-local cells (mirrored with the facing).
     const poly = (pts: readonly (readonly [number, number])[], fill: string) => {
       ctx.beginPath();
@@ -1158,9 +1206,65 @@ export class Renderer {
       ctx.fillRect(3, -3.3, 0.9, 2.9);
       ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
       ctx.fillRect(3.2, -2.6, 0.8, 1.4);
+      if (rig?.firedLaser) {
+        // A tarantula's eye is its laser: white-hot as it fires.
+        ctx.fillStyle = 'rgba(255,90,190,0.55)';
+        ctx.fillRect(3.4, -3.4, 1.8, 3);
+        ctx.fillStyle = '#fff0ff';
+        ctx.fillRect(3.3, -2.4, 1.2, 1);
+      }
       ctx.restore();
     }
     ctx.miterLimit = 10;
+    if (k !== 1) ctx.restore();
+  }
+
+  /**
+   * A tarantula's missile rack, on its back (droid-local cells, at its
+   * pivot): a squat twin-tube launcher on a yoke, turning with the aim, a
+   * flash out of the tubes as a missile leaves.
+   */
+  private drawSpiderRack(ctx: CanvasRenderingContext2D, px: number, py: number, left: boolean, aim: number, fired: boolean, now: number): void {
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.lineWidth = 0.35;
+    ctx.strokeStyle = '#121518';
+    // The yoke, down onto the chassis.
+    ctx.fillStyle = '#30353a';
+    ctx.beginPath();
+    ctx.moveTo(-0.9, 0);
+    ctx.lineTo(0.9, 0);
+    ctx.lineTo(1.4, 2.9);
+    ctx.lineTo(-1.4, 2.9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.rotate(aim);
+    if (left) ctx.scale(1, -1);
+    // The box: two tubes side by side, their mouths at the front.
+    ctx.fillStyle = '#4d5359';
+    ctx.fillRect(-2.4, -1.7, 5, 3.4);
+    ctx.strokeRect(-2.4, -1.7, 5, 3.4);
+    ctx.fillStyle = '#5c6a3c';
+    ctx.fillRect(-2.1, -1.4, 4.4, 0.6);
+    ctx.fillStyle = '#b9bfc4';
+    ctx.fillRect(-1.6, -0.15, 3.4, 0.3);
+    ctx.fillStyle = '#121518';
+    for (const ty of [-0.85, 0.85]) {
+      ctx.beginPath();
+      ctx.arc(2.6, ty, 0.62, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // A warning chevron on the side.
+    ctx.fillStyle = (now / 400) % 2 < 1 ? '#d8b030' : '#8a6a18';
+    ctx.fillRect(-1.9, 0.5, 1.1, 0.6);
+    if (fired) {
+      ctx.fillStyle = '#ffd860';
+      ctx.fillRect(2.6, -1.6, 1.6, 3.2);
+      ctx.fillStyle = '#fffbe0';
+      ctx.fillRect(2.6, -0.8, 1, 1.6);
+    }
+    ctx.restore();
   }
 
   private drawActor(
@@ -1419,9 +1523,13 @@ export class Renderer {
     // A watchdog, if we haven't one out already.
     const dog = game.myDog();
     if (!dog) entries.push({ kind: CallKind.Watchdog, name: 'WATCHDOG', blurb: 'small robot tank · guards you · drive it (P)', cost: WATCHDOG_COST });
-    // Our dropship's (or watchdog's) up: the remote to drive it ourselves.
+    // A tarantula, likewise.
+    const spider = game.mySpider();
+    if (!spider) entries.push({ kind: CallKind.Tarantula, name: 'TARANTULA', blurb: 'ultraheavy spider · missiles + laser · guards you', cost: TARANTULA_COST });
+    // Our dropship's (or watchdog's, or tarantula's) up: the remote to drive it ourselves.
+    const pet = dog && !dog.chute ? dog : spider && !spider.chute ? spider : null;
     if (game.shipViews().some((v) => v.owner === game.myId && !v.leaving)) entries.push({ kind: CallKind.Pilot, name: 'PILOT DROPSHIP', blurb: 'fly it yourself (P) · your clone stands by', free: true });
-    else if (dog && !dog.chute) entries.push({ kind: CallKind.Pilot, name: 'DRIVE WATCHDOG', blurb: 'drive it yourself (P) · your clone stands by', free: true });
+    else if (pet) entries.push({ kind: CallKind.Pilot, name: pet === dog ? 'DRIVE WATCHDOG' : 'DRIVE TARANTULA', blurb: 'drive it yourself (P) · your clone stands by', free: true });
     const y0 = Math.max(250 * s, H / 2 - (entries.length * rowH) / 2);
     this.callRects.length = 0;
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
@@ -1978,6 +2086,43 @@ export class Renderer {
     ctx.restore();
   }
 
+  /**
+   * A tarantula: a spider droid three times over (drawDroid, scaled, its feet
+   * planted in the world as a droid's are), the laser its head, the missile
+   * rack on its back. A parachute holds it while it comes down; as the hull
+   * weakens it smokes, then burns.
+   */
+  private drawTarantula(ctx: CanvasRenderingContext2D, t: TankView, faceLeft: boolean, aim: number, game: Game, now: number): void {
+    const k = t.s ?? TARANTULA_SCALE;
+    const cx = t.x + tankW(t) / 2;
+    if (t.chute) {
+      ctx.save();
+      ctx.translate(cx, t.y);
+      ctx.scale(1.3, 1.3);
+      ctx.drawImage(this.sprites.tankChute(), -TANK_W / 2 - 8, -34);
+      ctx.restore();
+    }
+    const rgb = game.players.get(t.owner)?.rgb ?? 0xff4040;
+    let parts = (1 << DroidPart.Chassis) | DROID_LEGS.reduce((m, l) => m | (1 << l), 0);
+    if (hasTankPart(t.parts, TankPart.Smg)) parts |= 1 << DroidPart.Turret;
+    if (hasTankPart(t.parts, TankPart.Armor)) parts |= 1 << DroidPart.Plating;
+    const rig = { rack: hasTankPart(t.parts, TankPart.Cannon), firedLaser: t.firedSmg, firedRack: t.firedCannon };
+    this.drawDroid(ctx, t.x, t.y, faceLeft, t.onGround, parts, rgb, Math.abs(t.vx) > 1, now, aim, 1000 + t.slot, k, rig);
+    // Battle damage: smoke off the chassis as the hull weakens, then fire.
+    const wear = 1 - t.hp / tankMaxHp(t);
+    if (wear > 0.4) {
+      const by = t.y + 8.5 * k;
+      const ph = (now / 70) % 6;
+      ctx.fillStyle = 'rgba(30,26,22,0.5)';
+      ctx.fillRect(cx - 6 + ph, by - 4 - ph * 1.5, 3, 3);
+      if (wear > 0.7 && (now / 90) % 3 < 2) {
+        ctx.fillStyle = (now / 60) % 2 < 1 ? '#ff9a30' : '#ffd060';
+        ctx.fillRect(cx - 4, by + 1, 2, 2);
+        ctx.fillRect(cx + 5, by + 2, 1.5, 2);
+      }
+    }
+  }
+
   /** A drop rocket: hull in the passenger's colour, exhaust plume along its axis, damage sparks. */
   private drawCraft(ctx: CanvasRenderingContext2D, c: CraftView, game: Game, now: number): void {
     const team = c.passenger !== 255 ? (game.players.get(c.passenger)?.rgb ?? 0x8a9096) : 0x8a9096;
@@ -2259,9 +2404,15 @@ export class Renderer {
       ctx.fillRect(W / 2 - 320 * s, py, 640 * s, 56 * s);
       ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = '#fff';
-      ctx.fillText('WATCHDOG REMOTE   A/D drive   W jets   click vulcan   right-click cannon   P exit', W / 2, py + 22 * s);
+      const spider = isSpider(dog);
+      ctx.fillText(
+        spider ? 'TARANTULA REMOTE   A/D walk (into a wall: up it)   W/S climb   click laser   right-click missiles   P next' : 'WATCHDOG REMOTE   A/D drive   W jets   click vulcan   right-click cannon   P next',
+        W / 2,
+        py + 22 * s,
+      );
       const max = tankMaxHp(dog);
-      const lost = (['CANNON', 'VULCAN', 'ARMOUR'] as const).filter((_, i) => !hasTankPart(dog.parts, [TankPart.Cannon, TankPart.Smg, TankPart.Armor][i]));
+      const names = spider ? (['MISSILES', 'LASER', 'PLATING'] as const) : (['CANNON', 'VULCAN', 'ARMOUR'] as const);
+      const lost = names.filter((_, i) => !hasTankPart(dog.parts, [TankPart.Cannon, TankPart.Smg, TankPart.Armor][i]));
       ctx.fillStyle = lost.length || dog.hp < max * 0.35 ? '#ff9060' : '#a0ffa0';
       ctx.fillText([`hull ${Math.max(0, Math.round((dog.hp / max) * 100))}%`, ...lost.map((l) => `${l} LOST`), 'your clone stands guard where you left it'].join('   '), W / 2, py + 44 * s);
       ctx.textAlign = 'left';

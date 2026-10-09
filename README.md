@@ -630,7 +630,7 @@ come down by parachute** at spread-out spots and land empty.
 Every clone carries a **Radio** (`WeaponId.Radio`, always in the kit
 alongside the digger and the materializer). With the radio in hand, a menu
 comes up: click **Dropship** or **Tank** to call it in for **1500 gold**,
-or a **Watchdog** for **1000**. The radio then needs 30 seconds to recharge
+a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then needs 30 seconds to recharge
 (`World.call`, `C_CALL`).
 
 - **Watchdog** (`src/server/watchdog.ts`). A small unmanned robot tank,
@@ -656,12 +656,44 @@ or a **Watchdog** for **1000**. The radio then needs 30 seconds to recharge
     it yourself, like the dropship: A/D treads, W jets, click the vulcan,
     right-click the cannon, with auto-aim. Your clone stands inert and
     shootable where you left it, and the view rides with the watchdog. **P**
-    cycles: your dropship, then your watchdog, then back to the clone. Its
+    cycles: your dropship, then your watchdog, then your tarantula, then back to the clone. Its
     autonomy takes over again the moment you let go.
   - **Destroyed.** A watchdog destroyed while you drive it doesn't take you
     with it.
   - **As a target.** It counts as a vehicle: AT missiles seek it, mines
     under it go off, and enemy bots shoot at it.
+
+- **Tarantula** (`TankKind.Tarantula`). An ultraheavy spider droid, three
+  times a spider droid's size (24 x 42 cells), parachuted in beside you.
+  It has **twice a tank's hull**. Under the hood it is a `Tank` with a
+  `kind`: its design cells are a spider droid's own, scaled by `s` = 3,
+  so the tank geometry (hit testing, part centres, muzzles) works
+  unchanged, and the client draws it with the droid's own drawing at that
+  scale, its feet planted in the world, alternating tripods and all. You
+  get one at a time (a watchdog besides is fine), nobody can climb in, and
+  it shuts down if you leave the game.
+  - **Its guns.** An **automatic missile launcher**: a twin-tube rack on
+    its back that turns all the way round and fires a stream of small,
+    straight-flying missiles (about two a second, alternating tubes, each
+    about half a bazooka rocket's blast; `ProjKind.SpiderMissile`). And a
+    **laser** in its head: thin instant beams like the laser rifle's, five
+    a second, each weaker than a charged rifle shot, but automatic. Each
+    beam goes through every clone in its way and stops at terrain or a
+    vehicle (`World.beam`, shared with the laser rifle).
+  - **On its own** it thinks as the watchdog does, with its own kit
+    (`SPIDER_KIT`): it looks further (560 cells) and screens further out
+    (90). Its laser reaches 420 cells and needs no leading, its missiles
+    520, and it fires both at once down the same line. It holds fire with
+    you in the line, and saves the missiles for vehicles and clones over
+    60 cells from you.
+  - **Getting about.** No treads, no jets: it walks, its legs stepping up
+    18 cells a stride and keeping the body level. Pushing into a sheer
+    wall, or holding W with one alongside, it **walks straight up it**
+    and over the top (S climbs down).
+  - **Its parts.** The laser head, the missile rack and the plating can
+    each be shot off. Rounds flying under its belly pass between its legs.
+  - **By remote**: A/D walk (into a wall to climb it), W/S climb, click
+    the laser, right-click the missiles.
 
 - **Tank.** An empty tank is parachuted onto your position. Climb in, or
   leave it for a teammate.

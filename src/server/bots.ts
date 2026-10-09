@@ -6,7 +6,7 @@ import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/p
 import { MAT_HARD, Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isDog, tankH, tankW } from '../shared/tank.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, tankH, tankW } from '../shared/tank.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -200,11 +200,11 @@ export class BotBrain {
         best = { x: q.x, y: q.y, vx: sh.vx, vy: sh.vy };
       }
     }
-    // An enemy watchdog (nobody inside to shoot at: the machine itself is the target).
+    // An enemy watchdog or tarantula (nobody inside to shoot at: the machine itself is the target; a tarantula's chassis).
     for (const k of world.tanks) {
-      if (!k || !isDog(k) || k.chute || k.owner === p.id || (p.team !== Team.None && world.players[k.owner]?.team === p.team)) continue;
+      if (!k || !isPet(k) || k.chute || k.owner === p.id || (p.team !== Team.None && world.players[k.owner]?.team === p.team)) continue;
       const cx = k.x + tankW(k) / 2;
-      const cy = k.y + tankH(k) / 2;
+      const cy = k.y + tankH(k) * (isSpider(k) ? 0.7 : 0.5);
       const d = Math.hypot(cx - sx, cy - sy);
       if (d >= bestD || !clearLine(world, sx, sy, cx, cy)) continue;
       bestD = d;
@@ -278,7 +278,7 @@ export class BotBrain {
     if (this.tanker && near > 120 && !world.extractionLive) {
       for (let slot = 0; slot < world.tanks.length; slot++) {
         const k = world.tanks[slot];
-        if (!k || k.pilot !== 255 || k.chute || isDog(k) || (slot === this.abandoned && t < this.abandonUntil)) continue;
+        if (!k || k.pilot !== 255 || k.chute || isPet(k) || (slot === this.abandoned && t < this.abandonUntil)) continue;
         const kx = k.x + TANK_W / 2;
         if (Math.abs(kx - p.cx) > 260 || Math.abs(k.y + TANK_H / 2 - p.cy) > 80) continue;
         goalX = kx;

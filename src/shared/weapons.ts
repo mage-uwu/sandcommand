@@ -40,6 +40,8 @@ export const ProjKind = {
   Bolt: 18,
   /** A landmine going off under someone. */
   Landmine: 19,
+  /** A tarantula's missile: a small, fast, straight-flying rocket, fired in a stream off the rack on its back. */
+  SpiderMissile: 20,
 } as const;
 
 export interface ProjDef {
@@ -114,6 +116,8 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0, life: 30, damage: 12, mass: 0.3, sharp: 0.95, carveR: 1, coreR: 0, splashR: 0, splashDamage: 0, debris: 1, bounce: 0, ballistic: true, knock: 0.4 },
   // Landmine: a modest blast straight up out of the ground (less than a grenade).
   { gravity: 1, life: 2, damage: 0, mass: 0.6, sharp: 0.1, carveR: 14, coreR: 6, splashR: 30, splashDamage: 70, debris: 40, bounce: 0, ballistic: false },
+  // Tarantula missile: dead straight (it burns all the way), about half a bazooka rocket's blast.
+  { gravity: 0, life: 75, damage: 26, mass: 1.6, sharp: 0.6, carveR: 13, coreR: 6, splashR: 26, splashDamage: 44, debris: 30, bounce: 0, ballistic: false },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -262,6 +266,7 @@ export function projName(kind: number): string {
   if (kind === ProjKind.Mine) return 'Booby Trap';
   if (kind === ProjKind.Bomblet) return 'GL';
   if (kind === ProjKind.Landmine) return 'Mine';
+  if (kind === ProjKind.SpiderMissile) return 'Tarantula';
   return weaponOfProj(kind)?.name ?? '';
 }
 

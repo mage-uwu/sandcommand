@@ -1,5 +1,5 @@
 import { BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_UP } from './actor.ts';
-import { ACTOR_MAX_HP, GRAVITY } from './constants.ts';
+import { ACTOR_H, ACTOR_MAX_HP, ACTOR_W, GRAVITY } from './constants.ts';
 import type { Terrain } from './terrain.ts';
 
 /**
@@ -30,13 +30,42 @@ export const TANK_H = 22;
  * it (its box, its parts, its guns' pivots and barrels).
  */
 export const WATCHDOG_SCALE = 2 / 3;
+/**
+ * What a tank slot holds: a tank (anyone can climb in), a watchdog, or a
+ * tarantula. The last two are unmanned (radio purchases that guard whoever
+ * called them in, and that their owner can drive by remote).
+ */
+export const TankKind = { Tank: 0, Watchdog: 1, Tarantula: 2 } as const;
+/**
+ * The tarantula: an ultraheavy spider droid, three times a spider droid's
+ * size. Its "design" cells are a spider droid's own (ACTOR_W x ACTOR_H,
+ * drawn and laid out as the droid is), scaled by its `s`. It walks on six
+ * legs (and straight up walls), with a missile rack on its back and an
+ * automatic laser in its head.
+ */
+export const TARANTULA_SCALE = 3;
+/** Its hull, in tanks. */
+export const TARANTULA_HP = 2;
+type Kinded = { s?: number; kind?: number };
+/** Is this tank a watchdog? A tarantula? Either (an owner's unmanned machine)? */
+export const isDog = (t: Kinded) => (t.kind ?? (t.s && t.s < 1 ? TankKind.Watchdog : TankKind.Tank)) === TankKind.Watchdog;
+export const isSpider = (t: Kinded) => t.kind === TankKind.Tarantula;
+export const isPet = (t: Kinded) => isDog(t) || isSpider(t);
+/** Its design box (unscaled cells): a tank's, or (a tarantula) a spider droid's. */
+export const designW = (t: Kinded) => (isSpider(t) ? ACTOR_W : TANK_W);
+export const designH = (t: Kinded) => (isSpider(t) ? ACTOR_H : TANK_H);
 /** A tank's box (cells), for its scale. */
-export const tankW = (t: { s?: number }) => (t.s && t.s !== 1 ? Math.round(TANK_W * t.s) : TANK_W);
-export const tankH = (t: { s?: number }) => (t.s && t.s !== 1 ? Math.round(TANK_H * t.s) : TANK_H);
-/** Is this tank a watchdog? */
-export const isDog = (t: { s?: number }) => !!t.s && t.s < 1;
+export const tankW = (t: Kinded) => (t.s && t.s !== 1 ? Math.round(designW(t) * t.s) : designW(t));
+export const tankH = (t: Kinded) => (t.s && t.s !== 1 ? Math.round(designH(t) * t.s) : designH(t));
+/** How much of a tank's hull (and parts) it has. */
+export const hullScale = (t: Kinded) => (isSpider(t) ? TARANTULA_HP : (t.s ?? 1));
 /** A tank's full hull, for its scale. */
-export const tankMaxHp = (t: { s?: number }) => TANK_HP * (t.s ?? 1);
+export const tankMaxHp = (t: Kinded) => TANK_HP * hullScale(t);
+/**
+ * How far down its box is solid to shots: a tank's all hull; a tarantula's
+ * stops at its belly (below are only its spindly legs, which shots pass between).
+ */
+export const hitH = (t: Kinded) => (isSpider(t) ? SPIDER_BELLY : designH(t));
 /** Seventy-five times a clone's health: a fortress on tracks. */
 export const TANK_HP = 75 * ACTOR_MAX_HP;
 /** Hits below this penetration energy only scratch the armour. */
@@ -81,6 +110,21 @@ export const TANK_PART_CENTER: readonly (readonly [number, number])[] = [
 
 export const hasTankPart = (mask: number, part: number) => (mask & (1 << part)) !== 0;
 
+/** Where to shoot a tank (its middle; a tarantula's chassis, not the air between its legs), and where its guns turn (world y). */
+export const tankCoreY = (t: Kinded & { y: number }) => t.y + tankH(t) * (isSpider(t) ? 0.7 : 0.5);
+export const gunPivotY = (t: Kinded & { y: number }) => t.y + (isSpider(t) ? SPIDER_LASER_PIVOT[1] : CANNON_PIVOT[1]) * (t.s ?? 1);
+
+/** The tarantula's parts' centres (its design cells: the spider droid's). */
+const SPIDER_PART_CENTER: readonly (readonly [number, number])[] = [
+  [4, 10.5],
+  [0.8, 6],
+  [4, 3.6],
+  [4, 9],
+  [4, 4],
+];
+/** Where a part is (design cells, facing right), for a tank or a tarantula. */
+export const partCenter = (t: Kinded, part: number) => (isSpider(t) ? SPIDER_PART_CENTER : TANK_PART_CENTER)[part];
+
 /** How high a driver's head sits out of the hatch (clone top, from the tank's top) once the shield is gone. */
 export const EXPOSED_SEAT_Y = -8;
 /** Rows of an exposed driver's body that stick out and can be hit (head and shoulders). */
@@ -94,6 +138,31 @@ export const CANNON_DOWN = 0.45;
 /** The vulcan: pivot and barrel length. It swivels all the way round. */
 export const SMG_PIVOT = [25, 11] as const;
 export const SMG_LEN = 12;
+
+/**
+ * The tarantula's guns (in its design cells, the spider droid's): the laser
+ * in its head (pivoting where a droid's gun does), the missile rack on its
+ * back. Both swivel all the way round.
+ */
+export const SPIDER_LASER_PIVOT = [4, 4] as const;
+export const SPIDER_LASER_LEN = 4.4;
+export const SPIDER_RACK_PIVOT = [0.6, 5.4] as const;
+export const SPIDER_RACK_LEN = 2.6;
+/** The underside of its chassis (design cells): below it, only legs. */
+export const SPIDER_BELLY = 12.6;
+/** Seconds between laser beams, and between missiles. */
+export const SPIDER_LASER_INTERVAL = 60 / 300;
+export const SPIDER_MISSILE_INTERVAL = 60 / 140;
+export const SPIDER_MISSILE_SPEED = 380;
+/** Its laser's beam: narrower and weaker than a charged laser rifle's, but it never stops. */
+export const SPIDER_BEAM_WIDTH = 0.9;
+export const SPIDER_BEAM_WOUND = 22;
+export const SPIDER_BEAM_ENERGY = 560;
+/** Walking pace, and climbing a wall. */
+const SPIDER_RUN = 72;
+const SPIDER_CLIMB = 64;
+/** Its legs step up this much per cell advanced. */
+const SPIDER_STEP_UP = 18;
 
 /** Seconds between shots. */
 export const SMG_INTERVAL = 60 / 720;
@@ -135,11 +204,16 @@ export interface Tank {
   s: number;
   /** A watchdog's owner (whom it guards, and who can drive it from afar), or 255. */
   owner: number;
+  /** TankKind. */
+  kind: number;
+  /** Which of a tarantula's two missile tubes fired last. */
+  tube?: number;
 }
 
-export function newTank(x: number, y: number, s = 1, owner = 255): Tank {
+export function newTank(x: number, y: number, s = 1, owner = 255, kind: number = s < 1 ? TankKind.Watchdog : TankKind.Tank): Tank {
   const partHp = new Float32Array(TANK_PARTS);
-  for (let i = 0; i < TANK_PARTS; i++) partHp[i] = TANK_PART_HP[i] * s;
+  const hs = hullScale({ s, kind });
+  for (let i = 0; i < TANK_PARTS; i++) partHp[i] = TANK_PART_HP[i] * hs;
   return {
     x,
     y,
@@ -149,8 +223,9 @@ export function newTank(x: number, y: number, s = 1, owner = 255): Tank {
     onGround: false,
     jetting: false,
     chute: true,
-    hp: TANK_HP * s,
-    parts: ALL_TANK_PARTS,
+    hp: TANK_HP * hs,
+    // (Nobody rides a tarantula: no hatch, no shield over it.)
+    parts: kind === TankKind.Tarantula ? ALL_TANK_PARTS & ~(1 << TankPart.Shield) : ALL_TANK_PARTS,
     partHp,
     pilot: 255,
     faceLeft: false,
@@ -164,11 +239,26 @@ export function newTank(x: number, y: number, s = 1, owner = 255): Tank {
     w: 0,
     s,
     owner,
+    kind,
   };
 }
 
+/** A tarantula, called in over `x`, for its owner. */
+export function newTarantula(x: number, y: number, owner: number): Tank {
+  return newTank(x, y, TARANTULA_SCALE, owner, TankKind.Tarantula);
+}
+
 /** Which part is at tank-local (lx, ly) (from the top-left); missing parts expose the hull. */
-export function tankPartAt(t: { faceLeft: boolean; parts: number }, lx: number, ly: number): number {
+export function tankPartAt(t: { faceLeft: boolean; parts: number; kind?: number }, lx: number, ly: number): number {
+  if (isSpider(t)) {
+    // The tarantula (spider-droid cells): the laser head up on its T, the
+    // missile rack on its back, the plating round the chassis.
+    const fx = t.faceLeft ? ACTOR_W - lx : lx;
+    if (fx >= 2 && ly < 7 && hasTankPart(t.parts, TankPart.Smg)) return TankPart.Smg;
+    if (fx < 2.4 && ly < 8.4 && hasTankPart(t.parts, TankPart.Cannon)) return TankPart.Cannon;
+    if ((ly < 9.4 || fx < 1.2 || fx > 6.8) && hasTankPart(t.parts, TankPart.Armor)) return TankPart.Armor;
+    return TankPart.Hull;
+  }
   const fx = t.faceLeft ? TANK_W - lx : lx;
   let p: number = TankPart.Hull;
   // Matches the sprite (client/sprites.ts): cannon out of the dome front,
@@ -180,7 +270,7 @@ export function tankPartAt(t: { faceLeft: boolean; parts: number }, lx: number, 
   return p;
 }
 
-type Posed = { x: number; y: number; faceLeft: boolean; a: number; s?: number };
+type Posed = { x: number; y: number; faceLeft: boolean; a: number; s?: number; kind?: number };
 
 /** Inset of the tread contact points from the hull's ends (cells). */
 const CONTACT = 3;
@@ -200,8 +290,9 @@ export function tankSink(a: number, s = 1): number {
  */
 export function tankPoint(t: Posed, lx: number, ly: number, out: { x: number; y: number }): { x: number; y: number } {
   const k = t.s ?? 1;
-  const dx = ((t.faceLeft ? TANK_W - lx : lx) - TANK_W / 2) * k;
-  const dy = (ly - TANK_H) * k;
+  const dw = designW(t);
+  const dx = ((t.faceLeft ? dw - lx : lx) - dw / 2) * k;
+  const dy = (ly - designH(t)) * k;
   const c = Math.cos(t.a);
   const s = Math.sin(t.a);
   out.x = t.x + tankW(t) / 2 + dx * c - dy * s;
@@ -216,8 +307,8 @@ export function tankLocal(t: Posed, wx: number, wy: number, out: { x: number; y:
   const dy = wy - (t.y + tankH(t) + tankSink(t.a, k));
   const c = Math.cos(t.a);
   const s = Math.sin(t.a);
-  out.x = TANK_W / 2 + (dx * c + dy * s) / k;
-  out.y = TANK_H + (-dx * s + dy * c) / k;
+  out.x = designW(t) / 2 + (dx * c + dy * s) / k;
+  out.y = designH(t) + (-dx * s + dy * c) / k;
   return out;
 }
 
@@ -235,9 +326,11 @@ export function cannonAngle(faceLeft: boolean, aim: number, tilt = 0): number {
 const mzPt = { x: 0, y: 0 };
 /** Muzzle of the cannon or the SMG (world), and the angle it fires at. */
 export function tankMuzzle(t: Posed, cannon: boolean, aim: number, out: { x: number; y: number; a: number }): { x: number; y: number; a: number } {
-  const [px, py] = cannon ? CANNON_PIVOT : SMG_PIVOT;
-  const a = cannon ? cannonAngle(t.faceLeft, aim, t.a) : aim;
-  const len = (cannon ? CANNON_LEN : SMG_LEN) * (t.s ?? 1);
+  const spider = isSpider(t);
+  const [px, py] = spider ? (cannon ? SPIDER_RACK_PIVOT : SPIDER_LASER_PIVOT) : cannon ? CANNON_PIVOT : SMG_PIVOT;
+  // (A tarantula's rack and head both turn all the way round.)
+  const a = cannon && !spider ? cannonAngle(t.faceLeft, aim, t.a) : aim;
+  const len = (spider ? (cannon ? SPIDER_RACK_LEN : SPIDER_LASER_LEN) : cannon ? CANNON_LEN : SMG_LEN) * (t.s ?? 1);
   const p = tankPoint(t, px, py, mzPt);
   out.x = p.x + Math.cos(a) * len;
   out.y = p.y + Math.sin(a) * len;
@@ -277,6 +370,7 @@ const AIR_D = 5;
 export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): number {
   boxW = tankW(k);
   boxH = tankH(k);
+  if (isSpider(k)) return stepSpider(k, t, dt, buttons);
   // A watchdog is lighter on its treads.
   const run = isDog(k) ? RUN * 1.25 : RUN;
   // Unstick: sand poured onto it, or it landed in a bunker's rubble.
@@ -403,6 +497,107 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
   return impact;
 }
 
+/**
+ * The tarantula's tick: it walks (no treads, no jets, no tilt: its legs keep
+ * the body level), steps up over anything up to SPIDER_STEP_UP a cell, and
+ * where a wall stops it, walks straight up it: pushing into a wall, or
+ * holding up (W) with one alongside, it climbs (and holding down, climbs
+ * down), gravity off while it clings; at the top its legs carry it over.
+ */
+function stepSpider(k: Tank, t: Terrain, dt: number, buttons: number): number {
+  if (collides(t, k.x, k.y)) {
+    for (let s = 1; s <= 24; s++) {
+      if (!collides(t, k.x, k.y - s)) {
+        k.y -= s;
+        break;
+      }
+    }
+  }
+  k.a = 0;
+  k.w = 0;
+  k.jetting = false;
+  k.fuel = 0;
+  const driven = k.pilot !== 255 && !k.chute ? buttons : 0;
+  const dir = (driven & BTN_RIGHT ? 1 : 0) - (driven & BTN_LEFT ? 1 : 0);
+  // A wall alongside (either side), and the one it's walking into.
+  const wallR = collides(t, k.x + 1, k.y);
+  const wallL = collides(t, k.x - 1, k.y);
+  const into = (dir > 0 && wallR) || (dir < 0 && wallL);
+  const cling = !k.chute && !k.onGround ? into || ((wallL || wallR) && (driven & (BTN_UP | BTN_DOWN)) !== 0) : into || ((wallL || wallR) && (driven & BTN_UP) !== 0);
+  const accel = (k.onGround || cling ? GROUND_ACCEL : AIR_ACCEL) * dt;
+  const dv = dir * SPIDER_RUN - k.vx;
+  k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
+  if (cling) {
+    // Up the wall (down it, holding down), at a steady crawl.
+    const up = into || (driven & BTN_UP) !== 0;
+    k.vy = up ? -SPIDER_CLIMB : driven & BTN_DOWN ? SPIDER_CLIMB : 0;
+  } else {
+    k.vy += GRAVITY * dt;
+    if (k.chute) {
+      k.vy = Math.min(k.vy, CHUTE_FALL);
+      k.vx *= 1 - Math.min(1, 2 * dt);
+    }
+  }
+  if (k.vy > MAX_FALL) k.vy = MAX_FALL;
+  // Across, a cell at a time, stepping up what its legs can reach (all of
+  // it, on a wall: that's how it gets over the top).
+  const gripping = k.onGround || cling || collides(t, k.x, k.y + 3);
+  const wasGround = k.onGround;
+  let rem = k.vx * dt;
+  while (rem !== 0) {
+    const step = rem > 1 ? 1 : rem < -1 ? -1 : rem;
+    const nx = k.x + step;
+    if (!collides(t, nx, k.y)) k.x = nx;
+    else {
+      let climbed = false;
+      if (gripping) {
+        for (let s = 1; s <= SPIDER_STEP_UP; s++) {
+          if (!collides(t, nx, k.y - s)) {
+            k.x = nx;
+            k.y -= s;
+            climbed = true;
+            break;
+          }
+        }
+      }
+      if (!climbed) {
+        // (Held against the wall: it climbs it next tick.)
+        k.vx = 0;
+        break;
+      }
+    }
+    rem -= step;
+  }
+  if (wasGround && !cling && k.vy >= 0 && !collides(t, k.x, k.y + 1)) {
+    for (let s = 2; s <= SNAP_DOWN; s++) {
+      if (collides(t, k.x, k.y + s)) {
+        k.y += s - 1;
+        break;
+      }
+    }
+  }
+  let impact = 0;
+  rem = k.vy * dt;
+  while (rem !== 0) {
+    const step = rem > 1 ? 1 : rem < -1 ? -1 : rem;
+    if (!collides(t, k.x, k.y + step)) {
+      k.y += step;
+      rem -= step;
+    } else {
+      if (step > 0) impact = k.vy;
+      k.vy = 0;
+      break;
+    }
+  }
+  if (k.y < -400) {
+    k.y = -400;
+    if (k.vy < 0) k.vy = 0;
+  }
+  k.onGround = collides(t, k.x, k.y + 1);
+  if (k.onGround && k.chute) k.chute = false;
+  return impact;
+}
+
 /** Copy every field stepTank reads or writes (prediction rebasing). */
 export function copyTankMotion(dst: Tank, src: Tank): void {
   dst.x = src.x;
@@ -419,4 +614,5 @@ export function copyTankMotion(dst: Tank, src: Tank): void {
   dst.w = src.w;
   dst.s = src.s;
   dst.owner = src.owner;
+  dst.kind = src.kind;
 }

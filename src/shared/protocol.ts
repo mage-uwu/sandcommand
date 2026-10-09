@@ -19,11 +19,13 @@ export const C_CALL = 0x07;
 /** What a radio can call in. */
 /** What a radio can call in; `Pilot` takes (or hands back) remote control of our own dropship. */
 /** Watchdog: a small unmanned tank that guards its caller (who can also drive it from afar). Pilot: the remote (our dropship, then our watchdog, then back). */
-export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2, Watchdog: 3 } as const;
+export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2, Watchdog: 3, Tarantula: 4 } as const;
 /** Gold a radio call costs. */
 export const CALL_COST = 1500;
 /** A watchdog's price (two-thirds of a tank's). */
 export const WATCHDOG_COST = 1000;
+/** A tarantula's price: twice a tank's hull, missiles and a laser, and it fights for you. */
+export const TARANTULA_COST = 3000;
 
 // Server -> client
 export const S_WELCOME = 0x81;
@@ -97,7 +99,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 28;
+export const PROTOCOL_VERSION = 29;
 
 /** Last Man Standing round phases. */
 export const Phase = {

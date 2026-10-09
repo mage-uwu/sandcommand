@@ -3,7 +3,7 @@ import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, applyFrameRecords } from '../shared/frame.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
-import { TANK_W, type Tank, isDog, newTank, stepTank, tankH, tankW } from '../shared/tank.ts';
+import { TANK_W, type Tank, isDog, isSpider, newTank, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
@@ -424,7 +424,7 @@ export class Game implements FrameHandler {
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) {
       const k = pr.kind[i];
-      if (k === ProjKind.Rocket || k === ProjKind.Shell || k === ProjKind.Missile) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+      if (k === ProjKind.Rocket || k === ProjKind.Shell || k === ProjKind.Missile || k === ProjKind.SpiderMissile) rocketTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.AutoShell) smokeTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.Engine) {
         // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
@@ -751,6 +751,11 @@ export class Game implements FrameHandler {
     return this.tankViews().find((v) => isDog(v) && v.owner === this.myId) ?? null;
   }
 
+  /** Our own tarantula, if we have one out. */
+  mySpider(): TankView | null {
+    return this.tankViews().find((v) => isSpider(v) && v.owner === this.myId) ?? null;
+  }
+
   /** Landmines on the map (R_MINES). */
   mineList: MineState[] = [];
   mines(list: MineState[]): void {
@@ -1072,7 +1077,7 @@ export class Game implements FrameHandler {
       heavyMuzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp);
     } else if (kind === ProjKind.Bolt) {
       // (A blaster just flashes.)
-    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile || kind === ProjKind.AutoShell);
+    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile || kind === ProjKind.SpiderMissile || kind === ProjKind.AutoShell);
     this.sfx?.shot(kind, x, y, owner);
     // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
     const w = weaponOfProj(kind);
@@ -1170,7 +1175,7 @@ export class Game implements FrameHandler {
     const camDx = k.x - me.x;
     const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
-    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === ProjKind.AutoShell || weapon === ProjKind.Landmine || weapon === W_TANK || weapon === W_SHIP;
+    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === ProjKind.AutoShell || weapon === ProjKind.Landmine || weapon === ProjKind.SpiderMissile || weapon === W_TANK || weapon === W_SHIP;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     if (droid) droidWreck(this.particles, k.x, k.y, k.vx, k.vy, k.parts, violence);
     else gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));

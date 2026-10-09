@@ -1,7 +1,7 @@
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
 import { CRAFT_PARTS } from './craft.ts';
-import { TANK_PARTS, WATCHDOG_SCALE } from './tank.ts';
+import { TANK_PARTS, TARANTULA_SCALE, TankKind, WATCHDOG_SCALE } from './tank.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
@@ -154,6 +154,8 @@ export interface TankState {
   s: number;
   owner: number;
   remote: boolean;
+  /** tank.ts TankKind. */
+  kind: number;
 }
 
 export interface ShipState {
@@ -637,10 +639,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             hp: r.u16(),
             pilot: r.u8(),
             a: tilt,
-            s: f & 64 ? WATCHDOG_SCALE : 1,
+            s: 1,
             owner: r.u8(),
             remote: (f & 128) !== 0,
+            kind: r.u8(),
           });
+          const v = list[list.length - 1];
+          v.s = v.kind === TankKind.Tarantula ? TARANTULA_SCALE : v.kind === TankKind.Watchdog ? WATCHDOG_SCALE : 1;
         }
         h.tanks(list);
         break;
