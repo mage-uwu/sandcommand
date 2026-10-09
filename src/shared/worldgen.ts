@@ -1,5 +1,5 @@
 import { WORLD_H, WORLD_W } from './constants.ts';
-import { Mat } from './materials.ts';
+import { MAT_LOOSE, Mat, isSoil } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { type Complex, placeStructures } from './structures.ts';
@@ -130,6 +130,20 @@ class Fbm {
 }
 
 /**
+ * Which soil a cell of ground is, from the soil noise `n` (0..1), its depth
+ * under the surface and its row: mostly rust-red dirt; ochre where the
+ * noise runs high near the surface, oxblood clay where it runs high deeper
+ * down and in thin wavy bands; dark regolith where it runs low, and more of
+ * it the deeper you dig.
+ */
+function soilAt(n: number, depth: number, y: number): number {
+  if (depth < 90 ? n > 0.61 : n > 0.66) return depth < 90 ? Mat.Ochre : Mat.Clay;
+  if (n < 0.26 + Math.min(depth, 400) / 3000) return depth > 10 ? Mat.Regolith : Mat.Dirt;
+  if (depth > 20 && ((y + Math.floor(n * 22)) % 41) < 3) return Mat.Clay;
+  return Mat.Dirt;
+}
+
+/**
  * Frosting on the natural ground (never on bunkers): patches of grass turf on
  * gentle slopes (sparse in the desert, nearly everywhere on the meadows),
  * and snow capping the Highlands' peaks.
@@ -147,7 +161,7 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
   for (let x = 6; x < WORLD_W - 6; x++) {
     const y = top[x];
     const mat = m[y * WORLD_W + x];
-    if (mat !== Mat.Dirt && mat !== Mat.Sand && mat !== Mat.Rock) continue; // natural ground only
+    if (!isSoil(mat) && mat !== Mat.Rock) continue; // natural ground only
     const slope = Math.abs(top[x + 3] - top[x - 3]) / 6;
     const h = (hash2(x, y, seed ^ 0x5eed) >>> 0) / 4294967296;
     if (biome === Biome.Highlands && y < snowline + patch.at(x, 3) * 50) {
@@ -160,7 +174,7 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
     // A turf two or three cells deep, on soil (a little dirt under it if it's on sand).
     const depth = 2 + Math.floor(h * 2);
     for (let k = 0; k < depth; k++) m[(y + k) * WORLD_W + x] = Mat.Grass;
-    for (let k = depth; k < depth + 2; k++) if (m[(y + k) * WORLD_W + x] === Mat.Sand) m[(y + k) * WORLD_W + x] = Mat.Dirt;
+    for (let k = depth; k < depth + 2; k++) if (MAT_LOOSE[m[(y + k) * WORLD_W + x]]) m[(y + k) * WORLD_W + x] = Mat.Dirt;
   }
 }
 
@@ -241,6 +255,9 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   const gold = new Fbm(14, seed ^ 0xb7, 2);
   const rock = new Fbm(48, seed ^ 0xa1, 3);
   const lenses = new Fbm(40, seed ^ 0x5a, 3);
+  // The soil's varieties: ochre pockets near the surface, oxblood clay
+  // deeper and in bands, dark regolith in patches and the deep.
+  const soil = new Fbm(70, seed ^ 0x3d, 2);
   const m = t.mat;
   for (let y = 0; y < WORLD_H; y++) {
     for (let x = 0; x < WORLD_W; x++) {
@@ -258,7 +275,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
         else if (biome === Biome.Canyons && surf > canyonFloor && depth < 6) v = Mat.Sand; // a sandy riverbed
         else if (biome === Biome.Canyons && ((y + Math.floor(rock.at(x, 0) * 8)) / 13 | 0) % 3 === 0) v = Mat.Rock; // layered walls
         else if (depth > 25 && lenses.at(x, y) > 0.7) v = Mat.Sand;
-        else v = depth < dune[x] ? Mat.Sand : Mat.Dirt;
+        else if (depth < dune[x]) v = Mat.RustSand; // the dunes: rust dust
+        else v = soilAt(soil.at(x, y), depth, y);
       }
       if (y >= WORLD_H - 12 || x < 4 || x >= WORLD_W - 4) v = Mat.Bedrock;
       m[y * WORLD_W + x] = v;

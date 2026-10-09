@@ -425,14 +425,22 @@ terrain in less than half the time.
 
 ## Scenery
 
-Behind the battlefield, over the sky gradient, sit pixel-art parallax
-layers in the Cortex Command / Metal Slug style (`src/client/backdrop.ts`):
-- **Clouds:** puffy pixel cumulus drifting on their own.
-- **Far mountains:** blue ranges with faceted faces, lit toward the light
-  and shaded on the far side, split from each summit. Their crags and snow
-  caps fade into the base colour with ordered 4×4 Bayer dithering.
-- **Mid range:** a darker violet range in front of them.
-- **Mesas:** sandstone mesas and buttes on talus slopes, banded with strata.
+The battlefield is an alien world, a Mars of sorts. The sky runs from a
+dark violet zenith through dusty rose to a butterscotch haze at the
+horizon. Over it sit pixel-art parallax layers in the Cortex Command /
+Metal Slug style (`src/client/backdrop.ts`):
+- **The heavens:** a ringed gas giant hanging over the hills, banded
+  lavender and teal, lit from the upper left with a dithered terminator,
+  hazed by the dusty air, its ring passing behind it above and in front
+  below; and two small cratered moons. The layer barely moves.
+- **Dust wisps:** long, flat streaks of high dust in pale salmon, drifting
+  on their own.
+- **Far mountains:** dusty-rose ranges with faceted faces, lit toward the
+  light and shaded on the far side, split from each summit. Their crags and
+  frost caps fade into the base colour with ordered 4×4 Bayer dithering.
+- **Mid range:** a darker maroon range in front of them.
+- **Mesas:** rust mesas and buttes on talus slopes, banded with strata,
+  with thin needle spires (hoodoos) between them.
 
 Each layer is baked once into a seamless 1024-cell tile, one pixel per
 world cell, and drawn scaled up with no smoothing. The join screen pans
@@ -853,19 +861,31 @@ countdown banner names it.
 
 | Biome | Terrain |
 |---|---|
-| **Dunes** | Rolling sand over dirt, as before. Patches of grass. |
+| **Dunes** | Rolling dunes of rust dust over the soil. Patches of lichen. |
 | **Canyons** | A high rock plateau cut by 3–5 deep ravines, 45–120 cells wide and up to 340 deep. The rock is banded with strata and the ravine floors are sand. Some ravines have a natural rock bridge. Extra sniper towers. |
 | **Highlands** | Ridged mountains up to 330 cells above the valleys, rockier underground, and capped with snow above the snowline. Many sniper towers. |
-| **Meadows** | Gentle hills under a thin sand crust, mostly grassed over. |
+| **Meadows** | Gentle hills under a thin crust of rust dust, mostly lichened over. |
 
 Fortress maps are only Dunes or Meadows, so the forts have room to stand.
 Extraction's labyrinth is always Dunes.
 
+**The ground** (`src/shared/materials.ts`, `soilAt` in worldgen). The soil
+is rust red (iron oxide), and a soil noise threads its varieties through
+it: **ochre** (yellow-orange) in pockets within 90 cells of the surface,
+**oxblood clay** in deeper pockets and in thin wavy bands, and dark,
+gritty **regolith** in patches that grow commoner the deeper you dig. The
+dunes are **rust dust** (`Mat.RustSand`), loose like sand. **Pale sand**
+stays for buried lenses and dry riverbeds. Rock is a dark basalt. Each soil
+has its own grain when drawn (`soilColor` in `src/client/texture.ts`):
+clods in the rust soil, basalt pebbles in the regolith, bright grains in
+the ochre, streaks in the clay, wind ripples in the dust.
+
 **Frosting.** After the bunkers are built, the top of the natural ground
-gets a cover: grass turf 2–3 cells deep in patches (not on rock or steep
-slopes), or snow on the high Highlands. Bunkers never get it. Grass and
-snow are new soft materials. Grass is drawn with blades poking into the air
-above it. Snow is drawn with a bright crust, blue shadows and glints.
+gets a cover: alien lichen 2–3 cells deep in patches (not on rock or steep
+slopes), or frost on the high Highlands. Bunkers never get it. The lichen
+(`Mat.Grass`) is a teal crust tipped pale aqua and violet, with fronds
+poking into the air above it and the odd glowing violet spore-head. Frost
+(`Mat.Snow`) is drawn with a bright crust, lilac shadows and glints.
 
 ## Architecture
 

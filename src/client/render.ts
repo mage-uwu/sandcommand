@@ -19,7 +19,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { backWallColor, structColor, frostColor, grassBlade } from './texture.ts';
+import { backWallColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
@@ -41,6 +41,20 @@ for (let m = 0; m < MAT_COLOR.length; m++) {
     const cb = Math.min(255, Math.round(b * k));
     PALETTE[m * 8 + v] = (255 << 24) | (cb << 16) | (cg << 8) | cr;
   }
+}
+
+/**
+ * The sky of an alien world, Mars-like: a dark violet zenith, dusty rose,
+ * then butterscotch haze down to the horizon (world y 500 at the bottom).
+ */
+function skyGradient(ctx: CanvasRenderingContext2D, offY: number, z: number): CanvasGradient {
+  const g = ctx.createLinearGradient(0, offY + -300 * z, 0, offY + 500 * z);
+  g.addColorStop(0, '#1e1030');
+  g.addColorStop(0.4, '#6a3f5c');
+  g.addColorStop(0.72, '#c27a5a');
+  g.addColorStop(0.9, '#e0a070');
+  g.addColorStop(1, '#ebb784');
+  return g;
 }
 
 /** Blend an ABGR terrain pixel toward dried-blood red by stain intensity. */
@@ -149,7 +163,7 @@ export class Renderer {
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
-          c = PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)];
+          c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);
         }
         const st = stain[row + x];
         if (st) c = bloodied(c, st);
@@ -281,14 +295,9 @@ export class Renderer {
     const offX = Math.round(W / 2 - camX * z);
     const offY = Math.round(H / 2 - camY * z);
 
-    // Background: sky fading into deep cave dark by world depth.
-    const g = ctx.createLinearGradient(0, offY + -300 * z, 0, offY + 500 * z);
-    g.addColorStop(0, '#1d2a48');
-    g.addColorStop(0.45, '#6d7fa8');
-    g.addColorStop(0.8, '#d8ab7c');
-    g.addColorStop(1, '#e6b98a');
+    // Background: an alien sky, fading into deep cave dark by world depth.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = g;
+    ctx.fillStyle = skyGradient(ctx, offY, z);
     ctx.fillRect(0, 0, W, H);
     // Clouds, blue ranges and mesas in parallax over the sky.
     this.backdrop.draw(ctx, W, H, (W / 2 - offX) / z, (H / 2 - offY) / z, z, now);
@@ -301,7 +310,7 @@ export class Renderer {
     const bx0 = Math.max(0, Math.floor(camX - halfW));
     const bx1 = Math.min(WORLD_W - 1, Math.ceil(camX + halfW));
     const bottom = Math.min(WORLD_H, camY + halfH + 1);
-    ctx.fillStyle = '#2a201b';
+    ctx.fillStyle = '#2c1914';
     let runStart = bx0;
     for (let x = bx0 + 1; x <= bx1 + 1; x++) {
       if (x > bx1 || game.skyline[x] !== game.skyline[runStart]) {
@@ -851,12 +860,7 @@ export class Renderer {
     const z = Math.max(2, Math.round(H / 260));
     const camY = 300;
     const offY = H / 2 - camY * z;
-    const g = ctx.createLinearGradient(0, offY + -300 * z, 0, offY + 500 * z);
-    g.addColorStop(0, '#1d2a48');
-    g.addColorStop(0.45, '#6d7fa8');
-    g.addColorStop(0.8, '#d8ab7c');
-    g.addColorStop(1, '#e6b98a');
-    ctx.fillStyle = g;
+    ctx.fillStyle = skyGradient(ctx, offY, z);
     ctx.fillRect(0, 0, W, H);
     const now = performance.now();
     this.backdrop.draw(ctx, W, H, 2048 + now / 60, camY, z, now);

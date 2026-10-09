@@ -1,10 +1,12 @@
 /**
- * The scenery behind the battlefield, Cortex Command / Metal Slug style:
- * pixel-art parallax layers over the sky gradient. Far blue mountain ranges
- * lit from the top left with snow on the peaks, a darker range in front of
- * them, sandstone mesas and buttes nearer still, and puffy pixel clouds
- * drifting across. Each layer is baked once into a horizontally seamless
- * tile, one pixel per world cell, and drawn scaled up with no smoothing.
+ * The scenery behind the battlefield, Cortex Command / Metal Slug style, on
+ * an alien world: pixel-art parallax layers over the sky gradient. A ringed
+ * gas giant and two small moons hang in the sky; far dusty-rose ranges lit
+ * from the top left with frost on the peaks, a darker maroon range in front
+ * of them, rust mesas, buttes and needle spires nearer still, and thin
+ * wisps of dust drifting across. Each layer is baked once into a
+ * horizontally seamless tile, one pixel per world cell, and drawn scaled up
+ * with no smoothing.
  */
 
 /** 4x4 ordered-dither thresholds (0..15): the classic 16-bit fade. */
@@ -143,12 +145,24 @@ function mesas(height: number, s: number): HTMLCanvasElement {
       h[x] = Math.max(h[x], cliff, talus);
     }
   }
+  // Needle spires (hoodoos) between them: thin and sheer, a knob on top.
+  for (let i = 0; i < 14; i++) {
+    const cx = hash(i, s + 11) * TW;
+    const w = 2 + hash(i, s + 12) * 3;
+    const top = 30 + hash(i, s + 13) * (height - 36);
+    for (let x = Math.floor(cx - w - 2); x <= cx + w + 2; x++) {
+      const xx = ((x % TW) + TW) % TW;
+      const dx = Math.abs(x - cx);
+      const v = dx <= w ? top - dx * 1.5 + (dx < 1.5 ? 3 : 0) : top * 0.3 - (dx - w) * 2;
+      h[xx] = Math.max(h[xx], v);
+    }
+  }
   for (let x = 0; x < TW; x++) h[x] = Math.max(h[x], 8 + noise1(x, 64, s + 5) * 14) + (noise1(x, 6, s + 6) - 0.5) * 2;
-  const lit: RGB = [178, 128, 92];
-  const base: RGB = [144, 100, 74];
-  const shade: RGB = [108, 74, 60];
-  const band: RGB = [122, 84, 64];
-  const rim: RGB = [206, 156, 112];
+  const lit: RGB = [186, 100, 66];
+  const base: RGB = [148, 74, 52];
+  const shade: RGB = [108, 52, 44];
+  const band: RGB = [126, 60, 46];
+  const rim: RGB = [214, 134, 88];
   return canvasOf(TW, height, (d) => {
     for (let x = 0; x < TW; x++) {
       const top = Math.round(height - 1 - h[x]);
@@ -165,12 +179,12 @@ function mesas(height: number, s: number): HTMLCanvasElement {
   });
 }
 
-/** Puffy pixel cumulus: a cluster of round puffs on a flat base, lit on top. */
+/** Wisps of high dust: long, flat, thin puffs, lit on top (the clouds of a thin, dry sky). */
 function clouds(height: number, s: number): HTMLCanvasElement {
   const W = TW * 2;
-  const light: RGB = [246, 248, 252];
-  const mid: RGB = [214, 226, 240];
-  const dark: RGB = [176, 192, 220];
+  const light: RGB = [246, 214, 198];
+  const mid: RGB = [222, 182, 172];
+  const dark: RGB = [184, 140, 146];
   const occ = new Uint8Array(W * height);
   const puffs: [number, number, number][] = [];
   const n = 11;
@@ -183,9 +197,12 @@ function clouds(height: number, s: number): HTMLCanvasElement {
     puffs.push([cx, cy + size * 0.2, size * 0.8]);
   }
   for (const [cx, cy, r] of puffs) {
-    for (let y = Math.max(0, Math.floor(cy - r)); y < Math.min(height, cy + r * 0.55); y++) {
-      for (let x = Math.floor(cx - r); x < cx + r; x++) {
-        if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) occ[y * W + ((x % W) + W) % W] = 1;
+    // (Squashed flat and drawn out: wisps, not cumulus.)
+    const rx = r * 2.2;
+    const ry = r * 0.4;
+    for (let y = Math.max(0, Math.floor(cy - ry)); y < Math.min(height, cy + ry * 0.7); y++) {
+      for (let x = Math.floor(cx - rx); x < cx + rx; x++) {
+        if (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1) occ[y * W + ((x % W) + W) % W] = 1;
       }
     }
   }
@@ -197,9 +214,76 @@ function clouds(height: number, s: number): HTMLCanvasElement {
         const up = y > 1 && occ[(y - 2) * W + x];
         const down = y < height - 2 && occ[(y + 2) * W + x];
         const c = !up ? light : !down ? dark : mid;
-        d[y * W + x] = rgb(c, 235);
+        d[y * W + x] = rgb(c, 190);
       }
     }
+  });
+}
+
+/**
+ * The sky's bodies, fixed far off: a ringed gas giant low over the hills,
+ * banded lavender and teal, lit from the upper left and dithered into
+ * shadow, its ring tilted across it (behind it above, in front below); and
+ * two small cratered moons.
+ */
+function heavens(height: number): HTMLCanvasElement {
+  const W = TW * 2;
+  return canvasOf(W, height, (d) => {
+    const put = (x: number, y: number, c: number) => {
+      if (y >= 0 && y < height) d[y * W + (((x % W) + W) % W)] = c;
+    };
+    // The giant. (This layer barely moves, so only its first few hundred
+    // cells, and the last few before them, are ever on screen: it hangs there.)
+    const gx = 150;
+    const gy = height - 96;
+    const R = 30;
+    const bands: RGB[] = [
+      [196, 176, 214],
+      [150, 170, 196],
+      [214, 196, 206],
+      [132, 150, 182],
+      [182, 164, 204],
+      [120, 162, 170],
+    ];
+    const tilt = -0.32;
+    const tc = Math.cos(tilt);
+    const ts = Math.sin(tilt);
+    for (let y = gy - R * 2; y < gy + R * 2; y++) {
+      for (let x = gx - R * 2; x < gx + R * 2; x++) {
+        const dx = x - gx;
+        const dy = y - gy;
+        // The ring: a band of a tilted, flattened ellipse round the centre.
+        const u = dx * tc - dy * ts;
+        const v = dx * ts + dy * tc;
+        const rr = Math.hypot(u, v / 0.22);
+        const rk = rr > R * 1.35 && rr < R * 1.95 ? (rr < R * 1.62 ? 1 : 2) : 0;
+        const front = rk !== 0 && v > 0;
+        if (dx * dx + dy * dy <= R * R && !front) {
+          const b = bands[Math.max(0, Math.floor((dy / R + 1) * 3.2 + Math.sin(dx * 0.07) * 0.3)) % bands.length];
+          // Lit from the upper left: a terminator dithered across the lower right.
+          const lit = Math.max(0, Math.min(1, (-dx * 0.75 - dy * 0.45) / R + 0.55));
+          const dark = lit < 0.15 || (lit < 0.45 && (0.45 - lit) * 32 > BAYER[(y & 3) * 4 + (x & 3)]);
+          const k = dark ? 0.42 : 1;
+          // (Through the dusty air: a little of the sky shows through it.)
+          put(x, y, px(Math.round(b[0] * k), Math.round(b[1] * k), Math.round(b[2] * k), 205));
+        } else if (rk) put(x, y, rk === 1 ? px(226, 206, 196, 170) : px(186, 160, 168, 120));
+      }
+    }
+    // Two moons: a lumpy grey one, and a speck further off.
+    const moon = (mx: number, my: number, r: number, s: number) => {
+      for (let y = my - r - 1; y <= my + r + 1; y++) {
+        for (let x = mx - r - 1; x <= mx + r + 1; x++) {
+          const dx = x - mx;
+          const dy = y - my;
+          const lump = r * (1 + (hash(Math.round(Math.atan2(dy, dx) * 3) + 8, s) - 0.5) * 0.25);
+          if (dx * dx + dy * dy > lump * lump) continue;
+          const c = hash(x * 7 + y, s + 1) < 0.08 ? 120 : dx + dy * 0.5 > r * 0.3 ? 132 : 188;
+          put(x, y, px(c, Math.round(c * 0.95), Math.round(c * 0.92)));
+        }
+      }
+    };
+    moon(36, 112, 6, 5);
+    moon(W - 110, 92, 3, 9);
   });
 }
 
@@ -220,16 +304,17 @@ export class Backdrop {
 
   private build(): Layer[] {
     return [
+      { img: heavens(220), f: 0.02, base: 330, fill: '', drift: 0 },
       { img: clouds(110, 41), f: 0.05, base: 250, fill: '', drift: 3 },
       {
-        img: mountains(150, 125, [260, 120, 60, 24], 11, { lit: [132, 150, 196], base: [104, 120, 170], shade: [86, 100, 152], snow: [236, 240, 250], snowShade: [184, 196, 228], snowline: 92 }),
+        img: mountains(150, 125, [260, 120, 60, 24], 11, { lit: [178, 124, 138], base: [146, 96, 116], shade: [120, 76, 100], snow: [238, 222, 230], snowShade: [196, 170, 196], snowline: 92 }),
         f: 0.12,
         base: 400,
-        fill: 'rgb(104,120,170)',
+        fill: 'rgb(146,96,116)',
         drift: 0,
       },
-      { img: mountains(105, 80, [180, 80, 34, 14], 23, { lit: [110, 106, 150], base: [86, 82, 126], shade: [70, 64, 108] }), f: 0.25, base: 425, fill: 'rgb(86,82,126)', drift: 0 },
-      { img: mesas(85, 37), f: 0.42, base: 455, fill: 'rgb(108,74,60)', drift: 0 },
+      { img: mountains(105, 80, [180, 80, 34, 14], 23, { lit: [140, 78, 84], base: [112, 60, 70], shade: [90, 46, 60] }), f: 0.25, base: 425, fill: 'rgb(112,60,70)', drift: 0 },
+      { img: mesas(85, 37), f: 0.42, base: 455, fill: 'rgb(108,52,44)', drift: 0 },
     ];
   }
 

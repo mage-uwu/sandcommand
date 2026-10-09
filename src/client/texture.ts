@@ -224,10 +224,10 @@ function glyphStone(t: Terrain, x: number, y: number): number {
 }
 
 /**
- * Frosting on the topsoil. Grass: bright tips on its top row (some blades
- * lighter, some darker), deepening to a rooty green-brown underneath. Snow:
- * a bright crust lit from above, cold blue in its depths and shadows, the
- * odd glint.
+ * Frosting on the topsoil. Lichen (Mat.Grass: it's an alien world): a
+ * teal-cyan crust, its top row tipped pale aqua or violet here and there,
+ * deepening to a dark sea-green mat underneath. Frost (Mat.Snow): a bright
+ * crust lit from above, cold lilac in its depths and shadows, the odd glint.
  */
 export function frostColor(t: Terrain, m: number, x: number, y: number): number {
   let d = 0; // depth below open air
@@ -237,20 +237,26 @@ export function frostColor(t: Terrain, m: number, x: number, y: number): number 
     if (n < 0.012) return abgr(255, 255, 255);
     const k = (d === 0 ? 1.04 : d === 1 ? 0.97 : 0.88 - (d - 2) * 0.04) * (0.96 + 0.06 * noise(x, y, 9, 62));
     const shade = matAt(t, x + 1, y) === Mat.Air ? 0.9 : 1;
-    return abgr(222 * k * shade, 232 * k * shade, 246 * k);
+    return abgr(226 * k * shade, 220 * k * shade, 242 * k);
   }
   const blade = h(x, 0, 63);
-  let r = 86;
+  let r = 50;
   let g = 150;
-  let b = 58;
+  let b = 140;
   if (d === 0) {
-    r = blade < 0.3 ? 128 : 104;
-    g = blade < 0.3 ? 188 : 168;
-    b = blade < 0.3 ? 72 : 62;
+    if (blade < 0.12) {
+      r = 168;
+      g = 112;
+      b = 206; // violet tips
+    } else {
+      r = blade < 0.4 ? 120 : 76;
+      g = blade < 0.4 ? 222 : 190;
+      b = blade < 0.4 ? 200 : 170;
+    }
   } else if (d >= 2) {
-    r = 78;
-    g = 112;
-    b = 52;
+    r = 34;
+    g = 90;
+    b = 92;
   }
   const k = 0.92 + 0.14 * n;
   return abgr(r * k, g * k, b * k);
@@ -266,7 +272,37 @@ export function grassBlade(t: Terrain, x: number, y: number): number {
   if (!below1 && !below2) return 0;
   const tall = h(x, 7, 64);
   if (below1 ? tall < 0.45 : tall < 0.82) return 0;
-  return below1 ? abgr(96, 170, 64) : abgr(122, 190, 78);
+  // Lichen fronds; now and then a glowing violet spore-head on a tall one.
+  if (!below1 && tall > 0.95) return abgr(206, 140, 255);
+  return below1 ? abgr(70, 186, 168) : abgr(110, 214, 196);
+}
+
+/**
+ * Natural ground (`m`: dirt and its varieties, sand, rust dust), from its
+ * palette shade `c` (ABGR): grit and texture by kind. Rust soil with the
+ * odd dark clod; regolith full of basalt pebbles; ochre with bright
+ * grains; clay streaked; rust dust in wind ripples. Others pass through.
+ */
+export function soilColor(m: number, x: number, y: number, c: number): number {
+  const n = h(x, y, 71);
+  let k = 1;
+  if (m === Mat.Dirt) {
+    if (n < 0.04) k = 0.72;
+    else k = 0.94 + 0.12 * noise(x, y, 5, 72);
+  } else if (m === Mat.Regolith) {
+    if (n < 0.1) k = 0.6;
+    else if (n > 0.96) k = 1.35;
+  } else if (m === Mat.Ochre) {
+    if (n > 0.95) k = 1.3;
+    else k = 0.92 + 0.14 * noise(x, y, 7, 73);
+  } else if (m === Mat.Clay) {
+    k = 0.9 + 0.16 * noise(x * 0.4, y * 2, 4, 74);
+  } else if (m === Mat.RustSand) {
+    // Ripples: faint diagonal bands, as the wind leaves them.
+    k = (x + y * 3 + Math.floor(noise(x, y, 9, 75) * 6)) % 9 < 2 ? 1.1 : 1;
+  } else return c;
+  if (k === 1) return c;
+  return abgr((c & 255) * k, ((c >> 8) & 255) * k, ((c >> 16) & 255) * k);
 }
 
 /** A built solid (concrete, steel, ancient cobble or temple stone) at (x, y). */

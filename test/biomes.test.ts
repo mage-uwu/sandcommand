@@ -57,7 +57,18 @@ describe('biomes', () => {
     const dunes = surface(t);
     expect(dunes.frac(Mat.Grass)).toBeGreaterThan(0.01);
     expect(dunes.frac(Mat.Grass)).toBeLessThan(meadow);
-    expect(dunes.frac(Mat.Sand)).toBeGreaterThan(0.3);
+    expect(dunes.frac(Mat.RustSand)).toBeGreaterThan(0.3); // dunes of rust dust
+  });
+
+  it('the ground is an alien one: rust soil and dust, with ochre, clay and regolith through it', () => {
+    generateWorld(t, seedFor(Biome.Meadows));
+    const count = new Map<number, number>();
+    for (let i = 0; i < t.mat.length; i += 7) count.set(t.mat[i], (count.get(t.mat[i]) ?? 0) + 1);
+    const soil = [Mat.Dirt, Mat.Ochre, Mat.Clay, Mat.Regolith].map((m) => count.get(m) ?? 0);
+    const total = soil.reduce((a, b) => a + b, 0);
+    expect(soil[0] / total).toBeGreaterThan(0.35); // mostly rust soil
+    for (const n of soil.slice(1)) expect(n / total).toBeGreaterThan(0.04); // each variety in good measure
+    expect(count.get(Mat.RustSand) ?? 0).toBeGreaterThan(0);
   });
 
   it('frosting is only on natural ground, never on a bunker', () => {
