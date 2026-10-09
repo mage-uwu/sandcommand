@@ -773,12 +773,12 @@ export class SpriteCache {
   private tankGuns = new Map<number, { c: HTMLCanvasElement; r: number }>();
 
   /** Tank hull (with its dome), facing right or left. */
-  tankHull(left: boolean): HTMLCanvasElement {
-    return this.tankSprite(`hull${left ? 1 : 0}`, () => bake(TANK_HULL, TANK_PAL, left));
+  tankHull(left: boolean, steel = false): HTMLCanvasElement {
+    return this.tankSprite(`hull${left ? 1 : 0}${steel ? 's' : ''}`, () => bake(TANK_HULL, steel ? STEEL_PAL : TANK_PAL, left));
   }
   /** The armour plate over the roof and nose. */
-  tankArmor(left: boolean): HTMLCanvasElement {
-    return this.tankSprite(`armor${left ? 1 : 0}`, () => bake(TANK_ARMOR, TANK_PAL, left));
+  tankArmor(left: boolean, steel = false): HTMLCanvasElement {
+    return this.tankSprite(`armor${left ? 1 : 0}${steel ? 's' : ''}`, () => bake(TANK_ARMOR, steel ? STEEL_PAL : TANK_PAL, left));
   }
   /** Dropship hull in the caller's team colour. */
   shipHull(team: number): HTMLCanvasElement {
@@ -788,25 +788,26 @@ export class SpriteCache {
     return this.tankSprite('shipEngine', () => bake(SHIP_ENGINE, shipPalette(0x808080)));
   }
   /** The steel cupola over the hatch. */
-  tankShield(left: boolean): HTMLCanvasElement {
-    return this.tankSprite(`shield${left ? 1 : 0}`, () => bake(TANK_SHIELD, TANK_PAL, left));
+  tankShield(left: boolean, steel = false): HTMLCanvasElement {
+    return this.tankSprite(`shield${left ? 1 : 0}${steel ? 's' : ''}`, () => bake(TANK_SHIELD, steel ? STEEL_PAL : TANK_PAL, left));
   }
   /** The tracks, animation frame chosen by how far the tank has rolled. */
-  tankTread(frame: number, left: boolean): HTMLCanvasElement {
+  tankTread(frame: number, left: boolean, steel = false): HTMLCanvasElement {
     const f = ((frame % TREAD_FRAMES) + TREAD_FRAMES) % TREAD_FRAMES;
-    return this.tankSprite(`tread${f}${left ? 1 : 0}`, () => bake(tankTread(f), TANK_PAL, left));
+    return this.tankSprite(`tread${f}${left ? 1 : 0}${steel ? 's' : ''}`, () => bake(tankTread(f), steel ? STEEL_PAL : TANK_PAL, left));
   }
   tankChute(): HTMLCanvasElement {
     return this.tankSprite('chute', bakeChute);
   }
   /** Cannon (or vulcan) rotated to world angle `a` about its pivot. Draw at pivot - r. */
-  tankGun(vulcan: boolean, a: number): { c: HTMLCanvasElement; r: number } {
+  tankGun(vulcan: boolean, a: number, steel = false): { c: HTMLCanvasElement; r: number } {
     const step = ((Math.round((a / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
-    const key = step * 2 + (vulcan ? 1 : 0);
+    const key = step * 4 + (vulcan ? 1 : 0) + (steel ? 2 : 0);
     let g = this.tankGuns.get(key);
     if (!g) {
       const ang = (step / ANGLE_STEPS) * Math.PI * 2;
-      g = vulcan ? bakeRotatedGrid(TANK_VULCAN, TANK_PAL, ang, 1, 3) : bakeRotatedGrid(TANK_CANNON, TANK_PAL, ang, 1, 2);
+      const pal = steel ? STEEL_PAL : TANK_PAL;
+      g = vulcan ? bakeRotatedGrid(TANK_VULCAN, pal, ang, 1, 3) : bakeRotatedGrid(TANK_CANNON, pal, ang, 1, 2);
       this.tankGuns.set(key, g);
     }
     return g;
@@ -909,6 +910,24 @@ const TANK_PAL: Record<string, number> = {
   T: 0x50504c, // track links
   W: 0xaaaca0, // wheel face
   R: 0x696c64, // wheel rim
+};
+/**
+ * The watchdog's livery: bare machined steel in place of the tank's olive
+ * camouflage (a cool blue-grey, bright on its edges, dark in the recesses),
+ * with darker gunmetal running gear.
+ */
+const STEEL_PAL: Record<string, number> = {
+  ...TANK_PAL,
+  K: 0x101418,
+  H: 0xe4ecf2, // polished edge
+  L: 0xa8b4be, // light steel
+  O: 0x7a8794, // steel
+  D: 0x56616c, // dark steel
+  d: 0x343c44, // deepest shadow
+  g: 0x1c2024,
+  m: 0x4a535c,
+  W: 0x8e969e,
+  R: 0x50575e,
 };
 /** Rows of hull sprite above the tank's box. */
 export const TANK_SPRITE_TOP = 3;

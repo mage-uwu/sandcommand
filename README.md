@@ -570,7 +570,7 @@ or a **Watchdog** for **1000**. The radio then needs 30 seconds to recharge
   parachuted in beside you. It's two-thirds the size of a tank and
   two-thirds as tough, and it carries the same vulcan and cannon. A
   `Tank` with `s` = 2/3 and an `owner`: every tank geometry function
-  scales by `s`. It has a sensor mast with a light in your colour, and a
+  scales by `s`. It wears bare machined steel, not the tanks' olive camouflage, and has a sensor mast with a light in your colour, and a
   red eye. There's no seat in it and nobody can climb in. You get one at a
   time; it shuts down if you leave the game.
   - **On its own** (the default) it **guards you**. With nothing about, it

@@ -1565,15 +1565,15 @@ export class Renderer {
     }
     if (hasTankPart(t.parts, TankPart.Cannon)) {
       const a = cannonAngle(faceLeft, aim, t.a) - t.a; // relative to the tilted hull
-      const g = sp.tankGun(false, a);
+      const g = sp.tankGun(false, a, dog);
       const kick = t.firedCannon ? 3 : 0;
       const px = (faceLeft ? x + TANK_W - CANNON_PIVOT[0] : x + CANNON_PIVOT[0]) - Math.cos(a) * kick;
       const py = ty + CANNON_PIVOT[1] - Math.sin(a) * kick;
       ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
     }
-    ctx.drawImage(sp.tankHull(faceLeft), x, y);
+    ctx.drawImage(sp.tankHull(faceLeft, dog), x, y);
     // The steel cupola over the hatch (12 wide, its foot on the hatch rim).
-    if (shield) ctx.drawImage(sp.tankShield(faceLeft), wx(9, 12), y - 4);
+    if (shield) ctx.drawImage(sp.tankShield(faceLeft, dog), wx(9, 12), y - 4);
     if (dog) {
       // A watchdog: no hatch, no crew. A sensor mast with a winking light in its owner's colour.
       const rgb = game.players.get(t.owner)?.rgb ?? 0xff4040;
@@ -1587,11 +1587,11 @@ export class Renderer {
       ctx.fillRect(wx(26, 4), ty + 6, 4, 2);
     }
     // Tracks: one frame per two cells rolled.
-    ctx.drawImage(sp.tankTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft), x, y + 18);
-    if (hasTankPart(t.parts, TankPart.Armor)) ctx.drawImage(sp.tankArmor(faceLeft), x, y);
+    ctx.drawImage(sp.tankTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft, dog), x, y + 18);
+    if (hasTankPart(t.parts, TankPart.Armor)) ctx.drawImage(sp.tankArmor(faceLeft, dog), x, y);
     if (hasTankPart(t.parts, TankPart.Smg)) {
       aim -= t.a; // the vulcan's swivel, relative to the tilted hull
-      const g = sp.tankGun(true, aim);
+      const g = sp.tankGun(true, aim, dog);
       const px = faceLeft ? x + TANK_W - SMG_PIVOT[0] : x + SMG_PIVOT[0];
       const py = ty + SMG_PIVOT[1];
       ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
