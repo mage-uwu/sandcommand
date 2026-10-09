@@ -85,6 +85,8 @@ export interface FeedItem {
   text: string;
   color: string;
   at: number;
+  /** A kill-feed line (part of the event stream, hidden with the info panel), not a notice for us. */
+  kill?: boolean;
 }
 
 export interface Flash {
@@ -1147,7 +1149,7 @@ export class Game implements FrameHandler {
     if (!has(k.parts, Part.Head)) text += ' (headshot)';
     else if (!has(k.parts, Part.Torso)) text += ' (torn apart)';
     const color = victim === this.myId ? '#ff6060' : killer === this.myId ? '#80ff80' : '#e0e0e0';
-    this.feed.push({ text, color, at: performance.now() });
+    this.feed.push({ text, color, at: performance.now(), kill: true });
     if (this.feed.length > 6) this.feed.shift();
 
     // Gib it. Skip the work for deaths far off-screen.

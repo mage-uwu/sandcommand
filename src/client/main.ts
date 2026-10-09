@@ -296,6 +296,13 @@ function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boo
 }
 /** Tools aimed at the ground or at friends (or nothing): no snapping onto enemies. */
 const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol, WeaponId.Mine]);
+/** I: the info panel (humans online, net stats, kill feed), hidden by default; the choice is remembered. */
+input.showInfo = storageGet('sc.info') === 'on';
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyI' || input.typing || e.repeat) return;
+  input.showInfo = !input.showInfo;
+  storageSet('sc.info', input.showInfo ? 'on' : 'off');
+});
 /** Mouse aim assist: on unless switched off (V), and the choice is remembered. */
 let mouseAssist = storageGet('sc.assist') !== 'off';
 addEventListener('keydown', (e) => {

@@ -1775,21 +1775,28 @@ export class Renderer {
     let humans = 0;
     for (const [, pl] of game.players) if (!pl.bot) humans++;
     const online = `${humans} ${humans === 1 ? 'human' : 'humans'} online`;
-    ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
-    const ox = touch ? mx - 10 * s : W - 14 * s;
-    const oy = touch ? my + 14 * s : 22 * s;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillText(online, ox + s, oy + s);
-    ctx.fillStyle = '#9fe870';
-    ctx.fillText(online, ox, oy);
+    // The info panel (this, the net stats and the kill feed) only on request
+    // (I), or while the scoreboard is up.
+    const info = input.showInfo || input.scoreboard;
+    if (info) {
+      ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+      const ox = touch ? mx - 10 * s : W - 14 * s;
+      const oy = touch ? my + 14 * s : 22 * s;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillText(online, ox + s, oy + s);
+      ctx.fillStyle = '#9fe870';
+      ctx.fillText(online, ox, oy);
+    }
     ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    if (!touch) lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (40 + i * 15) * s));
+    if (!touch && info) lines.forEach((l, i) => ctx.fillText(l, W - 14 * s, (40 + i * 15) * s));
 
     // Kill feed.
     const now = performance.now();
-    const feedY = touch ? my + mh + 16 * s : 100 * s;
-    const feed = touch ? game.feed.slice(-3) : game.feed;
+    // (Without the info panel, only notices for us show: not the kill feed.)
+    const feedY = touch ? my + mh + 16 * s : info ? 100 * s : 22 * s;
+    const shown = info ? game.feed : game.feed.filter((f) => !f.kill);
+    const feed = touch ? shown.slice(-3) : shown;
     feed.forEach((f, i) => {
       const a = Math.max(0, Math.min(1, (8000 - (now - f.at)) / 1000));
       if (a <= 0) return;
@@ -2057,22 +2064,18 @@ export class Renderer {
       const who = (game.players.get(rs.winner)?.name ?? '').replace(/^BOT /, '');
       big(rs.winner === 255 ? 'NO SURVIVORS' : won ? 'YOU WIN!' : `${who} WINS`, `${rs.winner !== 255 && !won ? name(rs.winner) + ' takes ' : ''}wave ${rs.wave} · next wave in ${secs}`, won ? '#80ff80' : '#ffd34a');
     } else {
-      // Live: a small status line, plus the spectator banner once we're out.
-      ctx.textAlign = 'center';
-      ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(W / 2 - 150 * s, 8 * s, 300 * s, 24 * s);
-      ctx.fillStyle = secs <= 30 ? '#ff8070' : '#ffd34a';
+      // Live: the match card (wave, mode and clock, and how the sides stand)
+      // on the same rows as HP and JET, plus the spectator banner once we're out.
       const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      const parts: { t: string; c: string }[] = [];
+      const gap = { t: '  ', c: '#888' };
+      let modeName = 'LAST MAN STANDING';
+      let extra: { t: string; c: string } | null = null;
       if (extraction) {
-        // Extraction: the clock; every team's clones; where the idol is.
-        ctx.fillText(`WAVE ${rs.wave} · EXTRACTION · ${clock}`, W / 2, 25 * s);
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W / 2 - 230 * s, 32 * s, 460 * s, 42 * s);
-        const cols = [-165, -55, 55, 165];
+        modeName = 'EXTRACTION';
         for (let t = 0; t < 4; t++) {
-          ctx.fillStyle = teamCss(t);
-          ctx.fillText(`${TEAM_NAMES[t]}${game.myTeam === t ? '*' : ''} ${rs.teamLeft[t] ?? 0}`, W / 2 + cols[t] * s, 48 * s);
+          if (t > 0) parts.push(gap);
+          parts.push({ t: `${TEAM_NAMES[t]}${game.myTeam === t ? '*' : ''} ${rs.teamLeft[t] ?? 0}`, c: teamCss(t) });
         }
         const idol = rs.idol;
         const evac = rs.evac;
@@ -2086,58 +2089,30 @@ export class Renderer {
         if (evac?.state === Evac.Inbound) line += evac.eta > 0 ? ` · EXTRACTION IN ${Math.ceil(evac.eta / TICK_RATE)}s` : ' · EXTRACTION LANDING';
         else if (evac?.state === Evac.Landed) line += ' · EXTRACTION WAITING';
         else if (evac?.state === Evac.Moving) line += ' · EXTRACTION MOVING';
-        ctx.fillStyle = color;
-        ctx.fillText(line, W / 2, 67 * s);
+        extra = { t: line, c: color };
       } else if (pvp) {
-        // PvP: the clock, then the leader and our own score beneath it.
-        ctx.fillText(`WAVE ${rs.wave} · PVP · ${clock}`, W / 2, 25 * s);
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W / 2 - 210 * s, 32 * s, 420 * s, 22 * s);
+        modeName = 'PVP';
         const st = rs.pvp;
         if (st) {
           const leading = st.leader === game.myId;
           const lead = st.leader === 255 ? 'nobody yet' : `${leading ? 'YOU' : name(st.leader).replace(/^BOT /, '')} ${st.leaderKills}`;
-          ctx.fillStyle = leading ? '#80ff80' : '#ffd34a';
-          ctx.fillText(`LEAD: ${lead}   ·   YOU: ${st.kills} K  ${st.deaths} D`, W / 2, 48 * s);
+          parts.push({ t: `LEAD ${lead}`, c: leading ? '#80ff80' : '#ffd34a' }, gap, { t: `YOU ${st.kills}K ${st.deaths}D`, c: '#e8ecef' });
         }
       } else if (regicide) {
-        // Regicide: the clock, then each side's king beneath it.
-        ctx.fillText(`WAVE ${rs.wave} · REGICIDE · ${clock}`, W / 2, 25 * s);
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W / 2 - 190 * s, 32 * s, 380 * s, 22 * s);
+        modeName = 'REGICIDE';
         const king = (t: number) => {
           const id = rs.kings[t];
           const who = id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '?').replace(/^BOT /, '');
           return `♛ ${who}${game.myTeam === t && id !== game.myId ? ' (yours)' : ''}`;
         };
-        ctx.textAlign = 'right';
-        ctx.fillStyle = teamCss(Team.Red);
-        ctx.fillText(king(Team.Red), W / 2 - 12 * s, 48 * s);
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#ccc';
-        ctx.fillText('v', W / 2, 48 * s);
-        ctx.textAlign = 'left';
-        ctx.fillStyle = teamCss(Team.Green);
-        ctx.fillText(king(Team.Green), W / 2 + 12 * s, 48 * s);
-        ctx.textAlign = 'center';
+        parts.push({ t: king(Team.Red), c: teamCss(Team.Red) }, { t: '  v  ', c: '#999' }, { t: king(Team.Green), c: teamCss(Team.Green) });
         if (game.alive && game.isKing(game.myId) && secs > 6 * 60 - 5) big('YOU ARE KING', 'stay alive · if you fall, your side loses', teamCss(game.myTeam));
       } else if (teams) {
-        // Last Team Standing: the clock, then red's and green's clones left beneath it.
-        ctx.fillText(`WAVE ${rs.wave} · TEAMS · ${clock}`, W / 2, 25 * s);
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(W / 2 - 150 * s, 32 * s, 300 * s, 22 * s);
-        const you = (t: number) => (game.myTeam === t ? ' (YOU)' : '');
-        ctx.textAlign = 'right';
-        ctx.fillStyle = teamCss(Team.Red);
-        ctx.fillText(`RED${you(Team.Red)} ${rs.teamLeft[0]}`, W / 2 - 12 * s, 48 * s);
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#ccc';
-        ctx.fillText('v', W / 2, 48 * s);
-        ctx.textAlign = 'left';
-        ctx.fillStyle = teamCss(Team.Green);
-        ctx.fillText(`${rs.teamLeft[1]} GREEN${you(Team.Green)}`, W / 2 + 12 * s, 48 * s);
-        ctx.textAlign = 'center';
-      } else ctx.fillText(`WAVE ${rs.wave} · ${rs.left} LEFT · ${clock}`, W / 2, 25 * s);
+        modeName = 'TEAMS';
+        const you = (t: number) => (game.myTeam === t ? '*' : '');
+        parts.push({ t: `RED${you(Team.Red)} ${rs.teamLeft[0]}`, c: teamCss(Team.Red) }, { t: '  v  ', c: '#999' }, { t: `${rs.teamLeft[1]} GREEN${you(Team.Green)}`, c: teamCss(Team.Green) });
+      } else parts.push({ t: `${rs.left} LEFT`, c: '#e8ecef' });
+      this.drawMatchCard(`WAVE ${rs.wave} · ${modeName}`, clock, secs <= 30 ? '#ff8070' : '#ffd34a', parts, extra, s);
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
         if (rs.out) big('FRAGGED', `out for this wave · ${watching}`, '#ff4d3d');
@@ -2151,6 +2126,57 @@ export class Renderer {
       }
     }
     ctx.textAlign = 'left';
+  }
+
+  /**
+   * The match card: on the same rows as the HP and JET bars, to their right
+   * (past the paper doll). Wave and mode, the clock (red in the last 30 s), and beneath them
+   * how the sides stand; Extraction adds where the idol is under the card.
+   */
+  private drawMatchCard(title: string, clock: string, clockColor: string, parts: { t: string; c: string }[], extra: { t: string; c: string } | null, s: number): void {
+    const ctx = this.ctx;
+    // (Past the paper doll, which sits just right of the bars.)
+    const x = 234 * s;
+    const y = 14 * s;
+    const h = 32 * s;
+    const pad = 8 * s;
+    const small = `${Math.round(11 * s)}px ui-monospace, monospace`;
+    const bold = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
+    const big = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+    ctx.font = bold;
+    const tw = ctx.measureText(title).width;
+    ctx.font = big;
+    const cw = ctx.measureText(clock).width;
+    ctx.font = small;
+    const pw = parts.reduce((w, p) => w + ctx.measureText(p.t).width, 0);
+    const w = Math.max(tw + cw + pad * 3, pw + pad * 2, 170 * s);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = clockColor;
+    ctx.fillRect(x, y, 2 * s, h);
+    ctx.textAlign = 'left';
+    ctx.font = bold;
+    ctx.fillStyle = '#c8d0d8';
+    ctx.fillText(title, x + pad, y + 13 * s);
+    ctx.textAlign = 'right';
+    ctx.font = big;
+    ctx.fillStyle = clockColor;
+    ctx.fillText(clock, x + w - pad, y + 14 * s);
+    ctx.textAlign = 'left';
+    ctx.font = small;
+    let px = x + pad;
+    for (const p of parts) {
+      ctx.fillStyle = p.c;
+      ctx.fillText(p.t, px, y + 27 * s);
+      px += ctx.measureText(p.t).width;
+    }
+    if (extra) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      const ew = ctx.measureText(extra.t).width + pad * 2;
+      ctx.fillRect(x, y + h + 2 * s, ew, 16 * s);
+      ctx.fillStyle = extra.c;
+      ctx.fillText(extra.t, x + pad, y + h + 14 * s);
+    }
   }
 
   /** When the current big message first showed (it slides in each time it changes). */

@@ -22,7 +22,7 @@ Controls: **A/D** run, **W/Space** jump (hold for jetpack), **S** crouch (hold
 to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
-drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** mute all sound, **N** sound effects, **V** aim assist. With the Materializer out, the wheel or a click
+drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** mute all sound, **N** sound effects, **V** aim assist, **I** info panel. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
 **Keyboard-only aim** (no mouse needed), like the phone's fire pad: the
@@ -256,7 +256,10 @@ Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
    the next one.
 4. **Last clone standing wins.** The winner gets a win on the scoreboard
    (Tab: wins, kills, deaths) and a 7-second victory lap. A wave has a
-   4-minute clock (top of the screen). If time runs out, the survivor with
+   4-minute clock. The **match card** shows it, top left on the same rows as
+   HP and JET: the wave, the mode and the clock (red in the last 30 s),
+   and beneath them how the sides stand (kings, clones left, the PvP
+   leader). If time runs out, the survivor with
    the most kills that wave wins, so nobody wins by hiding in a bunker.
    Big messages (WAVE 3 IN 2, FRAGGED, HAWKINS WINS) are retro console
    banners: block letters made of █, glowing in the message's colour. They
@@ -786,8 +789,11 @@ whatever room a client asks for, so everyone plays together and the cost is
 a single room's. The match holds 64. Bots fill every slot no human has and
 give theirs up as humans arrive, so the 65th human is turned away with
 "room full". The room stops ticking when its last human leaves.
-The top-right corner shows how many humans are on (bots aside; on a phone,
-beside the minimap). Clients tell bots by their **BOT** tag, which the
+The info panel in the top-right corner (hidden by default: **I** toggles
+it, and it shows while the scoreboard is up) has how many humans are on
+(bots aside; on a phone, beside the minimap), the net stats and the kill
+feed. Notices meant for you (sound on/off, aim assist, dropship contacts)
+show there either way. Clients tell bots by their **BOT** tag, which the
 server reserves for bots: a human who calls themselves "BOT …" loses it.
 
 | Path | Role |

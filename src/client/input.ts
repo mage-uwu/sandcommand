@@ -19,6 +19,8 @@ export class InputState {
   /** Selected materializer piece (index into PIECES). */
   piece = 0;
   scoreboard = false;
+  /** The info panel (top right: humans online, net stats, the kill feed): off unless toggled on (I). */
+  showInfo = false;
   /** True while the chat box has focus; game keys are ignored. */
   typing = false;
   onChatKey: (() => void) | null = null;
