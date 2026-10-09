@@ -155,6 +155,40 @@ describe('radio and dropship', () => {
     expect(closest).toBeLessThan(80);
   });
 
+  it('rival dropships dogfight: they close in, match altitude and shoot each other up', () => {
+    const world = new World(73);
+    const a = world.addPlayer('a', { send() {} })!;
+    const b = world.addPlayer('b', { send() {} })!;
+    deliverAll(world, [a, b]);
+    // Far enough apart to stay out of each other's guns, close enough for the ships to meet.
+    const x = a.body.x + 450;
+    internals(world).placeClone(b, x, world.terrain.surfaceY(Math.floor(x + 4)) - ACTOR_H, 0, 0);
+    for (const p of [a, b]) {
+      p.gold = CALL_COST;
+      world.equip(p, WeaponId.Radio);
+    }
+    world.step();
+    expect(world.call(a.id, CallKind.Dropship)).toBe(true);
+    expect(world.call(b.id, CallKind.Dropship)).toBe(true);
+    const [sa, sb] = world.ships.filter(Boolean) as NonNullable<(typeof world.ships)[number]>[];
+    let intercepting = false;
+    let gap = Infinity;
+    let hurt = false;
+    for (let k = 0; k < 30 * 25; k++) {
+      a.hp = b.hp = 100; // (the callers sit it out)
+      a.body.vx = b.body.vx = 0;
+      world.step();
+      const alive = world.ships.includes(sa) && world.ships.includes(sb);
+      if (sa.mission === ShipMission.Intercept && sb.mission === ShipMission.Intercept) intercepting = true;
+      if (alive) gap = Math.min(gap, Math.abs(sa.y - sb.y) + (Math.abs(sa.x - sb.x) < 400 ? 0 : 999));
+      if (!alive || sa.hp < SHIP_HP || sb.hp < SHIP_HP || sa.parts !== 255 || sb.parts !== 255) hurt = true;
+      if (hurt && intercepting) break;
+    }
+    expect(intercepting).toBe(true);
+    expect(gap).toBeLessThan(60); // level with each other, in range
+    expect(hurt).toBe(true);
+  });
+
   it("it spots enemies for its side: they're marked on the caller's screen", () => {
     const frames: Uint8Array[] = [];
     const world = new World(72);

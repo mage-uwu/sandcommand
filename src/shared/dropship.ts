@@ -93,8 +93,10 @@ export const ShipMission = {
   Scout: 1,
   Cover: 2,
   Strike: 3,
+  /** Dogfighting an enemy dropship: alongside it at its altitude, guns on it. */
+  Intercept: 4,
 } as const;
-export const SHIP_MISSION_NAMES = ['ESCORT', 'SCOUTING', 'COVERING', 'STRIKING'] as const;
+export const SHIP_MISSION_NAMES = ['ESCORT', 'SCOUTING', 'COVERING', 'STRIKING', 'INTERCEPTING'] as const;
 
 export interface Ship {
   x: number; // box top-left, world cells
@@ -132,6 +134,8 @@ export interface Ship {
   goalX: number;
   focus: number;
   planCd: number;
+  /** Intercepting: the enemy dropship's slot it's after (255: none). */
+  foeShip: number;
   /** Remote control: who's flying it (255: the autopilot), and the point they're holding it at. */
   pilot: number;
   holdX: number;
@@ -169,6 +173,7 @@ export function newShip(x: number, y: number, owner: number, team: number): Ship
     goalX: x + SHIP_W / 2,
     focus: 255,
     planCd: 0,
+    foeShip: 255,
     pilot: 255,
     holdX: x + SHIP_W / 2,
     holdY: y,

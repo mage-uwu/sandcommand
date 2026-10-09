@@ -5,6 +5,8 @@ import {
   BAY_AT,
   MAX_SHIPS,
   SHIP_H,
+  ENGINE_NOZZLE_Y,
+  ENGINE_X,
   SHIP_INTEGRITY,
   SHIP_PARTS,
   SHIP_PART_CENTER,
@@ -340,6 +342,7 @@ export class World {
   private readonly tankMz = { x: 0, y: 0, a: 0 };
   private readonly craftStep = newCraftStep();
   private readonly pt = { x: 0, y: 0 };
+  private readonly pt2 = { x: 0, y: 0 };
   private readonly ext = { x: 0, y: 0 };
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
@@ -2744,6 +2747,11 @@ export class World {
     return p.alive && p.id !== sh.owner && !(sh.team !== Team.None && p.team === sh.team);
   }
 
+  /** Is dropship `o` an enemy of `sh` (another caller's, and not on its team)? */
+  private shipEnemy(sh: Ship, o: Ship | null): o is Ship {
+    return !!o && o !== sh && o.owner !== sh.owner && !(sh.team !== Team.None && o.team === sh.team);
+  }
+
   /** Who a dropship works for: its caller, and in team modes the caller's whole team. */
   private shipAlly(sh: Ship, p: Player): boolean {
     return p.id === sh.owner || (sh.team !== Team.None && p.team === sh.team);
@@ -2782,6 +2790,28 @@ export class World {
     if (!lead) {
       sh.mission = ShipMission.Escort;
       sh.goalX = sh.anchorX;
+      return;
+    }
+    // Intercept: an enemy dropship near us or any of ours comes first (air superiority).
+    sh.foeShip = 255;
+    let near = SHIP_INTERCEPT_R;
+    for (let k = 0; k < MAX_SHIPS; k++) {
+      const o = this.ships[k];
+      if (!this.shipEnemy(sh, o) || o.leaving) continue;
+      const ox = o.x + SHIP_W / 2;
+      let d = Math.abs(ox - cx);
+      for (const a of allies) d = Math.min(d, Math.abs(ox - a.cx));
+      if (d < near) {
+        near = d;
+        sh.foeShip = k;
+      }
+    }
+    if (sh.foeShip !== 255) {
+      sh.mission = ShipMission.Intercept;
+      const o = this.ships[sh.foeShip]!;
+      // Stand off to the side we're already on, guns on it.
+      const ox = o.x + SHIP_W / 2;
+      sh.goalX = ox + (cx < ox ? -1 : 1) * SHIP_STANDOFF;
       return;
     }
     const spotted = this.spots.get(this.spotKey(sh.team, sh.owner));
@@ -2908,6 +2938,13 @@ export class World {
       const cx = sh.x + SHIP_W / 2;
       const focus = sh.focus !== 255 ? this.players[sh.focus] : null;
       let tx = focus && focus.alive ? focus.cx : sh.goalX;
+      // Dogfighting: keep station beside the enemy ship (weaving a little so it's harder to hit), level with it.
+      const foe = !pilot && sh.mission === ShipMission.Intercept && sh.foeShip !== 255 ? this.ships[sh.foeShip] : null;
+      if (foe && this.shipEnemy(sh, foe)) {
+        const ox = foe.x + SHIP_W / 2;
+        const ph = k * 1.9;
+        tx = ox + (cx < ox ? -1 : 1) * (SHIP_STANDOFF + Math.sin(sh.age / 23 + ph) * 60);
+      }
       // Bombs: on whichever enemy is under it (bay intact), unless an ally is too close to them.
       let bombTarget: Player | null = null;
       if (!sh.leaving && sh.bombs > 0 && hasShipPart(sh.parts, ShipPart.Doors)) {
@@ -2945,7 +2982,7 @@ export class World {
       let ground = WORLD_H;
       for (let gx = lo; gx <= hi && gx <= lo + 600; gx += 6) ground = Math.min(ground, this.terrain.surfaceY(gx));
       if (tx < cx) for (let gx = hi; gx >= lo && gx >= hi - 600; gx -= 6) ground = Math.min(ground, this.terrain.surfaceY(gx));
-      const ty = sh.leaving ? -260 : pilot ? sh.holdY : Math.max(40, ground - SHIP_ALT);
+      const ty = sh.leaving ? -260 : pilot ? sh.holdY : foe ? Math.max(40, Math.min(ground - SHIP_ALT, foe.y + Math.cos(sh.age / 29 + k * 2.3) * 35)) : Math.max(40, ground - SHIP_ALT);
       const impact = stepShip(sh, this.terrain, DT, sh.leaving ? cx : tx, ty);
       if (impact > 90) {
         this.destroyShip(k, sh.lastHitBy);
@@ -2974,19 +3011,49 @@ export class World {
           sh.fired[side] = true;
           continue;
         }
-        let target: Player | null = null;
-        let best = SHIP_GUN_RANGE;
+        // Enemy dropships first (further off; at the engine pods hanging out
+        // on their pylons, each turret its own pod, else the hull), then soldiers.
+        let tx2 = 0;
+        let ty2 = 0;
+        let tvx = 0;
+        let tvy = 0;
+        let best = Infinity;
+        for (const o of this.ships) {
+          if (!this.shipEnemy(sh, o)) continue;
+          let lx = SHIP_W / 2;
+          let ly = SHIP_H / 2;
+          for (let e = 0; e < 4; e++) {
+            const pod = (side * 2 + e + (sh.age >> 6)) & 3;
+            if (hasShipPart(o.parts, ShipPart.EngineA + pod)) {
+              lx = ENGINE_X[pod];
+              ly = ENGINE_NOZZLE_Y - 4;
+              break;
+            }
+          }
+          const c = shipPoint(o, lx, ly, this.pt2);
+          const d = Math.hypot(c.x - gx, c.y - gy);
+          if (d < SHIP_AA_RANGE && d * 0.6 < best && this.clearLine(gx, gy, c.x, c.y)) {
+            best = d * 0.6;
+            tx2 = c.x;
+            ty2 = c.y;
+            tvx = o.vx;
+            tvy = o.vy;
+          }
+        }
         for (const o of this.players) {
           if (!o || !this.shipFoe(sh, o)) continue;
           const d = Math.hypot(o.cx - gx, o.cy - gy);
-          if (d < best && this.clearLine(gx, gy, o.cx, o.cy)) {
+          if (d < SHIP_GUN_RANGE && d < best && this.clearLine(gx, gy, o.cx, o.cy)) {
             best = d;
-            target = o;
+            tx2 = o.cx;
+            ty2 = o.cy;
+            tvx = o.body.vx;
+            tvy = o.body.vy;
           }
         }
-        if (!target) continue;
-        const lead = best / 900;
-        sh.aim[side] = Math.atan2(target.cy + target.body.vy * lead - gy, target.cx + target.body.vx * lead - gx);
+        if (best === Infinity) continue;
+        const lead = Math.hypot(tx2 - gx, ty2 - gy) / 900;
+        sh.aim[side] = Math.atan2(ty2 + tvy * lead - gy, tx2 + tvx * lead - gx);
         if (sh.gunCd[side] > 0) continue;
         const a = sh.aim[side] + (this.rng.next() - 0.5) * 0.1;
         this.spawnProj(this.nextProjId++, ProjKind.ShipGun, sh.owner, gx + Math.cos(a) * 9, gy + Math.sin(a) * 9, Math.cos(a) * 900 + sh.vx * 0.3, Math.sin(a) * 900 + sh.vy * 0.3);
@@ -3668,7 +3735,7 @@ export class World {
           w.u8(sh.team);
           w.u16(quantizeAim(sh.aim[0]));
           w.u16(quantizeAim(sh.aim[1]));
-          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4) | (sh.pilot !== 255 ? 64 : 0));
+          w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4) | (sh.pilot !== 255 ? 64 : 0) | ((sh.mission >> 2) << 7));
           for (let e = 0; e < 4; e++) w.u8(Math.round(sh.thrust[e] * 255));
         }
       }
@@ -3832,6 +3899,10 @@ const SHIP_SCOUT_AHEAD = 480;
 const SHIP_LEASH = 750;
 const SHIP_LEASH_TEAM = 1100;
 const SHIP_SIGHT = 620;
+/** Air to air: how near an enemy dropship (to it, or to any of its side) draws it in, the stand-off it fights from, and its guns' reach against ships. */
+const SHIP_INTERCEPT_R = 700;
+const SHIP_STANDOFF = 170;
+const SHIP_AA_RANGE = 460;
 const SPOT_TICKS = 30 * 4;
 const SHIP_GUN_RANGE = 300;
 const CALL_COOLDOWN = 30 * 30;

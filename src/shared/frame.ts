@@ -645,7 +645,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const aim: [number, number] = [dequantizeAim(r.u16()), dequantizeAim(r.u16())];
           const f = r.u8();
           const thrust = [r.u8() / 255, r.u8() / 255, r.u8() / 255, r.u8() / 255];
-          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: (f >> 4) & 3, piloted: (f & 64) !== 0 });
+          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: ((f >> 4) & 3) | ((f >> 7) << 2), piloted: (f & 64) !== 0 });
         }
         h.ships(list);
         break;

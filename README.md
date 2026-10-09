@@ -476,6 +476,15 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
   second. It flies in, then works on its own (`World.planShip`). In team
   modes it works for the **whole team**, not only its caller. A few times
   a second it picks a mission, shown on its tag to its own side:
+  - **Intercepting.** An enemy dropship within 700 cells of it, or of
+    any of its side, comes first: air superiority. It flies to a stand-off
+    about 170 cells beside the enemy, matches its altitude, and weaves in
+    and out and up and down on its own rhythm. Its turrets reach 460 cells
+    against ships and take enemy ships ahead of soldiers. Each turret aims
+    for one of the engine pods hanging out on the enemy's pylons, so a
+    dogfight usually ends with pods shot off and the loser spinning down,
+    in around 15–20 s. Remote pilots can fight other dropships by hand
+    too, since gun rounds hit an enemy ship's hull, pods and turrets.
   - **Covering.** When an enemy is close to an ally, it flies over that
     enemy. It picks the ally under the most pressure: nearest the threat,
     hurt, and its caller first.
