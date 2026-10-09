@@ -25,7 +25,6 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const canvas = $<HTMLCanvasElement>('game');
 const overlay = $<HTMLDivElement>('overlay');
 const nameInput = $<HTMLInputElement>('name');
-const roomInput = $<HTMLInputElement>('room');
 const playBtn = $<HTMLButtonElement>('play');
 const statusEl = $<HTMLDivElement>('status');
 const roomsEl = $<HTMLDivElement>('rooms');
@@ -53,14 +52,13 @@ function storageSet(key: string, value: string): void {
 }
 
 nameInput.value = storageGet('sc.name') ?? `Clone${Math.floor(Math.random() * 900 + 100)}`;
-roomInput.value = new URLSearchParams(location.search).get('room') ?? '';
 
 async function refreshRooms(): Promise<void> {
   try {
     const rooms = (await (await fetch('/api/rooms')).json()) as { room: string; players: number }[];
-    roomsEl.textContent = rooms.length
-      ? rooms.map((r) => `${r.room}: ${r.players}/64`).join('   ')
-      : 'No matches running. Yours will be the first.';
+    // One match for everyone: how many humans are in it.
+    const n = rooms.reduce((s, r) => s + r.players, 0);
+    roomsEl.textContent = n ? `${n}/64 in the match` : 'Nobody in yet. Bots will keep you company.';
   } catch {
     roomsEl.textContent = '';
   }
@@ -134,18 +132,9 @@ async function join(): Promise<void> {
   const name = nameInput.value.trim().slice(0, 16);
   storageSet('sc.name', name);
   playBtn.disabled = true;
-  statusEl.textContent = 'Finding a match…';
-  let room = roomInput.value.trim().toLowerCase();
-  if (!room) {
-    try {
-      room = ((await (await fetch('/api/join')).json()) as { room: string }).room;
-    } catch {
-      statusEl.textContent = 'Matchmaker unreachable.';
-      playBtn.disabled = false;
-      return;
-    }
-  }
-  statusEl.textContent = `Connecting to ${room}…`;
+  // There's one match, and everyone joins it.
+  const room = 'main';
+  statusEl.textContent = 'Connecting…';
   const g = new Game();
   g.sfx = sfx;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';

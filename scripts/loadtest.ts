@@ -15,7 +15,7 @@ import { Terrain } from '../src/shared/terrain.ts';
 const BOTS = Number(process.env.BOTS ?? 64);
 const SECONDS = Number(process.env.SECONDS ?? 20);
 const BASE = process.env.URL ?? 'http://127.0.0.1:8787';
-const ROOM = process.env.ROOM; // optional fixed room; default uses the matchmaker
+const ROOM = process.env.ROOM; // (ignored by the server now: there's one match, "main", for everyone)
 
 interface Bot {
   room: string;

@@ -638,17 +638,24 @@ above it. Snow is drawn with a bright crust, blue shadows and glints.
 ## Architecture
 
 ```
-browser ──/api/join──▶ Worker ──RPC──▶ Lobby DO  (packs players into rooms ≤ 64)
-browser ══/ws?room══▶ Worker ──────▶ GameRoom DO (one per match: authoritative sim)
-                         └──────────▶ static assets (public/)
+browser ══/ws══▶ Worker ──────▶ GameRoom DO "main" (the one match: authoritative sim)
+browser ──/api/rooms──▶ Worker ──RPC──▶ Lobby DO  (how many are in the match, for the menu)
+                   └──────────▶ static assets (public/)
 ```
+
+**One room, one runtime.** There is only ever one match: every player is
+sent to the same Durable Object (`MAIN_ROOM` in `src/server/worker.ts`),
+whatever room a client asks for, so everyone plays together and the cost is
+a single room's. The match holds 64. Bots fill every slot no human has and
+give theirs up as humans arrive, so the 65th human is turned away with
+"room full". The room stops ticking when its last human leaves.
 
 | Path | Role |
 | --- | --- |
 | `src/shared/` | Engine code that runs on **both** server and client: terrain, physics, kernels, protocol |
 | `src/server/world.ts` | Authoritative simulation and replication. Platform-agnostic, so tests and the benchmark drive it directly |
 | `src/server/room.ts` | `GameRoom` Durable Object: sockets, fixed-timestep loop, telemetry |
-| `src/server/lobby.ts` | `Lobby` Durable Object: matchmaking with seat reservations |
+| `src/server/lobby.ts` | `Lobby` Durable Object: the room board (the match's population, for the menu) |
 | `src/client/` | Canvas renderer, input, prediction/interpolation, HUD |
 
 ### Terrain: SWAR bitplanes
@@ -1238,7 +1245,9 @@ downstream per bot: ~31 KB/s
 server tick (from the room's telemetry log): avg ~4.2 ms, up to ~2.6k grains live
 ```
 
-With 70 bots, the lobby packs `{"room-2":64,"room-3":6}` and rejects nobody.
+(That run predates the single room: it used the old per-room matchmaker.
+Now every bot joins the one match, `main`, and past 64 humans the rest are
+turned away.)
 RTT tails in the local load test are dominated by the bot harness and workerd
 competing for the same CPU. Measure from a separate machine for real
 numbers.
