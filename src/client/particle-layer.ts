@@ -18,6 +18,8 @@ const pack = (r: number, g: number, b: number, a = 255) => ((a << 24) | (b << 16
 const fromRgb = (rgb: number, a = 255) => pack((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, a);
 
 const MAT_LUT = new Uint32Array(MAT_COLOR.map(([r, g, b]) => pack(r, g, b)));
+/** A stone chunk's shadowed side. */
+const STONE_DK = pack(132, 112, 88);
 
 /** Flame colour by remaining life (index 0 = dying, 15 = fresh). */
 const FLAME_LUT = new Uint32Array(16);
@@ -118,6 +120,16 @@ export class ParticleLayer {
         case PK.Blood:
           buf[o] = BLOOD;
           break;
+        case PK.Stone: {
+          // A chunk of dripstone: two cells square, lit top left, dark bottom right.
+          buf[o] = MAT_LUT[17];
+          if (cx + 1 < w) buf[o + 1] = MAT_LUT[17];
+          if (cy + 1 < h) {
+            buf[o + w] = STONE_DK;
+            if (cx + 1 < w) buf[o + w + 1] = STONE_DK;
+          }
+          break;
+        }
         case PK.Shrapnel: {
           // A hot tracer streak back along its path, like a bullet's.
           buf[o] = SPARK_HOT;

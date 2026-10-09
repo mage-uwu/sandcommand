@@ -32,21 +32,27 @@ export const Mat = {
   Clay: 15,
   /** Ochre: yellow-orange iron soil, in pockets near the surface. */
   Ochre: 16,
+  /**
+   * Dripstone: the calcite of stalactites and stalagmites. Brittle: a
+   * formation that's hit anywhere (a bullet's chip will do) breaks off whole
+   * and comes down in heavy chunks (particles.ts applyCarve).
+   */
+  Dripstone: 17,
 } as const;
 
-export const MAT_COUNT = 17;
+export const MAT_COUNT = 18;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false];
 
 /** Natural ground (soil, sand, rock): what frosting settles on and bots dig through. */
 export const isSoil = (m: number) => m === Mat.Dirt || m === Mat.Sand || m === Mat.RustSand || m === Mat.Regolith || m === Mat.Clay || m === Mat.Ochre;
@@ -70,6 +76,7 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [84, 62, 58], // regolith
   [108, 40, 34], // oxblood clay
   [178, 118, 50], // ochre
+  [206, 184, 152], // dripstone
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone'];

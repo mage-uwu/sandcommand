@@ -919,6 +919,23 @@ out of sight, they take the nearest way there, walking ramps and passages,
 jetting up shafts (resting beside one when the jetpack runs low), and
 dropping down the shaft in a basement they stand in.
 
+**Dripstone** (`Mat.Dripstone`, `dripstone` and `dripCaves` in
+`src/shared/caves.ts`). Stalactites hang from the roofs of the natural caves
+on every map (the odd stalagmite stands on their floors), and from the
+highway's roof and the natural citadels' domes on cave maps. Each is a
+tapering spike of pale calcite, drawn pixel-art style (`dripColor` in
+`src/client/texture.ts`): flow streaks down it, drip rings across it, lit
+from the left with a shadowed right edge, and a glistening drop on a
+stalactite's tip. Dripstone is brittle: anything that chips a formation (a
+single bullet, a blast, the digger) breaks the whole of it off at once.
+A third of it comes down as heavy chunks of stone (`PK.Stone`: heavier than
+hull scrap, they land hard), the rest as grit, and all of it settles as
+rubble. A big stalactite shot down onto a clone can kill it outright, and
+the kill is the shooter's ("Falling Rock" in the feed). It happens inside
+the shared carve (`applyCarve` in `src/shared/particles.ts`), so every
+replica breaks the same formations from the same carve record, with no
+extra traffic.
+
 **Traces** (`src/client/relics.ts`, drawn by `relic-art.ts`). Now and then, deep in a cave, something
 older than the war: a faded painting on the back wall, or a relic half sunk
 in a cave floor. Never explained, never in the way: purely cosmetic (each

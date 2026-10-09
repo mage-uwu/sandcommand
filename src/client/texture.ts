@@ -278,6 +278,26 @@ export function grassBlade(t: Terrain, x: number, y: number): number {
 }
 
 /**
+ * Dripstone, pixel-art style: pale calcite in vertical flow streaks with
+ * darker drip rings across it, lit from the left (a bright left edge, a
+ * shadowed right one, a dark outline below), and on the very tip of a
+ * stalactite a glistening drop.
+ */
+export function dripColor(t: Terrain, x: number, y: number): number {
+  const air = (dx: number, dy: number) => matAt(t, x + dx, y + dy) === Mat.Air;
+  const drip = (dx: number, dy: number) => matAt(t, x + dx, y + dy) === Mat.Dripstone;
+  // The tip of a stalactite: open below and either side, dripstone above.
+  if (air(0, 1) && air(-1, 0) && air(1, 0) && drip(0, -1)) return (h(x, y, 81) < 0.5 ? abgr(236, 242, 246) : abgr(198, 222, 230));
+  let k = 0.9 + 0.1 * noise(x * 3, y * 0.4, 6, 82); // flow streaks run down it
+  if (((y + Math.floor(noise(x, 0, 9, 83) * 3)) % 5) === 0) k *= 0.88; // drip rings
+  if (air(-1, 0)) k *= 1.2;
+  else if (air(1, 0)) k *= 0.74;
+  if (air(0, 1) && !drip(0, -1)) k *= 0.8; // the underside of a stalagmite's base, the foot of a stalactite
+  if (air(1, 0) && air(0, 1)) k *= 0.85;
+  return abgr(206 * k, 184 * k, 150 * k);
+}
+
+/**
  * Natural ground (`m`: dirt and its varieties, sand, rust dust), from its
  * palette shade `c` (ABGR): grit and texture by kind. Rust soil with the
  * odd dark clod; regolith full of basalt pebbles; ochre with bright

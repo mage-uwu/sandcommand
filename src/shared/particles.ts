@@ -1,4 +1,4 @@
-import { DT, GRAVITY, WORLD_H } from './constants.ts';
+import { DT, GRAVITY, WORLD_H, WORLD_W } from './constants.ts';
 import { segmentBox } from './kernels.ts';
 import { type Collider, FH, FIELD_CELL, FIELD_SHIFT, FW, contact, newHit } from './field.ts';
 import { MAT_LOOSE, Mat } from './materials.ts';
@@ -41,8 +41,9 @@ export const PK = {
   Gib: 6,
   Shrapnel: 7,
   Hull: 8, // drop-rocket fragments: heavy, settle as scrap metal
+  Stone: 9, // a broken stalactite's chunks: heavy, they hurt, settle as rubble
 } as const;
-export const KIND_COUNT = 9;
+export const KIND_COUNT = 10;
 
 // Contact behaviours.
 const C_SETTLE = 0; // become terrain (grains)
@@ -86,6 +87,8 @@ export const KINDS: readonly KindDef[] = [
   // Shrapnel flies like a bullet and hits like one: flat, fast, armour-piercing at full speed.
   /* Shrapnel */ { gravity: 0.15, drag: 0.996, e: 0.3, mu: 0.5, mass: false, advect: 0, air: 0.02, contact: C_SPENT, pmass: 0.5, sharp: 0.85, wound: 12, burn: 0, onActor: A_EMBED },
   /* Hull     */ { gravity: 1, drag: 0.997, e: 0.25, mu: 0.6, mass: true, advect: 0, air: 0.04, contact: C_SETTLE, pmass: 1.2, sharp: 0.35, wound: 12, burn: 0, onActor: A_BOUNCE },
+  // Falling dripstone: a chunk of rock dropping from a cave roof. Heavier than hull scrap, and it lands hard.
+  /* Stone    */ { gravity: 1, drag: 0.999, e: 0.15, mu: 0.7, mass: true, advect: 0, air: 0.02, contact: C_SETTLE, pmass: 1.8, sharp: 0.4, wound: 16, burn: 0, onActor: A_BOUNCE },
 ];
 const K_GRAV = new Float32Array(KINDS.map((k) => k.gravity));
 const K_DRAG = new Float32Array(KINDS.map((k) => k.drag));
@@ -134,6 +137,7 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_ROCKFALL = 246; // falling stalactites
 export const W_RAM = 247; // clones (and dropships) slamming into each other
 export const W_LASER = 248; // laser beams
 export const W_TRAP = 249; // spike pits
@@ -144,6 +148,7 @@ export const W_DEBRIS = 253;
 export const W_BURN = 254;
 const KIND_WEAPON = new Uint8Array(KIND_COUNT).fill(W_DEBRIS);
 KIND_WEAPON[PK.Flame] = W_BURN;
+KIND_WEAPON[PK.Stone] = W_ROCKFALL;
 
 export interface ParticleHooks {
   /** A grain came to rest: deposit it as terrain (server). */
@@ -689,7 +694,58 @@ export function applyCarve(
   });
   if (n === 0) return 0;
   t.collapseFrom(x, y, r, (cx, cy, m) => detached.push(cx, cy, m), carveExtent);
+  shatterDripstone(t, x, y, r, detached);
   return n;
+}
+
+/** Most cells of one formation that break off at once (bigger ones break where they're hit). */
+const DRIP_MAX = 2400;
+const dripStack: number[] = [];
+const dripSeen = new Set<number>();
+
+/**
+ * Dripstone is brittle: every stalactite or stalagmite the carve at (x, y, r)
+ * touched (any of its cells within a cell of the hole) breaks off whole. Its
+ * cells leave the terrain and go into `detached` (as Mat.Dripstone), for
+ * releaseCarve to drop as heavy chunks. Deterministic (a flood fill in a
+ * fixed order), so replicas break the same formations; `carveExtent` grows
+ * to cover them.
+ */
+function shatterDripstone(t: Terrain, x: number, y: number, r: number, detached: number[]): void {
+  const R = r + 1;
+  const x0 = Math.max(0, x - R);
+  const x1 = Math.min(WORLD_W - 1, x + R);
+  const y0 = Math.max(0, y - R);
+  const y1 = Math.min(WORLD_H - 1, y + R);
+  dripSeen.clear();
+  for (let sy = y0; sy <= y1; sy++) {
+    for (let sx = x0; sx <= x1; sx++) {
+      if (t.mat[sy * WORLD_W + sx] !== Mat.Dripstone || dripSeen.has(sy * WORLD_W + sx)) continue;
+      if ((sx - x) * (sx - x) + (sy - y) * (sy - y) > (R + 0.5) * (R + 0.5)) continue;
+      // Its whole formation (4-connected dripstone).
+      dripStack.length = 0;
+      dripStack.push(sy * WORLD_W + sx);
+      dripSeen.add(sy * WORLD_W + sx);
+      let count = 0;
+      while (dripStack.length && count < DRIP_MAX) {
+        const i = dripStack.pop()!;
+        const cx = i % WORLD_W;
+        const cy = (i - cx) / WORLD_W;
+        count++;
+        t.set(cx, cy, Mat.Air);
+        detached.push(cx, cy, Mat.Dripstone);
+        if (cx < carveExtent.x0) carveExtent.x0 = cx;
+        if (cx > carveExtent.x1) carveExtent.x1 = cx;
+        if (cy < carveExtent.y0) carveExtent.y0 = cy;
+        if (cy > carveExtent.y1) carveExtent.y1 = cy;
+        for (const j of [i - 1, i + 1, i - WORLD_W, i + WORLD_W]) {
+          if (j < 0 || j >= WORLD_W * WORLD_H || dripSeen.has(j) || t.mat[j] !== Mat.Dripstone) continue;
+          dripSeen.add(j);
+          dripStack.push(j);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -748,6 +804,15 @@ export function releaseCarve(
   for (let j = 0; j < detached.length; j += 3) {
     const vx = rng.range(-6, 6);
     const vy = rng.range(0, 12);
+    if (detached[j + 2] === Mat.Dripstone) {
+      // A broken formation: every third cell a heavy chunk of stone (it hurts), the rest grit.
+      // (Owned by whoever broke it: a stalactite brought down on someone's head is their kill.)
+      const ok = (j / 3) % 3 === 0
+        ? grains.spawn(PK.Stone, detached[j] + 0.5, detached[j + 1] + 0.5, vx * 3, vy, 600, Mat.Rubble, 0, owner)
+        : grains.spawnGrain(detached[j] + 0.5, detached[j + 1] + 0.5, vx * 2, vy, Mat.Rubble, 600, owner);
+      if (!ok) overflow?.(detached[j], detached[j + 1], Mat.Rubble);
+      continue;
+    }
     if (!grains.spawnGrain(detached[j] + 0.5, detached[j + 1] + 0.5, vx, vy, detached[j + 2], 600, owner)) {
       overflow?.(detached[j], detached[j + 1], detached[j + 2]);
     }

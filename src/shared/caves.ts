@@ -112,6 +112,69 @@ function vn(x: number, scale: number, salt: number): number {
 const at = (x: number, y: number) => y * WORLD_W + x;
 const inside = (x: number, y: number) => x >= 4 && x < WORLD_W - 4 && y >= 0 && y < WORLD_H - 12;
 
+/**
+ * A dripstone formation (Mat.Dripstone) growing from (x, root): a stalactite
+ * hanging down (`dir` 1) or a stalagmite standing up (`dir` -1), `len` cells
+ * long and `w` half-wide at its root, tapering to a point, ringed every few
+ * cells with a slight bulge (the drip lines). It only fills open air.
+ */
+export function dripstone(m: Uint8Array, x: number, root: number, dir: number, len: number, w: number, salt: number): void {
+  for (let k = 0; k < len; k++) {
+    const t = k / len;
+    let half = w * Math.pow(1 - t, 0.75);
+    if (k > 1 && k % 6 === 3) half += 0.8; // a drip ring
+    half += ((hash2(x, k, salt) & 3) - 1.5) * 0.15;
+    const y = root + dir * k;
+    for (let dx = -Math.ceil(half); dx <= Math.ceil(half); dx++) {
+      if (Math.abs(dx) > half + 0.25) continue;
+      if (inside(x + dx, y) && m[at(x + dx, y)] === Mat.Air) m[at(x + dx, y)] = Mat.Dripstone;
+    }
+  }
+}
+
+/** Natural ground a formation can grow from (never a bunker's concrete or steel, nor the ancient stone). */
+const natural = (v: number) => isSoil(v) || v === Mat.Rock;
+
+/**
+ * Dripstone through the natural caves of any map: stalactites from their
+ * roofs, the odd stalagmite on their floors, wherever a cave is roomy enough
+ * (never on bunkers or near the surface).
+ */
+export function dripCaves(m: Uint8Array, heights: Int32Array, seed: number): void {
+  const rng = new Rng(seed ^ 0xd419);
+  const tries = 900;
+  let hung = 0;
+  let stood = 0;
+  for (let n = 0; n < tries && (hung < 46 || stood < 18); n++) {
+    const x = 20 + rng.int(WORLD_W - 40);
+    let y = heights[x] + 30 + rng.int(Math.max(1, WORLD_H - heights[x] - 80));
+    if (!inside(x, y)) continue;
+    const up = rng.next() < 0.7;
+    if (up) {
+      // Up to a roof: open air under it, natural rock or soil in it.
+      while (y > heights[x] + 20 && m[at(x, y)] === Mat.Air) y--;
+      if (m[at(x, y)] === Mat.Air || !natural(m[at(x, y)]) || hung >= 46) continue;
+      let room = 0;
+      while (room < 120 && inside(x, y + 1 + room) && m[at(x, y + 1 + room)] === Mat.Air) room++;
+      if (room < 24) continue;
+      // (In a big cave, a tunnel, a cavern, a tarantula still walks under it.)
+      const len = Math.min(room >= 48 ? room - 48 : Math.floor(room * 0.4), 8 + rng.int(18));
+      if (len < 5) continue;
+      dripstone(m, x, y + 1, 1, len, 2 + rng.int(3), seed ^ x);
+      hung++;
+    } else {
+      // Down to a floor.
+      while (y < WORLD_H - 20 && m[at(x, y)] === Mat.Air) y++;
+      if (m[at(x, y)] === Mat.Air || !natural(m[at(x, y)]) || stood >= 18) continue;
+      let room = 0;
+      while (room < 50 && inside(x, y - 1 - room) && m[at(x, y - 1 - room)] === Mat.Air) room++;
+      if (room < 30) continue;
+      dripstone(m, x, y - 1, -1, 4 + rng.int(5), 2 + rng.int(2), seed ^ x ^ 0x77);
+      stood++;
+    }
+  }
+}
+
 /** A tunnel's bed: where its floor would open into a cave below, a rock floor this deep bridges it. */
 const BED = 8;
 
@@ -163,10 +226,7 @@ function decorate(m: Uint8Array, floor: Int32Array, ceil: Int32Array, x0: number
     const room = floor[x] - ceil[x];
     const len = Math.min(Math.floor(room * 0.35), 6 + rng.int(18));
     const w = 2 + rng.int(4);
-    for (let dy = 0; dy < len; dy++) {
-      const half = Math.round(w * (1 - dy / len));
-      for (let dx = -half; dx <= half; dx++) if (inside(x + dx, ceil[x] + dy) && m[at(x + dx, ceil[x] + dy)] === Mat.Air) m[at(x + dx, ceil[x] + dy)] = Mat.Rock;
-    }
+    dripstone(m, x, ceil[x], 1, len, w, salt ^ x);
   }
   for (let x = x0 + 60 + rng.int(80); x < x1 - 60; x += 90 + rng.int(160)) {
     const h = 4 + rng.int(9);
@@ -299,21 +359,13 @@ function naturalCitadel(m: Uint8Array, floor: Int32Array, ceil: Int32Array, cx: 
     if (Math.abs(x - cx) < kw + 30) continue; // (not into the keep's chambers)
     const len = Math.min(Math.floor((bot(x) - ceil[x]) * 0.4), bot(x) - ceil[x] - 64, 18 + rng.int(34));
     if (len < 6) continue;
-    const w = 3 + rng.int(5);
-    for (let dy = 0; dy < len; dy++) {
-      const half = Math.round(w * (1 - dy / len));
-      for (let dx = -half; dx <= half; dx++) put(x + dx, ceil[x + dx] + dy, Mat.Rock);
-    }
+    dripstone(m, x, ceil[x], 1, len, 3 + rng.int(5), salt ^ x);
   }
   for (let n = 0; n < 5 + rng.int(4); n++) {
     const x = cx - hw + 20 + rng.int(2 * hw - 40);
-    if (Math.abs(x - cx) < kw + 30) continue;
-    const h = 4 + rng.int(5);
-    const w = 3 + rng.int(3);
-    for (let dy = 0; dy < h; dy++) {
-      const half = Math.round(w * (1 - dy / h));
-      for (let dx = -half; dx <= half; dx++) put(x + dx, bot(x + dx) - 1 - dy, Mat.Rock);
-    }
+    // (Clear of the keep, and on the level floor: toward the ends it's eased lower later.)
+    if (Math.abs(x - cx) < kw + 30 || Math.abs(x - cx) > hw * 0.7) continue;
+    dripstone(m, x, bot(x) - 1, -1, 4 + rng.int(5), 3 + rng.int(3), salt ^ x ^ 0x5a);
   }
 }
 

@@ -4,7 +4,7 @@ import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { type Complex, placeStructures } from './structures.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
-import { type CaveNet, carveCaves } from './caves.ts';
+import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
 export let lastComplexes: Complex[] = [];
@@ -319,6 +319,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // Cave maps: the highway under it all, its citadels, and the shafts down to it from every bunker.
   lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
+  // Stalactites and stalagmites through the natural caves.
+  if (!dungeon) dripCaves(m, heights, seed);
   frost(m, biome, seed);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the

@@ -19,7 +19,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { backWallColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
+import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
@@ -162,6 +162,7 @@ export class Renderer {
         let c: number;
         if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph) c = structColor(t, m, wx, wy);
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
+        else if (m === Mat.Dripstone) c = dripColor(t, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);
