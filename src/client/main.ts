@@ -16,7 +16,7 @@ import { InputState } from './input.ts';
 import { Net } from './net.ts';
 import { Renderer } from './render.ts';
 import { TouchControls } from './touch.ts';
-import { touchPulses } from './stick.ts';
+import { touchPulses, wheelMayFire } from './stick.ts';
 import { registerServiceWorker, setupInstall, takeRejoin, watchForUpdates } from './pwa.ts';
 
 const snapAt = { x: 0, y: 0 };
@@ -493,14 +493,22 @@ function frame(now: number): void {
       // round goes (a target not already locked waits a moment for the lock
       // to settle and the scope to get there; one already locked, by auto
       // mode or before, fires at once). A quick tap's shot waits with it.
-      const stickDown = !!st && !stickWas;
+      // The same when a held thumb sweeps (or swipes) onto someone new.
       stickWas = !!st;
-      if (stickDown && mark.on && mark.g !== heldG) lockGate = LOCK_TICKS;
+      if (st && mark.on && mark.g !== heldG) lockGate = LOCK_TICKS;
       const gated = lockGate > 0;
       if (gated) {
         lockGate--;
         buttons &= ~BTN_FIRE;
       }
+      // The fire pad only fires locked on: sweep it around and it just aims,
+      // no spraying, until it lands on someone (then lock first, and fire).
+      // Grenades, the digger and the tools (aimed at ground, walls or
+      // friends) fire wherever it points; so do a tank's guns.
+      const wheel = input.touch && (!!st?.fire || input.tapFire > 0);
+      const lockedOn = !!tgt && g.lockAim !== null;
+      if (wheel && !wheelMayFire(g.weapon, lockedOn, !!g.drive)) buttons &= ~BTN_FIRE;
+      touch.setLocked(lockedOn);
       // Locked on (assist or scope): the server holds the muzzle on the target, shots down the sight line.
       if (tgt && g.lockAim !== null) buttons |= BTN_LOCK;
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so

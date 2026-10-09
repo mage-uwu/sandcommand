@@ -229,3 +229,16 @@ describe('hard lock', () => {
   });
 });
 
+describe('the fire pad only fires locked on', () => {
+  it('a gun waits for a lock; grenades, the digger, the tools and a tank fire anywhere', async () => {
+    const { wheelMayFire } = await import('../src/client/stick.ts');
+    const { WeaponId } = await import('../src/shared/weapons.ts');
+    for (const w of [WeaponId.Rifle, WeaponId.Sniper, WeaponId.Smg, WeaponId.Laser, WeaponId.Bazooka, WeaponId.Autocannon]) {
+      expect(wheelMayFire(w, false, false)).toBe(false);
+      expect(wheelMayFire(w, true, false)).toBe(true);
+    }
+    for (const w of [WeaponId.Grenade, WeaponId.GrenadeLauncher, WeaponId.Digger, WeaponId.RepairKit, WeaponId.Mine]) expect(wheelMayFire(w, false, false)).toBe(true);
+    expect(wheelMayFire(WeaponId.Rifle, false, true)).toBe(true); // driving a tank
+  });
+});
+

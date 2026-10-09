@@ -1,5 +1,5 @@
 import { BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../shared/actor.ts';
-import { PROJ_LASER } from '../shared/weapons.ts';
+import { PROJ_LASER, WeaponId } from '../shared/weapons.ts';
 
 /** Joystick throw (CSS px) that counts as full deflection. */
 export const STICK_R = 56;
@@ -29,3 +29,29 @@ export function stickButtons(dx: number, dy: number): number {
 export function touchPulses(def: { auto: boolean; proj: number } | undefined): boolean {
   return !!def && !def.auto && def.proj !== PROJ_LASER;
 }
+
+/**
+ * Weapons the touch fire pad fires without a lock: grenades (thrown or
+ * launched at ground and cover), the digger, and the tools (aimed at walls,
+ * the ground or friends). Every other gun fires only locked onto someone.
+ */
+export const WHEEL_FREE: ReadonlySet<number> = new Set<number>([
+  WeaponId.Grenade,
+  WeaponId.GrenadeLauncher,
+  WeaponId.Digger,
+  WeaponId.Materializer,
+  WeaponId.Radio,
+  WeaponId.RepairKit,
+  WeaponId.Idol,
+  WeaponId.Mine,
+]);
+
+/**
+ * May the touch fire pad fire right now? With most guns, only locked on:
+ * sweep it around and it just aims, no spraying. Grenades, the digger and
+ * the tools fire wherever it points, and so do a tank's guns (no assist).
+ */
+export function wheelMayFire(weapon: number, lockedOn: boolean, driving: boolean): boolean {
+  return lockedOn || driving || WHEEL_FREE.has(weapon);
+}
+

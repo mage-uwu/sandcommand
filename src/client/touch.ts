@@ -186,6 +186,11 @@ export class TouchControls {
     this.onAuto = changed;
   }
 
+  /** Show on the fire pad whether the aim is locked on (it only fires then, with most guns). */
+  setLocked(on: boolean): void {
+    this.pad.classList.toggle('locked', on);
+  }
+
   /** Hide or show the controls (e.g. behind the join screen). */
   setVisible(on: boolean): void {
     this.root.classList.toggle('hidden', !on || !this.enabled);

@@ -51,7 +51,10 @@ body.touch .help:not(.touch-help) { display: none; }
 .fire-pad .tick.n { top: 6px; } .fire-pad .tick.s { bottom: 6px; } .fire-pad .tick.w { left: 6px; } .fire-pad .tick.e { right: 6px; }
 .fire-pad.firing { opacity: 1; border-color: rgba(255, 80, 50, 0.85); }
 .fire-knob { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: rgba(255, 120, 90, 0.3); }
-.fire-pad.firing .fire-knob { background: rgba(255, 70, 40, 0.85); box-shadow: 0 0 10px rgba(255, 70, 40, 0.6); }
+.fire-pad.firing .fire-knob { background: rgba(200, 200, 210, 0.5); box-shadow: none; }
+/* Locked on: the pad goes hot (held, it fires). Not locked: a cool grey knob that only aims. */
+.fire-pad.locked { border-color: rgba(255, 80, 50, 0.7); }
+.fire-pad.firing.locked .fire-knob { background: rgba(255, 70, 40, 0.9); box-shadow: 0 0 12px rgba(255, 70, 40, 0.7); }
 /* The item block: 2 by 2 in the bottom-right corner (◀ ▶ over zoom and pick up). */
 .tbtns { --btn: 52px; position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(2, var(--btn)); gap: 8px; }
 #touch .tbtns button { width: var(--btn); height: var(--btn); }

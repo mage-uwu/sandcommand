@@ -67,6 +67,19 @@ before) fires at once.
 **Never fires for you.** The aim assist only ever aims. Firing is always
 your tap, hold or click.
 
+**The fire pad only fires locked on** (touch). With a gun, sweeping the
+fire pad around just aims, with no spraying, until it lands on someone.
+Then it locks on (the lock-first beat) and fires for as long as you hold.
+The pad shows it: a cool grey knob while it's only aiming, red-hot once
+it's locked. A target you lose sight of mid-burst stops the burst. The
+exceptions, which fire wherever the pad points:
+- grenades (thrown, or from the GL);
+- the digger;
+- the tools (aimed at walls, the ground or friends);
+- a tank's guns.
+
+The mouse and keyboard fire on the click as ever (`wheelMayFire`).
+
 **Fire goes down the laser.** Snapped on (or scope-locked), the client
 flags its input as locked (`BTN_LOCK`). The server then holds the muzzle on
 the target: no recoil climb, and the braced (halved) spread of a scope.
