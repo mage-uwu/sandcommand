@@ -29,10 +29,14 @@ export const TANK_HP = 75 * ACTOR_MAX_HP;
 export const TANK_INTEGRITY = 120;
 export const MAX_TANKS = 4;
 export const TANK_MAX_FUEL = 100;
-const RUN = 64;
-const GROUND_ACCEL = 420;
-const AIR_ACCEL = 140;
-export const TANK_STEP_UP = 8;
+const RUN = 80;
+const GROUND_ACCEL = 640;
+/** Steering in the air (coasting or on the jets). */
+const AIR_ACCEL = 300;
+/** The treads climb a step this tall for each cell they advance: steep hills and jagged ground, not sheer walls. */
+export const TANK_STEP_UP = 14;
+/** Rolling over a dip this deep (or less), the treads stay on the ground rather than hopping off it. */
+const SNAP_DOWN = 10;
 const JET_ACCEL = 1050; // vs GRAVITY 620: a slow, heavy climb
 const FUEL_BURN = 32; // per second
 const FUEL_REGEN = 22; // per second, on the ground
@@ -237,24 +241,13 @@ function groundAt(t: Terrain, x: number, y0: number, depth: number): number {
   return y0 + depth;
 }
 
-const LOOK_AHEAD = 4;
-/** How high the ground stands LOOK_AHEAD cells beyond the nose, above the treads' bottom. */
-function riseAhead(t: Terrain, k: Tank, dir: number): number {
-  const x = Math.floor(dir > 0 ? k.x + TANK_W + LOOK_AHEAD : k.x - 1 - LOOK_AHEAD);
-  const bottom = Math.floor(k.y + TANK_H - 1);
-  let r = 0;
-  while (r < 40 && t.isSolid(x, bottom - r)) r++;
-  return r;
-}
-
-/** Steepest tilt the treads settle to, and the steepest slope they will climb. */
-const MAX_TILT = 0.9;
-const MAX_CLIMB = 0.85;
-/** Tread suspension: stiffness and damping of the hull's settling onto the ground; looser in the air. */
-const TILT_K = 70;
-const TILT_D = 10;
-const AIR_K = 5;
-const AIR_D = 1.5;
+/** Steepest tilt the treads settle to. */
+const MAX_TILT = 1.15;
+/** Tread suspension: stiffness and damping of the hull's settling onto the ground; in the air it levels out (leaning a touch into its motion). */
+const TILT_K = 80;
+const TILT_D = 11;
+const AIR_K = 14;
+const AIR_D = 5;
 
 export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): number {
   // Unstick: sand poured onto it, or it landed in a bunker's rubble.
@@ -279,25 +272,32 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
     const gr = groundAt(t, k.x + TANK_W - CONTACT, bottom, 30);
     const target = Math.max(-MAX_TILT, Math.min(MAX_TILT, Math.atan2(gr - gl, TANK_W - 2 * CONTACT)));
     k.w += ((target - k.a) * TILT_K - k.w * TILT_D) * dt;
-  } else k.w += (-k.a * AIR_K - k.w * AIR_D) * dt;
+  } else {
+    const lean = Math.max(-1, Math.min(1, k.vx / RUN)) * 0.12;
+    k.w += ((lean - k.a) * AIR_K - k.w * AIR_D) * dt;
+  }
   k.a += k.w * dt;
-  if (k.a > 1) k.a = 1;
-  else if (k.a < -1) k.a = -1;
+  if (k.a > 1.2) k.a = 1.2;
+  else if (k.a < -1.2) k.a = -1.2;
 
-  if (dir !== 0 || k.onGround) {
-    const accel = (k.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt;
-    // Uphill is slow going, downhill quicker (sin0 > 0: the right end is lower).
-    const slope = k.onGround ? Math.max(0.3, Math.min(1.35, 1 + 0.7 * sin0 * dir)) : 1;
+  if (k.onGround) {
+    const accel = GROUND_ACCEL * dt;
+    // Uphill costs some speed, downhill gains a little (sin0 > 0: the right end is lower).
+    const slope = Math.max(0.6, Math.min(1.25, 1 + 0.5 * sin0 * dir));
     const dv = dir * RUN * slope - k.vx;
     k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
-  }
+  } else if (dir !== 0) {
+    // In the air: steer with A/D (the jets' vectoring), up to a brisk drift.
+    const accel = AIR_ACCEL * dt;
+    const dv = dir * RUN * 1.1 - k.vx;
+    k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
+  } else k.vx *= 1 - Math.min(1, 0.8 * dt); // (coasting: air drag)
   // Left on a steep slope without throttle, it slides off.
-  if (k.onGround && dir === 0 && Math.abs(k.a) > 0.55) k.vx += sin0 * GRAVITY * 0.5 * dt;
+  if (k.onGround && dir === 0 && Math.abs(k.a) > 0.7) k.vx += sin0 * GRAVITY * 0.5 * dt;
   k.jetting = false;
   if (driven & BTN_UP && k.fuel > 0) {
-    // Lift jets push along the hull's normal: a tilted tank drifts sideways.
-    k.vx += sin0 * JET_ACCEL * dt;
-    k.vy -= Math.cos(k.a) * JET_ACCEL * dt;
+    // Lift jets push straight up, whatever the hull's tilt: steering is A/D's job.
+    k.vy -= JET_ACCEL * dt;
     k.fuel = Math.max(0, k.fuel - FUEL_BURN * dt);
     k.jetting = true;
   } else if (k.onGround) k.fuel = Math.min(TANK_MAX_FUEL, k.fuel + FUEL_REGEN * dt);
@@ -312,7 +312,11 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
   if (k.vy > MAX_FALL) k.vy = MAX_FALL;
   if (k.vy < -MAX_RISE) k.vy = -MAX_RISE;
 
-  // Horizontal sweep in <=1 cell steps; the treads climb small steps.
+  // Horizontal sweep in <=1 cell steps. The treads climb whatever they can
+  // get a grip on: any step up to TANK_STEP_UP per cell advanced (steep
+  // hills, jagged rock, rubble), on the ground or just off it (a bump mid-climb).
+  const gripping = k.onGround || collides(t, k.x, k.y + 3);
+  const wasGround = k.onGround;
   let rem = k.vx * dt;
   while (rem !== 0) {
     const step = rem > 1 ? 1 : rem < -1 ? -1 : rem;
@@ -320,16 +324,14 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
     if (!collides(t, nx, k.y)) k.x = nx;
     else {
       let climbed = false;
-      // The treads climb small steps, but not a face steeper than they can
-      // grip: already tilted too far up, or the ground just ahead of the nose
-      // rising faster than MAX_CLIMB allows.
-      const uphill = (step * k.a < 0 && Math.abs(k.a) > MAX_CLIMB) || riseAhead(t, k, step) > Math.tan(MAX_CLIMB) * LOOK_AHEAD;
-      if (k.onGround && !uphill) {
+      if (gripping) {
         for (let s = 1; s <= TANK_STEP_UP; s++) {
           if (!collides(t, nx, k.y - s)) {
             k.x = nx;
             k.y -= s;
             climbed = true;
+            // A big step is hard work: it costs some speed.
+            if (s > 6) k.vx *= 0.94;
             break;
           }
         }
@@ -340,6 +342,15 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
       }
     }
     rem -= step;
+  }
+  // Rolling over a dip: the treads follow the ground down instead of hopping off it.
+  if (wasGround && !k.jetting && k.vy >= 0 && !collides(t, k.x, k.y + 1)) {
+    for (let s = 2; s <= SNAP_DOWN; s++) {
+      if (collides(t, k.x, k.y + s)) {
+        k.y += s - 1;
+        break;
+      }
+    }
   }
   let impact = 0;
   rem = k.vy * dt;

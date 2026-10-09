@@ -441,18 +441,24 @@ come down by parachute** at spread-out spots and land empty.
   hatch.
 - **Tread suspension.** The hull settles onto the ground under its rear and
   front treads through a damped spring. It tilts to match hills, both
-  tread ends touching, and rocks a little. In the air it drifts level, and
-  it jolts on landing. Cannon recoil pitches the nose up, and blasts rock
+  tread ends touching, and rocks a little. In the air it levels out
+  quickly, leaning a touch into its motion, and it jolts on landing. Cannon recoil pitches the nose up, and blasts rock
   it.
-- **Slopes.** Uphill is slower and downhill quicker. The treads climb
-  slopes up to about 50° but refuse a steeper face, and an idle tank slides
-  off steep ground. Lift jets push along the tilted hull's normal.
+- **Terrain.** The treads climb whatever they can get a grip on: any step
+  up to 14 cells for each cell they advance. That covers steep hills (65°
+  and more), jagged rock and rubble, and they keep gripping a cell or three
+  off the ground, so a bump mid-climb doesn't stop them. Only sheer walls
+  taller than that need the jets. Uphill costs at most 40% of the speed,
+  downhill gains a little, and a big step costs a little momentum. Rolling
+  over a dip, the treads follow the ground down instead of hopping off it.
+  An idle tank slides off very steep ground.
 - **Tilted parts.** The art, the cannon and SMG mounts, the muzzles, the
   part hit zones and an exposed driver's head all rotate with the hull.
   Tilt is part of the predicted state, at full precision for the driver.
-- **Driving.** **A/D** drive the treads, which climb 8-cell steps. **W**
-  fires the lift jets (their own fuel, weaker than a jetpack). **S** drops
-  you faster while airborne.
+- **Driving.** **A/D** drive the treads. **W** fires the lift jets (their
+  own fuel, weaker than a jetpack). They push straight up whatever the
+  hull's tilt, and A/D steer in the air. **S** drops you faster while
+  airborne.
 - **Two guns.** **Left mouse** fires the vulcan SMG, which swivels all the
   way round (or **right Shift**). **Right mouse / left Shift** (touch: hold ◎) fires the cannon: a
   heavy lobbed shell with a big blast, aimed out the front (25° down to 72°

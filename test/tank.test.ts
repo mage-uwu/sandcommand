@@ -230,19 +230,15 @@ describe('tanks', () => {
     }
   });
 
-  it('climbs a hill (slower than on the flat), but not a cliff face', () => {
-    const climb = (deg: number) => {
+  it('climbs hills, steep ones and jagged ground (uphill a little slower), but not a sheer wall', () => {
+    /** Drive right for 5 s at ground shaped by `top(x)` from x 800 on; where does it get? */
+    const drive = (top: (x: number) => number) => {
       const world = new World(52);
       const a = world.addPlayer('d', { send() {} })!;
       deliverAll(world, [a]);
       yard(world);
       const t = world.terrain;
-      const slope = Math.tan((deg * Math.PI) / 180);
-      // Flat until x 800, then up the slope to the right (for 120 cells high at most).
-      for (let x = 800; x < 1600; x++) {
-        const top = Math.max(FLOOR - 120, Math.round(FLOOR - (x - 800) * slope));
-        for (let y = top; y < FLOOR; y++) t.set(x, y, Mat.Bedrock);
-      }
+      for (let x = 800; x < 1600; x++) for (let y = Math.max(FLOOR - 120, top(x)); y < FLOOR; y++) t.set(x, y, Mat.Bedrock);
       world.terrainReplaced();
       a.body.x = 700;
       a.body.y = FLOOR - ACTOR_H;
@@ -256,12 +252,42 @@ describe('tanks', () => {
       }
       return { x: k.x, y: k.y };
     };
-    const flat = climb(0);
-    const hill = climb(30);
-    const cliff = climb(75);
-    expect(hill.y).toBeLessThan(FLOOR - TANK_H - 40); // well up the hill
-    expect(hill.x).toBeLessThan(flat.x); // uphill is slower going
-    expect(cliff.y).toBeGreaterThan(FLOOR - TANK_H - 30); // a face too steep to grip
+    const slope = (deg: number) => (x: number) => Math.round(FLOOR - (x - 800) * Math.tan((deg * Math.PI) / 180));
+    const flat = drive(() => FLOOR);
+    const hill = drive(slope(30));
+    const steep = drive(slope(65));
+    // Jagged: a rough staircase of random steps up to 10 cells.
+    let h = 0;
+    const steps = Array.from({ length: 80 }, () => (h += 2 + ((h * 7919) % 9)));
+    const jagged = drive((x) => FLOOR - steps[Math.floor((x - 800) / 10)]);
+    const wall = drive((x) => (x < 820 ? FLOOR : FLOOR - 60));
+    const top = FLOOR - TANK_H - 120; // where it sits on the plateau
+    expect(hill.y).toBeLessThan(top + 5); // all the way up
+    expect(steep.y).toBeLessThan(top + 5); // a 65-degree slope too
+    expect(jagged.y).toBeLessThan(FLOOR - TANK_H - 100);
+    expect(hill.x).toBeLessThan(flat.x); // uphill is a bit slower going
+    expect(hill.x).toBeGreaterThan(flat.x - (flat.x - 710) * 0.5); // ...but not a crawl
+    expect(wall.y).toBeGreaterThan(FLOOR - TANK_H - 10); // a sheer 60-cell wall needs the jets
+  });
+
+  it('jets lift straight up whatever the hull tilt, and A/D steer it in the air', () => {
+    const { world, a, tank } = setup(35);
+    tapPickup(world, a);
+    tank.a = 0.6; // tilted hard
+    tank.w = 0;
+    const x0 = tank.x;
+    for (let k = 0; k < 12; k++) {
+      send(world, a, BTN_UP);
+      world.step();
+    }
+    expect(Math.abs(tank.x - x0)).toBeLessThan(4); // no sideways slide off the tilt
+    expect(Math.abs(tank.a)).toBeLessThan(0.3); // and the hull levels out in the air
+    const x1 = tank.x;
+    for (let k = 0; k < 20; k++) {
+      send(world, a, BTN_UP | BTN_RIGHT);
+      world.step();
+    }
+    expect(tank.x - x1).toBeGreaterThan(15);
   });
 
   it('recoil kicks the nose up and the suspension settles it back', () => {
