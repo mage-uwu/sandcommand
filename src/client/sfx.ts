@@ -97,7 +97,7 @@ export class Sfx {
     const key = owner * 32 + kind;
     const prev = this.last.get(key) ?? -1;
     // One report per shotgun shell (nine pellets), and the Gatling's stream thinned a little.
-    const gap = kind === ProjKind.Pellet ? 0.05 : kind === ProjKind.Heavy || kind === ProjKind.TankBullet || kind === ProjKind.ShipGun ? 0.045 : 0;
+    const gap = kind === ProjKind.Pellet ? 0.05 : kind === ProjKind.Heavy || kind === ProjKind.TankBullet || kind === ProjKind.ShipGun || kind === ProjKind.SmgRound || kind === ProjKind.Bolt ? 0.045 : 0;
     if (now - prev < gap) return;
     this.last.set(key, now);
     if (this.last.size > 512) this.last.clear();
@@ -109,6 +109,41 @@ export class Sfx {
         this.burst(v, 0, 0.04, 'highpass', 2600, 0.7, 0.9);
         this.burst(v, 0, 0.17, 'lowpass', 2600, 0.8, 0.9, 500);
         this.tone(v, 0, 0.09, 'sine', 170, 55, 0.7);
+        return;
+      }
+      case ProjKind.LightRound: {
+        // Light rifle: a big full-power crack, a rolling report.
+        const v = this.voice(x, y, 0.6, 0.6, 1.1);
+        if (!v) return;
+        this.burst(v, 0, 0.04, 'highpass', 2800, 0.7, 1);
+        this.burst(v, 0, 0.3, 'lowpass', 2200, 0.8, 1, 380);
+        this.tone(v, 0, 0.14, 'sine', 140, 45, 0.9);
+        return;
+      }
+      case ProjKind.SmgRound: {
+        // Suppressed SMG: a dull, quick "thup".
+        const v = this.voice(x, y, 0.32, 0.2);
+        if (!v) return;
+        this.burst(v, 0, 0.06, 'bandpass', 900, 1.2, 0.8, 500);
+        this.tone(v, 0, 0.05, 'sine', 210, 80, 0.5);
+        return;
+      }
+      case ProjKind.AutoShell: {
+        // Autocannon: a hard, deep "dunk" with a mechanical clank.
+        const v = this.voice(x, y, 0.7, 0.6, 1.1);
+        if (!v) return;
+        this.tone(v, 0, 0.18, 'sine', 95, 38, 1.2);
+        this.burst(v, 0, 0.3, 'lowpass', 1400, 0.8, 1, 240);
+        this.tone(v, 0.03, 0.05, 'square', 520, 300, 0.12);
+        return;
+      }
+      case ProjKind.Bolt: {
+        // Blaster: a bright falling "pew".
+        const v = this.voice(x, y, 0.35, 0.25);
+        if (!v) return;
+        this.tone(v, 0, 0.11, 'sawtooth', 1900, 320, 0.35);
+        this.tone(v, 0, 0.08, 'sine', 1200, 260, 0.4);
+        this.burst(v, 0, 0.03, 'highpass', 4000, 0.7, 0.2);
         return;
       }
       case ProjKind.Heavy:

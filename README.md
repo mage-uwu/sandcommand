@@ -141,6 +141,10 @@ Every sound is synthesized too, from noise bursts and swept oscillators
 | Source | Sound |
 |---|---|
 | **Rifle** | A sharp crack over a short, punchy body. |
+| **Light rifle** | A bigger, full-power crack with a rolling report. |
+| **SMG** | A dull, quick suppressed "thup". |
+| **Autocannon** | A hard, deep "dunk" with a mechanical clank. |
+| **Blaster** | A bright, falling "pew". |
 | **Gatling, tank and dropship guns** | A lower, chunkier report, thinned out at full rate. |
 | **Shotgun** | One big, wide boom per shell, not nine. |
 | **Sniper** | A .50-cal supersonic crack, a deep boom, an echo rolling back, and a hard strike where it lands. |
@@ -558,8 +562,39 @@ come down by parachute** at spread-out spots and land empty.
 
 Every clone carries a **Radio** (`WeaponId.Radio`, always in the kit
 alongside the digger and the materializer). With the radio in hand, a menu
-comes up: click **Dropship** or **Tank** to call it in for **1500 gold**.
-The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
+comes up: click **Dropship** or **Tank** to call it in for **1500 gold**,
+or a **Watchdog** for **1000**. The radio then needs 30 seconds to recharge
+(`World.call`, `C_CALL`).
+
+- **Watchdog** (`src/server/watchdog.ts`). A small unmanned robot tank,
+  parachuted in beside you. It's two-thirds the size of a tank and
+  two-thirds as tough, and it carries the same vulcan and cannon. A
+  `Tank` with `s` = 2/3 and an `owner`: every tank geometry function
+  scales by `s`. It has a sensor mast with a light in your colour, and a
+  red eye. There's no seat in it and nobody can climb in. You get one at a
+  time; it shuts down if you leave the game.
+  - **On its own** (the default) it **guards you**. With nothing about, it
+    heels at your side. When a hostile comes within 420 cells, it **gets
+    between you and the nearest one**: onto the ground halfway toward the
+    threat, up to 70 cells out in front of you, so whatever comes has to
+    come through it first.
+  - **Its guns.** It hoses the nearest hostile it can see within 280 cells
+    with the vulcan, leading it. It lobs cannon shells on the arc that
+    lands (the shared ballistic solver) at enemy vehicles, and at clones
+    more than 60 cells from you. It never fires with you in the line.
+  - **Getting about.** It jets over what its treads can't climb, and
+    follows you up to a higher level. It slips past you and your side
+    rather than shoving you about.
+  - **By remote** (**P**, or *Drive watchdog* on the radio menu) you drive
+    it yourself, like the dropship: A/D treads, W jets, click the vulcan,
+    right-click the cannon, with auto-aim. Your clone stands inert and
+    shootable where you left it, and the view rides with the watchdog. **P**
+    cycles: your dropship, then your watchdog, then back to the clone. Its
+    autonomy takes over again the moment you let go.
+  - **Destroyed.** A watchdog destroyed while you drive it doesn't take you
+    with it.
+  - **As a target.** It counts as a vehicle: AT missiles seek it, mines
+    under it go off, and enemy bots shoot at it.
 
 - **Tank.** An empty tank is parachuted onto your position. Climb in, or
   leave it for a teammate.
@@ -1034,6 +1069,11 @@ exists everywhere.
 | Gatling | heavy round, 960 | 17 | 1100 rpm (after spin-up) | auto | 100 | 5 s | 120 |
 | Laser | instant beam (see below) | 15 | hold, release | charge | 8 | 4 s | 400 |
 | AT Cannon | heat-seeking missile, 200 → 430 | 16 | 20 rpm | semi | 1 | 9 s | 160 |
+| Light Rifle | full-power round, 1100 | 15 | 480 rpm | semi | 7 | 2 s | 220 |
+| SMG | light round, 760 | 11 | 900 rpm | auto | 40 | 2 s | 70 |
+| Autocannon | solid shell, 420 | 18 | 150 rpm | auto | 12 | 4 s | 140 |
+| Mine | lays a landmine (see below) | 6 | 60 rpm | click | 2 | 5 s | 60 |
+| Blaster | light bolt, 1300 | 14 | 600 rpm | auto | 30 | 2.5 s | 160 |
 
 Four heavier guns are in the spawn pool too:
 - **Shotgun:** a military combat shotgun. Each shell is a spread of nine
@@ -1074,6 +1114,52 @@ bunkers' grand halls with the other heavy guns.
   through the armour (dropships take less), on top of the warhead and its
   blast. One missile takes about half a tank (47.6% in the tests).
 - **The cost.** One missile a load, and **nine seconds** to load the next.
+
+Five more, the newest:
+- **Light Rifle** (M1 Garand style). Semi-automatic: one round per pull,
+  as fast as you can pull (up to 480 rpm, faster than the rifle). Seven
+  rounds to an en-bloc clip. Its full-power round flies at 1100 cells/s
+  and wounds 26 a layer (the rifle's 16), and it's precise (spread 0.012
+  against 0.035), with a 220-cell scope. It mixes precise damage with a
+  modest clip.
+- **SMG** (Type 05 style). A suppressed bullpup that hoses out 900 rpm of
+  light rounds (10 wounds each), 40 to a magazine, with a 2 s reload. Its
+  rounds die out after about 150 cells, so it belongs up close, where it
+  still gets through a vest.
+- **Autocannon.** Low-velocity (420 cells/s), heavy solid shells that don't
+  explode. One shell carries enough energy to punch through any armour,
+  even a heavy's, and wounds 70 a layer: enough to take a head or limb off
+  outright. The shock of the hit also wrenches every other part of the body
+  (`shatter` in `PROJ`), so limbs come off. Its kills gib like an
+  explosion's. Each shell leaves a smoke trail, punches a small hole where
+  it lands, and goes with a deep "dunk".
+- **Mine.** Click to lay a landmine on the ground just in front of you
+  (you need ground under you: not in mid-air). You carry two, and another
+  pair is ready 5 s after the last is laid. More details under
+  **Landmines** below.
+- **Blaster.** The laser's SMG cousin: 600 rpm of weightless cyan bolts that
+  fly dead straight at 1300 cells/s. Each wounds 12 a layer (less than a
+  rifle round), and sparks where it lands.
+
+The new guns are in the spawn pool. Landmines sometimes replace a clone's
+grenades. The autocannon is in the bunkers' grand halls, and the rest turn
+up in the labyrinth's loot. Bots use all of them, the mines too: with
+nobody about, now and then they leave one behind.
+
+#### Landmines
+
+- **Who sets them off.** A mine is armed 1.5 s after it is laid. Then the
+  first enemy clone to step on it, or enemy tank (or watchdog) to roll over
+  it, sets it off. The clone that laid it, and its side, never do.
+- **The blast.** Modest: less than a grenade (splash 70 within 30 cells).
+  It's credited to the mine's owner as **Mine** in the kill feed.
+- **Limits.** Each clone keeps at most four down; laying a fifth clears its
+  oldest. Dig out the ground under one and it drops to whatever is below.
+- **What you see.** Your own side's mines are plain to see: a light winks
+  amber while one arms, then green. An enemy's mine is only a dull,
+  half-buried disc, for those who look.
+- **On the wire.** The server keeps them in `World.mines` and sends the
+  whole list (`R_MINES`) whenever it changes.
 
 The **sniper** is near instant: its slug flies 800 cells a tick and crosses
 the whole map in about five ticks, so you point and click. It's light for

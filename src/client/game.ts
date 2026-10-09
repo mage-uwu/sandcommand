@@ -1,9 +1,9 @@
 import { BTN_FIRE, type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, applyFrameRecords } from '../shared/frame.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
-import { TANK_H, TANK_W, type Tank, newTank, stepTank } from '../shared/tank.ts';
+import { TANK_W, type Tank, isDog, newTank, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
@@ -18,7 +18,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -188,7 +188,10 @@ export class Game implements FrameHandler {
     const foe = (id: number, t: number) => id !== owner && !(team !== Team.None && t === team);
     const list = this.heat;
     list.length = 0;
-    for (const t of this.tankViews()) if (t.pilot !== 255 && foe(t.pilot, this.teamOf[t.pilot] ?? Team.None)) list.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
+    for (const t of this.tankViews()) {
+      const who = t.pilot !== 255 ? t.pilot : t.owner;
+      if (who !== 255 && foe(who, this.teamOf[who] ?? Team.None)) list.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2 });
+    }
     for (const sh of this.shipViews()) if (!sh.leaving && foe(sh.owner, sh.team)) list.push({ x: sh.x + SHIP_W / 2, y: sh.y + SHIP_H / 2 });
     for (const c of this.craftViews()) if (c.passenger !== 255 && foe(c.passenger, this.teamOf[c.passenger] ?? Team.None)) list.push({ x: c.x, y: c.y });
     return pickHeat(pr.x[i], pr.y[i], pr.ang[i] || Math.atan2(pr.vy[i], pr.vx[i]), list, out);
@@ -382,7 +385,7 @@ export class Game implements FrameHandler {
     // Record every command, even while dead: the server may already have
     // respawned us and will apply it.
     // (Flying our dropship: the controls are the ship's; the clone stands still.)
-    if (this.pilot >= 0) buttons = 0;
+    if (this.pilot >= 0 || this.rc >= 0) buttons = 0;
     this.pending.push({ seq: this.seq, buttons });
     if (this.pending.length > 90) this.pending.shift();
     // The laser's charge, as the server counts it (for the meter and the glow).
@@ -420,6 +423,7 @@ export class Game implements FrameHandler {
     for (let i = 0; i < pr.n; i++) {
       const k = pr.kind[i];
       if (k === ProjKind.Rocket || k === ProjKind.Shell || k === ProjKind.Missile) rocketTrail(this.particles, pr.x[i], pr.y[i]);
+      else if (k === ProjKind.AutoShell) smokeTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.Engine) {
         // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
         const burning = PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0);
@@ -471,7 +475,7 @@ export class Game implements FrameHandler {
     }
     for (const [slot, ts] of this.tankSnaps) {
       const t = slot === this.driveSlot && this.drive ? this.drive : ts[ts.length - 1];
-      if (t && actors.n < MAX_ACTORS) actors.add(192 + slot, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H, 200, 255, 0.3);
+      if (t && actors.n < MAX_ACTORS) actors.add(192 + slot, t.x, t.y, t.vx, t.vy, tankW(t), tankH(t), 200 * (t.s ?? 1), 255, 0.3);
     }
     for (const [slot, ss] of this.shipSnaps) {
       const s = ss[ss.length - 1];
@@ -725,10 +729,30 @@ export class Game implements FrameHandler {
 
   /** The dropship slot we're remote-piloting, or -1 (our clone stands inert meanwhile). */
   pilot = -1;
+  /** The watchdog (tank slot) we're driving by remote, or -1 (the clone stands inert meanwhile too). */
+  rc = -1;
 
   self(s: SelfState): void {
     this.lastSelf = s;
     this.pilot = s.pilot === 255 ? -1 : s.pilot;
+    this.rc = s.rc === 255 ? -1 : s.rc;
+  }
+
+  /** The watchdog we're driving by remote, if we are. */
+  remoteDog(): TankView | null {
+    if (this.rc < 0) return null;
+    return this.tankViews().find((v) => v.slot === this.rc) ?? null;
+  }
+
+  /** Our own watchdog, if we have one out. */
+  myDog(): TankView | null {
+    return this.tankViews().find((v) => isDog(v) && v.owner === this.myId) ?? null;
+  }
+
+  /** Landmines on the map (R_MINES). */
+  mineList: MineState[] = [];
+  mines(list: MineState[]): void {
+    this.mineList = list;
   }
 
   /** The dropship we're flying, if we are. */
@@ -1036,7 +1060,9 @@ export class Game implements FrameHandler {
       this.slugFrom.set(id, { x, y });
       if (this.slugFrom.size > 64) this.slugFrom.delete(this.slugFrom.keys().next().value!);
       heavyMuzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp);
-    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile);
+    } else if (kind === ProjKind.Bolt) {
+      // (A blaster just flashes.)
+    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile || kind === ProjKind.AutoShell);
     this.sfx?.shot(kind, x, y, owner);
     // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
     const w = weaponOfProj(kind);
@@ -1046,8 +1072,14 @@ export class Game implements FrameHandler {
     }
   }
 
+  /** The velocity of the last projectile to end (which way its strike sprays). */
+  private lastVx = 0;
+  private lastVy = 0;
+
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void {
     const i = this.projectiles.indexOf(id);
+    this.lastVx = i >= 0 ? this.projectiles.vx[i] : 0;
+    this.lastVy = i >= 0 ? this.projectiles.vy[i] : 1;
     if (i >= 0) this.projectiles.removeAt(i);
     const from = this.slugFrom.get(id);
     if (from) {
@@ -1064,6 +1096,17 @@ export class Game implements FrameHandler {
       return;
     }
     if (!detonate) return;
+    if (kind === ProjKind.AutoShell) {
+      // Solid shot: no blast, just a heavy strike (dust, sparks, smoke) where it lands.
+      const sp = Math.hypot(this.lastVx, this.lastVy) || 1;
+      slugImpact(this.particles, x, y, this.lastVx / sp, this.lastVy / sp, this.dustColorAt(x, y));
+      this.sfx?.impact(x, y);
+      return;
+    }
+    if (kind === ProjKind.Bolt) {
+      laserHit(this.particles, x, y, this.lastVx / (Math.hypot(this.lastVx, this.lastVy) || 1), this.lastVy / (Math.hypot(this.lastVx, this.lastVy) || 1), 0.08);
+      return;
+    }
     if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
       return;
@@ -1115,7 +1158,7 @@ export class Game implements FrameHandler {
     const camDx = k.x - me.x;
     const camDy = k.y - me.y;
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
-    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === W_TANK || weapon === W_SHIP;
+    const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === ProjKind.AutoShell || weapon === ProjKind.Landmine || weapon === W_TANK || weapon === W_SHIP;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
     gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
     this.sfx?.gib(k.x, k.y, violence, this.synthetic(victim));
@@ -1199,7 +1242,7 @@ export class Game implements FrameHandler {
     this.tankPilots.clear();
     for (const t of list) {
       seen.add(t.slot);
-      if (t.pilot !== 255) this.tankPilots.add(t.pilot);
+      if (t.pilot !== 255 && !t.remote) this.tankPilots.add(t.pilot);
       let s = this.tankSnaps.get(t.slot);
       if (!s) this.tankSnaps.set(t.slot, (s = []));
       s.push({ ...t, tick: this.frameTick });
@@ -1315,9 +1358,9 @@ export class Game implements FrameHandler {
     const b = this.body;
     for (const [, s] of this.tankSnaps) {
       const t = s[s.length - 1];
-      if (t.pilot !== 255 || t.chute) continue;
-      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + TANK_W));
-      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + TANK_H));
+      if (t.pilot !== 255 || t.chute || isDog(t)) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
       if (dx <= 10 && dy <= 10) return t;
     }
     return null;

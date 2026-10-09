@@ -50,7 +50,12 @@ import {
   tankPoint,
   tankLocal,
   tankSink,
+  tankW,
+  tankH,
+  isDog,
+  WATCHDOG_SCALE,
 } from '../shared/tank.ts';
+import { type DogFoe, type DogMemory, dogThink, newDogMemory } from './watchdog.ts';
 import {
   CRAFT_H,
   CRAFT_INERTIA,
@@ -143,6 +148,7 @@ import {
   R_TRAPS,
   R_BEAM,
   R_SPOTTED,
+  R_MINES,
   R_WAVE,
   R_TEAMS,
   R_TANKS,
@@ -151,6 +157,7 @@ import {
   R_SHIP_PART,
   R_SHIP_BOOM,
   CALL_COST,
+  WATCHDOG_COST,
   CallKind,
   R_TANK_PART,
   R_TANK_BOOM,
@@ -183,7 +190,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
@@ -251,6 +258,8 @@ export class Player {
   callCd = 0;
   /** Remote-piloting our dropship (its slot), or -1. The clone stands inert meanwhile. */
   pilot = -1;
+  /** Remote-driving our watchdog (its tank slot), or -1. The clone stands inert meanwhile too. */
+  rc = -1;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
   /** Muzzle climb from recent shots (radians), settling back each tick. */
@@ -260,6 +269,8 @@ export class Player {
   spin = 0;
   /** Extraction: the trap revision this client last got, and ticks until a spike pit can bite again. */
   trapsSeen = -1;
+  /** The mines revision this client last got. */
+  minesSeen = -1;
   spikeCd = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
@@ -396,6 +407,10 @@ export class World {
   /** Extraction: mines gone off (bit per trap id), its revision, and every trap's rearm timer. */
   readonly trapSpent = new Uint8Array(32);
   trapsRev = 0;
+  /** Landmines laid by clones (see layMine), and a revision bumped whenever the list changes. */
+  readonly mines: Mine[] = [];
+  minesRev = 0;
+  private nextMineId = 1;
   private trapCd = new Uint16Array(256);
   /** Extraction: the extraction rocket. */
   readonly evac = { state: Evac.None as number, x: 0, y: 0, vy: 0, toX: 0, idle: 0, team: 255, eta: 0 };
@@ -919,12 +934,81 @@ export class World {
         for (const p of this.players) {
           if (p && p.alive && p.tank < 0 && Math.abs(p.cx - t.x) < t.w / 2 + 3 && Math.abs(p.body.y + ACTOR_H - t.y) < 2.5) stepped = true;
         }
-        for (const k of this.tanks) if (k && t.x > k.x && t.x < k.x + TANK_W && Math.abs(k.y + TANK_H - t.y) < 4) stepped = true;
+        for (const k of this.tanks) if (k && t.x > k.x && t.x < k.x + tankW(k) && Math.abs(k.y + tankH(k) - t.y) < 4) stepped = true;
         if (!stepped) continue;
         this.trapSpent[t.id >> 3] |= 1 << (t.id & 7);
         this.trapsRev++;
         this.spawnProj(this.nextProjId++, ProjKind.Mine, NO_OWNER, t.x, t.y - 2, 0, 420);
       }
+    }
+  }
+
+  /**
+   * Lay a landmine on the ground just in front of the clone (it has to be
+   * standing near some: not in mid-air). False if there's nowhere to put it.
+   * Each clone keeps at most MINES_EACH down: laying another clears its oldest.
+   */
+  layMine(p: Player): boolean {
+    const b = p.body;
+    const left = Math.cos(dequantizeAim(p.aimQ)) < 0;
+    const x = Math.round(p.cx + (left ? -9 : 9));
+    const y0 = Math.floor(b.y + ACTOR_H / 2);
+    let y = -1;
+    for (let yy = y0; yy < y0 + 24; yy++) {
+      if (this.terrain.isSolid(x, yy)) {
+        y = yy;
+        break;
+      }
+    }
+    if (y < 0 || this.terrain.isSolid(x, y - 1)) return false;
+    let own = 0;
+    for (const m of this.mines) if (m.owner === p.id) own++;
+    if (own >= MINES_EACH) this.mines.splice(this.mines.findIndex((m) => m.owner === p.id), 1);
+    if (this.mines.length >= MAX_MINES) this.mines.shift();
+    this.mines.push({ id: this.nextMineId++, x, y, owner: p.id, team: p.team, arm: MINE_ARM });
+    this.minesRev++;
+    return true;
+  }
+
+  /**
+   * Landmines: armed a moment after they're laid, then the first enemy over
+   * one (a clone's feet, or a tank's treads) sets it off. Ground dug or blown
+   * out from under one lets it drop to whatever is below.
+   */
+  private stepMines(): void {
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      const m = this.mines[i];
+      // Settle onto whatever is under it now.
+      if (!this.terrain.isSolid(m.x, m.y)) {
+        let y = m.y;
+        while (y < WORLD_H - 1 && !this.terrain.isSolid(m.x, y) && y < m.y + 8) y++;
+        m.y = y;
+        this.minesRev++;
+        if (y >= WORLD_H - 1) {
+          this.mines.splice(i, 1);
+          continue;
+        }
+      }
+      if (m.arm > 0) {
+        if (--m.arm === 0) this.minesRev++;
+        continue;
+      }
+      const foe = (id: number, team: number) => id !== m.owner && !(m.team !== Team.None && team === m.team);
+      let tripped = false;
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0 || !foe(p.id, p.team)) continue;
+        if (Math.abs(p.cx - m.x) < ACTOR_W / 2 + 2 && Math.abs(p.body.y + ACTOR_H - m.y) < 3) tripped = true;
+      }
+      for (const t of this.tanks) {
+        if (!t || t.chute) continue;
+        const who = t.pilot !== 255 ? t.pilot : t.owner;
+        if (who === 255 || !foe(who, this.players[who]?.team ?? Team.None)) continue;
+        if (m.x > t.x && m.x < t.x + tankW(t) && Math.abs(t.y + tankH(t) - m.y) < 4) tripped = true;
+      }
+      if (!tripped) continue;
+      this.mines.splice(i, 1);
+      this.minesRev++;
+      this.spawnProj(this.nextProjId++, ProjKind.Landmine, m.owner, m.x, m.y - 2, 0, 420);
     }
   }
 
@@ -1065,6 +1149,8 @@ export class World {
     this.ships.fill(null);
     this.spots.clear();
     this.items.length = 0;
+    this.mines.length = 0;
+    this.minesRev++;
     this.grains.n = 0;
     this.projectiles.n = 0;
     this.pendingPixels.clear();
@@ -1076,6 +1162,7 @@ export class World {
       p.team = Team.None;
       p.tank = -1;
       p.pilot = -1;
+      p.rc = -1;
       p.pendingSpawn = false;
       p.delivering = -1;
       p.inv = [];
@@ -1127,6 +1214,8 @@ export class World {
     if (!p) return;
     if (p.alive) this.dropAll(p); // a deserter's kit stays behind
     this.leaveTank(p, false);
+    // Its watchdog shuts down (blows itself up) when its owner goes.
+    for (let k = 0; k < MAX_TANKS; k++) if (this.tanks[k]?.owner === id) this.destroyTank(k, 255);
     this.players[id] = null;
     this.pendingRoster.delete(id);
     // An empty rocket flies itself home.
@@ -1316,7 +1405,7 @@ export class World {
     // Tanks: axis-aligned boxes. A tank's own guns never hit it.
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
-      if (!t || (owner === t.pilot && owner !== 255)) continue;
+      if (!t || (owner === (t.pilot !== 255 ? t.pilot : t.owner) && owner !== 255)) continue;
       // In the tank's own frame its (tilted) hull is an axis-aligned box.
       const la = tankLocal(t, x0, y0, this.segA);
       const lb = tankLocal(t, x1, y1, this.segB);
@@ -1436,6 +1525,7 @@ export class World {
     // Out of the wave: watch whoever did it.
     if (this.mode === 'ffa') victim.spectate = attacker !== victim.id && this.players[attacker]?.alive ? attacker : 255;
     if (victim.pilot >= 0) this.endPilot(victim);
+    if (victim.rc >= 0) this.endRemote(victim);
     victim.deaths++;
     const killer = this.players[attacker];
     if (killer && killer !== victim) {
@@ -1512,7 +1602,11 @@ export class World {
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
-      if (!this.friendly(owner, v)) strike(v.parts, part, energy, def.damage, res);
+      if (!this.friendly(owner, v)) {
+        strike(v.parts, part, energy, def.damage, res);
+        // A heavy solid shot: the shock wrenches every part, so limbs come off.
+        if (def.shatter) for (let q = 0; q < PART_COUNT; q++) if (q !== part && PARTS_BASE[q] && has(v.parts.mask, q)) harm(v.parts, q, def.shatter * SPLASH_SHARE[q], res);
+      }
       const knock = (def.mass * (def.knock ?? 1)) / 8;
       v.body.vx += rvx * knock;
       v.body.vy += rvy * knock;
@@ -1620,8 +1714,8 @@ export class World {
     p.cooldown -= 1;
     // The repair kit works off either hand (so it can regrow a lost gun arm).
     const want = spun && def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && def.proj !== PROJ_IDOL && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
-    if (want && p.cooldown <= 0) {
-      this.fire(p, def);
+    if (want && p.cooldown <= 0 && (def.proj !== PROJ_MINE || this.layMine(p))) {
+      if (def.proj !== PROJ_MINE) this.fire(p, def);
       p.firing = true;
       // One-handed (off arm gone): slower to recover.
       p.cooldown += fireInterval(def) * (p.mob.oneHanded ? 1.6 : 1);
@@ -1849,7 +1943,7 @@ export class World {
     const bl = this.blockers;
     bl.length = 0;
     for (const o of this.players) if (o && o.alive) bl.push({ x: o.body.x, y: o.body.y, w: ACTOR_W, h: ACTOR_H });
-    for (const t of this.tanks) if (t) bl.push({ x: t.x, y: t.y, w: TANK_W, h: TANK_H });
+    for (const t of this.tanks) if (t) bl.push({ x: t.x, y: t.y, w: tankW(t), h: tankH(t) });
     for (const c of this.crafts) {
       if (!c) continue;
       const e = craftHalfExtents(c.a, this.ext);
@@ -2422,9 +2516,9 @@ export class World {
     const b = p.body;
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
-      if (!t || t.pilot !== 255 || t.chute) continue;
-      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + TANK_W));
-      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + TANK_H));
+      if (!t || t.pilot !== 255 || t.chute || isDog(t)) continue;
+      const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
+      const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
       if (dx > BOARD_REACH || dy > BOARD_REACH) continue;
       t.pilot = p.id;
       p.tank = k;
@@ -2443,9 +2537,9 @@ export class World {
     if (t.pilot === p.id) t.pilot = 255;
     if (!climbOut) return;
     const spots = [
-      [t.x + TANK_W / 2 - ACTOR_W / 2, t.y - ACTOR_H - 1],
-      [t.x - ACTOR_W - 1, t.y + TANK_H - ACTOR_H - 1],
-      [t.x + TANK_W + 1, t.y + TANK_H - ACTOR_H - 1],
+      [t.x + tankW(t) / 2 - ACTOR_W / 2, t.y - ACTOR_H - 1],
+      [t.x - ACTOR_W - 1, t.y + tankH(t) - ACTOR_H - 1],
+      [t.x + tankW(t) + 1, t.y + tankH(t) - ACTOR_H - 1],
     ];
     let [x, y] = spots[0];
     for (const [sx, sy] of spots) {
@@ -2476,14 +2570,14 @@ export class World {
       b.x = hatch.x - ACTOR_W / 2;
       b.y = hatch.y - EXPOSED_H / 2;
     } else {
-      b.x = t.x + TANK_W / 2 - ACTOR_W / 2;
+      b.x = t.x + tankW(t) / 2 - ACTOR_W / 2;
       b.y = t.y + 2;
     }
     b.vx = t.vx;
     b.vy = t.vy;
     b.onGround = t.onGround;
-    p.camX = t.x + TANK_W / 2;
-    p.camY = t.y + TANK_H / 2;
+    p.camX = t.x + tankW(t) / 2;
+    p.camY = t.y + tankH(t) / 2;
   }
 
   private stepTanks(): void {
@@ -2491,12 +2585,23 @@ export class World {
       const t = this.tanks[k];
       if (!t) continue;
       let pilot = t.pilot !== 255 ? this.players[t.pilot] : null;
-      if (pilot && (!pilot.alive || pilot.tank !== k)) {
+      if (pilot && (!pilot.alive || (pilot.tank !== k && pilot.rc !== k))) {
+        if (pilot.rc === k) pilot.rc = -1;
         t.pilot = 255;
         pilot = null;
       }
-      const buttons = pilot ? pilot.buttons : 0;
+      // A watchdog whose owner is gone shuts down.
+      if (isDog(t) && !this.players[t.owner]) {
+        this.destroyTank(k, 255);
+        continue;
+      }
+      // A watchdog with nobody at the remote drives itself.
+      const brain = !pilot && isDog(t) && !t.chute ? this.dogBrain(k, t) : null;
+      const buttons = pilot ? pilot.buttons : brain ? brain.buttons : 0;
+      // (stepTank only takes a driver's buttons: the watchdog's brain counts as one.)
+      if (brain) t.pilot = t.owner;
       const impact = stepTank(t, this.terrain, DT, buttons);
+      if (brain) t.pilot = 255;
       if (t.y > WORLD_H) {
         this.destroyTank(k, t.lastHitBy);
         continue;
@@ -2504,28 +2609,79 @@ export class World {
       if (pilot) {
         t.aim = dequantizeAim(pilot.aimQ);
         t.faceLeft = Math.cos(t.aim) < 0;
+      } else if (brain) {
+        t.aim = brain.aim;
+        t.faceLeft = Math.cos(t.aim) < 0;
       }
+      // Who its guns fire for: the driver, or (on its own) the watchdog's owner.
+      const gunner = pilot ? pilot.id : brain ? t.owner : -1;
       // Guns: the vulcan on fire, the cannon on right mouse / Shift.
       // Cooldowns carry fractions so the rates are exact on average.
       t.firedSmg = t.firedCannon = false;
       t.smgCd -= DT;
       t.cannonCd -= DT;
-      if (pilot && buttons & BTN_FIRE && hasTankPart(t.parts, TankPart.Smg)) {
+      if (gunner >= 0 && buttons & BTN_FIRE && hasTankPart(t.parts, TankPart.Smg)) {
         while (t.smgCd <= 0) {
-          this.tankShot(t, pilot.id, false);
+          this.tankShot(t, gunner, false);
           t.smgCd += SMG_INTERVAL;
         }
       }
-      if (pilot && buttons & BTN_SCOPE && hasTankPart(t.parts, TankPart.Cannon) && t.cannonCd <= 0) {
-        this.tankShot(t, pilot.id, true);
-        t.cannonCd += CANNON_INTERVAL;
+      if (gunner >= 0 && buttons & BTN_SCOPE && hasTankPart(t.parts, TankPart.Cannon) && t.cannonCd <= 0) {
+        this.tankShot(t, gunner, true);
+        t.cannonCd += CANNON_INTERVAL * (isDog(t) ? 1.3 : 1);
       }
       t.smgCd = Math.max(0, t.smgCd);
       t.cannonCd = Math.max(0, t.cannonCd);
       if (t.jetting) this.tankJets(t);
-      this.tankCrush(t, impact, pilot ? pilot.id : t.lastHitBy);
-      if (pilot) this.syncPilot(pilot, t);
+      this.tankCrush(t, impact, pilot ? pilot.id : isDog(t) ? t.owner : t.lastHitBy);
+      if (pilot && pilot.tank === k) this.syncPilot(pilot, t);
     }
+  }
+
+  /** What each watchdog remembers between ticks (by tank slot). */
+  private readonly dogMem = new Map<number, DogMemory>();
+  private readonly dogFoes: DogFoe[] = [];
+
+  /** A watchdog thinking for itself (watchdog.ts): its owner, and the hostiles about. */
+  private dogBrain(k: number, t: Tank): { buttons: number; aim: number } {
+    let mem = this.dogMem.get(k);
+    if (!mem) this.dogMem.set(k, (mem = newDogMemory()));
+    const owner = this.players[t.owner];
+    const foes = this.dogFoes;
+    foes.length = 0;
+    const team = owner?.team ?? Team.None;
+    const foe = (id: number, tm: number) => id !== t.owner && !(team !== Team.None && tm === team);
+    const cx = t.x + tankW(t) / 2;
+    const cy = t.y + tankH(t) / 2;
+    const near = (x: number, y: number) => Math.abs(x - cx) < 700 && Math.abs(y - cy) < 500;
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0 || p.delivering >= 0 || !foe(p.id, p.team) || this.shielded(p) || !near(p.cx, p.cy)) continue;
+      foes.push({ x: p.cx, y: p.cy, vx: p.body.vx, vy: p.body.vy, vehicle: false });
+    }
+    for (const o of this.tanks) {
+      if (!o || o === t || o.chute) continue;
+      const who = o.pilot !== 255 ? o.pilot : o.owner;
+      if (who === 255 || !foe(who, this.players[who]?.team ?? Team.None)) continue;
+      const ox = o.x + tankW(o) / 2;
+      const oy = o.y + tankH(o) / 2;
+      if (near(ox, oy)) foes.push({ x: ox, y: oy, vx: o.vx, vy: o.vy, vehicle: true });
+    }
+    for (const sh of this.ships) {
+      if (!sh || sh.leaving || !foe(sh.owner, sh.team)) continue;
+      const sx = sh.x + SHIP_W / 2;
+      const sy = sh.y + SHIP_H / 2;
+      if (near(sx, sy)) foes.push({ x: sx, y: sy, vx: sh.vx, vy: sh.vy, vehicle: true });
+    }
+    return dogThink(t, mem, owner ? { cx: owner.cx, cy: owner.cy, alive: owner.alive } : null, foes, (x0, y0, x1, y1) => this.lineClear(x0, y0, x1, y1));
+  }
+
+  /** Is the straight line between two points free of terrain? */
+  private lineClear(x0: number, y0: number, x1: number, y1: number): boolean {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const n = Math.ceil(Math.hypot(dx, dy) / 2);
+    for (let i = 2; i < n; i++) if (this.terrain.isSolid(Math.floor(x0 + (dx * i) / n), Math.floor(y0 + (dy * i) / n))) return false;
+    return true;
   }
 
   private tankShot(t: Tank, owner: number, cannon: boolean): void {
@@ -2542,26 +2698,29 @@ export class World {
 
   /** Lift-jet flames under the hull (they burn whoever is beneath) and a downdraft. */
   private tankJets(t: Tank): void {
-    const owner = t.pilot !== 255 ? t.pilot : NO_OWNER;
-    for (const lx of [7, TANK_W - 7]) {
+    const owner = t.pilot !== 255 ? t.pilot : t.owner !== 255 ? t.owner : NO_OWNER;
+    const inset = Math.round(7 * t.s);
+    for (const lx of [inset, tankW(t) - inset]) {
       const x = t.x + lx;
-      const y = t.y + TANK_H + 1;
+      const y = t.y + tankH(t) + 1;
       for (let i = 0; i < 2; i++) {
         this.grains.spawn(PK.Flame, x + this.rng.range(-2, 2), y, t.vx * 0.5 + this.rng.range(-30, 30), t.vy * 0.5 + 200 + this.rng.range(0, 120), 8 + this.rng.int(6), 0, 0, owner);
       }
     }
-    this.grains.wind(t.x + TANK_W / 2, t.y + TANK_H + 14, 24, 0, 260);
+    this.grains.wind(t.x + tankW(t) / 2, t.y + tankH(t) + 14, 24, 0, 260);
   }
 
   /** Clones in the tank's way are shoved aside; one it lands on is crushed. */
   private tankCrush(t: Tank, impact: number, by: number): void {
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0) continue;
+      // A watchdog slips past its own owner (and its owner's side) rather than shoving them about.
+      if (isDog(t) && (p.id === t.owner || (p.team !== Team.None && p.team === this.players[t.owner]?.team))) continue;
       const b = p.body;
-      if (b.x + ACTOR_W < t.x - 1 || b.x > t.x + TANK_W + 1 || b.y + ACTOR_H < t.y - 1 || b.y > t.y + TANK_H + 1) continue;
-      const side = p.cx < t.x + TANK_W / 2 ? -1 : 1;
+      if (b.x + ACTOR_W < t.x - 1 || b.x > t.x + tankW(t) + 1 || b.y + ACTOR_H < t.y - 1 || b.y > t.y + tankH(t) + 1) continue;
+      const side = p.cx < t.x + tankW(t) / 2 ? -1 : 1;
       b.vx += side * 70 + t.vx * 0.5;
-      if (impact > 90 && p.cy > t.y + TANK_H / 2) {
+      if (impact > 90 && p.cy > t.y + tankH(t) / 2) {
         const who = by === 255 ? p.id : by;
         if (!this.friendly(who, p)) this.damage(p, (impact - 60) * 0.9, who, W_TANK);
       }
@@ -2577,8 +2736,10 @@ export class World {
 
   /** Is a hit by `by` on this tank friendly fire (its driver is a teammate)? */
   private friendlyTank(by: number, t: Tank): boolean {
-    const d = t.pilot !== 255 ? this.players[t.pilot] : null;
-    return !!d && this.friendly(by, d);
+    // A watchdog is its owner's (whoever is at the remote).
+    const id = isDog(t) ? t.owner : t.pilot;
+    const d = id !== 255 ? this.players[id] : null;
+    return !!d && (by === d.id ? isDog(t) : this.friendly(by, d));
   }
 
   /**
@@ -2615,8 +2776,8 @@ export class World {
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
       if (!t || this.friendlyTank(owner, t)) continue;
-      const nx = Math.max(t.x, Math.min(x, t.x + TANK_W));
-      const ny = Math.max(t.y, Math.min(y, t.y + TANK_H));
+      const nx = Math.max(t.x, Math.min(x, t.x + tankW(t)));
+      const ny = Math.max(t.y, Math.min(y, t.y + tankH(t)));
       const d = Math.hypot(nx - x, ny - y);
       if (d >= r) continue;
       const amt = dmg * 1.5 * (1 - d / r);
@@ -2638,8 +2799,8 @@ export class World {
       t.vx += ((nx - x) / dl) * s;
       t.vy += ((ny - y) / dl) * s;
       // Off-centre blasts rock the hull (torque about the tread line).
-      const rx = nx - (t.x + TANK_W / 2);
-      const ry = ny - (t.y + TANK_H);
+      const rx = nx - (t.x + tankW(t) / 2);
+      const ry = ny - (t.y + tankH(t));
       t.w += ((rx * (ny - y) - ry * (nx - x)) / dl) * s * 0.004;
     }
   }
@@ -2652,7 +2813,7 @@ export class World {
     const pt = tankPoint(t, TANK_PART_CENTER[part][0], TANK_PART_CENTER[part][1], this.pt);
     const x = pt.x;
     const y = pt.y;
-    const out = (x - (t.x + TANK_W / 2)) >= 0 ? 1 : -1;
+    const out = (x - (t.x + tankW(t) / 2)) >= 0 ? 1 : -1;
     const vx = t.vx + out * (60 + this.rng.range(0, 60));
     const vy = t.vy - 120 - this.rng.range(0, 60);
     const seed = this.rng.nextU32();
@@ -2675,16 +2836,18 @@ export class World {
     if (!t) return;
     this.tanks[slot] = null;
     const owner = by === 255 ? NO_OWNER : by;
-    const cx = t.x + TANK_W / 2;
-    const cy = t.y + TANK_H / 2;
+    const cx = t.x + tankW(t) / 2;
+    const cy = t.y + tankH(t) / 2;
     const driver = t.pilot !== 255 ? this.players[t.pilot] : null;
     t.pilot = 255;
-    if (driver) {
+    this.dogMem.delete(slot);
+    if (driver && driver.rc === slot) driver.rc = -1; // at the remote, far away: the clone is fine
+    else if (driver) {
       driver.tank = -1;
       this.damage(driver, 999, by === 255 ? driver.id : by, W_TANK, false, true);
     }
     const seed = this.rng.nextU32();
-    this.carve(cx, cy + TANK_H / 3, 18, 8, 40, owner);
+    this.carve(cx, cy + tankH(t) / 3, 18, 8, 40, owner);
     this.grains.blast(cx, cy, 90, BLAST_IMPULSE * 1.5);
     const rng = new Rng(seed);
     craftFragments(this.grains, cx, cy, t.vx, t.vy, owner, rng);
@@ -2727,7 +2890,22 @@ export class World {
   call(id: number, kind: number): boolean {
     if (kind === CallKind.Pilot) return this.togglePilot(id);
     const p = this.players[id];
-    if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < CALL_COST) return false;
+    if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < (kind === CallKind.Watchdog ? WATCHDOG_COST : CALL_COST)) return false;
+    if (kind === CallKind.Watchdog) {
+      // One watchdog each.
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0 || p.gold < WATCHDOG_COST || this.tanks.some((t) => t?.owner === p.id)) return false;
+      const w = Math.round(TANK_W * WATCHDOG_SCALE);
+      const x = Math.max(60, Math.min(WORLD_W - 60 - w, p.cx - w / 2 + this.rng.range(-30, 30)));
+      this.tanks[slot] = newTank(x, -TANK_H - 40, WATCHDOG_SCALE, p.id);
+      this.dogMem.delete(slot);
+      p.gold -= WATCHDOG_COST;
+      p.callCd = CALL_COOLDOWN;
+      this.broadcast.u8(R_CHAT);
+      this.broadcast.u8(p.id);
+      this.broadcast.str('*radio* watchdog inbound, it has my back');
+      return true;
+    }
     if (kind === CallKind.Tank) {
       const slot = this.tanks.indexOf(null);
       if (slot < 0) return false;
@@ -2759,19 +2937,44 @@ export class World {
   togglePilot(id: number): boolean {
     const p = this.players[id];
     if (!p) return false;
+    // The remote cycles: our dropship, then our watchdog, then back to the clone.
+    const dog = this.tanks.findIndex((t) => t !== null && isDog(t) && t.owner === id && !t.chute && t.pilot === 255);
+    if (p.rc >= 0) {
+      this.endRemote(p);
+      return true;
+    }
     if (p.pilot >= 0) {
       this.endPilot(p);
+      if (dog >= 0 && p.alive) this.startRemote(p, dog);
       return true;
     }
     if (!p.alive || p.tank >= 0) return false;
     const slot = this.ships.findIndex((sh) => sh !== null && sh.owner === id && !sh.leaving && sh.pilot === 255);
-    if (slot < 0) return false;
+    if (slot < 0) {
+      if (dog < 0) return false;
+      this.startRemote(p, dog);
+      return true;
+    }
     const sh = this.ships[slot]!;
     p.pilot = slot;
     sh.pilot = id;
     sh.holdX = sh.x + SHIP_W / 2;
     sh.holdY = sh.y;
     return true;
+  }
+
+  /** Take the watchdog's remote: we drive it and fire its guns; the clone stands inert. */
+  private startRemote(p: Player, slot: number): void {
+    const t = this.tanks[slot]!;
+    p.rc = slot;
+    t.pilot = p.id;
+  }
+
+  /** Hand the watchdog back to its own head (guarding us). */
+  private endRemote(p: Player): void {
+    const t = p.rc >= 0 ? this.tanks[p.rc] : null;
+    if (t && t.pilot === p.id) t.pilot = 255;
+    p.rc = -1;
   }
 
   /** Back to the autopilot (and its support role): the clone is ours again. */
@@ -3184,7 +3387,10 @@ export class World {
     const foe = (id: number, t: number) => id !== owner && !(team !== Team.None && t === team);
     const list = this.heat;
     list.length = 0;
-    for (const t of this.tanks) if (t && t.pilot !== 255 && foe(t.pilot, this.players[t.pilot]?.team ?? Team.None)) list.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
+    for (const t of this.tanks) {
+      const who = t ? (t.pilot !== 255 ? t.pilot : t.owner) : 255;
+      if (t && who !== 255 && foe(who, this.players[who]?.team ?? Team.None)) list.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2 });
+    }
     for (const sh of this.ships) if (sh && !sh.leaving && foe(sh.owner, sh.team)) list.push({ x: sh.x + SHIP_W / 2, y: sh.y + SHIP_H / 2 });
     for (const c of this.crafts) if (c && c.passenger !== 255 && foe(c.passenger, this.players[c.passenger]?.team ?? Team.None)) list.push({ x: c.x, y: c.y });
     return pickHeat(pr.x[i], pr.y[i], pr.ang[i] || Math.atan2(pr.vy[i], pr.vx[i]), list, out);
@@ -3477,7 +3683,9 @@ export class World {
         const sh = this.ships[p.pilot];
         if (!sh || sh.pilot !== p.id || sh.leaving) this.endPilot(p);
       }
-      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 ? 0 : p.buttons, terrain, DT);
+      // Remote control: still at the controls? (The watchdog may be gone.)
+      if (p.rc >= 0 && this.tanks[p.rc]?.pilot !== p.id) p.rc = -1;
+      const impact = p.tank >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -3510,6 +3718,14 @@ export class World {
         p.buildReq = null;
         continue;
       }
+      if (p.rc >= 0) {
+        // Driving the watchdog from afar: the same, the view is the watchdog's.
+        const t = this.tanks[p.rc]!;
+        p.camX = t.x + tankW(t) / 2;
+        p.camY = t.y + tankH(t) / 2;
+        p.buildReq = null;
+        continue;
+      }
       this.handleInventory(p);
       this.handleWeapon(p, prev);
       if (p.buildReq) this.tryBuild(p);
@@ -3537,6 +3753,7 @@ export class World {
     this.shipSpotting();
     this.stepItems();
     this.stepTraps();
+    this.stepMines();
     this.stepEvac();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
@@ -3555,7 +3772,7 @@ export class World {
       const t = this.tanks[k];
       // Immune to its own jet flames and shell fragments.
       // The tilted hull dips below its box by up to tankSink: cover that too.
-      if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, TANK_W, TANK_H + tankSink(t.a), TANK_MASS, t.pilot !== 255 ? t.pilot : NO_OWNER, 0.3);
+      if (t) actors.add(TANK_ID_BASE + k, t.x, t.y, t.vx, t.vy, tankW(t), tankH(t) + tankSink(t.a, t.s), TANK_MASS * t.s, t.pilot !== 255 ? t.pilot : t.owner !== 255 ? t.owner : NO_OWNER, 0.3);
     }
     for (let k = 0; k < MAX_SHIPS; k++) {
       const sh = this.ships[k];
@@ -3716,6 +3933,18 @@ export class World {
         for (let ci = 0; ci < CHUNK_COUNT; ci++) if (this.chunkVersion[ci] === this.pristine[ci]) p.known[ci] = this.chunkVersion[ci];
       }
       p.needsMap = false;
+      if (p.minesSeen !== this.minesRev) {
+        p.minesSeen = this.minesRev;
+        w.u8(R_MINES);
+        w.u8(this.mines.length);
+        for (const m of this.mines) {
+          w.u16(clampU16(m.x));
+          w.u16(clampU16(m.y + Y_BIAS));
+          w.u8(m.owner);
+          w.u8(m.team);
+          w.u8(m.arm > 0 ? 0 : 1);
+        }
+      }
       if (this.mode === 'ffa') {
         w.u8(R_ROUND);
         w.u8(this.phase);
@@ -3794,6 +4023,7 @@ export class World {
       for (let part = 0; part < PART_COUNT; part++) w.u8(partHealth(p.parts, part));
       w.u8(b.stance | (b.downTicks << 2) | (b.faction << 6));
       w.u8(p.pilot >= 0 ? p.pilot : 255);
+      w.u8(p.rc >= 0 ? p.rc : 255);
 
       // Riding in: the rocket at full precision too, since the client
       // predicts it from this state the same way it predicts its clone.
@@ -3930,10 +4160,12 @@ export class World {
           w.i16(clampI16(t.vy * VEL_SCALE));
           w.u16(quantizeAim(t.aim));
           w.u8(Math.round(t.a * 100) & 255); // tilt, centiradians (signed)
-          w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0));
+          const remote = t.pilot !== 255 && this.players[t.pilot]?.rc === k;
+          w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0) | (isDog(t) ? 64 : 0) | (remote ? 128 : 0));
           w.u8(t.parts);
           w.u16(Math.max(0, Math.ceil(t.hp)));
           w.u8(t.pilot);
+          w.u8(t.owner);
         }
       }
 
@@ -4154,6 +4386,19 @@ const SHIP_GUN_RANGE = 300;
 const CALL_COOLDOWN = 30 * 30;
 /** How close (cells, box to box) a clone must be to climb into a tank. */
 const BOARD_REACH = 10;
+/** A laid landmine: where it sits (on the ground cell at x, y), who laid it and their side, and ticks until it's armed. */
+interface Mine {
+  id: number;
+  x: number;
+  y: number;
+  owner: number;
+  team: number;
+  arm: number;
+}
+/** Landmines: ticks to arm, at most this many down per clone, and on the whole map. */
+const MINE_ARM = 45;
+const MINES_EACH = 4;
+const MAX_MINES = 64;
 const CRAFT_MASS = 60; // vs 8 for a clone: shoves move it far less
 /** Base parts (armour is reached through them) and their share of blast overpressure. */
 /** segmentActor `kind` for a laser beam: test vehicles only. */

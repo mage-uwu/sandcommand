@@ -118,7 +118,7 @@ export const ENTRANCE_COLS = [11, 18, 43, 50];
 export const ENTRANCE_ROWS = [6, 0, 0, 6];
 const PYRAMID_COL = Math.floor(COLS / 2);
 
-const LOOT = [WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Grenade, WeaponId.Rifle, WeaponId.RepairKit, WeaponId.Grenade];
+const LOOT = [WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Grenade, WeaponId.Rifle, WeaponId.RepairKit, WeaponId.Grenade, WeaponId.LightRifle, WeaponId.Smg, WeaponId.Mine, WeaponId.Blaster];
 
 export function generateDungeon(m: Uint8Array, heights: Int32Array, seed: number, backdrop?: Uint8Array): Dungeon {
   const rng = new Rng((seed ^ 0xd06e0) >>> 0);

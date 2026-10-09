@@ -30,6 +30,16 @@ export const ProjKind = {
   Heavy: 13,
   /** An AT cannon's heat-seeking missile: homes on enemy vehicles; a direct hit guts a tank. */
   Missile: 14,
+  /** A light rifle's full-power round: harder-hitting and faster than the rifle's. */
+  LightRound: 15,
+  /** An SMG's pistol-calibre round: light, short-ranged. */
+  SmgRound: 16,
+  /** An autocannon shell: slow, heavy, solid (it doesn't explode); it tears clones apart. */
+  AutoShell: 17,
+  /** A blaster bolt: a pulse of light, dead straight. */
+  Bolt: 18,
+  /** A landmine going off under someone. */
+  Landmine: 19,
 } as const;
 
 export interface ProjDef {
@@ -57,6 +67,8 @@ export interface ProjDef {
   cruise?: number;
   /** Shaped charge: on a direct hit, this fraction of a tank's full hull (and less of a dropship's) goes straight through its armour. */
   antiArmor?: number;
+  /** A direct hit on a clone also shakes every part it has: this much harm (by splash share) to each, so limbs come off. */
+  shatter?: number;
 }
 
 export const PROJ: readonly ProjDef[] = [
@@ -91,6 +103,17 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.12, life: 40, damage: 24, mass: 0.7, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.3 },
   // AT missile: slow off the tube, then it burns up to cruise and homes on the nearest hot enemy vehicle.
   { gravity: 0, life: 150, damage: 120, mass: 6, sharp: 0.6, carveR: 20, coreR: 9, splashR: 36, splashDamage: 110, debris: 56, bounce: 0, ballistic: false, seek: 2.4, cruise: 430, antiArmor: 0.46 },
+  // Light rifle round: a full-power cartridge. Through a vest and well into the torso: 26 a layer (the rifle's 16).
+  { gravity: 0.12, life: 40, damage: 26, mass: 0.55, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.2 },
+  // SMG round: light and short-lived (a close-quarters gun), still through a vest at close range.
+  { gravity: 0.2, life: 22, damage: 10, mass: 0.36, sharp: 0.8, carveR: 1, coreR: 0, splashR: 0, splashDamage: 0, debris: 1, bounce: 0, ballistic: true, knock: 0.7 },
+  // Autocannon shell: slow and heavy, solid shot. Through any armour, 70 a layer (a limb or a head
+  // off outright), and the shock of it wrenches every other part too; it punches a hole where it lands.
+  { gravity: 0.3, life: 90, damage: 70, mass: 4, sharp: 0.7, carveR: 5, coreR: 2, splashR: 0, splashDamage: 0, debris: 10, bounce: 0, ballistic: false, knock: 1.6, shatter: 34 },
+  // Blaster bolt: weightless and straight; a rifle round's punch, a bit less wound.
+  { gravity: 0, life: 30, damage: 12, mass: 0.3, sharp: 0.95, carveR: 1, coreR: 0, splashR: 0, splashDamage: 0, debris: 1, bounce: 0, ballistic: true, knock: 0.4 },
+  // Landmine: a modest blast straight up out of the ground (less than a grenade).
+  { gravity: 1, life: 2, damage: 0, mass: 0.6, sharp: 0.1, carveR: 14, coreR: 6, splashR: 30, splashDamage: 70, debris: 40, bounce: 0, ballistic: false },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -105,6 +128,8 @@ export const PROJ_REPAIR = -4;
 export const PROJ_IDOL = -5;
 /** WeaponDef.proj for the laser: no projectile; hold to charge, release to fire an instant beam (see laser*). */
 export const PROJ_LASER = -6;
+/** WeaponDef.proj for the landmine: placed on the ground in front of you, not fired. */
+export const PROJ_MINE = -7;
 /** Laser: ticks to a full charge (8 s); the least charge that fires; and the beam at a given charge (0..1). */
 export const LASER_MAX = 30 * 8;
 export const LASER_MIN = 3;
@@ -141,6 +166,16 @@ export const WeaponId = {
   Laser: 12,
   /** Anti-tank cannon: one heat-seeking missile a load, an age to reload, and half a tank gone if it hits. */
   ATCannon: 13,
+  /** Light rifle (M1 Garand style): semi-automatic, seven hard-hitting, precise rounds a clip. */
+  LightRifle: 14,
+  /** SMG (Type 05 style): a hose of light rounds, for close quarters. */
+  Smg: 15,
+  /** Autocannon: slow, heavy solid shells that take clones apart; smoke trails. */
+  Autocannon: 16,
+  /** Landmine: placed on the ground; goes off under the next enemy over it. */
+  Mine: 17,
+  /** Blaster: rapid bolts of light, the laser's SMG cousin. */
+  Blaster: 18,
 } as const;
 
 /**
@@ -197,6 +232,13 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Laser', proj: PROJ_LASER, muzzle: 15, rpm: 120, auto: false, speed: 0, spread: 0, clip: 8, reload: 120, scope: 400, kick: 10, climb: 0, lockCone: 0.12 },
   // One missile, nine seconds to load the next.
   { name: 'AT Cannon', proj: ProjKind.Missile, muzzle: 16, rpm: 20, auto: false, speed: 200, spread: 0.01, clip: 1, reload: 270, scope: 160, kick: 70, climb: 0.06, lockCone: 0.08 },
+  // Seven rounds an en-bloc clip, as fast as you can pull the trigger, and precise: a marksman's rifle.
+  { name: 'Light Rifle', proj: ProjKind.LightRound, muzzle: 15, rpm: 480, auto: false, speed: 1100, spread: 0.012, clip: 7, reload: 60, scope: 220, kick: 22, climb: 0.05, lockCone: 0.09 },
+  { name: 'SMG', proj: ProjKind.SmgRound, muzzle: 11, rpm: 900, auto: true, speed: 760, spread: 0.06, clip: 40, reload: 60, scope: 70, kick: 3, climb: 0.016, lockCone: 0.06 },
+  { name: 'Autocannon', proj: ProjKind.AutoShell, muzzle: 18, rpm: 150, auto: true, speed: 420, spread: 0.03, clip: 12, reload: 120, scope: 140, kick: 38, climb: 0.07, lockCone: 0.07 },
+  // Two to carry; each placed one is armed after a moment. Another pair is ready 5 s after the last goes down.
+  { name: 'Mine', proj: PROJ_MINE, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 2, reload: 150, scope: 60 },
+  { name: 'Blaster', proj: ProjKind.Bolt, muzzle: 14, rpm: 600, auto: true, speed: 1300, spread: 0.035, clip: 30, reload: 75, scope: 160, kick: 2, climb: 0.01, lockCone: 0.07 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
@@ -219,6 +261,7 @@ export function projName(kind: number): string {
   if (kind === ProjKind.Dart) return 'Dart Trap';
   if (kind === ProjKind.Mine) return 'Booby Trap';
   if (kind === ProjKind.Bomblet) return 'GL';
+  if (kind === ProjKind.Landmine) return 'Mine';
   return weaponOfProj(kind)?.name ?? '';
 }
 

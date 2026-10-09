@@ -123,6 +123,11 @@ export function laserHit(p: Particles, x: number, y: number, dx: number, dy: num
   if (power > 0.3) burst(p, PK.Flame, x, y, Math.round(power * 14), 120, 8);
 }
 
+/** An autocannon shell's wake: a thin grey smoke trail, no flame. */
+export function smokeTrail(p: Particles, x: number, y: number): void {
+  p.spawn(PK.Smoke, x, y, rnd(-6, 6), rnd(-6, 6), rnd(18, 32));
+}
+
 /** Rocket exhaust trail. */
 export function rocketTrail(p: Particles, x: number, y: number): void {
   p.spawn(PK.Flame, x, y, rnd(-20, 20), rnd(-20, 20), rnd(3, 5));

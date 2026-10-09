@@ -23,11 +23,25 @@ import type { Terrain } from './terrain.ts';
  */
 export const TANK_W = 32;
 export const TANK_H = 22;
+/**
+ * The watchdog: a small unmanned tank (a radio purchase) that drives itself,
+ * two-thirds the size of a tank and two-thirds as tough. Everything here is
+ * written for a full-size tank in its own "design" cells; a tank's `s` scales
+ * it (its box, its parts, its guns' pivots and barrels).
+ */
+export const WATCHDOG_SCALE = 2 / 3;
+/** A tank's box (cells), for its scale. */
+export const tankW = (t: { s?: number }) => (t.s && t.s !== 1 ? Math.round(TANK_W * t.s) : TANK_W);
+export const tankH = (t: { s?: number }) => (t.s && t.s !== 1 ? Math.round(TANK_H * t.s) : TANK_H);
+/** Is this tank a watchdog? */
+export const isDog = (t: { s?: number }) => !!t.s && t.s < 1;
+/** A tank's full hull, for its scale. */
+export const tankMaxHp = (t: { s?: number }) => TANK_HP * (t.s ?? 1);
 /** Seventy-five times a clone's health: a fortress on tracks. */
 export const TANK_HP = 75 * ACTOR_MAX_HP;
 /** Hits below this penetration energy only scratch the armour. */
 export const TANK_INTEGRITY = 120;
-export const MAX_TANKS = 4;
+export const MAX_TANKS = 12;
 export const TANK_MAX_FUEL = 100;
 const RUN = 80;
 const GROUND_ACCEL = 640;
@@ -117,11 +131,15 @@ export interface Tank {
   /** Hull tilt (radians, clockwise on screen: positive = right end lower) and its angular velocity. */
   a: number;
   w: number;
+  /** Size: 1 for a tank, WATCHDOG_SCALE for a watchdog. */
+  s: number;
+  /** A watchdog's owner (whom it guards, and who can drive it from afar), or 255. */
+  owner: number;
 }
 
-export function newTank(x: number, y: number): Tank {
+export function newTank(x: number, y: number, s = 1, owner = 255): Tank {
   const partHp = new Float32Array(TANK_PARTS);
-  for (let i = 0; i < TANK_PARTS; i++) partHp[i] = TANK_PART_HP[i];
+  for (let i = 0; i < TANK_PARTS; i++) partHp[i] = TANK_PART_HP[i] * s;
   return {
     x,
     y,
@@ -131,7 +149,7 @@ export function newTank(x: number, y: number): Tank {
     onGround: false,
     jetting: false,
     chute: true,
-    hp: TANK_HP,
+    hp: TANK_HP * s,
     parts: ALL_TANK_PARTS,
     partHp,
     pilot: 255,
@@ -144,6 +162,8 @@ export function newTank(x: number, y: number): Tank {
     firedCannon: false,
     a: 0,
     w: 0,
+    s,
+    owner,
   };
 }
 
@@ -160,7 +180,7 @@ export function tankPartAt(t: { faceLeft: boolean; parts: number }, lx: number, 
   return p;
 }
 
-type Posed = { x: number; y: number; faceLeft: boolean; a: number };
+type Posed = { x: number; y: number; faceLeft: boolean; a: number; s?: number };
 
 /** Inset of the tread contact points from the hull's ends (cells). */
 const CONTACT = 3;
@@ -169,8 +189,8 @@ const CONTACT = 3;
  * How far the tilt pivot (the middle of the tread line) sits below the box:
  * the box rests on the higher end, the hull rotates down onto the lower one.
  */
-export function tankSink(a: number): number {
-  return (TANK_W / 2 - CONTACT) * Math.abs(Math.sin(a));
+export function tankSink(a: number, s = 1): number {
+  return (TANK_W / 2 - CONTACT) * s * Math.abs(Math.sin(a));
 }
 
 /**
@@ -179,23 +199,25 @@ export function tankSink(a: number): number {
  * the middle of its tread line.
  */
 export function tankPoint(t: Posed, lx: number, ly: number, out: { x: number; y: number }): { x: number; y: number } {
-  const dx = (t.faceLeft ? TANK_W - lx : lx) - TANK_W / 2;
-  const dy = ly - TANK_H;
+  const k = t.s ?? 1;
+  const dx = ((t.faceLeft ? TANK_W - lx : lx) - TANK_W / 2) * k;
+  const dy = (ly - TANK_H) * k;
   const c = Math.cos(t.a);
   const s = Math.sin(t.a);
-  out.x = t.x + TANK_W / 2 + dx * c - dy * s;
-  out.y = t.y + TANK_H + tankSink(t.a) + dx * s + dy * c;
+  out.x = t.x + tankW(t) / 2 + dx * c - dy * s;
+  out.y = t.y + tankH(t) + tankSink(t.a, k) + dx * s + dy * c;
   return out;
 }
 
-/** World -> the tank's own (untilted, unmirrored) box coordinates: x along the box from its left end. */
+/** World -> the tank's own (untilted, unmirrored) box coordinates, in design cells: x along the box from its left end. */
 export function tankLocal(t: Posed, wx: number, wy: number, out: { x: number; y: number }): { x: number; y: number } {
-  const dx = wx - (t.x + TANK_W / 2);
-  const dy = wy - (t.y + TANK_H + tankSink(t.a));
+  const k = t.s ?? 1;
+  const dx = wx - (t.x + tankW(t) / 2);
+  const dy = wy - (t.y + tankH(t) + tankSink(t.a, k));
   const c = Math.cos(t.a);
   const s = Math.sin(t.a);
-  out.x = TANK_W / 2 + dx * c + dy * s;
-  out.y = TANK_H - dx * s + dy * c;
+  out.x = TANK_W / 2 + (dx * c + dy * s) / k;
+  out.y = TANK_H + (-dx * s + dy * c) / k;
   return out;
 }
 
@@ -215,7 +237,7 @@ const mzPt = { x: 0, y: 0 };
 export function tankMuzzle(t: Posed, cannon: boolean, aim: number, out: { x: number; y: number; a: number }): { x: number; y: number; a: number } {
   const [px, py] = cannon ? CANNON_PIVOT : SMG_PIVOT;
   const a = cannon ? cannonAngle(t.faceLeft, aim, t.a) : aim;
-  const len = cannon ? CANNON_LEN : SMG_LEN;
+  const len = (cannon ? CANNON_LEN : SMG_LEN) * (t.s ?? 1);
   const p = tankPoint(t, px, py, mzPt);
   out.x = p.x + Math.cos(a) * len;
   out.y = p.y + Math.sin(a) * len;
@@ -223,10 +245,13 @@ export function tankMuzzle(t: Posed, cannon: boolean, aim: number, out: { x: num
   return out;
 }
 
+let boxW = TANK_W;
+let boxH = TANK_H;
+/** Does the tank's box (the one being stepped: boxW x boxH) at (x, y) overlap terrain? */
 function collides(t: Terrain, x: number, y: number): boolean {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
-  return t.rectSolid(ix, iy, ix + TANK_W - 1, iy + TANK_H - 1);
+  return t.rectSolid(ix, iy, ix + boxW - 1, iy + boxH - 1);
 }
 
 /**
@@ -250,6 +275,10 @@ const AIR_K = 14;
 const AIR_D = 5;
 
 export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): number {
+  boxW = tankW(k);
+  boxH = tankH(k);
+  // A watchdog is lighter on its treads.
+  const run = isDog(k) ? RUN * 1.25 : RUN;
   // Unstick: sand poured onto it, or it landed in a bunker's rubble.
   if (collides(t, k.x, k.y)) {
     for (let s = 1; s <= 16; s++) {
@@ -267,13 +296,13 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
   // drifts back level. Landings, recoil and blasts kick it (w).
   const sin0 = Math.sin(k.a);
   if (k.onGround) {
-    const bottom = k.y + TANK_H;
+    const bottom = k.y + boxH;
     const gl = groundAt(t, k.x + CONTACT, bottom, 30);
-    const gr = groundAt(t, k.x + TANK_W - CONTACT, bottom, 30);
-    const target = Math.max(-MAX_TILT, Math.min(MAX_TILT, Math.atan2(gr - gl, TANK_W - 2 * CONTACT)));
+    const gr = groundAt(t, k.x + boxW - CONTACT, bottom, 30);
+    const target = Math.max(-MAX_TILT, Math.min(MAX_TILT, Math.atan2(gr - gl, boxW - 2 * CONTACT)));
     k.w += ((target - k.a) * TILT_K - k.w * TILT_D) * dt;
   } else {
-    const lean = Math.max(-1, Math.min(1, k.vx / RUN)) * 0.12;
+    const lean = Math.max(-1, Math.min(1, k.vx / run)) * 0.12;
     k.w += ((lean - k.a) * AIR_K - k.w * AIR_D) * dt;
   }
   k.a += k.w * dt;
@@ -284,12 +313,12 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
     const accel = GROUND_ACCEL * dt;
     // Uphill costs some speed, downhill gains a little (sin0 > 0: the right end is lower).
     const slope = Math.max(0.6, Math.min(1.25, 1 + 0.5 * sin0 * dir));
-    const dv = dir * RUN * slope - k.vx;
+    const dv = dir * run * slope - k.vx;
     k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   } else if (dir !== 0) {
     // In the air: steer with A/D (the jets' vectoring), up to a brisk drift.
     const accel = AIR_ACCEL * dt;
-    const dv = dir * RUN * 1.1 - k.vx;
+    const dv = dir * run * 1.1 - k.vx;
     k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   } else k.vx *= 1 - Math.min(1, 0.8 * dt); // (coasting: air drag)
   // Left on a steep slope without throttle, it slides off.
@@ -388,4 +417,6 @@ export function copyTankMotion(dst: Tank, src: Tank): void {
   dst.parts = src.parts;
   dst.a = src.a;
   dst.w = src.w;
+  dst.s = src.s;
+  dst.owner = src.owner;
 }

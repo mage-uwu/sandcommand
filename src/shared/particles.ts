@@ -762,12 +762,12 @@ export function spillGold(grains: Particles, x: number, y: number, vx: number, v
 }
 
 const ACTOR_MASS = 8; // impulse units per cell/s of actor velocity change
-const tested = new Int32Array(4); // 128-slot bitmask scratch
+const tested = new Int32Array(8); // slot bitmask scratch (up to 256 slots)
 const SAND_MIN = 6; // grains overlapping a body before a flow can drag it
 const SAND_DRAG = 0.012; // per grain, capped by SAND_DRAG_MAX
 const SAND_DRAG_MAX = 0.35;
 const AIR_ACTOR = 0.35; // per-tick blend toward the blast wind
-export const MAX_ACTORS = 140; // 64 clones + 64 drop rockets + tanks + dropships
+export const MAX_ACTORS = 160; // 64 clones + 64 drop rockets + tanks (and watchdogs) + dropships
 
 /**
  * Actors (players) as seen by the particle engine. Each tick the world loads

@@ -295,6 +295,65 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 3,
   },
+  {
+    // Light rifle: an M1-style battle rifle, long walnut stock and handguard, steel barrel
+    grid: [
+      '....KKKKK........',
+      'KAAKmWWWWMMMMMMMK',
+      'KAAKmmWWWWWWKKKK.',
+      '.KK.KmmK.........',
+    ],
+    px: 1,
+    py: 1,
+  },
+  {
+    // SMG: a stubby bullpup with a fat suppressor
+    grid: [
+      '...KKKKK.....',
+      'KAAKMMMMMMMMK',
+      'KAAKGMMKDDDDK',
+      '.KKKGKKMK....',
+      '....KK.KK....',
+    ],
+    px: 1,
+    py: 1,
+  },
+  {
+    // Autocannon: a heavy olive receiver, a long steel barrel, a yellow-banded drum underneath
+    grid: [
+      '...KKKKKKK..........',
+      '..KOOOOOOOKKKKKKKKK.',
+      'KAAKOooOOOMMMMMMMMMK',
+      'KAAKOooOOOKKKKKKKKK.',
+      '..KKKKKKKKK.........',
+      '...KYYK.............',
+    ],
+    px: 1,
+    py: 2,
+  },
+  {
+    // Landmine in hand: an olive disc, its red trigger cap
+    grid: [
+      '..KKKKK.',
+      'KAAKNNNK',
+      'KAAKNrNK',
+      '.KKKKKKK',
+    ],
+    px: 1,
+    py: 1,
+  },
+  {
+    // Blaster: a compact white emitter, its cyan coil glowing down the barrel
+    grid: [
+      '....KKKKKK......',
+      'KAAKKLLLLLKKKKK.',
+      'KAAKHVVVVVHHHHVK',
+      '.KKKHKKKKKKKKKK.',
+      '....KK..........',
+    ],
+    px: 1,
+    py: 2,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
@@ -496,6 +555,7 @@ function paletteFor(team: number): Record<string, number> {
     A: 0x5e646a, // sleeve
     M: 0x2e3236, // rifle metal
     m: 0x6a5032, // rifle stock
+    W: 0x9a6a38, // walnut (light rifle)
     O: 0x5a6b34, // bazooka tube
     o: 0x3c4822, // bazooka shade
     r: 0xd03020, // warhead tip

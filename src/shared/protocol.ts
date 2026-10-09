@@ -18,9 +18,12 @@ export const C_CALL = 0x07;
 
 /** What a radio can call in. */
 /** What a radio can call in; `Pilot` takes (or hands back) remote control of our own dropship. */
-export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2 } as const;
+/** Watchdog: a small unmanned tank that guards its caller (who can also drive it from afar). Pilot: the remote (our dropship, then our watchdog, then back). */
+export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2, Watchdog: 3 } as const;
 /** Gold a radio call costs. */
 export const CALL_COST = 1500;
+/** A watchdog's price (two-thirds of a tank's). */
+export const WATCHDOG_COST = 1000;
 
 // Server -> client
 export const S_WELCOME = 0x81;
@@ -75,6 +78,8 @@ export const R_TRAPS = 32;
 export const R_BEAM = 33;
 /** Enemies this client's side has spotted from the air (its dropships): ids and where they are. */
 export const R_SPOTTED = 34;
+/** Every landmine on the map (sent when one is laid, arms, moves or goes off): where, whose, armed. */
+export const R_MINES = 35;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -92,7 +97,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 26;
+export const PROTOCOL_VERSION = 27;
 
 /** Last Man Standing round phases. */
 export const Phase = {

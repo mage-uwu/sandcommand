@@ -1,7 +1,7 @@
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
 import { CRAFT_PARTS } from './craft.ts';
-import { TANK_PARTS } from './tank.ts';
+import { TANK_PARTS, WATCHDOG_SCALE } from './tank.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
@@ -30,6 +30,7 @@ import {
   R_TRAPS,
   R_BEAM,
   R_SPOTTED,
+  R_MINES,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -76,6 +77,8 @@ export interface SelfState {
   faction: number; // factions.ts: this clone's vendor
   /** The dropship slot we're remote-piloting (255: none). */
   pilot: number;
+  /** The watchdog (tank slot) we're driving by remote (255: none). */
+  rc: number;
 }
 
 export interface RemoteActor {
@@ -121,6 +124,15 @@ export interface CraftState {
   parts: number; // attached-part mask (craft.ts)
 }
 
+/** A landmine on the ground (the cell it sits on), whose it is, and whether it's armed yet. */
+export interface MineState {
+  x: number;
+  y: number;
+  owner: number;
+  team: number;
+  armed: boolean;
+}
+
 export interface TankState {
   slot: number;
   x: number; // top-left
@@ -138,6 +150,10 @@ export interface TankState {
   hp: number;
   pilot: number; // player id or 255
   a: number; // hull tilt, radians
+  /** Size (tank.ts WATCHDOG_SCALE for a watchdog), its owner (255: none), and whether its driver is at a remote. */
+  s: number;
+  owner: number;
+  remote: boolean;
 }
 
 export interface ShipState {
@@ -248,6 +264,8 @@ export interface FrameHandler {
   beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number): void;
   /** Extraction: which traps have gone off (bit per trap id). */
   traps(spent: Uint8Array): void;
+  /** Every landmine laid (the whole list, when it changes). */
+  mines(list: MineState[]): void;
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
@@ -312,12 +330,14 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           downTicks: 0,
           faction: 0,
           pilot: 255,
+          rc: 255,
         };
         const st = r.u8();
         self.stance = st & 3;
         self.downTicks = (st >> 2) & 15;
         self.faction = st >> 6;
         self.pilot = r.u8();
+        self.rc = r.u8();
         h.self(self);
         break;
       }
@@ -437,6 +457,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const y1 = r.u16() - Y_BIAS;
         const power = r.u8() / 255;
         h.beam(seq, x0, y0, x1, y1, power, r.u8());
+        break;
+      }
+      case R_MINES: {
+        const n = r.u8();
+        const list: MineState[] = [];
+        for (let i = 0; i < n; i++) list.push({ x: r.u16(), y: r.u16() - Y_BIAS, owner: r.u8(), team: r.u8(), armed: r.u8() !== 0 });
+        h.mines(list);
         break;
       }
       case R_TRAPS: {
@@ -610,6 +637,9 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             hp: r.u16(),
             pilot: r.u8(),
             a: tilt,
+            s: f & 64 ? WATCHDOG_SCALE : 1,
+            owner: r.u8(),
+            remote: (f & 128) !== 0,
           });
         }
         h.tanks(list);
@@ -713,6 +743,7 @@ export const nullHandler: FrameHandler = {
   chunkLoaded() {},
   round() {},
   traps() {},
+  mines() {},
   beam() {},
   teams() {},
   wave() {},

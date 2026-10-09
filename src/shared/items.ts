@@ -34,6 +34,10 @@ export const PRIMARIES: readonly number[] = [
   WeaponId.GrenadeLauncher,
   WeaponId.Gatling,
   WeaponId.Laser,
+  WeaponId.LightRifle,
+  WeaponId.Smg,
+  WeaponId.Autocannon,
+  WeaponId.Blaster,
 ];
 
 export interface InvItem {
@@ -47,13 +51,15 @@ export function newItem(weapon: number): InvItem {
 
 /**
  * A fresh clone's kit: always a primary, a digger, a materializer, a
- * radio and a repair kit; often grenades, sometimes a second gun (or an
- * AT cannon).
+ * radio and a repair kit; often grenades (or landmines), sometimes a
+ * second gun (or an AT cannon).
  */
 export function spawnLoadout(rng: Rng): InvItem[] {
   const primary = PRIMARIES[rng.int(PRIMARIES.length)];
   const inv = [newItem(primary)];
+  // Grenades, often; now and then a pair of landmines instead.
   if (rng.next() < 0.6) inv.push(newItem(WeaponId.Grenade));
+  else if (rng.next() < 0.4) inv.push(newItem(WeaponId.Mine));
   if (rng.next() < 0.25) {
     const others = PRIMARIES.filter((w) => w !== primary);
     inv.push(newItem(others[rng.int(others.length)]));

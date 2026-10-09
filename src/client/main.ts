@@ -4,7 +4,7 @@ import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
-import { TANK_W, TANK_H } from '../shared/tank.ts';
+import { CANNON_PIVOT, SMG_SPEED, TANK_W, TANK_H, isDog, tankH, tankW } from '../shared/tank.ts';
 import { ASSIST_RANGE, assistAim, ballisticAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
@@ -276,7 +276,11 @@ function assistTargets(g: Game): { x: number; y: number; vx: number; vy: number 
     out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5, vx: v.vx, vy: v.vy });
     out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy });
   }
-  for (const t of g.tankViews()) if (t.pilot !== 255 && foe(t.pilot)) out.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2, vx: t.vx, vy: t.vy });
+  for (const t of g.tankViews()) {
+    // A tank by its driver; a watchdog by its owner, driven or not.
+    const who = isDog(t) ? t.owner : t.pilot;
+    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2, vx: t.vx, vy: t.vy });
+  }
   return out;
 }
 
@@ -291,7 +295,7 @@ function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boo
   return true;
 }
 /** Tools aimed at the ground or at friends (or nothing): no snapping onto enemies. */
-const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol]);
+const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol, WeaponId.Mine]);
 /** Mouse aim assist: on unless switched off (V), and the choice is remembered. */
 let mouseAssist = storageGet('sc.assist') !== 'off';
 addEventListener('keydown', (e) => {
@@ -303,8 +307,8 @@ addEventListener('keydown', (e) => {
 // P: take remote control of our dropship (or hand it back to the autopilot).
 addEventListener('keydown', (e) => {
   if (e.code !== 'KeyP' || input.typing || e.repeat || !game || !net) return;
-  if (game.pilot < 0 && !game.shipViews().some((v) => v.owner === game!.myId && !v.leaving)) {
-    game.feed.push({ text: 'no dropship of yours to fly (call one in by radio)', color: '#b8a0ff', at: performance.now() });
+  if (game.pilot < 0 && game.rc < 0 && !game.shipViews().some((v) => v.owner === game!.myId && !v.leaving) && !game.myDog()) {
+    game.feed.push({ text: 'no dropship or watchdog of yours to drive (call one in by radio)', color: '#b8a0ff', at: performance.now() });
     return;
   }
   net.call(CallKind.Pilot);
@@ -348,8 +352,10 @@ function frame(now: number): void {
       const sh = shoulderAt(g.body.x, g.body.y, g.body.stance, wx < g.body.x + ACTOR_W / 2, shoulderPt);
       // Flying our dropship: aim from the ship (its turrets), not the clone.
       const flying = g.pilotedShip();
-      const ox = flying ? flying.x + SHIP_W / 2 : sh.x;
-      const oy = flying ? flying.y + SHIP_H / 2 : sh.y;
+      // Driving our watchdog by remote: aim from its turret.
+      const dogged = flying ? null : g.remoteDog();
+      const ox = flying ? flying.x + SHIP_W / 2 : dogged ? dogged.x + tankW(dogged) / 2 : sh.x;
+      const oy = flying ? flying.y + SHIP_H / 2 : dogged ? dogged.y + CANNON_PIVOT[1] * dogged.s : sh.y;
       let aim: number;
       mark.on = false;
       // Scoped, the assist reaches as far as the scope sees.
@@ -368,7 +374,7 @@ function frame(now: number): void {
         // Arrow keys: the direction they point, snapped onto the enemy nearest that way.
         if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
         else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
-        else if (mouseAssist && !g.drive && (flying || !NO_ASSIST.has(g.weapon))) {
+        else if (mouseAssist && !g.drive && (flying || dogged || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
           const reach = Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80)));
           aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach, mark);
@@ -376,7 +382,7 @@ function frame(now: number): void {
       }
       const raw = Math.atan2(wy - oy, wx - ox);
       // Scoped onto someone: the aim locks onto them.
-      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
+      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying && !dogged ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
       // Locked or assisted onto someone: the arm and the aim line show the snap.
       g.lockAim = g.scopeLock || Math.abs(aim - raw) > 1e-4 ? aim : null;
       // The little target on what we're snapped to: the scope's lock (a clone) if any, else the assist's pick.
@@ -387,10 +393,10 @@ function frame(now: number): void {
         // Lead it: aim where it will be when the shot gets there, and for a
         // shot that falls (a GL bomb, a grenade), along the arc that lands on it.
         const def = WEAPONS[g.weapon];
-        const proj = flying ? ProjKind.ShipGun : (def?.proj ?? -1);
-        const speed = flying ? 900 : (def?.speed ?? 0);
-        const own = flying ? { vx: flying.vx * 0.3, vy: flying.vy * 0.3 } : { vx: g.body.vx * 0.25, vy: g.body.vy * 0.25 };
-        const b = ballisticAim(ox, oy, tgt, speed, proj >= 0 ? GRAVITY * PROJ[proj].gravity : 0, own, flying ? 9 : (def?.muzzle ?? 0));
+        const proj = flying ? ProjKind.ShipGun : dogged ? ProjKind.TankBullet : (def?.proj ?? -1);
+        const speed = flying ? 900 : dogged ? SMG_SPEED : (def?.speed ?? 0);
+        const own = flying ? { vx: flying.vx * 0.3, vy: flying.vy * 0.3 } : dogged ? { vx: dogged.vx * 0.25, vy: dogged.vy * 0.25 } : { vx: g.body.vx * 0.25, vy: g.body.vy * 0.25 };
+        const b = ballisticAim(ox, oy, tgt, speed, proj >= 0 ? GRAVITY * PROJ[proj].gravity : 0, own, flying ? 9 : dogged ? 0 : (def?.muzzle ?? 0));
         if (b) aim = b.aim;
         else aim = Math.atan2(tgt.y - oy, tgt.x - ox);
         g.aimReach = b?.reach ?? true;

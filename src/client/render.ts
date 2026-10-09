@@ -1,12 +1,12 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { CALL_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES } from '../shared/worldgen.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
-import { LASER_MAX, PROJ, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
@@ -18,7 +18,7 @@ import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
-import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor, frostColor, grassBlade } from './texture.ts';
 import { Backdrop } from './backdrop.ts';
@@ -201,8 +201,15 @@ export class Renderer {
     const selfX = pb.x + (b.x - pb.x) * alpha + game.smoothX;
     const selfY = pb.y + (b.y - pb.y) * alpha + game.smoothY;
     const flying = game.alive ? game.pilotedShip() : null;
-    this.scoped = game.alive && input.scoping && !game.drive && !flying; // in a tank, right mouse is the cannon; flying, it's the bombs
-    if (flying) {
+    const dogged = game.alive ? game.remoteDog() : null;
+    this.scoped = game.alive && input.scoping && !game.drive && !flying && !dogged; // in a tank, right mouse is the cannon; flying, it's the bombs
+    if (dogged) {
+      // Driving the watchdog by remote: the view rides with it, looking toward the mouse.
+      const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;
+      const lookY = (input.mouseY * (H / innerHeight) - H / 2) / z;
+      this.camX += (dogged.x + tankW(dogged) / 2 + lookX * 0.3 - this.camX) * 0.25;
+      this.camY += (dogged.y + tankH(dogged) / 2 + lookY * 0.3 - this.camY) * 0.25;
+    } else if (flying) {
       // Remote-piloting our dropship: the view rides with it, looking ahead
       // toward the mouse and down at the ground it's working over.
       const lookX = (input.mouseX * (W / innerWidth) - W / 2) / z;
@@ -258,7 +265,7 @@ export class Renderer {
     }
     // Snapped by the aim assist (unscoped): the same laser and lock the scope shows.
     this.assistSight = false;
-    if (!this.scoped && !flying && game.alive && !game.drive && game.lockAim !== null && game.aimMark) {
+    if (!this.scoped && !flying && !dogged && game.alive && !game.drive && game.lockAim !== null && game.aimMark) {
       const sh = shoulderAt(selfX, selfY, b.stance, Math.cos(game.lockAim) < 0, this.shPt);
       this.sight = { x: sh.x, y: sh.y, aim: game.lockAim, mouseAim: game.lockAim, cone: 0, dist: 0 };
       this.assistSight = true;
@@ -331,13 +338,30 @@ export class Renderer {
     const ride = game.myCraft(alpha);
     if (ride && game.ride) this.drawCraft(ctx, ride, game, now);
 
+    // Landmines: ours and our side's plain to see (a light winks green once armed, amber
+    // while arming); the enemy's only a dull, half-buried disc for those who look.
+    for (const m of game.mineList) {
+      const ours = m.owner === game.myId || (m.team !== Team.None && m.team === game.myTeam);
+      const x = m.x;
+      const y = m.y;
+      ctx.fillStyle = ours ? '#141a10' : 'rgba(20,24,16,0.75)';
+      ctx.fillRect(x - 3, y - 2, 7, 2);
+      ctx.fillStyle = ours ? '#5a6a34' : 'rgba(70,78,52,0.7)';
+      ctx.fillRect(x - 2, y - 2, 5, 1);
+      if (ours) {
+        ctx.fillStyle = !m.armed ? ((now / 120) % 2 < 1 ? '#ffb020' : '#503008') : (now / 600) % 1 < 0.15 ? '#60ff60' : '#1a4a1a';
+        ctx.fillRect(x, y - 3, 1, 1);
+      }
+    }
+
     // Tanks (behind the clones, so a clone walking past shows in front).
     const wmx = (input.mouseX * (W / innerWidth) - offX) / z;
     const wmy = (input.mouseY * (H / innerHeight) - offY) / z;
     for (const t of game.tankViews(alpha)) {
-      const mine = t.slot === game.driveSlot && !!game.drive;
-      const aim = mine ? Math.atan2(wmy - (t.y + CANNON_PIVOT[1]), wmx - (t.x + TANK_W / 2)) : t.aim;
-      this.drawTank(ctx, t, mine ? wmx < t.x + TANK_W / 2 : t.faceLeft, aim, game, now);
+      const mine = (t.slot === game.driveSlot && !!game.drive) || (t.slot === game.rc && game.alive);
+      // (Driving it ourselves: the guns follow our mouse now, not the last word from the server.)
+      const aim = mine ? (game.rc === t.slot && game.lockAim !== null ? game.lockAim : Math.atan2(wmy - (t.y + CANNON_PIVOT[1] * t.s), wmx - (t.x + tankW(t) / 2))) : t.aim;
+      this.drawTank(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
     }
 
     // Dropships.
@@ -418,7 +442,7 @@ export class Renderer {
     if (boardable) {
       ctx.font = `${Math.max(4, Math.round(11 / z))}px ui-monospace, monospace`;
       const label = `${input.touch ? '⬆' : '[3]'} climb in`;
-      const tx = boardable.x + TANK_W / 2;
+      const tx = boardable.x + tankW(boardable) / 2;
       const tw = ctx.measureText(label).width;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(tx - tw / 2 - 1, boardable.y - 19, tw + 2, 6);
@@ -497,6 +521,31 @@ export class Renderer {
         ctx.fillRect(x - 2, y - 2, 4, 4);
         ctx.fillStyle = '#ffb040';
         ctx.fillRect(x - p.vx[i] * 0.006 - 1, y - p.vy[i] * 0.006 - 1, 2, 2);
+      } else if (k === ProjKind.Bolt) {
+        // Blaster bolt: a short hot-cyan dart of light with a white core.
+        const sp = Math.hypot(p.vx[i], p.vy[i]) + 1e-6;
+        const dx = p.vx[i] / sp;
+        const dy = p.vy[i] / sp;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(80,220,255,0.45)';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - dx * 9, y - dy * 9);
+        ctx.stroke();
+        ctx.strokeStyle = '#eaffff';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - dx * 7, y - dy * 7);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+      } else if (k === ProjKind.AutoShell) {
+        // Autocannon shell: a squat steel slug, a glowing tracer base.
+        ctx.fillStyle = '#2c2e2a';
+        ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+        ctx.fillStyle = '#ffc060';
+        ctx.fillRect(x - p.vx[i] * 0.005 - 0.75, y - p.vy[i] * 0.005 - 0.75, 1.5, 1.5);
       } else if (PROJ[k]?.ballistic) {
         ctx.strokeStyle = '#fff3b0';
         ctx.lineWidth = 1;
@@ -630,21 +679,25 @@ export class Renderer {
     }
     // Tanks: who's driving, and how much hull is left.
     for (const t of game.tankViews(alpha)) {
-      const sx = offX + (t.x + TANK_W / 2) * z;
-      const sy = offY + (t.y - 8) * z - 10 * dpr;
-      if (t.pilot !== 255 && t.pilot !== game.myId) {
-        const info = game.players.get(t.pilot);
+      const sx = offX + (t.x + tankW(t) / 2) * z;
+      const sy = offY + (t.y - (isDog(t) ? 14 : 8)) * z - 10 * dpr;
+      // A watchdog wears its owner's name; a tank its driver's.
+      const who = isDog(t) ? t.owner : t.pilot;
+      if (who !== 255 && (who !== game.myId || isDog(t))) {
+        const info = game.players.get(who);
+        const tag = isDog(t) ? `${who === game.myId ? 'your' : `${info?.name ?? '?'}'s`} watchdog` : (info?.name ?? '?');
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillText(info?.name ?? '?', sx + dpr, sy + dpr);
+        ctx.fillText(tag, sx + dpr, sy + dpr);
         ctx.fillStyle = info?.color ?? '#ccc';
-        ctx.fillText(info?.name ?? '?', sx, sy);
+        ctx.fillText(tag, sx, sy);
       }
-      if (t.hp < TANK_HP) {
-        const w = 40 * dpr;
+      const max = tankMaxHp(t);
+      if (t.hp < max) {
+        const w = (isDog(t) ? 28 : 40) * dpr;
         ctx.fillStyle = '#300';
         ctx.fillRect(sx - w / 2, sy + 3 * dpr, w, 3 * dpr);
-        ctx.fillStyle = t.hp > TANK_HP * 0.35 ? '#d8c040' : '#e33';
-        ctx.fillRect(sx - w / 2, sy + 3 * dpr, (w * t.hp) / TANK_HP, 3 * dpr);
+        ctx.fillStyle = t.hp > max * 0.35 ? '#d8c040' : '#e33';
+        ctx.fillRect(sx - w / 2, sy + 3 * dpr, (w * t.hp) / max, 3 * dpr);
       }
     }
     for (const v of views) {
@@ -1006,12 +1059,16 @@ export class Renderer {
     const rowH = 46 * s;
     const w = 236 * s;
     const x0 = 14 * s;
-    const entries: { kind: number; name: string; blurb: string; free?: boolean }[] = [
+    const entries: { kind: number; name: string; blurb: string; free?: boolean; cost?: number }[] = [
       { kind: CallKind.Dropship, name: 'DROPSHIP', blurb: 'air support · 2 turrets · 8 bombs' },
       { kind: CallKind.Tank, name: 'TANK', blurb: 'parachuted onto your position' },
     ];
-    // Our dropship's up: the remote to fly it ourselves.
+    // A watchdog, if we haven't one out already.
+    const dog = game.myDog();
+    if (!dog) entries.push({ kind: CallKind.Watchdog, name: 'WATCHDOG', blurb: 'small robot tank · guards you · drive it (P)', cost: WATCHDOG_COST });
+    // Our dropship's (or watchdog's) up: the remote to drive it ourselves.
     if (game.shipViews().some((v) => v.owner === game.myId && !v.leaving)) entries.push({ kind: CallKind.Pilot, name: 'PILOT DROPSHIP', blurb: 'fly it yourself (P) · your clone stands by', free: true });
+    else if (dog && !dog.chute) entries.push({ kind: CallKind.Pilot, name: 'DRIVE WATCHDOG', blurb: 'drive it yourself (P) · your clone stands by', free: true });
     const y0 = Math.max(250 * s, H / 2 - (entries.length * rowH) / 2);
     this.callRects.length = 0;
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
@@ -1021,7 +1078,8 @@ export class Renderer {
     ctx.fillStyle = '#9fe870';
     ctx.fillText(`RADIO  (${input.touch ? 'tap' : 'click'} to call in)`, x0, y0 - 8 * s);
     entries.forEach((e, i) => {
-      const afford = e.free || game.gold >= CALL_COST;
+      const cost = e.cost ?? CALL_COST;
+      const afford = e.free || game.gold >= cost;
       const y = y0 + i * rowH;
       ctx.fillStyle = afford ? 'rgba(160,232,112,0.14)' : 'rgba(255,255,255,0.05)';
       ctx.fillRect(x0, y + 2 * s, w, rowH - 4 * s);
@@ -1033,7 +1091,7 @@ export class Renderer {
       ctx.fillText(e.name, x0 + 8 * s, y + 20 * s);
       ctx.fillStyle = afford ? '#ffd34a' : '#ff7060';
       ctx.textAlign = 'right';
-      ctx.fillText(e.free ? 'remote' : `${CALL_COST} gold`, x0 + w - 8 * s, y + 20 * s);
+      ctx.fillText(e.free ? 'remote' : `${cost} gold`, x0 + w - 8 * s, y + 20 * s);
       ctx.textAlign = 'left';
       ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = '#c8d0d8';
@@ -1476,20 +1534,24 @@ export class Renderer {
    */
   private drawTank(ctx: CanvasRenderingContext2D, t: TankView, faceLeft: boolean, aim: number, game: Game, now: number): void {
     const sp = this.sprites;
-    const x = Math.round(t.x);
-    const ty = Math.round(t.y);
+    const k = t.s ?? 1;
+    const dog = isDog(t);
+    // A watchdog is a tank drawn at its scale, in its own frame (from its top-left).
+    const x = dog ? 0 : Math.round(t.x);
+    const ty = dog ? 0 : Math.round(t.y);
     const y = ty - TANK_SPRITE_TOP;
     // Tank-local x (as drawn facing right) to world, mirrored when facing left.
     const wx = (lx: number, w = 0) => (faceLeft ? x + TANK_W - lx - w : x + lx);
-    if (t.chute) ctx.drawImage(sp.tankChute(), x - 8, ty - 34);
     // Everything below is drawn in the hull's own frame, tilted with the
     // treads about the middle of the tread line (sunk so both ends touch).
     ctx.save();
-    ctx.translate(t.x + TANK_W / 2, t.y + TANK_H + tankSink(t.a));
+    ctx.translate(t.x + tankW(t) / 2, t.y + tankH(t) + tankSink(t.a, k));
     ctx.rotate(t.a);
+    if (dog) ctx.scale(k, k);
     ctx.translate(-(x + TANK_W / 2), -(ty + TANK_H));
+    if (t.chute) ctx.drawImage(sp.tankChute(), x - 8, ty - 34);
     const shield = hasTankPart(t.parts, TankPart.Shield);
-    if (t.pilot !== 255 && !shield) {
+    if (t.pilot !== 255 && !shield && !dog) {
       // Shield blown off: the driver's head and shoulders, out in the open.
       const rgb = game.players.get(t.pilot)?.rgb ?? 0x7a8a50;
       ctx.fillStyle = '#141012';
@@ -1512,6 +1574,18 @@ export class Renderer {
     ctx.drawImage(sp.tankHull(faceLeft), x, y);
     // The steel cupola over the hatch (12 wide, its foot on the hatch rim).
     if (shield) ctx.drawImage(sp.tankShield(faceLeft), wx(9, 12), y - 4);
+    if (dog) {
+      // A watchdog: no hatch, no crew. A sensor mast with a winking light in its owner's colour.
+      const rgb = game.players.get(t.owner)?.rgb ?? 0xff4040;
+      ctx.fillStyle = '#141012';
+      ctx.fillRect(wx(6, 1), y - 11, 1, 10);
+      ctx.fillRect(wx(4, 5), y - 1, 5, 2);
+      ctx.fillStyle = (now / 260) % 2 < 1 ? `#${rgb.toString(16).padStart(6, '0')}` : '#3a2a2a';
+      ctx.fillRect(wx(5, 3), y - 13, 3, 3);
+      // Its eye: a red slit in the glacis, brighter while it's at its owner's remote.
+      ctx.fillStyle = t.remote ? '#7ff0ff' : (now / 140) % 4 < 3 ? '#ff3020' : '#901008';
+      ctx.fillRect(wx(26, 4), ty + 6, 4, 2);
+    }
     // Tracks: one frame per two cells rolled.
     ctx.drawImage(sp.tankTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft), x, y + 18);
     if (hasTankPart(t.parts, TankPart.Armor)) ctx.drawImage(sp.tankArmor(faceLeft), x, y);
@@ -1533,7 +1607,7 @@ export class Renderer {
       }
     }
     // Battle damage: scorch blotches spread as the hull weakens, then it burns.
-    const wear = 1 - t.hp / TANK_HP;
+    const wear = 1 - t.hp / tankMaxHp(t);
     if (wear > 0.25) {
       ctx.fillStyle = 'rgba(16,12,8,0.55)';
       ctx.fillRect(wx(5, 4), ty + 8, 4, 2);
@@ -1790,6 +1864,23 @@ export class Renderer {
     // Last Man Standing: the round, and what's happening to us in it.
     const rs = game.roundState;
     if (rs) this.drawRound(game, rs, s, W, H);
+
+    // Driving the watchdog by remote: the controls, and what's left of it.
+    const dog = game.alive ? game.remoteDog() : null;
+    if (dog) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      const py = H - 150 * s;
+      ctx.fillRect(W / 2 - 320 * s, py, 640 * s, 56 * s);
+      ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText('WATCHDOG REMOTE   A/D drive   W jets   click vulcan   right-click cannon   P exit', W / 2, py + 22 * s);
+      const max = tankMaxHp(dog);
+      const lost = (['CANNON', 'VULCAN', 'ARMOUR'] as const).filter((_, i) => !hasTankPart(dog.parts, [TankPart.Cannon, TankPart.Smg, TankPart.Armor][i]));
+      ctx.fillStyle = lost.length || dog.hp < max * 0.35 ? '#ff9060' : '#a0ffa0';
+      ctx.fillText([`hull ${Math.max(0, Math.round((dog.hp / max) * 100))}%`, ...lost.map((l) => `${l} LOST`), 'your clone stands guard where you left it'].join('   '), W / 2, py + 44 * s);
+      ctx.textAlign = 'left';
+    }
 
     // Remote-piloting the dropship: the controls, and what's left of it.
     const flown = game.alive ? game.pilotedShip() : null;

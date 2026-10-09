@@ -6,7 +6,7 @@ import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/p
 import { MAT_HARD, Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isDog, tankH, tankW } from '../shared/tank.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -35,11 +35,15 @@ const RANGE: Record<number, number> = {
   [WeaponId.Gatling]: 140,
   [WeaponId.Laser]: 230,
   [WeaponId.ATCannon]: 240,
+  [WeaponId.LightRifle]: 200,
+  [WeaponId.Smg]: 85,
+  [WeaponId.Autocannon]: 160,
+  [WeaponId.Blaster]: 150,
 };
 const MAX_SHOT = 340; // won't shoot at anything further than this
 /** Anti-air: how far off a bot will shoot at an enemy dropship, and with what (not grenades, tools or the radio). */
 const AA_RANGE = 360;
-const ANTI_AIR: number[] = [WeaponId.Rifle, WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Gatling, WeaponId.Laser, WeaponId.ATCannon];
+const ANTI_AIR: number[] = [WeaponId.Rifle, WeaponId.Bazooka, WeaponId.Sniper, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Gatling, WeaponId.Laser, WeaponId.ATCannon, WeaponId.LightRifle, WeaponId.Smg, WeaponId.Autocannon, WeaponId.Blaster];
 /** How far around itself a prospecting bot looks for gold (half-width, and depth from just above its head). */
 const GOLD_SCAN_W = 220;
 const GOLD_SCAN_H = 280;
@@ -76,6 +80,8 @@ export class BotBrain {
   private trigger = false;
   private seq = 0;
   private nadeUntil = 0;
+  /** Laying a landmine until this tick. */
+  private mineUntil = 0;
   /** Not before this tick: a beat to get bearings after landing, and to react to a new target. */
   private holdFire = 0;
   private wasAlive = false;
@@ -194,6 +200,16 @@ export class BotBrain {
         best = { x: q.x, y: q.y, vx: sh.vx, vy: sh.vy };
       }
     }
+    // An enemy watchdog (nobody inside to shoot at: the machine itself is the target).
+    for (const k of world.tanks) {
+      if (!k || !isDog(k) || k.chute || k.owner === p.id || (p.team !== Team.None && world.players[k.owner]?.team === p.team)) continue;
+      const cx = k.x + tankW(k) / 2;
+      const cy = k.y + tankH(k) / 2;
+      const d = Math.hypot(cx - sx, cy - sy);
+      if (d >= bestD || !clearLine(world, sx, sy, cx, cy)) continue;
+      bestD = d;
+      best = { x: cx, y: cy, vx: k.vx, vy: k.vy };
+    }
     return best;
   }
 
@@ -262,7 +278,7 @@ export class BotBrain {
     if (this.tanker && near > 120 && !world.extractionLive) {
       for (let slot = 0; slot < world.tanks.length; slot++) {
         const k = world.tanks[slot];
-        if (!k || k.pilot !== 255 || k.chute || (slot === this.abandoned && t < this.abandonUntil)) continue;
+        if (!k || k.pilot !== 255 || k.chute || isDog(k) || (slot === this.abandoned && t < this.abandonUntil)) continue;
         const kx = k.x + TANK_W / 2;
         if (Math.abs(kx - p.cx) > 260 || Math.abs(k.y + TANK_H / 2 - p.cy) > 80) continue;
         goalX = kx;
@@ -308,10 +324,14 @@ export class BotBrain {
     const digSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Digger);
     if (nadeSlot >= 0 && dist < 150 && t > this.nadeUntil + 90 && rng.next() < 0.01) this.nadeUntil = t + 30;
     if (t < this.nadeUntil && nadeSlot >= 0) want = nadeSlot;
+    // Nobody about and on its feet: now and then, leave a landmine behind.
+    const mineSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Mine && it.ammo > 0);
+    if (mineSlot >= 0 && p.body.onGround && (!tgt || (!this.seeTarget && dist > 200)) && t > this.mineUntil + 300 && rng.next() < 0.004) this.mineUntil = t + 12;
+    if (t < this.mineUntil && mineSlot >= 0) want = mineSlot;
     // Up close with a launcher: a gun that won't blow us up too, if we carry one.
     const splashy = p.inv[want]?.weapon === WeaponId.Bazooka || p.inv[want]?.weapon === WeaponId.GrenadeLauncher;
     if (dist < 70 && splashy) {
-      const safe: number[] = [WeaponId.Shotgun, WeaponId.Gatling, WeaponId.Rifle, WeaponId.Laser, WeaponId.Sniper];
+      const safe: number[] = [WeaponId.Shotgun, WeaponId.Smg, WeaponId.Gatling, WeaponId.Rifle, WeaponId.LightRifle, WeaponId.Blaster, WeaponId.Laser, WeaponId.Sniper];
       const gun = p.inv.findIndex((it) => safe.includes(it.weapon));
       if (gun >= 0) want = gun;
     }
@@ -458,7 +478,9 @@ export class BotBrain {
     const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade || weapon === WeaponId.GrenadeLauncher ? 50 : 0;
     const shoot = air
       ? t >= this.holdFire
-      : weapon === WeaponId.RepairKit
+      : weapon === WeaponId.Mine
+        ? t < this.mineUntil && t > this.mineUntil - 8
+        : weapon === WeaponId.RepairKit
         ? healing
         : weapon === WeaponId.Digger
         ? digging
