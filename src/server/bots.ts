@@ -3,7 +3,7 @@ import { stumps } from '../shared/body.ts';
 import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
 import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/protocol.ts';
-import { Mat } from '../shared/materials.ts';
+import { MAT_HARD, Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W } from '../shared/tank.ts';
@@ -37,7 +37,15 @@ const RANGE: Record<number, number> = {
 const MAX_SHOT = 340; // won't shoot at anything further than this
 /** How far around itself a prospecting bot looks for gold (half-width, and depth from just above its head). */
 const GOLD_SCAN_W = 220;
-const GOLD_SCAN_H = 160;
+const GOLD_SCAN_H = 280;
+/** Gold cells (of 25 sampled around it) that make a seam worth digging for. */
+const GOLD_SEAM = 8;
+/** The chance, each life, that a bot takes on the prospecting objective. */
+const PROSPECT_CHANCE = 0.15;
+/** Hard cells (sampled every other row) over a seam that make it not worth the dig. */
+const GOLD_HARD = 3;
+/** Ticks of digging with nothing to show for it before a seam is given up. */
+const GOLD_STALL = 120;
 /** With this many enemies left or fewer, prospectors stop digging and fight. */
 const ENDGAME_FOES = 4;
 
@@ -87,11 +95,18 @@ export class BotBrain {
   private laserGoal = 30;
   /** Extraction: resting on a ledge to refill the jetpack before the next climb. */
   private resting = false;
-  /** Some bots mine gold whenever the fighting's elsewhere, to buy dropships. */
-  private readonly prospector: boolean;
+  /**
+   * A rare objective, rolled each life: go prospecting. Dig down to real
+   * gold whenever the fighting's elsewhere, to buy a dropship.
+   */
+  private prospector = false;
   /** The gold cell it's digging toward, and when it last looked for one. */
   private gold: { x: number; y: number } | null = null;
   private goldScanAt = -1e9;
+  /** Mining progress: gold banked when it last went up, and when. Seams it gave up on (rock in the way). */
+  private goldBanked = 0;
+  private goldGainAt = 0;
+  private readonly badGold: { x: number; y: number }[] = [];
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -100,32 +115,47 @@ export class BotBrain {
     this.react = 15 + this.rng.int(25);
     this.tanker = this.rng.next() < 0.5;
     this.assault = this.rng.next() < 0.5;
-    this.prospector = this.rng.next() < 0.45;
   }
 
   /**
-   * The nearest gold to mine: a gold cell within reach of a short walk and
-   * dig (nearest first, ones below the feet counting a little further off).
-   * Re-scanned every second or so, or as soon as the one it had is dug out.
+   * Real gold to dig for: the nearest seam (a cell of gold with more around
+   * it, not a stray grain) under or beside us, as deep as a long shaft
+   * reaches. Walking there counts for less than digging down to it, and
+   * gold above (which would mean tunnelling up) for more. Re-scanned every
+   * few seconds, or as soon as the cell it was after is dug out.
    */
   private findGold(world: World, p: Player): { x: number; y: number } | null {
     const t = world.tick;
     const g = this.gold;
-    if (g && world.terrain.get(g.x, g.y) === Mat.Gold && t - this.goldScanAt < 90) return g;
-    if (g === null && t - this.goldScanAt < 30) return null;
+    if (g && world.terrain.get(g.x, g.y) === Mat.Gold && t - this.goldScanAt < 150) return g;
+    if (g === null && t - this.goldScanAt < 45) return null;
     this.goldScanAt = t;
     this.gold = null;
+    const ter = world.terrain;
     let best = Infinity;
     const x0 = Math.floor(p.cx) - GOLD_SCAN_W;
-    const y0 = Math.floor(p.cy) - 40;
+    const y0 = Math.floor(p.cy) - 30;
     for (let y = y0; y < y0 + GOLD_SCAN_H; y += 3) {
       for (let x = x0; x < x0 + GOLD_SCAN_W * 2; x += 3) {
-        if (world.terrain.get(x, y) !== Mat.Gold) continue;
-        const d = Math.abs(x - p.cx) + Math.max(0, y - p.cy) * 1.5 + Math.max(0, p.cy - y) * 2;
-        if (d < best) {
-          best = d;
-          this.gold = { x, y };
+        if (ter.get(x, y) !== Mat.Gold || this.badGold.some((b) => Math.abs(b.x - x) < 14 && Math.abs(b.y - y) < 14)) continue;
+        const d = Math.abs(x - p.cx) + Math.max(0, y - p.cy) * 1.3 + Math.max(0, p.cy - y) * 3;
+        if (d >= best) continue;
+        // A seam, not a speck: enough gold around it to be worth the dig.
+        let n = 0;
+        for (let yy = y - 4; yy <= y + 4; yy += 2) for (let xx = x - 4; xx <= x + 4; xx += 2) if (ter.get(xx, yy) === Mat.Gold) n++;
+        if (n < GOLD_SEAM) continue;
+        // Dug for from above: skip it under a bunker (concrete, steel) or
+        // stone that never yields; rock in the way only makes it a longer dig.
+        let built = 0;
+        let rock = 0;
+        for (let yy = y - 2; yy > ter.surfaceY(x) - 1 && built <= GOLD_HARD; yy -= 2) {
+          const m = ter.get(x, yy);
+          if (m === Mat.Rock) rock++;
+          else if (MAT_HARD[m]) built++;
         }
+        if (built > GOLD_HARD || d + rock * 6 >= best) continue;
+        best = d + rock * 6;
+        this.gold = { x, y };
       }
     }
     return this.gold;
@@ -144,6 +174,9 @@ export class BotBrain {
     if (!this.wasAlive) {
       this.wasAlive = true;
       this.holdFire = t + 45 + rng.int(45); // just landed: look around first
+      this.prospector = rng.next() < PROSPECT_CHANCE;
+      this.gold = null;
+      this.badGold.length = 0;
     }
 
     // Pick a target: the nearest living clone, re-chosen twice a second.
@@ -256,7 +289,23 @@ export class BotBrain {
     const headClear = !world.terrain.rectSolid(bx0, by0 - 22, bx0 + 7, by0 - 1);
     // (The labyrinth's stone never yields: no digging through it.)
     // Close enough to the gold to bite at it (or tunnelling down to it).
-    const mining = !!goldAt && digSlot >= 0 && Math.abs(goldAt.x - p.cx) < 22 && goldAt.y - p.cy < 60;
+    // Mining: once over the seam, sink a shaft straight down to it (or
+    // just bite at it when it's within the beam's reach).
+    const gdx = goldAt ? goldAt.x - p.cx : 0;
+    const gdy = goldAt ? goldAt.y - sy : 0;
+    const mining = !!goldAt && digSlot >= 0 && (Math.hypot(goldAt.x - sx, gdy) < DIGGER_REACH + 6 || (Math.abs(gdx) < 6 && gdy > 0));
+    if (mining) this.stuck = 0; // (standing still on purpose: not stuck)
+    // Digging and getting nothing (rock or steel in the way): give that seam up and find another.
+    if (p.gold !== this.goldBanked || !mining) {
+      this.goldBanked = p.gold;
+      this.goldGainAt = t;
+    } else if (goldAt && t - this.goldGainAt > GOLD_STALL) {
+      this.badGold.push(goldAt);
+      if (this.badGold.length > 8) this.badGold.shift();
+      this.gold = null;
+      this.goldScanAt = -1e9;
+      this.goldGainAt = t;
+    }
     const digging = !world.extractionLive && digSlot >= 0 && (mining || (!this.seeTarget && (this.stuck > 75 || this.blind > 60)));
     if (digging) want = digSlot;
     if (calling) want = radioSlot;
@@ -278,7 +327,7 @@ export class BotBrain {
     // On the objective unless someone's right in our face (a carrier never stops to brawl).
     const onTask = nav && !(tgt && this.seeTarget && dist < 100 && !nav.urgent);
     if (onTask) dir = Math.abs(dx) < 2.5 || nav.fall ? 0 : Math.sign(dx);
-    else if (goldAt) dir = Math.abs(dx) < 6 ? 0 : Math.sign(dx);
+    else if (goldAt) dir = Math.abs(gdx) < 3 || (mining && Math.abs(gdx) < 6) ? 0 : Math.sign(gdx);
     else if (calling) dir = 0;
     else if (gunSlot < 0 || !tgt) dir = Math.sign(dx);
     else if (weapon === WeaponId.Digger) dir = Math.sign(dx);
@@ -313,11 +362,18 @@ export class BotBrain {
       if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
     }
     let sweep = 0;
-    if (weapon === WeaponId.Digger && mining && goldAt && this.stuck <= 150) {
-      // Mining: straight at the gold (the beam bites the first solid cell on the way).
-      const tl = Math.hypot(goldAt.x - sx, goldAt.y - sy) || 1;
-      ax = sx + ((goldAt.x - sx) / tl) * DIGGER_REACH;
-      ay = sy + ((goldAt.y - sy) / tl) * DIGGER_REACH;
+    if (weapon === WeaponId.Digger && mining && goldAt) {
+      const tl = Math.hypot(goldAt.x - sx, gdy) || 1;
+      if (tl > DIGGER_REACH + 6) {
+        // Over it, out of reach: sink a shaft straight down, the beam swept
+        // a little either way so the shaft's wide enough to drop down.
+        ax = p.cx + Math.sin(t * 0.5) * 6;
+        ay = sy + DIGGER_REACH;
+      } else {
+        // In reach: straight at the gold; the beam bites the first solid cell on the way.
+        ax = sx + ((goldAt.x - sx) / tl) * DIGGER_REACH;
+        ay = sy + (gdy / tl) * DIGGER_REACH;
+      }
     } else if (weapon === WeaponId.Digger) {
       // Dig at the target when it's just the other side of a floor or wall;
       // otherwise through the obstacle in the way.

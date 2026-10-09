@@ -88,6 +88,7 @@ describe('bots that save up for air support', () => {
     const world = new World(seed);
     const bot = world.addBot()!;
     deliverAll(world, [bot]);
+    world.step(); // (its first think rolls this life's objective: then force it on)
     (bot.bot as unknown as { prospector: boolean }).prospector = true;
     return { world, bot };
   }
@@ -101,8 +102,38 @@ describe('bots that save up for air support', () => {
       for (let y = top + 2; y < top + 12; y++) world.terrain.set(x, y, Mat.Gold);
     }
     const g0 = bot.gold;
-    for (let k = 0; k < 30 * 20 && bot.gold < g0 + 40; k++) world.step();
+    for (let k = 0; k < 30 * 30 && bot.gold < g0 + 40; k++) world.step();
     expect(bot.gold).toBeGreaterThan(g0 + 40);
+  });
+
+  it('digs a shaft straight down to a seam buried deep underground', () => {
+    const { world, bot } = lone(86);
+    // A seam 70 cells under the ground just beside it, and nothing nearer.
+    const gx = Math.floor(bot.cx + 30);
+    const top = world.terrain.surfaceY(gx);
+    for (let x = gx; x < gx + 16; x++) for (let y = top + 70; y < top + 80; y++) world.terrain.set(x, y, Mat.Gold);
+    const g0 = bot.gold;
+    let deepest = 0;
+    for (let k = 0; k < 30 * 45 && bot.gold < g0 + 40; k++) {
+      world.step();
+      deepest = Math.max(deepest, bot.body.y - (top - ACTOR_H));
+    }
+    expect(deepest).toBeGreaterThan(40); // it went down after it
+    expect(bot.gold).toBeGreaterThan(g0 + 40);
+  });
+
+  it('prospecting is a rare objective, rolled each life', () => {
+    let on = 0;
+    // (rolled at spawn: count over many fresh lives)
+    const { world: w2, bot } = lone(88);
+    const b = bot.bot as unknown as { prospector: boolean; wasAlive: boolean };
+    for (let life = 0; life < 300; life++) {
+      b.wasAlive = false;
+      w2.step();
+      if (b.prospector) on++;
+    }
+    expect(on).toBeGreaterThan(15);
+    expect(on).toBeLessThan(90); // ~15%
   });
 
   it('with the gold banked, it gets on the radio and calls in a dropship', () => {

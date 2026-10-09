@@ -515,13 +515,25 @@ The radio then needs 30 seconds to recharge (`World.call`, `C_CALL`).
   - **Ending it.** Piloting ends when the ship goes down or heads home, or
     when your clone dies. Whenever nobody is flying it, the autopilot's own
     brain (covering, striking, scouting, spotting) is back in charge.
-- **Bots buy air support too.** About half the bots are prospectors. When
-  no enemy is close and in sight, they go to the nearest gold, dig it out,
-  and bank it. Once they have 1500 they get on the radio and call a
-  dropship, for themselves or, in team modes, for their whole team. They
-  don't call while one of their own is already up. With four enemies or
-  fewer left in a wave, they stop digging and finish the fight. Gold resets every wave,
-  so a bot has to survive and dig most of a wave to afford one.
+- **Bots buy air support too.** Now and then a bot takes on a rare
+  objective: prospecting. Each life it has a 15% chance.
+  - **Finding gold.** When no enemy is close and in sight, it looks for
+    real gold within about 220 cells either side and 250 down: a seam
+    with plenty of gold around it, not a stray speck.
+  - **What it skips.** Seams under a bunker's concrete or steel, or under
+    stone that never yields, are skipped. Rock in the way only makes a
+    seam count as further off.
+  - **Digging.** It walks until it's right over the seam and sinks a shaft
+    straight down to it, the digger beam sweeping a little either way so
+    the shaft is wide enough to drop down. Then it banks the gold, moving
+    on through the seam.
+  - **Giving up.** If four seconds of digging bring in nothing, it gives
+    that seam up and finds another.
+  - **Calling it in.** With 1500 banked, it gets on the radio and calls a
+    dropship, for itself or, in team modes, for its whole team. It won't
+    call while one of its own is already up.
+  - **Endgame.** With four enemies or fewer left in a wave, it stops
+    digging and finishes the fight.
 - **Damage.** The dropship has about half a tank's toughness (3750 hull).
   Each engine, each turret and the bay doors can be shot off separately.
   Without doors it can't bomb. On three engines it leans on the rest and
