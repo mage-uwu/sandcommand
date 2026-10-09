@@ -40,7 +40,9 @@ compete it takes the one nearest your own aim angle, however near or far
 A head is a target of its own beside centre mass: aim a touch high for the
 headshot, a touch low for the body. Crouched or prone clones have both
 points lower. A small pulsing red reticle sits on whatever it has snapped
-to. Enemy dropships are targets too: the hull, and each engine pod still on
+to. The snap is shown the way the scope shows a lock, scoped or not: a red
+laser runs from the gun to the target, brackets close on a snapped clone,
+and a LOCK tag marks it (on a dropship, at the hull or pod it picked). Enemy dropships are targets too: the hull, and each engine pod still on
 its pylons, so aiming near a pod picks that pod. Scoped, it reaches as far
 as the scope sees, and the scope's lock-on works on dropships too. It works
 for mouse, touch and keyboard aim. It reaches 650

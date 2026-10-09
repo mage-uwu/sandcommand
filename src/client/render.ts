@@ -71,6 +71,8 @@ export class Renderer {
   private scoped = false;
   /** The scope's line of sight this frame: from the shoulder along the aim to the first solid cell. */
   private sight: { x: number; y: number; aim: number; mouseAim: number; cone: number; dist: number } | null = null;
+  /** Not scoped, but the aim assist has snapped onto something: the scope's laser and lock show anyway. */
+  private assistSight = false;
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
   camX = WORLD_W / 2;
@@ -250,6 +252,13 @@ export class Renderer {
         }
       }
     }
+    // Snapped by the aim assist (unscoped): the same laser and lock the scope shows.
+    this.assistSight = false;
+    if (!this.scoped && !flying && game.alive && !game.drive && game.lockAim !== null && game.aimMark) {
+      const sh = shoulderAt(selfX, selfY, b.stance, Math.cos(game.lockAim) < 0, this.shPt);
+      this.sight = { x: sh.x, y: sh.y, aim: game.lockAim, mouseAim: game.lockAim, cone: 0, dist: 0 };
+      this.assistSight = true;
+    }
     const halfW = W / z / 2;
     const halfH = H / z / 2;
     this.camX = Math.max(halfW, Math.min(WORLD_W - halfW, this.camX));
@@ -346,7 +355,7 @@ export class Renderer {
     }
     // Scoped: the line a shot would take, to the wall it would hit or the
     // first clone in its way (bracketed): only what you can actually hit.
-    if (this.scoped && this.sight) this.drawSightLine(ctx, game, now);
+    if ((this.scoped || this.assistSight) && this.sight) this.drawSightLine(ctx, game, now);
 
     // Own clone (hidden inside its tank while driving).
     if (game.alive && !game.drive) {
@@ -1216,15 +1225,28 @@ export class Renderer {
     const ex = s.x + Math.cos(s.aim) * lof.dist;
     const ey = s.y + Math.sin(s.aim) * lof.dist;
     const hit = lof.hit;
-    const locked = !!hit && game.scopeLock?.id === hit.id;
-    ctx.strokeStyle = lof.foe ? 'rgba(255,70,50,0.5)' : 'rgba(255,90,70,0.22)';
+    // Snapped by the assist onto something: a lock too (the assist's mark is the locked point).
+    const mark = this.assistSight ? game.aimMark : null;
+    const locked = !!hit && (game.scopeLock?.id === hit.id || (!!mark && lof.foe));
+    // (A dropship part, which the line test doesn't know: the laser runs to the mark on it.)
+    const toMark = !!mark && !hit && Math.hypot(mark.x - s.x, mark.y - s.y) <= lof.dist + 4;
+    const lx1 = toMark ? mark!.x : ex;
+    const ly1 = toMark ? mark!.y : ey;
+    const hot = lof.foe || toMark;
+    ctx.strokeStyle = hot ? 'rgba(255,70,50,0.55)' : 'rgba(255,90,70,0.22)';
     ctx.lineWidth = 0.5;
     ctx.beginPath();
     ctx.moveTo(s.x + Math.cos(s.aim) * 8, s.y + Math.sin(s.aim) * 8);
-    ctx.lineTo(ex, ey);
+    ctx.lineTo(lx1, ly1);
     ctx.stroke();
-    ctx.fillStyle = lof.foe ? '#ff4030' : '#ffb0a0';
-    ctx.fillRect(Math.round(ex) - 1, Math.round(ey) - 1, 2, 2);
+    ctx.fillStyle = hot ? '#ff4030' : '#ffb0a0';
+    ctx.fillRect(Math.round(lx1) - 1, Math.round(ly1) - 1, 2, 2);
+    if (toMark) {
+      ctx.font = '5px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('LOCK', mark!.x, mark!.y - 8);
+      ctx.textAlign = 'left';
+    }
     if (!hit) return;
     const p = locked ? 0 : 1 + Math.round(Math.sin(now / 90));
     const x0 = Math.round(hit.x) - 2 - p;
@@ -1237,10 +1259,10 @@ export class Renderer {
       ctx.fillRect(Math.min(cx, cx + sx * arm), cy, arm, 1);
       ctx.fillRect(cx, Math.min(cy, cy + sy * arm), 1, arm);
     }
-    if (locked && game.scopeLock) {
+    if (locked && (game.scopeLock || mark)) {
       // The locked point, and a tag.
-      const lx = Math.round(hit.x + game.scopeLock.lx);
-      const ly = Math.round(hit.y + game.scopeLock.ly);
+      const lx = Math.round(mark ? mark.x : hit.x + game.scopeLock!.lx);
+      const ly = Math.round(mark ? mark.y : hit.y + game.scopeLock!.ly);
       ctx.fillRect(lx - 2, ly, 5, 1);
       ctx.fillRect(lx, ly - 2, 1, 5);
       ctx.font = '5px ui-monospace, monospace';
