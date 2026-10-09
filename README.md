@@ -259,7 +259,11 @@ Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
    4-minute clock (top of the screen). If time runs out, the survivor with
    the most kills that wave wins, so nobody wins by hiding in a bunker.
    Big messages (WAVE 3 IN 2, FRAGGED, HAWKINS WINS) are retro console
-   banners in block letters (`src/client/banner.ts`).
+   banners: block letters made of █, glowing in the message's colour. They
+   slide in on a dark, scanlined band edged in that colour. Under the title
+   is a terminal prompt with a blinking cursor: the status line
+   (`> REDEPLOYING IN 0:04_`), then dim green hints. Everything is sized and
+   wrapped to fit any screen (`src/client/banner.ts`).
 5. **A new wave on a fresh map.** The next wave gets a new seed: new
    terrain, with nothing carried over (rockets, dropped weapons, debris in
    flight).

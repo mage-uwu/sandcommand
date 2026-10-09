@@ -10,7 +10,7 @@ import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULD
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
-import { bannerLines } from './banner.ts';
+import { bannerLines, layoutSub } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
 import { CLASSES, PARTS, Part, has } from '../shared/body.ts';
@@ -1964,11 +1964,13 @@ export class Renderer {
     const h = (top.length + (rank >= top.length ? 2 : 0) + 4) * lineH + 16 * s;
     const x0 = W / 2 - w / 2;
     const y0 = Math.min(H - h - 70 * s, H * 0.5 + 34 * s);
-    ctx.fillStyle = 'rgba(4,8,6,0.78)';
+    ctx.fillStyle = 'rgba(4,8,6,0.8)';
     ctx.fillRect(x0, y0, w, h);
-    ctx.strokeStyle = 'rgba(160,255,160,0.25)';
+    ctx.strokeStyle = 'rgba(160,255,160,0.22)';
     ctx.lineWidth = Math.max(1, s);
-    ctx.strokeRect(x0 + 3 * s, y0 + 3 * s, w - 6 * s, h - 6 * s);
+    ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+    ctx.fillStyle = 'rgba(160,255,160,0.6)';
+    ctx.fillRect(x0, y0, w, Math.max(1, Math.round(2 * s)));
     ctx.textAlign = 'left';
     ctx.font = `bold ${Math.round(13 * s)}px ui-monospace, monospace`;
     const lx = x0 + 14 * s;
@@ -2014,11 +2016,11 @@ export class Renderer {
     const pvp = rs.mode === GameMode.Pvp;
     const teams = rs.mode === GameMode.Lts || regicide || extraction;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
+    if (rs.phase === Phase.Waiting) big(extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
-        (extraction ? '' : `${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} · `) +
+        // (The mode is the headline; the map's biome goes with the hints.)
         (extraction
           ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
           : regicide
@@ -2027,7 +2029,8 @@ export class Renderer {
           ? 'pvp · all against all · respawns · most kills in 5 minutes wins'
           : teams
             ? 'last team standing · red vs green · one life each'
-            : 'last man standing · one life each · every clone for itself'),
+            : 'last man standing · one life each · every clone for itself') +
+          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map`),
         '#ffd34a',
       );
     } else if (rs.phase === Phase.Victory && extraction) {
@@ -2137,10 +2140,10 @@ export class Renderer {
       } else ctx.fillText(`WAVE ${rs.wave} · ${rs.left} LEFT · ${clock}`, W / 2, 25 * s);
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
-        if (rs.out) big('FRAGGED', `(${watching})`, '#ff6050');
+        if (rs.out) big('FRAGGED', `out for this wave · ${watching}`, '#ff4d3d');
         else if ((regicide || extraction || pvp) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
-          big('FRAGGED', back > 0 ? `reinforcements in ${back}s by drop rocket · ${watching}` : 'drop rocket inbound', '#ff6050');
+          big('FRAGGED', back > 0 ? `redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · by drop rocket · ${watching}` : `drop rocket inbound · ${watching}`, '#ff4d3d');
         }
         else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${watching}`, '#c8d0d8');
         else if (teams && game.myTeam !== Team.None) big('INBOUND', `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · drop rocket on its way`, teamCss(game.myTeam));
@@ -2150,46 +2153,111 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
+  /** When the current big message first showed (it slides in each time it changes). */
+  private bannerKey = '';
+  private bannerAt = 0;
+
   /**
-   * A big message as a retro console banner: block letters made of █,
-   * a hard drop shadow, on a dark panel, with a prompt-style line under it.
+   * A big centre-screen message, retro console style but tidy: the title
+   * in block letters made of █ (banner.ts), glowing in the message's colour
+   * over a hard drop shadow, on a dark band with faint scanlines that fades
+   * out at its edges, edged with thin rules in that colour. Under it, a
+   * terminal prompt: the status line (the subtitle's first segment) with a
+   * blinking cursor, and the hints in dim phosphor green, wrapped to fit
+   * the screen. Everything is sized to fit; each new message slides in.
    */
   private drawBanner(text: string, sub: string, color: string, s: number, W: number, H: number): void {
     const ctx = this.ctx;
+    const now = performance.now();
+    if (text !== this.bannerKey) {
+      this.bannerKey = text;
+      this.bannerAt = now;
+    }
+    const t = Math.min(1, (now - this.bannerAt) / 260);
+    const ease = 1 - (1 - t) * (1 - t) * (1 - t);
+    const maxW = W * 0.84;
+    const MONO = 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+    // The title in block letters, sized so the whole banner fits (monospace cells are ~0.6em wide).
     const lines = bannerLines(text);
     const cols = Math.max(1, lines[0].length);
-    // Monospace cells are ~0.6em wide: fit the banner in 86% of the screen.
-    const px = Math.max(5, Math.min(15 * s, (W * 0.86) / (cols * 0.6)));
-    const lineH = px;
+    const px = Math.max(4, Math.min(13 * s, maxW / (cols * 0.6)));
     const bw = cols * px * 0.6;
-    const bh = lines.length * lineH;
-    const cy = H * 0.2;
-    const subPx = Math.round(13 * s);
-    const padX = 18 * s;
-    const padY = 12 * s;
-    ctx.fillStyle = 'rgba(4,8,6,0.72)';
-    ctx.fillRect(W / 2 - bw / 2 - padX, cy - padY, bw + 2 * padX, bh + 2 * padY + (sub ? subPx * 1.8 : 0));
-    ctx.strokeStyle = 'rgba(160,255,160,0.25)';
-    ctx.lineWidth = Math.max(1, s);
-    ctx.strokeRect(W / 2 - bw / 2 - padX + 3 * s, cy - padY + 3 * s, bw + 2 * padX - 6 * s, bh + 2 * padY + (sub ? subPx * 1.8 : 0) - 6 * s);
-    ctx.font = `${px}px ui-monospace, Menlo, Consolas, monospace`;
+    const titleH = lines.length * px;
+    // The prompt: status line and hints, wrapped to fit.
+    const hp = Math.max(10, Math.round(14 * s));
+    const sp = Math.max(9, Math.round(12 * s));
+    ctx.font = `${sp}px ${MONO}`;
+    const lay = layoutSub(sub, maxW, (x) => ctx.measureText(x).width);
+    const head = lay.head ? `> ${lay.head.toUpperCase()}` : '';
+    const headH = head ? hp * 1.8 : 0;
+    const hintH = sp * 1.45;
+    const padY = 14 * s;
+    const bandH = padY * 2 + titleH + (head || lay.hints.length ? 8 * s : 0) + headH + lay.hints.length * hintH;
+    const top = H * 0.17;
+    ctx.save();
+    ctx.globalAlpha = ease;
+    // The band, fading out toward the sides, with faint scanlines.
+    const g = ctx.createLinearGradient(0, 0, W, 0);
+    g.addColorStop(0, 'rgba(4,8,6,0)');
+    g.addColorStop(0.2, 'rgba(4,8,6,0.78)');
+    g.addColorStop(0.8, 'rgba(4,8,6,0.78)');
+    g.addColorStop(1, 'rgba(4,8,6,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, W, bandH);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    const step = Math.max(2, Math.round(3 * s));
+    for (let y = top + 1; y < top + bandH; y += step) ctx.fillRect(W * 0.12, y, W * 0.76, 1);
+    // Rules top and bottom, in the message's colour, drawing out from the centre.
+    const rw = W * 0.6 * ease;
+    const rule = ctx.createLinearGradient(W / 2 - rw / 2, 0, W / 2 + rw / 2, 0);
+    rule.addColorStop(0, 'rgba(0,0,0,0)');
+    rule.addColorStop(0.5, color);
+    rule.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = rule;
+    const rh = Math.max(1, Math.round(2 * s));
+    ctx.fillRect(W / 2 - rw / 2, top, rw, rh);
+    ctx.fillRect(W / 2 - rw / 2, top + bandH - rh, rw, rh);
+    // The title: a soft glow in its colour, a hard drop shadow, then the letters.
+    ctx.font = `${px}px ${MONO}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    const x0 = W / 2 - bw / 2;
+    const x0 = W / 2 - bw / 2 + (1 - ease) * -40 * s;
+    const y0 = top + padY;
     const off = Math.max(1, Math.round(px * 0.18));
-    for (let r = 0; r < lines.length; r++) {
-      ctx.fillStyle = 'rgba(0,0,0,0.85)';
-      ctx.fillText(lines[r], x0 + off, cy + r * lineH + off);
-    }
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    for (let r = 0; r < lines.length; r++) ctx.fillText(lines[r], x0 + off, y0 + r * px + off);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 16 * s;
     ctx.fillStyle = color;
-    for (let r = 0; r < lines.length; r++) ctx.fillText(lines[r], x0, cy + r * lineH);
-    if (sub) {
-      ctx.font = `${subPx}px ui-monospace, Menlo, Consolas, monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#9fe89f';
-      const cursor = Math.floor(performance.now() / 500) % 2 ? '_' : ' ';
-      ctx.fillText(`> ${sub}${cursor}`, W / 2, cy + bh + padY * 0.9);
+    for (let r = 0; r < lines.length; r++) ctx.fillText(lines[r], x0, y0 + r * px);
+    ctx.shadowBlur = 0;
+    // The prompt.
+    let y = y0 + titleH + 8 * s;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (head) {
+      let hw = hp;
+      ctx.font = `bold ${hw}px ${MONO}`;
+      const cursor = Math.floor(now / 500) % 2 ? '_' : ' ';
+      while (hw > 8 && ctx.measureText(head + '_').width > maxW) {
+        hw--;
+        ctx.font = `bold ${hw}px ${MONO}`;
+      }
+      y += headH / 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillText(head + cursor, W / 2 + s, y + s);
+      ctx.fillStyle = '#e8ffe8';
+      ctx.fillText(head + cursor, W / 2, y);
+      y += headH / 2;
     }
+    ctx.font = `${sp}px ${MONO}`;
+    ctx.fillStyle = 'rgba(150,232,150,0.85)';
+    for (const line of lay.hints) {
+      y += hintH / 2;
+      ctx.fillText(line, W / 2, y);
+      y += hintH / 2;
+    }
+    ctx.restore();
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
   }
