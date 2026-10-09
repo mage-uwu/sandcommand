@@ -778,9 +778,18 @@ export class Renderer {
       ctx.textAlign = 'left';
     }
     if (this.scoped) {
-      // Scope: dark vignette around the mouse, a fine reticle on it.
-      const mx = input.mouseX * dpr;
-      const my = input.mouseY * dpr;
+      // Scope: a dark vignette, a spotlight with a fine reticle in it. Locked
+      // onto someone, it's centred on them (wherever the pointer or thumb
+      // is), gliding over when the target changes; otherwise on the pointer.
+      const am = game.aimMark;
+      const tx = am ? am.x * z + offX : input.mouseX * dpr;
+      const ty = am ? am.y * z + offY : input.mouseY * dpr;
+      if (!this.spot || !this.spotWasScoped) this.spot = { x: tx, y: ty };
+      const k = am ? 0.35 : 1;
+      this.spot.x += (tx - this.spot.x) * k;
+      this.spot.y += (ty - this.spot.y) * k;
+      const mx = this.spot.x;
+      const my = this.spot.y;
       const r = Math.min(W, H) * 0.42;
       const v = ctx.createRadialGradient(mx, my, r * 0.75, mx, my, r * 1.6);
       v.addColorStop(0, 'rgba(0,0,0,0)');
@@ -800,6 +809,8 @@ export class Renderer {
       ctx.lineTo(mx, my + r * 0.3);
       ctx.stroke();
     }
+
+    this.spotWasScoped = this.scoped;
 
     if (game.hurtFlash > 0.02) {
       ctx.fillStyle = `rgba(160,0,0,${game.hurtFlash * 0.35})`;
@@ -2173,6 +2184,10 @@ export class Renderer {
       ctx.fillText(extra.t, x + pad, y + h + 14 * s);
     }
   }
+
+  /** The scope's spotlight centre (canvas px), gliding toward the target; and whether we were scoped last frame. */
+  private spot: { x: number; y: number } | null = null;
+  private spotWasScoped = false;
 
   /** When the current big message first showed (it slides in each time it changes). */
   private bannerKey = '';

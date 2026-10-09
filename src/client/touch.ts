@@ -77,6 +77,7 @@ export class TouchControls {
       <div class="ttop">
         <button data-act="scores">SCORE</button>
         <button data-act="chat">CHAT</button>
+        <button data-act="auto">AUTO</button>
       </div>`;
     document.body.appendChild(root);
     this.root = root;
@@ -163,6 +164,15 @@ export class TouchControls {
     this.input.touch = true;
     this.root.classList.remove('hidden');
     document.body.classList.add('touch');
+  }
+
+  private onAuto: ((on: boolean) => void) | null = null;
+
+  /** Show auto mode's state on its button, and hear when it's toggled. */
+  setAuto(on: boolean, changed: (on: boolean) => void): void {
+    this.input.autoMode = on;
+    this.root.querySelector('[data-act="auto"]')?.classList.toggle('on', on);
+    this.onAuto = changed;
   }
 
   /** Hide or show the controls (e.g. behind the join screen). */
@@ -299,6 +309,11 @@ export class TouchControls {
           break;
         case 'chat':
           this.hooks.chat();
+          break;
+        case 'auto':
+          this.input.autoMode = !this.input.autoMode;
+          b.classList.toggle('on', this.input.autoMode);
+          this.onAuto?.(this.input.autoMode);
           break;
       }
     });

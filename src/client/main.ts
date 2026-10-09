@@ -5,7 +5,7 @@ import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipP
 import { PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { CANNON_PIVOT, SMG_SPEED, TANK_W, TANK_H, isDog, tankH, tankW } from '../shared/tank.ts';
-import { ASSIST_RANGE, type AssistTarget, assistAim, ballisticAim } from './aim.ts';
+import { ASSIST_RANGE, type AssistTarget, assistAim, autoTarget, ballisticAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
@@ -280,7 +280,7 @@ function assistTargets(g: Game): AssistTarget[] {
       const q = shipPoint(s, ENGINE_X[e], ENGINE_NOZZLE_Y - 4, podPt);
       out.push({ x: q.x, y: q.y, vx: s.vx, vy: s.vy, g: 1000 + s.slot });
     }
-    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2, vx: s.vx, vy: s.vy, g: 1000 + s.slot });
+    out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2, vx: s.vx, vy: s.vy, g: 1000 + s.slot, core: true });
   }
   for (const v of g.remoteViews()) {
     if (!(v.flags & F_ALIVE) || g.tankPilots.has(v.id) || !foe(v.id)) continue;
@@ -289,12 +289,12 @@ function assistTargets(g: Game): AssistTarget[] {
     const h = STANCE_H[v.stance] ?? ACTOR_H;
     const top = v.y + ACTOR_H - h;
     out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5, vx: v.vx, vy: v.vy, g: v.id });
-    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy, g: v.id });
+    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5, vx: v.vx, vy: v.vy, g: v.id, core: true });
   }
   for (const t of g.tankViews()) {
     // A tank by its driver; a watchdog by its owner, driven or not.
     const who = isDog(t) ? t.owner : t.pilot;
-    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2, vx: t.vx, vy: t.vy, g: 2000 + t.slot });
+    if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: t.y + tankH(t) / 2, vx: t.vx, vy: t.vy, g: 2000 + t.slot, core: true });
   }
   return out;
 }
@@ -311,6 +311,9 @@ function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boo
 }
 /** Tools aimed at the ground or at friends (or nothing): no snapping onto enemies. */
 const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol, WeaponId.Mine]);
+/** Touch auto mode (the AUTO button): on unless switched off, and the choice is remembered. */
+input.autoMode = storageGet('sc.auto') !== 'off';
+touch.setAuto(input.autoMode, (on) => storageSet('sc.auto', on ? 'on' : 'off'));
 /** I: the info panel (humans online, net stats, kill feed), hidden by default; the choice is remembered. */
 input.showInfo = storageGet('sc.info') === 'on';
 addEventListener('keydown', (e) => {
@@ -318,6 +321,17 @@ addEventListener('keydown', (e) => {
   input.showInfo = !input.showInfo;
   storageSet('sc.info', input.showInfo ? 'on' : 'off');
 });
+/** What the aim assist was snapped onto last tick (it stays on it while it reasonably can). */
+let lastG: number | undefined;
+/** Weapons whose blast would catch us up close: auto mode won't fire them point-blank. */
+const SPLASHY = new Set<number>([WeaponId.Bazooka, WeaponId.Grenade, WeaponId.GrenadeLauncher, WeaponId.ATCannon]);
+/** How far auto mode looks for a target with this weapon: about as far as its shots carry (and no further than the assist reaches). */
+function autoRange(weapon: number): number {
+  const def = WEAPONS[weapon];
+  if (!def) return 0;
+  if (def.proj < 0) return weapon === WeaponId.Laser ? ASSIST_RANGE : 0;
+  return Math.min(ASSIST_RANGE, ((PROJ[def.proj].life * def.speed) / TICK_RATE) * 0.85);
+}
 /** Mouse aim assist: on unless switched off (V), and the choice is remembered. */
 let mouseAssist = storageGet('sc.assist') !== 'off';
 addEventListener('keydown', (e) => {
@@ -337,7 +351,7 @@ addEventListener('keydown', (e) => {
 });
 let pulse = 0;
 /** Where the assist snapped this tick (for the target marker). */
-const mark = { x: 0, y: 0, vx: 0, vy: 0, on: false };
+const mark: { x: number; y: number; vx: number; vy: number; g?: number; on: boolean } = { x: 0, y: 0, vx: 0, vy: 0, on: false };
 const shoulderPt = { x: 0, y: 0 };
 
 // Main loop: fixed 30 Hz simulation/input ticks, render every animation frame.
@@ -383,10 +397,27 @@ function frame(now: number): void {
       // Scoped, the assist reaches as far as the scope sees.
       const scopeReach = input.scoping ? 2000 : 0;
       const st = input.aimStick;
-      if (st && (st.dx !== 0 || st.dy !== 0)) {
+      // Touch auto mode: no thumb on the fire pad, so the gun finds the
+      // nearest enemy in sight by itself (and fires below, when it can hit).
+      const auto =
+        input.touch && input.autoMode && !st && !input.pointAssist && g.alive && !g.drive && !flying && !dogged && !g.building && !g.calling && !NO_ASSIST.has(g.weapon)
+          ? autoTarget(ox, oy, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), autoRange(g.weapon), lastG)
+          : null;
+      if (auto) {
+        aim = Math.atan2(auto.t.y - oy, auto.t.x - ox);
+        mark.x = auto.t.x;
+        mark.y = auto.t.y;
+        mark.vx = auto.t.vx ?? 0;
+        mark.vy = auto.t.vy ?? 0;
+        mark.g = auto.g;
+        mark.on = true;
+        const r = Math.min(innerWidth, innerHeight) * 0.3;
+        input.mouseX = ((ox - renderer.camX) * renderer.zoom) / dpr + innerWidth / 2 + Math.cos(aim) * r;
+        input.mouseY = ((oy - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2 + Math.sin(aim) * r;
+      } else if (st && (st.dx !== 0 || st.dy !== 0)) {
         // Touch aim stick: aim along it (assisted), and park the pointer out
         // along the aim so the crosshair, the arm and the camera follow.
-        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
+        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark, lastG);
         const r = Math.min(innerWidth, innerHeight) * 0.3;
         input.mouseX = ((ox - renderer.camX) * renderer.zoom) / dpr + innerWidth / 2 + Math.cos(aim) * r;
         input.mouseY = ((oy - renderer.camY) * renderer.zoom) / dpr + innerHeight / 2 + Math.sin(aim) * r;
@@ -394,14 +425,16 @@ function frame(now: number): void {
         aim = Math.atan2(wy - oy, wx - ox);
         const kd = input.keyDir;
         // Arrow keys: the direction they point, snapped onto the enemy nearest that way.
-        if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
-        else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
+        if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark, lastG);
+        else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark, lastG);
         else if (mouseAssist && !g.drive && (flying || dogged || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
           const reach = Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80)));
-          aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach, mark);
+          aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach, mark, lastG);
         }
       }
+      // (What it's on now: next tick's assist stays on it while it reasonably can.)
+      lastG = mark.on ? mark.g : undefined;
       const raw = Math.atan2(wy - oy, wx - ox);
       // Scoped onto someone: the aim locks onto them.
       aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying && !dogged ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
@@ -437,6 +470,10 @@ function frame(now: number): void {
         g.lockAim = aim;
       }
       let buttons = input.buttons();
+      // Auto mode fires for you, once it has a shot that will land (a lob that
+      // can reach; no rocket or bomb in your own face; not the laser, which
+      // wants a held charge).
+      if (auto && tgt && g.aimReach && g.weapon !== WeaponId.Laser && !(SPLASHY.has(g.weapon) && auto.d < 70)) buttons |= BTN_FIRE;
       // Locked on (assist or scope): the server holds the muzzle on the target, shots down the sight line.
       if (tgt && g.lockAim !== null) buttons |= BTN_LOCK;
       // Touch: a thumb can't click a semi-automatic as fast as it cycles, so

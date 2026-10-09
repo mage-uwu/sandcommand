@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
 import { stickButtons } from '../src/client/stick.ts';
-import { assistAim, leadPoint, ballisticAim } from '../src/client/aim.ts';
+import { assistAim, autoTarget, leadPoint, ballisticAim } from '../src/client/aim.ts';
 
 describe('touch joystick', () => {
   it('maps deflection to run, jet and crouch, with a dead zone', () => {
@@ -34,7 +34,7 @@ describe('touch aim assist', () => {
   it('reports what it snapped onto (for the target marker), and nothing when it lets the aim be', () => {
     const mark = { x: 0, y: 0, on: false };
     assistAim(0, 0, 0.3, [{ x: 150, y: 20 }], open, undefined, mark);
-    expect(mark).toEqual({ x: 150, y: 20, vx: 0, vy: 0, on: true });
+    expect(mark).toEqual({ x: 150, y: 20, vx: 0, vy: 0, g: -1, on: true });
     const none = { x: 0, y: 0, on: false };
     assistAim(0, 0, Math.PI, [{ x: 150, y: 20 }], open, undefined, none);
     expect(none.on).toBe(false);
@@ -66,6 +66,44 @@ describe('touch aim assist', () => {
       { x: 200, y: -8 },
     ], open);
     expect(a).toBeCloseTo(Math.atan2(-8, 200), 5);
+  });
+});
+
+describe('sticky aim and auto mode', () => {
+  const open = () => true;
+  it('stays on the target it has while it is still reasonably lined up', () => {
+    // Two enemies; the aim wobbles between them a little.
+    const a = { x: Math.cos(0.1) * 200, y: Math.sin(0.1) * 200, g: 1 };
+    const b = { x: Math.cos(-0.5) * 300, y: Math.sin(-0.5) * 300, g: 2 };
+    const mark = { x: 0, y: 0, on: false, g: undefined as number | undefined };
+    // Fresh, pointing right at the far one: b.
+    expect(assistAim(0, 0, -0.45, [a, b], open, undefined, mark)).toBeCloseTo(-0.5, 5);
+    expect(mark.g).toBe(2);
+    // The thumb drifts toward a, past halfway, but not decisively: still b...
+    expect(assistAim(0, 0, -0.25, [a, b], open, undefined, mark, 2)).toBeCloseTo(-0.5, 5);
+    // ...where a fresh pick would have taken the nearer a.
+    expect(assistAim(0, 0, -0.25, [a, b], open)).toBeCloseTo(0.1, 5);
+    // Swung clearly onto a: a.
+    expect(assistAim(0, 0, 0.05, [a, b], open, undefined, mark, 2)).toBeCloseTo(0.1, 5);
+  });
+  it('auto mode tracks the nearest enemy in sight, by centre mass, in any direction', () => {
+    const head = { x: -100, y: -8, g: 3 };
+    const body = { x: -100, y: 0, g: 3, core: true };
+    const far = { x: 300, y: 0, g: 4, core: true };
+    const t = autoTarget(0, 0, [head, body, far], open, 650)!;
+    expect(t.g).toBe(3);
+    expect(t.t).toBe(body);
+    // Behind a wall: the next one.
+    expect(autoTarget(0, 0, [head, body, far], (_a, _b, x1) => x1 > 0, 650)!.g).toBe(4);
+    // Nobody in range or sight: nothing.
+    expect(autoTarget(0, 0, [far], open, 200)).toBe(null);
+  });
+  it('auto mode keeps its target until another comes well closer', () => {
+    const held = { x: 200, y: 0, g: 1, core: true };
+    const other = { x: -170, y: 0, g: 2, core: true };
+    expect(autoTarget(0, 0, [held, other], open, 650, 1)!.g).toBe(1); // a bit closer: keep
+    const near = { x: -90, y: 0, g: 2, core: true };
+    expect(autoTarget(0, 0, [held, near], open, 650, 1)!.g).toBe(2); // well closer: switch
   });
 });
 

@@ -19,6 +19,12 @@ export class InputState {
   /** Selected materializer piece (index into PIECES). */
   piece = 0;
   scoreboard = false;
+  /**
+   * Touch auto mode: with no thumb on the fire pad, the gun tracks the
+   * nearest enemy in sight and fires when it can hit (main.ts). The AUTO
+   * button toggles it.
+   */
+  autoMode = true;
   /** The info panel (top right: humans online, net stats, the kill feed): off unless toggled on (I). */
   showInfo = false;
   /** True while the chat box has focus; game keys are ignored. */

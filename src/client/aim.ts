@@ -29,7 +29,16 @@ export interface AssistTarget {
   vy?: number;
   /** Which thing it's on (a clone's head and body share one). Points without one are each their own. */
   g?: number;
+  /** Its centre mass (a clone's body, a ship's hull, a tank): what auto mode aims at. */
+  core?: boolean;
 }
+
+/**
+ * Stickiness: once snapped onto something, the aim stays on it while it's
+ * still within this many radians of the best-lined-up enemy, so a jittery
+ * thumb (or a sweeping mouse) doesn't flick between targets.
+ */
+export const ASSIST_STICKY = 0.3;
 
 /**
  * The aim to use from (ox, oy) given the raw `aim`: the direction of an
@@ -50,8 +59,10 @@ export function assistAim(
   targets: readonly AssistTarget[],
   sight: (x0: number, y0: number, x1: number, y1: number) => boolean,
   range = ASSIST_RANGE,
-  /** Set to the point it snapped onto, and how it's moving (`on` false if none): for the target marker, and leading the shot. */
-  mark?: { x: number; y: number; vx?: number; vy?: number; on: boolean },
+  /** Set to the point it snapped onto, how it's moving, and what it's on (`on` false if none): for the target marker, and leading the shot. */
+  mark?: { x: number; y: number; vx?: number; vy?: number; g?: number; on: boolean },
+  /** What it was snapped onto last (`g`): it stays on that while it reasonably can. */
+  prev?: number,
 ): number {
   // Everything in the cone and in range, best lined up first.
   const cand: { t: AssistTarget; a: number; err: number; d: number; g: number; seen: number }[] = [];
@@ -73,12 +84,16 @@ export function assistAim(
   };
   const first = cand.find(visible);
   if (!first) return aim;
-  // The ambiguous ones: about as well lined up. The closest of them wins...
+  // Still on what it had last, if that's reasonably lined up: stay on it.
   let pick = first;
-  for (const c of cand) {
-    if (c.err > first.err + ASSIST_AMBIGUITY) break;
-    if (c.d < pick.d - 1e-6 && visible(c)) pick = c;
-  }
+  const held = prev === undefined ? undefined : cand.find((c) => c.g === prev && c.err <= first.err + ASSIST_STICKY && visible(c));
+  if (held) pick = held;
+  // Otherwise the ambiguous ones (about as well lined up): the closest of them wins...
+  else
+    for (const c of cand) {
+      if (c.err > first.err + ASSIST_AMBIGUITY) break;
+      if (c.d < pick.d - 1e-6 && visible(c)) pick = c;
+    }
   // ...and on it, the point nearest the aim.
   let best = pick;
   for (const c of cand) {
@@ -92,9 +107,51 @@ export function assistAim(
     mark.y = best.t.y;
     mark.vx = best.t.vx ?? 0;
     mark.vy = best.t.vy ?? 0;
+    mark.g = best.g;
     mark.on = true;
   }
   return best.a;
+}
+
+/** Auto mode keeps its target until another is this much closer (as a fraction of the held one's distance). */
+export const AUTO_SWITCH = 0.7;
+
+/**
+ * Auto mode (touch): the target to track with no thumb on the fire pad, in
+ * any direction: the nearest enemy in range and in sight, by its centre
+ * mass. It keeps the one it had (`prev`) while that's still in sight,
+ * unless another comes well closer (AUTO_SWITCH). Null if nobody's there.
+ */
+export function autoTarget(
+  ox: number,
+  oy: number,
+  targets: readonly AssistTarget[],
+  sight: (x0: number, y0: number, x1: number, y1: number) => boolean,
+  range: number,
+  prev?: number,
+): { t: AssistTarget; g: number; d: number } | null {
+  const cores: { t: AssistTarget; g: number; d: number }[] = [];
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    if (!t.core) continue;
+    const d = Math.hypot(t.x - ox, t.y - oy);
+    if (d < 4 || d > range) continue;
+    cores.push({ t, g: t.g ?? -1 - i, d });
+  }
+  cores.sort((p, q) => p.d - q.d);
+  let best: (typeof cores)[number] | null = null;
+  for (const c of cores) {
+    if (sight(ox, oy, c.t.x, c.t.y)) {
+      best = c;
+      break;
+    }
+  }
+  if (!best) return null;
+  if (prev !== undefined && best.g !== prev) {
+    const held = cores.find((c) => c.g === prev);
+    if (held && held.d * AUTO_SWITCH < best.d && sight(ox, oy, held.t.x, held.t.y)) return held;
+  }
+  return best;
 }
 
 /**

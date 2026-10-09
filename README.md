@@ -45,6 +45,11 @@ On the enemy it picked, the point goes by angle alone. A head is a target
 of its own beside centre mass: aim a touch high for the headshot, a touch
 low for the body. On a dropship, nudge between its hull and pods.
 
+**Sticky.** Once snapped onto someone, the aim stays on them while they're
+still reasonably lined up: within about 17° of the best-lined-up enemy.
+A jittery thumb or a sweeping mouse doesn't flick between targets. Swing
+clearly onto another and it follows.
+
 **Fire goes down the laser.** Snapped on (or scope-locked), the client
 flags its input as locked (`BTN_LOCK`). The server then holds the muzzle on
 the target: no recoil climb, and the braced (halved) spread of a scope.
@@ -58,7 +63,10 @@ laser runs from the gun to the target, brackets close on a snapped clone,
 and a LOCK tag marks it (on a dropship, at the hull or pod it picked).
 **Zoom and aim are one.** Snapped onto someone when you scope, the scope
 goes straight to them, however far out (past the weapon's usual scope
-distance), and the reticle stays on them. **It leads them:** the aim (and
+distance), and the reticle stays on them. The scope's spotlight (the
+clear circle in its dark vignette) is centred on them too, wherever your
+pointer or thumb is, and glides over when the target changes. **It leads
+them:** the aim (and
 the laser) points where a moving target will be when the shot gets there,
 from their velocity and your round's speed (`ballisticAim` in
 `src/client/aim.ts`). **Rounds that drop are aimed along their arc:** for
@@ -102,6 +110,19 @@ The screen splits down the middle:
   within 90° of it, with the laser and LOCK showing on whoever it picked
   (`src/client/aim.ts`). Point roughly their way and tap. Teammates are
   ignored.
+- **AUTO (on by default; the AUTO button, top left, toggles it and the
+  choice is remembered).** With no thumb on the fire pad, the gun finds the
+  nearest enemy in sight by itself, in any direction and within its
+  weapon's reach. It aims at their centre mass, leading them (on the arc,
+  for a lob), and fires once it has a shot that will land. So you can just
+  move with the left stick and let it fight.
+  - **Keeping a target.** It stays on the enemy it has unless another comes
+    well closer.
+  - **What it won't fire.** No rocket or grenade in your own face, no lob
+    that can't reach, and not the laser (which wants a held charge; it
+    still aims it).
+  - **Taking over.** Touch the fire pad and you aim by hand, assisted as
+    above.
 - **Taps on a spot.** With the Materializer out, a tap on the right builds
   there, and taps on its menu pick the piece. With the radio up, taps pick
   from its menu. Once you're out of the wave, a tap moves to the next clone
