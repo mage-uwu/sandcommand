@@ -9,7 +9,7 @@ import { ASSIST_RANGE, assistAim } from './aim.ts';
 import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
-import { BTN_FIRE, shoulderAt } from '../shared/actor.ts';
+import { BTN_FIRE, STANCE_H, shoulderAt } from '../shared/actor.ts';
 import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
@@ -272,7 +272,13 @@ function assistTargets(g: Game): { x: number; y: number }[] {
     out.push({ x: s.x + SHIP_W / 2, y: s.y + SHIP_H / 2 });
   }
   for (const v of g.remoteViews()) {
-    if (v.flags & F_ALIVE && !g.tankPilots.has(v.id) && foe(v.id)) out.push({ x: v.x + ACTOR_W / 2, y: v.y + 6 });
+    if (!(v.flags & F_ALIVE) || g.tankPilots.has(v.id) || !foe(v.id)) continue;
+    // Two targets per clone, the head on its own (aim a touch high for the
+    // headshot) and centre mass; crouched or prone, both sit lower.
+    const h = STANCE_H[v.stance] ?? ACTOR_H;
+    const top = v.y + ACTOR_H - h;
+    out.push({ x: v.x + ACTOR_W / 2, y: top + 1.5 });
+    out.push({ x: v.x + ACTOR_W / 2, y: top + h * 0.5 });
   }
   for (const t of g.tankViews()) if (t.pilot !== 255 && foe(t.pilot)) out.push({ x: t.x + TANK_W / 2, y: t.y + TANK_H / 2 });
   return out;

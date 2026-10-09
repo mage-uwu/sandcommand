@@ -12,8 +12,10 @@ const wrap = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.P
 
 /**
  * The aim to use from (ox, oy) given the raw `aim`: the direction of the
- * enemy nearest the aim line inside the cone (in range and in sight), or
- * the raw aim if there is none. Nearer misses win; distance breaks ties.
+ * target nearest the player's own aim angle inside the cone (in range and
+ * in sight), or the raw aim if there is none. Competing targets are decided
+ * by angle alone (distance only breaks exact ties), so nudging the aim picks
+ * between them: a head over a body, one engine pod over the next.
  */
 export function assistAim(
   ox: number,
@@ -36,7 +38,7 @@ export function assistAim(
     const err = Math.abs(wrap(a - aim));
     const cone = ASSIST_CONE;
     if (err > cone) continue;
-    const score = err / cone + d / range / 4;
+    const score = err + d * 1e-7;
     if (score >= bestScore || !sight(ox, oy, t.x, t.y)) continue;
     bestScore = score;
     best = a;

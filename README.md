@@ -34,9 +34,12 @@ reticle. Moving the mouse hands aim back to it.
 
 **Aim assist** (`src/client/aim.ts`). The bots aim like machines, so aiming
 is near-effortless: point anywhere within 90° either side of an enemy you
-can see, scoped or not, and the aim snaps straight onto them. With several
-in that half-circle it takes the one nearest your aim line, and distance
-breaks ties. A small pulsing red reticle sits on whatever it has snapped
+can see, scoped or not, and the aim snaps straight onto them. When targets
+compete it takes the one nearest your own aim angle, however near or far
+(distance only breaks exact ties), so nudging the aim chooses between them.
+A head is a target of its own beside centre mass: aim a touch high for the
+headshot, a touch low for the body. Crouched or prone clones have both
+points lower. A small pulsing red reticle sits on whatever it has snapped
 to. Enemy dropships are targets too: the hull, and each engine pod still on
 its pylons, so aiming near a pod picks that pod. Scoped, it reaches as far
 as the scope sees, and the scope's lock-on works on dropships too. It works
