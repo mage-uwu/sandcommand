@@ -62,22 +62,28 @@ death and spill half their gold as gold rubble that anyone can dig up.
 **On phones and tablets** (`src/client/touch.ts`) touch controls switch on
 by themselves the first time a finger touches the screen, or straight away
 on a touch-first device.
-- **Joystick (bottom-left).** It's a floating stick: it appears wherever
-  your thumb lands. Push left or right to run, up to jump and jetpack, down
-  to crouch. In a drop rocket the same stick steers, burns and cuts the
-  engine.
-- **Aim stick (anywhere else).** Put a thumb down and drag. The clone aims
-  along the drag, and pushed past halfway it fires; the ring turns red.
-  Semi-automatic weapons keep firing as fast as they cycle while you hold.
-- **Aim assist.** When the stick, a tap or a hold points within 90° of an
-  enemy in sight and in range, the aim snaps onto it
-  (`src/client/aim.ts`). Teammates are ignored.
-- **Quick tap.** Shoots once at that spot. With the Materializer out, a tap
-  builds there, and taps on its menu pick the piece. Once you're out of the
-  wave, a tap moves to the next clone to watch. A finger held still fires
-  at its spot until you lift it.
-- **Buttons (right edge).** ⇄ swaps weapon, ▲ jets, ↻ reloads, ◎ toggles
-  the scope (in a tank: hold to fire the cannon), ⬆ / ⬇ pick up and drop.
+The screen splits down the middle:
+- **Left half: movement.** One big floating stick: put a thumb down
+  anywhere on the left and drag. Push left or right to run, up to jump and
+  jetpack, down to crouch. In a drop rocket the same stick steers, burns
+  and cuts the engine.
+- **Right half: fire.** A fire pad sits at the centre of the right half,
+  not on your clone. Touch in the direction you want to shoot, measured
+  from the pad's centre, and you fire that way for as long as your finger
+  stays down, following it round. A quick tap gets a shot off.
+- **Aim assist does the rest.** The direction snaps onto any enemy in sight
+  within 90° of it, with the laser and LOCK showing on whoever it picked
+  (`src/client/aim.ts`). Point roughly their way and tap. Teammates are
+  ignored.
+- **Taps on a spot.** With the Materializer out, a tap on the right builds
+  there, and taps on its menu pick the piece. With the radio up, taps pick
+  from its menu. Once you're out of the wave, a tap moves to the next clone
+  to watch.
+- **Three item buttons (bottom right).** ◀ and ▶ step through what you
+  carry. ⬆ picks up the weapon at your feet; hold it to drop the one in
+  hand. Empty magazines reload themselves.
+- **Zoom.** ◎ above them toggles the scope (in a tank: hold to fire the
+  cannon).
 - **Top-left.** ☰ shows the scoreboard, 💬 opens chat.
 - **Screen layout.** The HUD shrinks on small screens. The minimap moves to
   the top-right so the buttons have the corner. Deploy goes fullscreen and

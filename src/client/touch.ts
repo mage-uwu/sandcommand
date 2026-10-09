@@ -1,30 +1,38 @@
-import { BTN_RELOAD, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
-import { AIM_FIRE_AT, STICK_R, TAP_MOVE, TAP_MS, stickButtons } from './stick.ts';
+import { BTN_SCOPE } from '../shared/actor.ts';
+import { STICK_R, TAP_MS, stickButtons } from './stick.ts';
 import type { InputState } from './input.ts';
 
 export interface TouchHooks {
   chat(): void;
-  /** Is there on-canvas UI (the build menu) under this CSS point? Taps there go to it, not the stick. */
+  /** Is there on-canvas UI (the build or radio menu) under this CSS point? Taps there go to it. */
   overUi(x: number, y: number): boolean;
+  /** Should taps on the right act on the spot touched (building, the radio menu up, spectating) rather than fire? */
+  pointMode(): boolean;
 }
+
+/** Below this distance (CSS px) from the fire pad's centre, a touch keeps the last direction. */
+const FIRE_DEAD = 18;
 
 /**
  * Phone and tablet controls, drawn over the canvas and feeding the same
- * InputState the keyboard and mouse do:
+ * InputState the keyboard and mouse do. The screen splits down the middle:
  *
- * - a floating move stick in the bottom-left corner: run left/right, push
- *   up to jump and jetpack, down to crouch (and, piloting a rocket, steer,
- *   burn and cut the engine);
- * - a floating aim stick anywhere else: put a thumb down and drag; the
- *   clone aims along the drag, and pushed past halfway it fires (semi-auto
- *   weapons keep firing as fast as they cycle). Aim assist settles the aim
- *   on an enemy in sight near the line;
- * - a quick tap there instead shoots once at that spot (with the
- *   materializer out it builds there, taps on its menu pick the piece, and
- *   out of the wave a tap watches the next clone); a finger held still
- *   fires at that spot until lifted;
- * - buttons down the right edge: swap weapon, pick up, drop, reload, scope,
- *   jet, scores and chat.
+ * - **Left half: movement.** One big floating stick: put a thumb down
+ *   anywhere on the left and drag. Left and right run, up jumps and
+ *   jetpacks, down crouches (and, piloting a rocket, steers, burns and cuts
+ *   the engine).
+ * - **Right half: fire.** A fire pad centred on the middle of the right
+ *   half (not on the clone): touch in the direction you want to shoot, and
+ *   it fires that way for as long as the finger stays down, following it
+ *   round; a quick tap gets a shot off that way. The aim assist snaps the
+ *   direction onto any enemy within 90 degrees of it, so you only need to
+ *   point roughly their way.
+ * - **Three item buttons** (◀ previous, ▶ next, and pick up, held to drop),
+ *   a **zoom** toggle (in a tank: the cannon), and scores and chat up top.
+ *
+ * With the materializer out, the radio menu up, or out of the wave
+ * (spectating), a tap on the right acts on the spot touched instead: build
+ * there, pick from the menu, watch the next clone.
  *
  * They switch on by themselves the first time a finger touches the screen
  * (or straight away on a touch-first device).
@@ -33,20 +41,20 @@ export class TouchControls {
   readonly root: HTMLDivElement;
   private readonly base: HTMLDivElement;
   private readonly knob: HTMLDivElement;
+  private readonly pad: HTMLDivElement;
+  private readonly padKnob: HTMLDivElement;
   private stickId = -1;
   private stickX = 0;
   private stickY = 0;
-  private aimId = -1;
-  /** What the finger on the aim side turned out to be: still deciding, a drag (stick), or a hold on a spot. */
-  private aimMode: 'pending' | 'stick' | 'hold' = 'pending';
-  private aimX0 = 0;
-  private aimY0 = 0;
-  private aimT0 = 0;
-  private holdTimer = 0;
-  private readonly aimBase: HTMLDivElement;
-  private readonly aimKnob: HTMLDivElement;
+  private fireId = -1;
+  private fireT0 = 0;
+  /** The finger on the right is pointing at a spot (point mode) rather than firing. */
+  private pointing = false;
+  private dirX = 1;
+  private dirY = 0;
   private stick = 0;
   private held = 0;
+  private dropTimer = 0;
   enabled = false;
 
   constructor(
@@ -58,16 +66,14 @@ export class TouchControls {
     root.id = 'touch';
     root.className = 'hidden';
     root.innerHTML = `
-      <div class="stick-zone"><div class="stick-base"><div class="stick-knob"></div></div></div>
-      <div class="aim-base"><div class="aim-knob"></div><span>AIM</span></div>
+      <div class="stick-base"><div class="stick-knob"></div></div>
+      <div class="fire-pad"><div class="fire-knob"></div><span>FIRE</span></div>
       <div class="tbtns">
-        <button data-act="swap" class="big">⇄<small>SWAP</small></button>
-        <button data-act="jet" class="big">▲<small>JET</small></button>
-        <button data-act="reload">↻<small>RELOAD</small></button>
-        <button data-act="scope">◎<small>SCOPE</small></button>
-        <button data-act="pick">⬆<small>PICK UP</small></button>
-        <button data-act="drop">⬇<small>DROP</small></button>
+        <button data-act="prev">◀<small>ITEM</small></button>
+        <button data-act="pick" class="big">⬆<small>PICK UP</small></button>
+        <button data-act="next">▶<small>ITEM</small></button>
       </div>
+      <button data-act="scope" class="tzoom">◎<small>ZOOM</small></button>
       <div class="ttop">
         <button data-act="scores">☰</button>
         <button data-act="chat">💬</button>
@@ -76,54 +82,44 @@ export class TouchControls {
     this.root = root;
     this.base = root.querySelector('.stick-base') as HTMLDivElement;
     this.knob = root.querySelector('.stick-knob') as HTMLDivElement;
-    this.aimBase = root.querySelector('.aim-base') as HTMLDivElement;
-    this.aimKnob = root.querySelector('.aim-knob') as HTMLDivElement;
+    this.pad = root.querySelector('.fire-pad') as HTMLDivElement;
+    this.padKnob = root.querySelector('.fire-knob') as HTMLDivElement;
 
     for (const b of root.querySelectorAll<HTMLButtonElement>('button')) this.wireButton(b);
 
-    // Fingers on the canvas: the stick (bottom-left) or aim-and-fire (anywhere else).
     canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'touch') return;
       this.enable();
       e.preventDefault();
       canvas.setPointerCapture?.(e.pointerId);
-      if (this.stickId < 0 && this.inStickZone(e.clientX, e.clientY) && !hooks.overUi(e.clientX, e.clientY)) {
+      const x = e.clientX;
+      const y = e.clientY;
+      if (hooks.overUi(x, y)) {
+        // A menu under the finger: it's a pick, wherever it is.
+        input.touchTap(x, y);
+        return;
+      }
+      if (x < innerWidth / 2) {
+        if (this.stickId >= 0) return;
         this.stickId = e.pointerId;
-        this.stickX = e.clientX;
-        this.stickY = e.clientY;
-        this.base.style.left = `${e.clientX}px`;
-        this.base.style.top = `${e.clientY}px`;
+        this.stickX = x;
+        this.stickY = y;
+        this.base.style.left = `${x}px`;
+        this.base.style.top = `${y}px`;
         this.base.classList.add('active');
-        this.moveStick(e.clientX, e.clientY);
-      } else if (this.aimId < 0) {
-        // Tap, drag or hold? Decide as the finger moves (or doesn't).
-        this.aimId = e.pointerId;
-        this.aimMode = 'pending';
-        this.aimX0 = e.clientX;
-        this.aimY0 = e.clientY;
-        this.aimT0 = performance.now();
-        clearTimeout(this.holdTimer);
-        const id = e.pointerId;
-        this.holdTimer = setTimeout(() => {
-          if (this.aimId !== id || this.aimMode !== 'pending') return;
-          this.aimMode = 'hold';
-          input.touchAim(this.aimX0, this.aimY0, true);
-          input.pointAssist = true;
-        }, TAP_MS) as unknown as number;
+        this.moveStick(x, y);
+      } else {
+        if (this.fireId >= 0) return;
+        this.fireId = e.pointerId;
+        this.fireT0 = performance.now();
+        this.pointing = hooks.pointMode();
+        if (this.pointing) input.touchTap(x, y);
+        else this.moveFire(x, y);
       }
     });
     canvas.addEventListener('pointermove', (e) => {
       if (e.pointerId === this.stickId) this.moveStick(e.clientX, e.clientY);
-      else if (e.pointerId === this.aimId) {
-        if (this.aimMode === 'pending' && Math.hypot(e.clientX - this.aimX0, e.clientY - this.aimY0) > TAP_MOVE) {
-          this.aimMode = 'stick';
-          this.aimBase.style.left = `${this.aimX0}px`;
-          this.aimBase.style.top = `${this.aimY0}px`;
-          this.aimBase.classList.add('active');
-        }
-        if (this.aimMode === 'stick') this.moveAim(e.clientX, e.clientY);
-        else if (this.aimMode === 'hold') input.touchAim(e.clientX, e.clientY, false);
-      }
+      else if (e.pointerId === this.fireId && !this.pointing) this.moveFire(e.clientX, e.clientY);
     });
     const end = (e: PointerEvent) => {
       if (e.pointerId === this.stickId) {
@@ -134,20 +130,19 @@ export class TouchControls {
         this.base.style.top = '';
         this.knob.style.transform = '';
         this.sync();
-      } else if (e.pointerId === this.aimId) {
-        this.aimId = -1;
-        clearTimeout(this.holdTimer);
-        if (this.aimMode === 'pending' && performance.now() - this.aimT0 < TAP_MS * 2) input.touchTap(this.aimX0, this.aimY0);
-        else if (this.aimMode === 'hold') input.touchRelease();
-        this.endAim();
+      } else if (e.pointerId === this.fireId) {
+        this.fireId = -1;
+        // A quick tap still gets its shot off (the trigger may not have been seen down yet).
+        if (!this.pointing && performance.now() - this.fireT0 < TAP_MS) input.tapFire = 2;
+        this.endFire();
       }
     };
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
     addEventListener('blur', () => {
-      this.endAim();
+      this.endFire();
       input.touchRelease();
-      this.stickId = this.aimId = -1;
+      this.stickId = this.fireId = -1;
       this.stick = this.held = 0;
       this.sync();
     });
@@ -168,8 +163,9 @@ export class TouchControls {
     this.root.classList.toggle('hidden', !on || !this.enabled);
   }
 
-  private inStickZone(x: number, y: number): boolean {
-    return x < Math.max(200, innerWidth * 0.3) && y > innerHeight - Math.max(220, innerHeight * 0.55);
+  /** The fire pad's centre: the middle of the right half (a little below middle, under the thumb). */
+  private padCentre(): { x: number; y: number } {
+    return { x: innerWidth * 0.75, y: innerHeight * 0.6 };
   }
 
   private moveStick(x: number, y: number): void {
@@ -185,27 +181,26 @@ export class TouchControls {
     this.sync();
   }
 
-  private moveAim(x: number, y: number): void {
-    let dx = (x - this.aimX0) / STICK_R;
-    let dy = (y - this.aimY0) / STICK_R;
+  /** Fire toward the finger, as seen from the fire pad's centre (the aim assist does the rest). */
+  private moveFire(x: number, y: number): void {
+    const c = this.padCentre();
+    const dx = x - c.x;
+    const dy = y - c.y;
     const m = Math.hypot(dx, dy);
-    if (m > 1) {
-      dx /= m;
-      dy /= m;
+    if (m > FIRE_DEAD) {
+      this.dirX = dx / m;
+      this.dirY = dy / m;
     }
-    const fire = m >= AIM_FIRE_AT;
-    this.aimKnob.style.transform = `translate(${dx * STICK_R}px, ${dy * STICK_R}px)`;
-    this.aimBase.classList.toggle('firing', fire);
-    this.input.aimStick = { dx, dy, fire };
+    this.padKnob.style.transform = `translate(${this.dirX * STICK_R}px, ${this.dirY * STICK_R}px)`;
+    this.pad.classList.add('firing');
+    this.input.aimStick = { dx: this.dirX, dy: this.dirY, fire: true };
   }
 
-  private endAim(): void {
+  private endFire(): void {
     this.input.aimStick = null;
-    this.aimMode = 'pending';
-    this.aimBase.classList.remove('active', 'firing');
-    this.aimBase.style.left = '';
-    this.aimBase.style.top = '';
-    this.aimKnob.style.transform = '';
+    this.pointing = false;
+    this.pad.classList.remove('firing');
+    this.padKnob.style.transform = '';
   }
 
   private sync(): void {
@@ -214,24 +209,29 @@ export class TouchControls {
 
   private wireButton(b: HTMLButtonElement): void {
     const act = b.dataset.act;
-    const hold = act === 'jet' ? BTN_UP : act === 'reload' ? BTN_RELOAD : 0;
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       b.setPointerCapture?.(e.pointerId);
       b.classList.add('down');
       switch (act) {
-        case 'swap':
+        case 'prev':
+          this.input.cycleBy(-1);
+          break;
+        case 'next':
           this.input.cycleBy(1);
           break;
         case 'pick':
-          this.input.pressPickup();
-          break;
-        case 'drop':
-          this.input.pressDrop();
+          // A tap picks up; held, it drops what's in hand instead.
+          clearTimeout(this.dropTimer);
+          this.dropTimer = setTimeout(() => {
+            this.dropTimer = 0;
+            this.input.pressDrop();
+            b.classList.add('on');
+          }, 450) as unknown as number;
           break;
         case 'scope':
-          // In a tank it's the cannon trigger (held); on foot it toggles the scope.
+          // In a tank it's the cannon trigger (held); on foot it toggles the zoom.
           if (this.input.driving) {
             this.held |= BTN_SCOPE;
             this.sync();
@@ -248,19 +248,19 @@ export class TouchControls {
           this.hooks.chat();
           break;
       }
-      if (hold) {
-        this.held |= hold;
-        this.sync();
-      }
     });
     const up = () => {
       b.classList.remove('down');
+      if (act === 'pick') {
+        if (this.dropTimer) {
+          clearTimeout(this.dropTimer);
+          this.dropTimer = 0;
+          this.input.pressPickup();
+        }
+        b.classList.remove('on');
+      }
       if (act === 'scope' && this.held & BTN_SCOPE) {
         this.held &= ~BTN_SCOPE;
-        this.sync();
-      }
-      if (hold) {
-        this.held &= ~hold;
         this.sync();
       }
     };

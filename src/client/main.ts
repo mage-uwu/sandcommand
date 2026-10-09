@@ -32,7 +32,12 @@ const chatInput = $<HTMLInputElement>('chat');
 
 const input = new InputState(canvas);
 const renderer = new Renderer(canvas);
-const touch = new TouchControls(canvas, input, { chat: () => input.onChatKey?.(), overUi: (x, y) => renderer.menuHit(x, y) >= 0 });
+const touch = new TouchControls(canvas, input, {
+  chat: () => input.onChatKey?.(),
+  overUi: (x, y) => (!!game?.building && renderer.menuHit(x, y) >= 0) || (!!game?.calling && renderer.callMenuHit(x, y) >= 0),
+  // Building, the radio menu up, or out of the wave: taps on the right act on the spot touched.
+  pointMode: () => !game || !game.alive || game.building || game.calling,
+});
 let game: Game | null = null;
 let net: Net | null = null;
 

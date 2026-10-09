@@ -35,27 +35,29 @@ body.touch .help:not(.touch-help) { display: none; }
 #touch button small { font-size: 8px; font-weight: bold; margin-top: 2px; color: var(--muted); }
 #touch button.down { background: rgba(255, 194, 61, 0.5); }
 #touch button.on { border-color: var(--accent); color: var(--accent); }
-.tbtns { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: 56px; display: grid; grid-template-columns: repeat(2, 56px); gap: 10px; direction: rtl; }
-.tbtns button { width: 56px; height: 56px; direction: ltr; }
-.tbtns button.big { width: 64px; height: 64px; font-size: 24px; }
-.ttop { position: absolute; top: 96px; left: max(12px, env(safe-area-inset-left)); display: flex; gap: 8px; }
-.ttop button { width: 40px; height: 40px; font-size: 16px; }
-.stick-zone { position: absolute; left: 0; bottom: 0; width: max(200px, 30vw); height: max(220px, 55vh); }
-.stick-base { position: fixed; left: max(84px, calc(env(safe-area-inset-left) + 72px)); top: calc(100vh - 110px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 220, 160, 0.25); background: rgba(20, 16, 12, 0.25); opacity: 0.6; }
+/* Left half: the move stick floats to wherever the thumb lands (resting spot shown bottom-left). */
+.stick-base { position: fixed; left: max(96px, calc(env(safe-area-inset-left) + 84px)); top: calc(100vh - 120px); width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid rgba(255, 220, 160, 0.25); background: rgba(20, 16, 12, 0.22); opacity: 0.5; }
 .stick-base.active { opacity: 1; }
-.stick-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(255, 220, 160, 0.45); }
-.aim-base { position: fixed; left: calc(100vw - max(214px, calc(env(safe-area-inset-right) + 214px))); top: calc(100vh - 120px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px dashed rgba(255, 140, 110, 0.3); background: rgba(20, 16, 12, 0.18); opacity: 0.55; display: grid; place-items: center; }
-.aim-base span { font-size: 9px; font-weight: bold; color: rgba(255, 180, 160, 0.6); letter-spacing: 0.1em; }
-.aim-base.active { opacity: 1; border-style: solid; }
-.aim-base.firing { border-color: rgba(255, 90, 60, 0.85); }
-.aim-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(255, 180, 160, 0.4); }
-.aim-base.firing .aim-knob { background: rgba(255, 90, 60, 0.75); }
+.stick-knob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: rgba(255, 220, 160, 0.45); }
+/* Right half: the fire pad, fixed at the half's centre; touch toward where to shoot. */
+.fire-pad { position: fixed; left: 75vw; top: 60vh; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; border: 2px dashed rgba(255, 140, 110, 0.35); background: rgba(20, 16, 12, 0.16); opacity: 0.6; display: grid; place-items: center; }
+.fire-pad span { font-size: 9px; font-weight: bold; color: rgba(255, 180, 160, 0.6); letter-spacing: 0.12em; }
+.fire-pad.firing { opacity: 1; border-style: solid; border-color: rgba(255, 90, 60, 0.85); }
+.fire-knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255, 180, 160, 0.35); }
+.fire-pad.firing .fire-knob { background: rgba(255, 90, 60, 0.75); }
+/* Three item buttons in a row along the bottom right, the zoom toggle above them. */
+.tbtns { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; gap: 10px; align-items: end; }
+#touch .tbtns button { width: 54px; height: 54px; }
+#touch .tbtns button.big { width: 64px; height: 64px; font-size: 24px; }
+#touch .tzoom { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 76px); width: 56px; height: 56px; }
+.ttop { position: absolute; top: 96px; left: max(12px, env(safe-area-inset-left)); display: flex; gap: 8px; }
+#touch .ttop button { width: 40px; height: 40px; font-size: 16px; }
 @media (max-height: 430px) {
-  .tbtns { grid-template-columns: repeat(2, 48px); gap: 8px; bottom: 48px; }
-  .tbtns button { width: 48px; height: 48px; font-size: 17px; }
-  .tbtns button.big { width: 56px; height: 56px; font-size: 21px; }
+  #touch .tbtns button { width: 46px; height: 46px; font-size: 17px; }
+  #touch .tbtns button.big { width: 54px; height: 54px; font-size: 21px; }
+  #touch .tzoom { width: 48px; height: 48px; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 64px); }
   .ttop { top: 70px; }
-  .aim-base { left: calc(100vw - 190px); top: calc(100vh - 96px); }
+  .fire-pad { width: 108px; height: 108px; margin: -54px 0 0 -54px; }
 }
 @media (orientation: portrait) {
   body.touch #overlay .panel::after { content: 'Tip: turn your phone sideways to play.'; display: block; margin-top: 12px; color: var(--accent); font-size: 12px; }
