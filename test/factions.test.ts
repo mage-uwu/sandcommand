@@ -95,6 +95,7 @@ describe('mercenary vendors (factions)', () => {
     expect(game.body.faction).toBe(a.parts.faction);
     const view = game.remoteViews().find((v) => v.id === b.id);
     expect(view?.faction).toBe(b.parts.faction);
-    expect(game.synthetic(b.id)).toBe(FACTIONS[b.parts.faction].synthetic);
+    // (A spider droid is machine through and through, whoever sold it.)
+    expect(game.synthetic(b.id)).toBe(FACTIONS[b.parts.faction].synthetic || b.parts.cls === ClassId.Droid);
   });
 });

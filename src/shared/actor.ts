@@ -86,7 +86,15 @@ export interface Body {
   downTicks: number;
   /** Carrying Extraction's golden idol: it's heavy (a slower run, a thirstier jetpack). */
   burdened?: boolean;
+  /** A climber (the spider droid) clinging to a wall this tick: -1 on its left, 1 on its right, 0 not. */
+  cling?: number;
 }
+
+/** A climber's (the droid's) climb up a wall it's pushing against (cells/s), and the steps it takes in its stride. */
+export const CLIMB_SPEED = 120;
+const CLIMB_STEP_UP = ACTOR_STEP_UP + 5;
+/** How far a wall can be for a climber to reach over and grab it (holding up). */
+const CLIMB_REACH = 6;
 
 /** What carrying the golden idol costs: run speed and jetpack fuel (thrust is untouched, so anyone can still climb). */
 export const IDOL_BURDEN = { run: 0.8, fuel: 1.5 };
@@ -111,6 +119,7 @@ export function copyBody(dst: Body, src: Body): void {
   dst.faction = src.faction;
   dst.stance = src.stance;
   dst.downTicks = src.downTicks;
+  dst.cling = src.cling;
 }
 
 /** Run speed and jump strength by legs attached (0, 1, 2). */
@@ -133,7 +142,9 @@ function collides(t: Terrain, x: number, y: number, h = ACTOR_H): boolean {
 export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): number {
   // Stance: down crouches; held on the ground it goes prone. Standing back
   // up (or just rising a level) needs the headroom for it.
-  const down = (buttons & BTN_DOWN) !== 0;
+  const base = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
+  // (A droid never crouches or lies down: it's the shape it is.)
+  const down = (buttons & BTN_DOWN) !== 0 && !base.climb;
   b.downTicks = down ? Math.min(PRONE_TICKS, b.downTicks + 1) : 0;
   const want: number = !down ? Stance.Stand : b.onGround && b.downTicks >= PRONE_TICKS ? Stance.Prone : Stance.Crouch;
   if (want > b.stance) b.stance = want;
@@ -153,7 +164,6 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
     }
   }
 
-  const base = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
   const fac = FACTIONS[b.faction] ?? FACTIONS[0];
   const load = b.burdened ? IDOL_BURDEN : NO_BURDEN;
   const cls = { run: base.run * fac.run * load.run, jet: base.jet * fac.jet, fuel: base.fuel * fac.fuel * load.fuel };
@@ -190,7 +200,12 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
   if (b.vy > ACTOR_MAX_FALL) b.vy = ACTOR_MAX_FALL;
   if (b.vy < -ACTOR_MAX_RISE) b.vy = -ACTOR_MAX_RISE;
 
-  // Horizontal sweep in <=1 cell steps, auto-climbing small ledges.
+  // Horizontal sweep in <=1 cell steps, auto-climbing small ledges (a
+  // climber takes bigger ones, and grips on whatever it's touching).
+  const climber = !!base.climb && b.legs > 0;
+  const gripping = b.onGround || (climber && (b.cling ?? 0) !== 0);
+  const stepUp = climber ? CLIMB_STEP_UP : ACTOR_STEP_UP;
+  let blocked = 0;
   let rem = b.vx * dt;
   while (rem !== 0) {
     const step = rem > 1 ? 1 : rem < -1 ? -1 : rem;
@@ -199,8 +214,8 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
       b.x = nx;
     } else {
       let climbed = false;
-      if (b.onGround && b.legs > 0) {
-        for (let s = 1; s <= ACTOR_STEP_UP; s++) {
+      if (gripping && b.legs > 0) {
+        for (let s = 1; s <= stepUp; s++) {
           if (!collides(t, nx, b.y - s, h)) {
             b.x = nx;
             b.y -= s;
@@ -211,10 +226,36 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
       }
       if (!climbed) {
         b.vx = 0;
+        blocked = Math.sign(step);
         break;
       }
     }
     rem -= step;
+  }
+  // A climber pushing into a wall walks straight up it (and clings there,
+  // gravity or not), cresting over the top when its legs reach it.
+  // Holding up (W) with a wall within reach either side does the same: it
+  // steps over to the wall and climbs (up a shaft, say).
+  b.cling = 0;
+  if (climber) {
+    let into = blocked !== 0 ? blocked : dir !== 0 && collides(t, b.x + dir, b.y, h) ? dir : 0;
+    if (into !== dir) into = 0;
+    if (into === 0 && buttons & BTN_UP && !b.onGround) {
+      for (let k = 1; k <= CLIMB_REACH && into === 0; k++) {
+        for (const side of dir !== 0 ? [dir, -dir] : [1, -1]) {
+          if (collides(t, b.x + side * k, b.y, h)) {
+            into = side;
+            // Over to it (as far as it's free to go).
+            for (let m = 1; m < k && !collides(t, b.x + side, b.y, h); m++) b.x += side;
+            break;
+          }
+        }
+      }
+    }
+    if (into !== 0) {
+      b.cling = into;
+      b.vy = -CLIMB_SPEED * (b.legs >= 2 ? 1 : 0.55);
+    }
   }
 
   // Vertical sweep.

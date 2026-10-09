@@ -45,6 +45,8 @@ export interface PartDef {
   flesh: boolean; // wounds also cost the clone HP
   vital: boolean; // losing it kills
   armorOf: number; // base part this armour covers, or -1
+  /** Metal that still counts toward health: HP lost per wound point (a droid's chassis). */
+  hpScale?: number;
   /** Region in hitbox-local cells for a right-facing clone (inclusive). */
   rx0: number;
   ry0: number;
@@ -67,14 +69,65 @@ export const PARTS: readonly PartDef[] = [
   { name: 'crown', integrity: 600, limit: 160, flesh: false, vital: false, armorOf: Part.Head, rx0: 1, ry0: 0, rx1: 6, ry1: 2 },
 ];
 
+/**
+ * The spider droid's parts. A droid uses the same ten part slots (and the
+ * same mask bits on the wire) with its own meanings, so everything that
+ * moves part masks around carries it unchanged: a turret on top (the head's
+ * slot), a chassis (the torso's: vital), armour plating over the chassis
+ * (the jetpack's slot), and six legs, three either side (the arms', legs',
+ * helmet's and vest's slots). All metal, nothing bleeds; the chassis's
+ * wounds are its health (`hpScale`). About a quarter of a tank, all told:
+ * some 120 rifle rounds to the body.
+ */
+export const DroidPart = {
+  Turret: 0,
+  Chassis: 1,
+  /** Back legs (outer to inner), then front legs (inner to outer): a droid facing right walks on L1 at the back, R1 at the front. */
+  L1: 2,
+  L2: 3,
+  L3: 4,
+  R3: 5,
+  R2: 6,
+  R1: 7,
+  Plating: 8,
+} as const;
+export const DROID_LEGS: readonly number[] = [DroidPart.L1, DroidPart.L2, DroidPart.L3, DroidPart.R3, DroidPart.R2, DroidPart.R1];
+const DROID_CHASSIS_LIMIT = 1700;
+export const DROID_PARTS: readonly PartDef[] = [
+  { name: 'turret', integrity: 140, limit: 260, flesh: false, vital: false, armorOf: -1, rx0: 2, ry0: 0, rx1: 5, ry1: 2 },
+  { name: 'chassis', integrity: 120, limit: DROID_CHASSIS_LIMIT, flesh: false, vital: true, armorOf: -1, rx0: 0, ry0: 3, rx1: 7, ry1: 8, hpScale: 100 / DROID_CHASSIS_LIMIT },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 0, ry0: 9, rx1: 0, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 1, ry0: 9, rx1: 2, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 3, ry0: 9, rx1: 3, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 4, ry0: 9, rx1: 4, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 5, ry0: 9, rx1: 6, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 7, ry0: 9, rx1: 7, ry1: 13 },
+  { name: 'plating', integrity: 240, limit: 520, flesh: false, vital: false, armorOf: DroidPart.Chassis, rx0: 0, ry0: 3, rx1: 7, ry1: 8 },
+  { name: '-', integrity: 0, limit: 1, flesh: false, vital: false, armorOf: -1, rx0: -1, ry0: -1, rx1: -1, ry1: -1 },
+];
+/** A droid's full set of parts. */
+export const DROID_MASK = (1 << 9) - 1;
+const DROID_HIT_ORDER = [DroidPart.Turret, ...DROID_LEGS, DroidPart.Chassis];
+
+/** The part table for a class (a droid's are its own). */
+export function partsOf(cls: number): readonly PartDef[] {
+  return cls === ClassId.Droid ? DROID_PARTS : PARTS;
+}
+
+/** A body's full set of parts, for its class (what "nothing missing" looks like). */
+export function fullMask(cls: number): number {
+  return cls === ClassId.Droid ? DROID_MASK : ALL_PARTS;
+}
+
 /** Base parts in hit-test priority order (small/outer regions first). */
 const HIT_ORDER = [Part.Head, Part.GunArm, Part.OffArm, Part.Jetpack, Part.LegF, Part.LegB, Part.Torso];
 /** Standard armour covering each base part (-1 none); the crown goes over the head on top of that. */
 const ARMOR_OVER = new Int8Array(PART_COUNT).fill(-1);
 for (let p = 0; p < PART_COUNT; p++) if (PARTS[p].armorOf >= 0 && p !== Part.Crown) ARMOR_OVER[PARTS[p].armorOf] = p;
 
-/** The armour layer a hit on `part` meets first, if any is on (a crown before a helmet). */
-function armorOn(mask: number, part: number): number {
+/** The armour layer a hit on `part` meets first, if any is on (a crown before a helmet; a droid's plating over its chassis). */
+function armorOn(mask: number, part: number, cls = -1): number {
+  if (cls === ClassId.Droid) return part === DroidPart.Chassis && has(mask, DroidPart.Plating) ? DroidPart.Plating : -1;
   if (part === Part.Head && has(mask, Part.Crown)) return Part.Crown;
   const a = ARMOR_OVER[part];
   return a >= 0 && has(mask, a) ? a : -1;
@@ -85,17 +138,19 @@ export const BLEED_PER_STUMP = 1.2; // HP per second per missing limb
 
 export const has = (mask: number, part: number) => (mask & (1 << part)) !== 0;
 
-/** Which base part is at a hitbox-local point (lx, ly) for a clone facing `left`. */
-export function partAt(mask: number, lx: number, ly: number, left: boolean): number {
+/** Which base part is at a hitbox-local point (lx, ly) for a clone (of class `cls`) facing `left`. */
+export function partAt(mask: number, lx: number, ly: number, left: boolean, cls = -1): number {
   let x = Math.max(0, Math.min(ACTOR_W - 1, Math.floor(lx)));
   const y = Math.max(0, Math.min(ACTOR_H - 1, Math.floor(ly)));
   if (left) x = ACTOR_W - 1 - x;
-  for (const p of HIT_ORDER) {
+  const droid = cls === ClassId.Droid;
+  const defs = droid ? DROID_PARTS : PARTS;
+  for (const p of droid ? DROID_HIT_ORDER : HIT_ORDER) {
     if (!has(mask, p)) continue;
-    const d = PARTS[p];
+    const d = defs[p];
     if (x >= d.rx0 && x <= d.rx1 && y >= d.ry0 && y <= d.ry1) return p;
   }
-  return Part.Torso;
+  return Part.Torso; // (the chassis, for a droid)
 }
 
 /**
@@ -111,6 +166,13 @@ export const ClassId = {
   Scout: 0,
   Medium: 1,
   Heavy: 2,
+  /**
+   * A spider droid: no clone at all, a gunmetal chassis on six tin legs with
+   * one turret on top that takes any gun. Fast, and it climbs almost
+   * anything (walls too); about a quarter of a tank's toughness, every leg
+   * shot off one by one. No jetpack.
+   */
+  Droid: 3,
 } as const;
 
 export interface ClassDef {
@@ -127,17 +189,20 @@ export interface ClassDef {
   fuel: number;
   /** Parts it spawns with. */
   mask: number;
+  /** Climbs walls (anything its legs can reach): the spider droid. */
+  climb?: boolean;
 }
 
 export const CLASSES: readonly ClassDef[] = [
   { name: 'Scout', armor: 0.7, limit: 1, harm: 1, run: 1.12, jet: 1.15, fuel: 0.8, mask: ALL_PARTS & ~(1 << Part.Vest) },
   { name: 'Medium', armor: 1, limit: 1, harm: 1, run: 1, jet: 1, fuel: 1, mask: ALL_PARTS },
   { name: 'Heavy', armor: 3, limit: 2.5, harm: 0.4, run: 0.85, jet: 0.6, fuel: 1.5, mask: ALL_PARTS },
+  { name: 'Droid', armor: 1, limit: 1, harm: 1, run: 1.45, jet: 0, fuel: 1, mask: DROID_MASK, climb: true },
 ];
 
-/** Roll a class for a fresh clone (semi-random: mediums are most common). */
+/** Roll a class for a fresh clone (semi-random: mediums are most common; a droid now and then). */
 export function rollClass(r: number): number {
-  return r < 0.35 ? ClassId.Scout : r < 0.75 ? ClassId.Medium : ClassId.Heavy;
+  return r < 0.33 ? ClassId.Scout : r < 0.71 ? ClassId.Medium : r < 0.93 ? ClassId.Heavy : ClassId.Droid;
 }
 
 export interface BodyState {
@@ -160,13 +225,13 @@ export function resetBody(s: BodyState, cls: number = ClassId.Medium, faction = 
 
 /** A part's integrity for this body's class (armour layers scale with it). */
 function integrityOf(s: BodyState, part: number): number {
-  const d = PARTS[part];
+  const d = partsOf(s.cls)[part];
   return d.flesh ? d.integrity : d.integrity * CLASSES[s.cls].armor * FACTIONS[s.faction].armor;
 }
 
 /** A part's wound limit for this body's class. */
 export function limitOf(s: BodyState, part: number): number {
-  return PARTS[part].limit * CLASSES[s.cls].limit * FACTIONS[s.faction].limit;
+  return partsOf(s.cls)[part].limit * CLASSES[s.cls].limit * FACTIONS[s.faction].limit;
 }
 
 /** Result of one strike: HP lost, parts torn off (in order), whether a vital part went. */
@@ -181,14 +246,16 @@ export function newStrike(): StrikeResult {
 }
 
 function woundLayer(s: BodyState, layer: number, amount: number, out: StrikeResult): void {
+  const d = partsOf(s.cls)[layer];
   s.wounds[layer] += amount;
-  if (PARTS[layer].flesh) out.hp += amount;
+  if (d.flesh) out.hp += amount;
+  else if (d.hpScale) out.hp += amount * d.hpScale;
   if (s.wounds[layer] >= limitOf(s, layer) && has(s.mask, layer)) {
     s.mask &= ~(1 << layer);
     out.detached.push(layer);
-    if (PARTS[layer].vital) out.vital = true;
+    if (d.vital) out.vital = true;
     // A torn-off limb takes its armour with it.
-    for (let armor = armorOn(s.mask, layer); armor >= 0; armor = armorOn(s.mask, layer)) {
+    for (let armor = armorOn(s.mask, layer, s.cls); armor >= 0; armor = armorOn(s.mask, layer, s.cls)) {
       s.mask &= ~(1 << armor);
       out.detached.push(armor);
     }
@@ -200,7 +267,7 @@ function woundLayer(s: BodyState, layer: number, amount: number, out: StrikeResu
  * dealing `wound` points to each layer it gets through. Accumulates into out.
  */
 export function strike(s: BodyState, part: number, energy: number, wound: number, out: StrikeResult): void {
-  const armor = armorOn(s.mask, part);
+  const armor = armorOn(s.mask, part, s.cls);
   const layers = armor >= 0 ? [armor, part] : [part];
   for (const layer of layers) {
     const integ = integrityOf(s, layer);
@@ -219,7 +286,7 @@ export function strike(s: BodyState, part: number, energy: number, wound: number
  */
 export function harm(s: BodyState, part: number, amount: number, out: StrikeResult): void {
   if (!has(s.mask, part) || amount <= 0) return;
-  const armor = armorOn(s.mask, part);
+  const armor = armorOn(s.mask, part, s.cls);
   woundLayer(s, armor >= 0 ? armor : part, amount * CLASSES[s.cls].harm * FACTIONS[s.faction].harm, out);
 }
 
@@ -231,7 +298,17 @@ export interface Mobility {
   oneHanded: boolean;
 }
 
-export function mobility(mask: number, out: Mobility): Mobility {
+export function mobility(mask: number, out: Mobility, cls = -1): Mobility {
+  if (cls === ClassId.Droid) {
+    // Six legs: it scuttles on four or more, limps on two or three, drags itself on fewer.
+    let n = 0;
+    for (const l of DROID_LEGS) if (has(mask, l)) n++;
+    out.legs = n >= 4 ? 2 : n >= 2 ? 1 : 0;
+    out.jet = false;
+    out.canFire = has(mask, DroidPart.Turret);
+    out.oneHanded = false;
+    return out;
+  }
   out.legs = (has(mask, Part.LegB) ? 1 : 0) + (has(mask, Part.LegF) ? 1 : 0);
   out.jet = has(mask, Part.Jetpack);
   out.canFire = has(mask, Part.GunArm);
@@ -239,8 +316,9 @@ export function mobility(mask: number, out: Mobility): Mobility {
   return out;
 }
 
-/** Missing limbs (arms, legs) that bleed. */
-export function stumps(mask: number): number {
+/** Missing limbs (arms, legs) that bleed (a droid's don't). */
+export function stumps(mask: number, cls = -1): number {
+  if (cls === ClassId.Droid) return 0;
   let n = 0;
   for (const p of [Part.GunArm, Part.OffArm, Part.LegB, Part.LegF]) if (!has(mask, p)) n++;
   return n;

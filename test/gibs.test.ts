@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { deliverAll } from './helpers.ts';
 import { Reader } from '../src/shared/codec.ts';
+import { ClassId, resetBody } from '../src/shared/body.ts';
+import { Faction } from '../src/shared/factions.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { PK, type Particles } from '../src/shared/particles.ts';
 
@@ -22,6 +24,11 @@ describe('gibbing', () => {
     watcher.myId = a.id;
     deliverAll(world, [a, b]); // both spawn
     expect(b.alive).toBe(true);
+    // (A clone of flesh and blood: a spider droid scraps into metal, not gibs. droid.test.ts has those.)
+    resetBody(b.parts, ClassId.Medium, Faction.GuildTech);
+    b.body.cls = ClassId.Medium;
+    b.body.faction = Faction.GuildTech;
+    world.step();
     b.gold = 40;
     // Park the watcher next to the victim so the death is on screen.
     a.body.x = b.body.x + 20;

@@ -18,8 +18,8 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
-import { ALL_PARTS, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
 /** Remote actors are rendered this many ticks in the past for smooth interpolation. */
@@ -456,9 +456,9 @@ export class Game implements FrameHandler {
       const last = s[s.length - 1];
       if (!last || !(last.flags & F_ALIVE)) continue;
       if (last.flags & F_JET) jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
-      if (last.parts !== ALL_PARTS) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
+      if (last.parts !== ALL_PARTS && classOfFlags(last.flags) !== ClassId.Droid) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
     }
-    if (this.alive && this.parts !== ALL_PARTS) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
+    if (this.alive && this.parts !== ALL_PARTS && this.body.cls !== ClassId.Droid) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
     if (this.sfx) this.soundBeds(this.sfx);
     // Bodies in the engine so shrapnel stops in them and grains bounce off
     // them on screen too; only the server's results (damage, knockback) count.
@@ -653,7 +653,7 @@ export class Game implements FrameHandler {
     b.onGround = (s.flags & F_GROUND) !== 0;
     b.jetting = (s.flags & F_JET) !== 0;
     // Predict with the body we actually have left (legs, jetpack).
-    mobility(s.parts, this.mob);
+    mobility(s.parts, this.mob, classOfFlags(s.flags));
     b.legs = this.mob.legs;
     b.jet = this.mob.jet;
     b.cls = classOfFlags(s.flags);
@@ -958,8 +958,16 @@ export class Game implements FrameHandler {
 
   /** Is this clone a machine (a Synth Legion body)? Its debris is scrap, not meat. */
   synthetic(id: number): boolean {
+    if (this.isDroid(id)) return true;
     const f = id === this.myId ? this.body.faction : this.snaps.get(id)?.at(-1)?.faction;
     return f !== undefined && !!FACTIONS[f]?.synthetic;
+  }
+
+  /** Is this player a spider droid (body.ts ClassId.Droid)? */
+  isDroid(id: number): boolean {
+    if (id === this.myId) return this.body.cls === ClassId.Droid;
+    const last = this.snaps.get(id)?.at(-1);
+    return !!last && classOfFlags(last.flags) === ClassId.Droid;
   }
 
   /** Is this player a king right now (Regicide)? */
@@ -1146,7 +1154,9 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
-    if (!has(k.parts, Part.Head)) text += ' (headshot)';
+    const droid = this.isDroid(victim);
+    if (droid) text += ' (droid scrapped)';
+    else if (!has(k.parts, Part.Head)) text += ' (headshot)';
     else if (!has(k.parts, Part.Torso)) text += ' (torn apart)';
     const color = victim === this.myId ? '#ff6060' : killer === this.myId ? '#80ff80' : '#e0e0e0';
     this.feed.push({ text, color, at: performance.now(), kill: true });
@@ -1162,7 +1172,8 @@ export class Game implements FrameHandler {
     if (victim !== this.myId && camDx * camDx + camDy * camDy > 1400 * 1400) return;
     const explosive = weapon === ProjKind.Rocket || weapon === ProjKind.Grenade || weapon === ProjKind.Shell || weapon === ProjKind.Bomb || weapon === ProjKind.Engine || weapon === ProjKind.AutoShell || weapon === ProjKind.Landmine || weapon === W_TANK || weapon === W_SHIP;
     const violence = k.overkill / 40 + (explosive ? 1.5 : 0) + (weapon === 255 ? 0.5 : 0);
-    gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
+    if (droid) droidWreck(this.particles, k.x, k.y, k.vx, k.vy, k.parts, violence);
+    else gibBurst(this.particles, k.x, k.y, k.vx, k.vy, this.players.get(victim)?.rgb ?? 0xcccccc, violence, k.parts, this.synthetic(victim));
     this.sfx?.gib(k.x, k.y, violence, this.synthetic(victim));
     // Same seed as the server, so the gold shower matches what will settle.
     spillGold(this.particles, k.x, k.y, k.vx, k.vy, k.gold, new Rng(k.seed));
@@ -1192,7 +1203,9 @@ export class Game implements FrameHandler {
   }
 
   hit(victim: number, x: number, y: number, amount: number): void {
-    bloodSplat(this.particles, x, y, Math.min(24, 3 + amount / 3), 60 + amount * 1.5);
+    // (A droid sparks where it's hit; anything else bleeds.)
+    if (this.isDroid(victim)) droidHit(this.particles, x, y, amount);
+    else bloodSplat(this.particles, x, y, Math.min(24, 3 + amount / 3), 60 + amount * 1.5);
     this.sfx?.hit(x, y, amount, this.synthetic(victim));
     if (victim === this.myId) this.hurtFlash = Math.min(1, this.hurtFlash + amount / 60);
   }
@@ -1415,7 +1428,8 @@ export class Game implements FrameHandler {
   }
 
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void {
-    limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc, this.synthetic(id));
+    if (this.isDroid(id)) droidPartOff(this.particles, part, x, y, vx, vy);
+    else limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc, this.synthetic(id));
     this.sfx?.limb(x, y, this.synthetic(id));
     if (id === this.myId) this.hurtFlash = 1;
   }

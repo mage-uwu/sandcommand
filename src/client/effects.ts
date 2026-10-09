@@ -23,6 +23,10 @@ export const GIB_MEAT = [7, 8, 9];
 export const GIB_HEAD = 10;
 export const GIB_VEST = 11;
 export const GIB_CROWN = 16;
+/** The spider droid's scrap: a leg strut, its turret dome, a chassis plate. */
+export const GIB_DROID_LEG = 17;
+export const GIB_DROID_TURRET = 18;
+export const GIB_DROID_PLATE = 19;
 
 const rnd = (a: number, b: number) => a + (b - a) * Math.random();
 
@@ -415,4 +419,52 @@ export function engineExhaust(p: Particles, x: number, y: number, vx: number, vy
 export function shipDownwash(p: Particles, x: number, y: number, vx: number, vy: number, thrust: number): void {
   if (Math.random() < thrust) p.spawn(PK.Flame, x + rnd(-1.5, 1.5), y, vx * 0.5 + rnd(-15, 15), vy * 0.5 + rnd(120, 220) * thrust, rnd(3, 6));
   if (Math.random() < thrust * 0.4) p.spawn(PK.Smoke, x + rnd(-3, 3), y + 4, vx * 0.3 + rnd(-30, 30), rnd(60, 140), rnd(20, 40));
+}
+
+/** A droid's metal scrap flying: spinning, bouncing, no blood. */
+function droidScrap(p: Particles, piece: number, x: number, y: number, vx: number, vy: number): void {
+  const i = p.n;
+  if (!p.spawn(PK.Gib, x, y, vx, vy, rnd(600, 750), piece | GIB_INORGANIC, 0x808080)) return;
+  p.spin[i] = Math.floor(Math.random() * 4);
+  p.spinRate[i] = (Math.random() - 0.5) * 0.2;
+}
+
+/**
+ * A spider droid's part shot off (droid part ids, body.ts DroidPart): a leg
+ * goes spinning as a bent strut, the turret as its dome, the plating as a
+ * plate; sparks and a puff of smoke, no blood.
+ */
+export function droidPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number): void {
+  const piece = part === 0 ? GIB_DROID_TURRET : part === 8 || part === 1 ? GIB_DROID_PLATE : GIB_DROID_LEG;
+  droidScrap(p, piece, x, y, vx, vy);
+  burst(p, PK.Spark, x, y, 12, 200, 12);
+  burst(p, PK.Smoke, x, y, 5, 40, 50);
+}
+
+/**
+ * A spider droid destroyed: whatever was still on it flies apart as scrap
+ * (legs, turret, plates) in a burst of sparks, a little fire and smoke.
+ */
+export function droidWreck(p: Particles, cx: number, cy: number, vx: number, vy: number, parts: number, violence: number): void {
+  const v = Math.min(2.4, 1 + violence * 0.5);
+  const fling = (piece: number, speed: number) => {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
+    const s = speed * (0.5 + Math.random() * 0.7) * v;
+    droidScrap(p, piece, cx + rnd(-4, 4), cy + rnd(-3, 3), vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 40);
+  };
+  for (let leg = 2; leg <= 7; leg++) if (has(parts, leg)) fling(GIB_DROID_LEG, 120);
+  if (has(parts, 0)) fling(GIB_DROID_TURRET, 90);
+  fling(GIB_DROID_PLATE, 80);
+  fling(GIB_DROID_PLATE, 80);
+  if (has(parts, 8)) fling(GIB_DROID_PLATE, 100);
+  p.blast(cx, cy, 30, 160);
+  burst(p, PK.Spark, cx, cy, 26, 260, 14);
+  burst(p, PK.Flame, cx, cy, 8, 90, 10, 0, vx * 0.3, vy * 0.3);
+  burst(p, PK.Smoke, cx, cy, 14, 50, 70);
+}
+
+/** A droid hit: sparks off its armour (more for a harder hit), and a wisp of smoke. */
+export function droidHit(p: Particles, x: number, y: number, amount: number): void {
+  burst(p, PK.Spark, x, y, Math.min(18, 4 + Math.round(amount / 2)), 160 + amount * 2, 10);
+  burst(p, PK.Smoke, x, y, 2, 30, 40);
 }

@@ -83,6 +83,8 @@ import {
   type Mobility,
   PART_COUNT,
   Part,
+  DROID_LEGS,
+  DroidPart,
   type StrikeResult,
   harm,
   has,
@@ -1452,7 +1454,7 @@ export class World {
   private partHit(p: Player, lx: number, ly: number): number {
     const st = p.body.stance;
     const left = this.facingLeft(p);
-    if (p.tank >= 0 || st === Stance.Stand) return partAt(p.parts.mask, lx, ly, left);
+    if (p.tank >= 0 || st === Stance.Stand) return partAt(p.parts.mask, lx, ly, left, p.parts.cls);
     if (st === Stance.Crouch) return partAt(p.parts.mask, lx, (ly * ACTOR_H) / STANCE_H[st], left);
     const along = left ? lx : ACTOR_W - lx; // 0 at the head
     return partAt(p.parts.mask, ACTOR_W / 2, (along * ACTOR_H) / ACTOR_W, left);
@@ -1486,7 +1488,7 @@ export class World {
         w.i16(clampI16((b.vy - (dy / d) * 90 - this.rng.range(60, 140)) * VEL_SCALE));
         this.hits.push({ bytes: w.finish(), id: 0, x: hx, y: hy });
       }
-      mobility(p.parts.mask, p.mob);
+      mobility(p.parts.mask, p.mob, p.parts.cls);
       b.legs = p.mob.legs;
       b.jet = p.mob.jet;
     }
@@ -1611,7 +1613,7 @@ export class World {
       if (!this.friendly(owner, v)) {
         strike(v.parts, part, energy, def.damage, res);
         // A heavy solid shot: the shock wrenches every part, so limbs come off.
-        if (def.shatter) for (let q = 0; q < PART_COUNT; q++) if (q !== part && PARTS_BASE[q] && has(v.parts.mask, q)) harm(v.parts, q, def.shatter * SPLASH_SHARE[q], res);
+        if (def.shatter) for (let q = 0; q < PART_COUNT; q++) if (q !== part && shareOf(v.parts.cls)[q] > 0 && has(v.parts.mask, q)) harm(v.parts, q, def.shatter * shareOf(v.parts.cls)[q], res);
       }
       const knock = (def.mass * (def.knock ?? 1)) / 8;
       v.body.vx += rvx * knock;
@@ -1649,7 +1651,7 @@ export class World {
             res.detached.length = 0;
             res.vital = false;
             for (let part = 0; part < PART_COUNT; part++) {
-              if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+              if (shareOf(p.parts.cls)[part] > 0 && has(p.parts.mask, part)) harm(p.parts, part, amt * shareOf(p.parts.cls)[part], res);
             }
             this.applyStrike(p, res, owner, kind, x + (dx / (d + 1)) * Math.min(d, 6), y + (dy / (d + 1)) * Math.min(d, 6));
           }
@@ -2134,7 +2136,7 @@ export class World {
     t.hp = Math.min(ACTOR_MAX_HP, t.hp + REPAIR_HP);
     const parts = t.parts;
     for (let part = 0; part < PART_COUNT; part++) if (has(parts.mask, part)) parts.wounds[part] = Math.max(0, parts.wounds[part] - REPAIR_WOUND);
-    const missing = REGROWABLE.find((part) => !has(parts.mask, part));
+    const missing = (parts.cls === ClassId.Droid ? DROID_REGROWABLE : REGROWABLE).find((part) => !has(parts.mask, part));
     if (missing === undefined || t.hp < ACTOR_MAX_HP * 0.6) {
       t.regrow = 0;
       return;
@@ -2143,7 +2145,7 @@ export class World {
     t.regrow = 0;
     parts.mask |= 1 << missing;
     parts.wounds[missing] = 0;
-    mobility(parts.mask, t.mob);
+    mobility(parts.mask, t.mob, parts.cls);
     t.body.legs = t.mob.legs;
     t.body.jet = t.mob.jet;
   }
@@ -2180,7 +2182,7 @@ export class World {
     resetBody(p.parts, rollClass(this.rng.next()), rollFaction(this.rng.next()));
     b.cls = p.parts.cls;
     b.faction = p.parts.faction;
-    mobility(p.parts.mask, p.mob);
+    mobility(p.parts.mask, p.mob, p.parts.cls);
     b.legs = p.mob.legs;
     b.jet = p.mob.jet;
     p.lastHitBy = 255;
@@ -2454,7 +2456,7 @@ export class World {
         res.vital = false;
         const amt = 60 * (1 - d / 36);
         for (let part = 0; part < PART_COUNT; part++) {
-          if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+          if (shareOf(p.parts.cls)[part] > 0 && has(p.parts.mask, part)) harm(p.parts, part, amt * shareOf(p.parts.cls)[part], res);
         }
         this.applyStrike(p, res, owner === NO_OWNER ? p.id : owner, W_CRAFT, cx, cy);
       }
@@ -2875,7 +2877,7 @@ export class World {
       res.vital = false;
       const amt = 80 * (1 - d / 48);
       for (let part = 0; part < PART_COUNT; part++) {
-        if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+        if (shareOf(p.parts.cls)[part] > 0 && has(p.parts.mask, part)) harm(p.parts, part, amt * shareOf(p.parts.cls)[part], res);
       }
       this.applyStrike(p, res, owner === NO_OWNER ? p.id : owner, W_TANK, cx, cy);
     }
@@ -3633,7 +3635,7 @@ export class World {
       res.vital = false;
       const amt = (90 + sh.bombs * 15) * (1 - d / r);
       for (let part = 0; part < PART_COUNT; part++) {
-        if (PARTS_BASE[part] && has(p.parts.mask, part)) harm(p.parts, part, amt * SPLASH_SHARE[part], res);
+        if (shareOf(p.parts.cls)[part] > 0 && has(p.parts.mask, part)) harm(p.parts, part, amt * shareOf(p.parts.cls)[part], res);
       }
       this.applyStrike(p, res, owner === NO_OWNER ? p.id : owner, W_SHIP, cx, cy);
     }
@@ -3717,7 +3719,7 @@ export class World {
       }
       if (p.body.y > WORLD_H) this.damage(p, 999, p.id, 255);
       // Open stumps bleed (machines' just spark); bleeding out credits whoever did it.
-      const n = FACTIONS[p.parts.faction].bleeds ? stumps(p.parts.mask) : 0;
+      const n = FACTIONS[p.parts.faction].bleeds ? stumps(p.parts.mask, p.parts.cls) : 0;
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
       if (p.pilot >= 0) {
@@ -4417,8 +4419,17 @@ const LASER_VEHICLES_ONLY = -2;
 const RECOIL_BRACE = [1, 0.55, 0.3];
 /** What nanobots can grow back, in order. */
 const REGROWABLE = [Part.GunArm, Part.OffArm, Part.LegF, Part.LegB, Part.Jetpack];
-const PARTS_BASE = [true, true, true, true, true, true, false, false, true, false];
+/** ...for a droid: its legs, then its plating (its nanobots weld them back on). */
+const DROID_REGROWABLE = [...DROID_LEGS, DroidPart.Plating];
+/**
+ * How a blast (or a heavy shot's shock) spreads over a body: each base
+ * part's share (armour takes its part's, being struck first); 0 for armour
+ * slots and empty ones.
+ */
 const SPLASH_SHARE = [0.45, 0.55, 0.6, 0.6, 0.6, 0.6, 0, 0, 0.5, 0];
+/** A droid's: the turret and chassis, and each of six legs a smaller share (and the plating none: it's armour). */
+const DROID_SPLASH_SHARE = [0.35, 0.6, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0, 0];
+const shareOf = (cls: number) => (cls === ClassId.Droid ? DROID_SPLASH_SHARE : SPLASH_SHARE);
 
 function clampU16(v: number): number {
   return Math.max(0, Math.min(65535, Math.round(v)));

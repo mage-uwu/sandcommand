@@ -953,15 +953,45 @@ hard landings don't need to penetrate: they go into the outermost layer
 | Shrapnel (0.5 × 0.85 × ~460–760) | ~200–320 | Bullet-grade: through a helmet or vest, 12 wounds a layer. A grenade throws 56 fragments, a rocket 36, as tracers |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
 
-**Classes.** Every clone rolls one at spawn (35% scout, 40% medium, 25%
-heavy), shown on the sprite and in the HUD:
+**Classes.** Every clone rolls one at spawn (33% scout, 38% medium, 22%
+heavy, 7% droid), shown on the sprite and in the HUD:
 
 | Class | Armour | Jetpack | Run |
 | --- | --- | --- | --- |
 | Scout | green army helmet, no vest; armour 0.7× as hard | 1.15× thrust, 0.8× fuel use | 1.12× |
 | Medium | helmet and vest (the standard clone) | 1× | 1× |
 | Heavy | metal plate over everything: armour 3× as hard, every part takes 2.5× the wounds, blasts, fire and falls do 0.4× | 0.6× thrust (it still lifts, slowly), 1.5× fuel use | 0.85× |
+| Droid | no clone at all (see below): about a quarter of a tank | none: it climbs instead | 1.45× |
 
+**The spider droid** (`ClassId.Droid`) is a body class of its own, not
+anthropomorphic: a squat gunmetal chassis slung between **six tin legs**,
+three either side, with **one turret on top** that takes **any gun** (it
+carries, picks up, switches and reloads like any clone).
+
+- **Its parts** (`DROID_PARTS` in `src/shared/body.ts`). It reuses the
+  ten part slots, and the same mask bits on the wire, with its own
+  meanings, so nothing that carries part masks had to change:
+  - the turret (the head's slot): shoot it off and it can't fire;
+  - the chassis (the torso's): vital, and its wounds are the droid's HP;
+  - armour plating over the chassis;
+  - six legs (the arms', legs', helmet's and vest's slots).
+- **Legs.** Each leg is durable (170 wounds) and comes off on its own as a
+  spinning tin strut, in sparks, not blood. On four legs or more it
+  scuttles, on two or three it limps, on fewer it drags itself.
+- **Toughness.** All told it's about **a quarter of a tank**: some 120
+  rifle rounds to the body (117 is a quarter of a tank's hull). Killed,
+  it's scrapped into flying legs, plates and its turret dome.
+- **Movement.** Fast (1.45×, faster than a scout) and **extremely flexible
+  on steep terrain**. It takes big steps in its stride, and pushing
+  against a wall, or holding **W** with one within reach either side
+  (up a shaft, say), it walks straight up it and over the top (`CLIMB_SPEED`
+  in the shared `stepBody`, so prediction stays exact). It has no jetpack,
+  and it never crouches or lies down.
+- **Its look.** Drawn procedurally, walking on a tripod gait keyed to the
+  distance it covers (so its feet don't skate), with legs dangling in the
+  air. It has a running light in its owner's colour and a red sensor eye.
+  Lost legs leave sparking sockets, and with its plating gone the chassis
+  shows scorched. The HUD's paper doll becomes the droid's own.
 A rifle round stops at a heavy's plate, two shots to a medium's head kill,
 and shrapnel goes straight through a scout's helmet. Class rides in two
 spare bits of the actor flags, and movement scaling lives in the shared

@@ -13,7 +13,7 @@ import type { RoundState } from '../shared/frame.ts';
 import { bannerLines, layoutSub } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Net } from './net.ts';
-import { PARTS, Part, has } from '../shared/body.ts';
+import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
@@ -841,6 +841,118 @@ export class Renderer {
     this.backdrop.draw(ctx, W, H, 2048 + now / 60, camY, z, now);
   }
 
+  /**
+   * A spider droid: a squat gunmetal chassis slung between six tin legs,
+   * three fanned out behind and three in front, a domed turret on top (the
+   * gun goes on it, drawn with the clones' guns). It walks on a tripod gait
+   * (alternate legs lift and swing) keyed to the distance it has covered, so
+   * its feet don't skate; in the air the legs hang. Legs shot off leave
+   * sparking sockets; with its plating gone the chassis shows scorched.
+   */
+  private drawDroid(ctx: CanvasRenderingContext2D, x: number, y: number, left: boolean, grounded: boolean, parts: number, team: number, moving: boolean, now: number): void {
+    // Droid-local (as facing right, from the hitbox's top-left) to world.
+    const X = (dx: number) => (left ? x + ACTOR_W - dx : x + dx);
+    const Y = (dy: number) => y + dy;
+    const GUN = '#4d5359';
+    const GUN_DK = '#30353a';
+    const TIN = '#b9bfc4';
+    const TIN_DK = '#7d858c';
+    const K = '#121518';
+    // Legs first (behind the chassis): hips along its belly, knees up and out, feet on the ground.
+    const stride = 7;
+    const phase = ((left ? -x : x) / stride) * Math.PI * 2;
+    const legs: [part: number, hip: number, side: number, i: number][] = [
+      [DroidPart.L1, 0.4, -1, 2],
+      [DroidPart.L2, 1.8, -1, 1],
+      [DroidPart.L3, 3.1, -1, 0],
+      [DroidPart.R3, 4.9, 1, 0],
+      [DroidPart.R2, 6.2, 1, 1],
+      [DroidPart.R1, 7.6, 1, 2],
+    ];
+    ctx.lineCap = 'round';
+    for (const [part, hip, side, i] of legs) {
+      const hx = hip;
+      const hy = 7.6;
+      if (!has(parts, part)) {
+        // A sparking socket where the leg was.
+        ctx.fillStyle = K;
+        ctx.fillRect(X(hx) - 0.6, Y(hy) - 0.4, 1.2, 1.2);
+        if ((now / 90 + part) % 4 < 1) {
+          ctx.fillStyle = '#ffd060';
+          ctx.fillRect(X(hx + side * 0.8) - 0.4, Y(hy + 0.8), 0.8, 0.8);
+        }
+        continue;
+      }
+      // Tripod gait: legs alternate between two groups, half a cycle apart.
+      const group = (part + (side > 0 ? 1 : 0)) & 1;
+      const ph = phase + group * Math.PI;
+      const swing = moving && grounded ? Math.sin(ph) * 1.6 : 0;
+      const lift = moving && grounded ? Math.max(0, Math.cos(ph)) * 1.6 : 0;
+      const reach = 3.6 + i * 1.7;
+      let fx = hx + side * reach + swing;
+      let fy = grounded ? ACTOR_H - lift : ACTOR_H - 1 + i * 0.4;
+      if (!grounded) fx = hx + side * (2.6 + i * 1.2); // dangling
+      const kx = hx + side * (1.8 + i * 0.9) + swing * 0.4;
+      const ky = hy - 3.4 + (grounded ? 0 : 1.6) - lift * 0.3;
+      // Outline, then the tin strut, then joints.
+      for (const [w, col] of [
+        [1.9, K],
+        [1.05, i === 1 ? TIN : TIN_DK],
+      ] as const) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = w;
+        ctx.beginPath();
+        ctx.moveTo(X(hx), Y(hy));
+        ctx.lineTo(X(kx), Y(ky));
+        ctx.lineTo(X(fx), Y(fy));
+        ctx.stroke();
+      }
+      ctx.fillStyle = TIN;
+      ctx.fillRect(X(kx) - 0.5, Y(ky) - 0.5, 1, 1);
+      fy += 0;
+      ctx.fillStyle = K;
+      ctx.fillRect(X(fx) - 0.5, Y(fy) - 0.6, 1, 0.8);
+    }
+    ctx.lineCap = 'butt';
+    // The chassis: a squat armoured pod, wider than it is tall.
+    const plated = has(parts, DroidPart.Plating);
+    const x0 = Math.min(X(-1.5), X(9.5));
+    const cy0 = Y(4);
+    ctx.fillStyle = K;
+    ctx.fillRect(x0, cy0, 11, 5.5);
+    ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 7);
+    ctx.fillStyle = plated ? GUN : '#3a3530';
+    ctx.fillRect(x0 + 1, cy0 + 0.4, 9, 4.4);
+    ctx.fillStyle = plated ? GUN_DK : '#251f1a';
+    ctx.fillRect(x0 + 1, cy0 + 3.6, 9, 1.2);
+    // Tin trim along the top, rivets; the plating gone, scorched seams instead.
+    ctx.fillStyle = plated ? TIN : '#5a4a3a';
+    ctx.fillRect(x0 + 1.5, cy0 + 0.4, 8, 0.7);
+    ctx.fillStyle = K;
+    for (const rx of [2.5, 5, 7.5]) ctx.fillRect(x0 + rx, cy0 + 2.2, 0.6, 0.6);
+    if (!plated && (now / 110) % 5 < 1) {
+      ctx.fillStyle = '#ffb040';
+      ctx.fillRect(x0 + 2 + ((now / 50) % 7), cy0 + 2, 0.8, 0.8);
+    }
+    // Its owner's colour on a running light at the front, and a red sensor eye.
+    ctx.fillStyle = `#${team.toString(16).padStart(6, '0')}`;
+    ctx.fillRect(X(7.6) - 0.7, Y(5.6), 1.4, 0.9);
+    ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
+    ctx.fillRect(X(9) - 0.6, Y(6.4), 1.2, 1);
+    // The turret: a dome on top (the gun pivots in its base).
+    if (has(parts, DroidPart.Turret)) {
+      const tx = X(4) - 3;
+      ctx.fillStyle = K;
+      ctx.fillRect(tx - 0.5, Y(1.2), 7, 3.4);
+      ctx.fillRect(tx + 0.5, Y(0.4), 5, 1.2);
+      ctx.fillStyle = GUN;
+      ctx.fillRect(tx + 0.3, Y(1.8), 5.4, 2.4);
+      ctx.fillRect(tx + 1.2, Y(1), 3.6, 1.2);
+      ctx.fillStyle = TIN;
+      ctx.fillRect(tx + 1.2, Y(1.2), 2, 0.6);
+    }
+  }
+
   private drawActor(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -861,9 +973,16 @@ export class Renderer {
     const face = left ? -1 : 1;
     const ix = Math.round(x);
     const iy = Math.round(y);
+    // A spider droid: no clone at all (its chassis, legs and turret are drawn whole; the gun goes on the turret below).
+    const droid = classOfFlags(flags) === ClassId.Droid;
+    if (droid) {
+      this.drawDroid(ctx, x, y, left, (flags & F_GROUND) !== 0, parts, team, moving, now);
+      lean = 0;
+      stance = Stance.Stand;
+    }
     // Walk cycle advances with distance travelled, so feet don't skate.
     const frame: BodyFrame = !(flags & F_GROUND) ? 'air' : moving ? WALK_CYCLE[Math.floor(ix / (stance === Stance.Stand ? 3 : 2)) & 3] : 'idle';
-    const sprite = this.sprites.body(team, frame, left, parts, classOfFlags(flags), faction);
+    const sprite = droid ? null : this.sprites.body(team, frame, left, parts, classOfFlags(flags), faction);
     // The torso pivots at the hip (leaning with the stance and the ragdoll
     // sway); crouched, the legs fold under it; prone, the whole clone lies down.
     const hipX = ix + HIP_X + 0.5;
@@ -873,24 +992,26 @@ export class Renderer {
     const sin = Math.sin(a);
     // A point given relative to the hip in the standing pose, posed.
     const posed = (dx: number, dy: number) => [hipX + dx * cos - dy * sin, hipY + dx * sin + dy * cos];
-    if (stance === Stance.Prone) {
+    if (droid) {
+      // (Drawn above.)
+    } else if (stance === Stance.Prone) {
       ctx.save();
       ctx.translate(hipX, hipY);
       ctx.rotate(a);
-      ctx.drawImage(sprite, -5.5, -11);
+      ctx.drawImage(sprite!, -5.5, -11);
       ctx.restore();
     } else {
       const legH = stance === Stance.Crouch ? 3 : 5;
-      ctx.drawImage(sprite, 0, 11, 10, 5, ix - 1, iy + ACTOR_H - legH, 10, legH);
+      ctx.drawImage(sprite!, 0, 11, 10, 5, ix - 1, iy + ACTOR_H - legH, 10, legH);
       ctx.save();
       ctx.translate(hipX, hipY);
       ctx.rotate(a);
-      ctx.drawImage(sprite, 0, 0, 10, 11, -5.5, -11, 10, 11);
+      ctx.drawImage(sprite!, 0, 0, 10, 11, -5.5, -11, 10, 11);
       ctx.restore();
     }
 
     // A king wears the crown on the head.
-    if (has(parts, Part.Crown)) {
+    if (!droid && has(parts, Part.Crown)) {
       ctx.save();
       ctx.translate(hipX, hipY);
       ctx.rotate(a);
@@ -899,7 +1020,7 @@ export class Renderer {
     }
 
     // Jetpack exhaust under the pack (pack is on the clone's back).
-    if (flags & F_JET && has(parts, Part.Jetpack)) {
+    if (!droid && flags & F_JET && has(parts, Part.Jetpack)) {
       const [px, py] = posed(left ? 2.5 : -4.5, -1);
       const fx = Math.round(px);
       const fy = Math.round(py) - 9;
@@ -917,8 +1038,18 @@ export class Renderer {
     const [psx, psy] = posed(SHOULDER_X - HIP_X - 0.5, SHOULDER_Y - HIP_Y);
     const sx = Math.round(psx);
     const sy = Math.round(psy);
-    if (!has(parts, Part.GunArm)) {
-      // Arm (and the gun with it) gone: a bloody stump at the shoulder.
+    if (droid ? !has(parts, DroidPart.Turret) : !has(parts, Part.GunArm)) {
+      // Arm (and the gun with it) gone: a bloody stump at the shoulder. A
+      // droid's turret shot off: a sparking socket.
+      if (droid) {
+        ctx.fillStyle = '#1c2024';
+        ctx.fillRect(sx - 2, sy - 1, 4, 2);
+        if ((now / 70) % 3 < 1) {
+          ctx.fillStyle = '#ffe080';
+          ctx.fillRect(sx + Math.round(Math.sin(now / 37) * 2), sy - 2, 1, 1);
+        }
+        return;
+      }
       ctx.fillStyle = '#a01818';
       ctx.fillRect(left ? sx - 1 : sx, sy, 2, 2);
       return;
@@ -1677,10 +1808,26 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(ox - 3 * s, oy - 3 * s, 8 * k + 6 * s, 14 * k + 6 * s);
     const col = (hp: number) => (hp <= 0 ? 'rgba(60,20,20,0.9)' : `hsl(${Math.round((hp / 100) * 120)},70%,45%)`);
+    const droid = game.body.cls === ClassId.Droid;
+    const defs = droid ? DROID_PARTS : PARTS;
     const rect = (p: number) => {
-      const d = PARTS[p];
+      const d = defs[p];
       ctx.fillRect(ox + d.rx0 * k, oy + d.ry0 * k, (d.rx1 - d.rx0 + 1) * k, (d.ry1 - d.ry0 + 1) * k);
     };
+    if (droid) {
+      // A droid's own doll: chassis (its plating outlined), turret on top, six legs beneath.
+      for (const p of [DroidPart.Chassis, DroidPart.Turret, ...DROID_LEGS]) {
+        ctx.fillStyle = col(game.partHp[p]);
+        rect(p);
+      }
+      if (game.partHp[DroidPart.Plating] > 0) {
+        ctx.lineWidth = Math.max(1, s);
+        ctx.strokeStyle = col(game.partHp[DroidPart.Plating]);
+        const d = DROID_PARTS[DroidPart.Plating];
+        ctx.strokeRect(ox + d.rx0 * k + 0.5, oy + d.ry0 * k + 0.5, (d.rx1 - d.rx0 + 1) * k - 1, (d.ry1 - d.ry0 + 1) * k - 1);
+      }
+      return;
+    }
     for (const p of [Part.Torso, Part.Jetpack, Part.OffArm, Part.LegB, Part.LegF, Part.Head, Part.GunArm]) {
       ctx.fillStyle = col(game.partHp[p]);
       rect(p);

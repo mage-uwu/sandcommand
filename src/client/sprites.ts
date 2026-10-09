@@ -375,6 +375,9 @@ const GIBS: Grid[] = [
   ['KGK', 'GGK', 'GK.'], // rocket fin
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
   ['Y.Y.Y', 'YYYYY', 'yYrYy'], // a king's crown, knocked off
+  ['KLH.', '.KLH', '..KH', '..KL'], // a droid's leg: a bent tin strut
+  ['.KMMK.', 'KGMMGK', 'KMMMMK'], // a droid's turret dome
+  ['KGGGK', 'GMMMG', 'KGGGK'], // a droid's chassis plate
 ];
 
 /**
