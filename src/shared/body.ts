@@ -94,15 +94,17 @@ export const DroidPart = {
 export const DROID_LEGS: readonly number[] = [DroidPart.L1, DroidPart.L2, DroidPart.L3, DroidPart.R3, DroidPart.R2, DroidPart.R1];
 const DROID_CHASSIS_LIMIT = 1700;
 export const DROID_PARTS: readonly PartDef[] = [
-  { name: 'turret', integrity: 140, limit: 260, flesh: false, vital: false, armorOf: -1, rx0: 2, ry0: 0, rx1: 5, ry1: 2 },
-  { name: 'chassis', integrity: 120, limit: DROID_CHASSIS_LIMIT, flesh: false, vital: true, armorOf: -1, rx0: 0, ry0: 3, rx1: 7, ry1: 8, hpScale: 100 / DROID_CHASSIS_LIMIT },
-  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 0, ry0: 9, rx1: 0, ry1: 13 },
-  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 1, ry0: 9, rx1: 2, ry1: 13 },
-  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 3, ry0: 9, rx1: 3, ry1: 13 },
-  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 4, ry0: 9, rx1: 4, ry1: 13 },
-  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 5, ry0: 9, rx1: 6, ry1: 13 },
-  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 7, ry0: 9, rx1: 7, ry1: 13 },
-  { name: 'plating', integrity: 240, limit: 520, flesh: false, vital: false, armorOf: DroidPart.Chassis, rx0: 0, ry0: 3, rx1: 7, ry1: 8 },
+  // The head: the turret up on its neck, the gun its face.
+  { name: 'turret', integrity: 140, limit: 260, flesh: false, vital: false, armorOf: -1, rx0: 1, ry0: 0, rx1: 6, ry1: 4 },
+  // The chassis, slung low (with the neck up to the head).
+  { name: 'chassis', integrity: 120, limit: DROID_CHASSIS_LIMIT, flesh: false, vital: true, armorOf: -1, rx0: 0, ry0: 5, rx1: 7, ry1: 10, hpScale: 100 / DROID_CHASSIS_LIMIT },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 0, ry0: 11, rx1: 0, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 1, ry0: 11, rx1: 2, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 3, ry0: 11, rx1: 3, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 4, ry0: 11, rx1: 4, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 5, ry0: 11, rx1: 6, ry1: 13 },
+  { name: 'leg', integrity: 110, limit: 170, flesh: false, vital: false, armorOf: -1, rx0: 7, ry0: 11, rx1: 7, ry1: 13 },
+  { name: 'plating', integrity: 240, limit: 520, flesh: false, vital: false, armorOf: DroidPart.Chassis, rx0: 0, ry0: 5, rx1: 7, ry1: 10 },
   { name: '-', integrity: 0, limit: 1, flesh: false, vital: false, armorOf: -1, rx0: -1, ry0: -1, rx1: -1, ry1: -1 },
 ];
 /** A droid's full set of parts. */

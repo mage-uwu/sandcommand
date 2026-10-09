@@ -871,7 +871,7 @@ export class Renderer {
     ];
     for (const [part, hip, side, i] of legs) {
       const hx = hip;
-      const hy = 7.6;
+      const hy = 10.4;
       if (!has(parts, part)) {
         // A sparking socket where the leg was.
         ctx.fillStyle = K;
@@ -894,7 +894,7 @@ export class Renderer {
       const fy = grounded ? ACTOR_H - lift : ACTOR_H - 1 + i * 0.5;
       if (!grounded) fx = hx + side * (3 + i * 1.3); // dangling
       const kx = hx + side * (reach * 0.62) + swing * 0.6;
-      const ky = grounded ? hy - 6 - i * 0.7 - lift * 0.5 : hy - 3.2 - i * 0.3;
+      const ky = grounded ? hy - 5.4 - i * 0.8 - lift * 0.5 : hy - 3 - i * 0.3;
       // Tapered struts as hard-edged polygons: thick at the hip, a point at the foot.
       const strut = (ax: number, ay: number, bx: number, by: number, wa: number, wb: number) => {
         const x1 = X(ax);
@@ -932,42 +932,57 @@ export class Renderer {
       ctx.fill();
     }
     ctx.miterLimit = 10; // (back to the canvas defaults)
-    // The chassis: a squat armoured pod, wider than it is tall.
+    // The chassis: a squat armoured pod slung low between the legs, wider
+    // than it is tall; the head (the turret, with the gun) stands up above it
+    // on a neck, so the gun is its face. (The gun pivots at the shoulder
+    // point, where the shots leave: the head is built round it.)
     const plated = has(parts, DroidPart.Plating);
     const x0 = Math.min(X(-1.5), X(9.5));
-    const cy0 = Y(4);
+    const cy0 = Y(7.2);
     ctx.fillStyle = K;
-    ctx.fillRect(x0, cy0, 11, 5.5);
-    ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 7);
+    ctx.fillRect(x0, cy0, 11, 4.6);
+    ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 6.2);
     ctx.fillStyle = plated ? GUN : '#3a3530';
-    ctx.fillRect(x0 + 1, cy0 + 0.4, 9, 4.4);
+    ctx.fillRect(x0 + 1, cy0 + 0.4, 9, 3.6);
     ctx.fillStyle = plated ? GUN_DK : '#251f1a';
-    ctx.fillRect(x0 + 1, cy0 + 3.6, 9, 1.2);
+    ctx.fillRect(x0 + 1, cy0 + 2.9, 9, 1.1);
     // Tin trim along the top, rivets; the plating gone, scorched seams instead.
     ctx.fillStyle = plated ? TIN : '#5a4a3a';
     ctx.fillRect(x0 + 1.5, cy0 + 0.4, 8, 0.7);
     ctx.fillStyle = K;
-    for (const rx of [2.5, 5, 7.5]) ctx.fillRect(x0 + rx, cy0 + 2.2, 0.6, 0.6);
+    for (const rx of [2.5, 7.5]) ctx.fillRect(x0 + rx, cy0 + 1.8, 0.6, 0.6);
     if (!plated && (now / 110) % 5 < 1) {
       ctx.fillStyle = '#ffb040';
-      ctx.fillRect(x0 + 2 + ((now / 50) % 7), cy0 + 2, 0.8, 0.8);
+      ctx.fillRect(x0 + 2 + ((now / 50) % 7), cy0 + 1.6, 0.8, 0.8);
     }
-    // Its owner's colour on a running light at the front, and a red sensor eye.
+    // Its owner's colour on a running light at the front of the chassis.
     ctx.fillStyle = `#${team.toString(16).padStart(6, '0')}`;
-    ctx.fillRect(X(7.6) - 0.7, Y(5.6), 1.4, 0.9);
-    ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
-    ctx.fillRect(X(9) - 0.6, Y(6.4), 1.2, 1);
-    // The turret: a dome on top (the gun pivots in its base).
-    if (has(parts, DroidPart.Turret)) {
-      const tx = X(4) - 3;
-      ctx.fillStyle = K;
-      ctx.fillRect(tx - 0.5, Y(1.2), 7, 3.4);
-      ctx.fillRect(tx + 0.5, Y(0.4), 5, 1.2);
-      ctx.fillStyle = GUN;
-      ctx.fillRect(tx + 0.3, Y(1.8), 5.4, 2.4);
-      ctx.fillRect(tx + 1.2, Y(1), 3.6, 1.2);
+    ctx.fillRect(X(8.2) - 0.7, Y(8.6), 1.4, 0.9);
+    const head = has(parts, DroidPart.Turret);
+    // The neck: a ribbed post from the chassis up to the head (just a stub, the head shot off).
+    const nx = X(4) - 0.9;
+    ctx.fillStyle = K;
+    ctx.fillRect(nx - 0.4, Y(head ? 5.2 : 6.2), 2.6, head ? 2.4 : 1.4);
+    ctx.fillStyle = TIN_DK;
+    ctx.fillRect(nx + 0.2, Y(head ? 5.4 : 6.4), 1.4, head ? 2 : 1);
+    if (head) {
       ctx.fillStyle = TIN;
-      ctx.fillRect(tx + 1.2, Y(1.2), 2, 0.6);
+      ctx.fillRect(nx + 0.2, Y(6.2), 1.4, 0.4);
+      // The head: an armoured dome round the gun's mount, a red sensor eye
+      // looking out the front over the barrel.
+      const hx0 = X(4) - 2.8;
+      ctx.fillStyle = K;
+      ctx.fillRect(hx0 - 0.5, Y(2.2), 6.6, 3.6);
+      ctx.fillRect(hx0 + 0.5, Y(1.2), 4.6, 1.4);
+      ctx.fillStyle = GUN;
+      ctx.fillRect(hx0 + 0.2, Y(2.6), 5.2, 2.8);
+      ctx.fillRect(hx0 + 1.1, Y(1.7), 3.4, 1.2);
+      ctx.fillStyle = GUN_DK;
+      ctx.fillRect(hx0 + 0.2, Y(4.6), 5.2, 0.8);
+      ctx.fillStyle = TIN;
+      ctx.fillRect(hx0 + 1.1, Y(1.9), 1.8, 0.5);
+      ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
+      ctx.fillRect(X(6) - 0.6, Y(2.6), 1.2, 0.9);
     }
   }
 
@@ -1060,11 +1075,10 @@ export class Renderer {
       // Arm (and the gun with it) gone: a bloody stump at the shoulder. A
       // droid's turret shot off: a sparking socket.
       if (droid) {
-        ctx.fillStyle = '#1c2024';
-        ctx.fillRect(sx - 2, sy - 1, 4, 2);
+        // (On top of the neck stub, below where the head was.)
         if ((now / 70) % 3 < 1) {
           ctx.fillStyle = '#ffe080';
-          ctx.fillRect(sx + Math.round(Math.sin(now / 37) * 2), sy - 2, 1, 1);
+          ctx.fillRect(sx + Math.round(Math.sin(now / 37) * 1.5), sy + 1, 1, 1);
         }
         return;
       }

@@ -992,9 +992,11 @@ heavy, 7% droid), shown on the sprite and in the HUD:
 | Droid | no clone at all (see below): about a quarter of a tank | none: it climbs instead | 1.45× |
 
 **The spider droid** (`ClassId.Droid`) is a body class of its own, not
-anthropomorphic: a squat gunmetal chassis slung between **six tin legs**,
-three either side, with **one turret on top** that takes **any gun** (it
-carries, picks up, switches and reloads like any clone).
+anthropomorphic: a squat gunmetal chassis slung low between **six tin
+legs**, three either side, and above it on a neck **its head: the turret**,
+which takes **any gun** so the gun is its face (it carries, picks up,
+switches and reloads like any clone). The head is built round the point the
+shots leave from, so it fires exactly from its face.
 
 - **Its parts** (`DROID_PARTS` in `src/shared/body.ts`). It reuses the
   ten part slots, and the same mask bits on the wire, with its own
