@@ -236,6 +236,8 @@ export class Player {
   /** FFA: waves won; in this wave; waiting for its drop rocket; who it's watching while out (255 none). */
   wins = 0;
   waveKills = 0;
+  /** Deaths this wave (PvP's tie-break: fewer wins). */
+  waveDeaths = 0;
   inWave = false;
   pendingSpawn = false;
   spectate = 255;
@@ -412,7 +414,7 @@ export class World {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
     this.tankDrops = opts.tanks ?? this.mode === 'ffa';
-    this.rotation = opts.rotation?.length ? opts.rotation : [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction];
+    this.rotation = opts.rotation?.length ? opts.rotation : DEFAULT_ROTATION;
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
     this.makeMap(this.mapKindFor(1));
@@ -507,10 +509,11 @@ export class World {
     this.players[id] = p;
     if (this.respawnLive) {
       // Regicide and Extraction have reinforcements: join the smallest side and drop in.
+      // (PvP has no sides: straight in.)
       const n = TEAMS_IN_MODE[this.modeOfWave(this.wave)];
       const count = new Array<number>(n).fill(0);
       for (const o of this.players) if (o && o !== p && o.team < n) count[o.team]++;
-      p.team = count.indexOf(Math.min(...count));
+      p.team = n > 0 ? count.indexOf(Math.min(...count)) : Team.None;
       p.inWave = true;
       p.pendingSpawn = true;
       p.respawn = REGICIDE_RESPAWN_TICKS;
@@ -587,6 +590,10 @@ export class World {
           this.stepExtraction(timeUp);
           break;
         }
+        if (this.modeOfWave(this.wave) === GameMode.Pvp) {
+          if (timeUp) this.endPvp();
+          break;
+        }
         if (this.remaining() <= 1 || timeUp) {
           let best: Player | null = null;
           for (const p of this.players) {
@@ -661,6 +668,25 @@ export class World {
     }
     this.winner = winner;
     if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /**
+   * PvP: when the five minutes are up, whoever has the most kills this wave
+   * wins (fewer deaths breaks a tie; still level, nobody does).
+   */
+  private endPvp(): void {
+    let best: Player | null = null;
+    let tie = false;
+    for (const p of this.players) {
+      if (!p || !p.inWave) continue;
+      if (!best || p.waveKills > best.waveKills || (p.waveKills === best.waveKills && p.waveDeaths < best.waveDeaths)) {
+        best = p;
+        tie = false;
+      } else if (p.waveKills === best.waveKills && p.waveDeaths === best.waveDeaths) tie = true;
+    }
+    this.winner = best && !tie && best.waveKills > 0 ? best.id : 255;
+    if (this.winner !== 255) best!.wins++;
     this.setPhase(Phase.Victory, VICTORY_TICKS);
   }
 
@@ -903,8 +929,13 @@ export class World {
   }
 
   /** A wave with reinforcements (soldiers come back by drop rocket) is being fought. */
+  /** A PvP wave is being fought right now. */
+  get pvpLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Pvp;
+  }
+
   get respawnLive(): boolean {
-    return this.regicideLive || this.extractionLive;
+    return this.regicideLive || this.extractionLive || this.pvpLive;
   }
 
   /** Is this clone a king (this wave)? */
@@ -997,6 +1028,7 @@ export class World {
       p.respawn = 1 + this.rng.int(60);
       p.spectate = 255;
       p.waveKills = 0;
+      p.waveDeaths = 0;
     }
     // One or two tanks come down by parachute for whoever gets to them first
     // (Extraction's tanks wait in the labyrinth instead).
@@ -1008,7 +1040,7 @@ export class World {
       this.spawnItem(l.weapon, WEAPONS[l.weapon].clip, l.x, l.y, 0, 0);
       this.items[this.items.length - 1].age = -30 * 60 * 15;
     }
-    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : WAVE_TICKS);
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : WAVE_TICKS);
   }
 
   /**
@@ -1388,10 +1420,12 @@ export class World {
     victim.respawn = RESPAWN_TICKS;
     this.leaveTank(victim, false);
     // Regicide: soldiers come back by drop rocket after a while; the king never does.
-    if (((this.regicideLive && !this.isKing(victim)) || this.extractionLive) && victim.inWave) {
+    // PvP: everyone comes back, quickly.
+    if (((this.regicideLive && !this.isKing(victim)) || this.extractionLive || this.pvpLive) && victim.inWave) {
       victim.pendingSpawn = true;
-      victim.respawn = REGICIDE_RESPAWN_TICKS;
+      victim.respawn = this.pvpLive ? PVP_RESPAWN_TICKS : REGICIDE_RESPAWN_TICKS;
     }
+    if (victim.inWave) victim.waveDeaths++;
     // Everything it carried spills where it fell, for anyone to take.
     this.dropAll(victim);
     // Out of the wave: watch whoever did it.
@@ -3517,6 +3551,15 @@ export class World {
         w.u8(this.kings[1]);
         w.u8(this.remaining(Team.Blue));
         w.u8(this.remaining(Team.Gold));
+        if (this.waveMode === GameMode.Pvp) {
+          // PvP: who leads (and on how many kills), and our own kills and deaths this wave.
+          let lead: Player | null = null;
+          for (const o of this.players) if (o && o.inWave && (!lead || o.waveKills > lead.waveKills || (o.waveKills === lead.waveKills && o.waveDeaths < lead.waveDeaths))) lead = o;
+          w.u8(lead ? lead.id : 255);
+          w.u8(Math.min(255, lead ? lead.waveKills : 0));
+          w.u8(Math.min(255, p.waveKills));
+          w.u8(Math.min(255, p.waveDeaths));
+        }
         if (this.waveMode === GameMode.Extraction) {
           const at = this.idolAt();
           w.u8(at ? at.holder : 255);
@@ -3867,6 +3910,15 @@ const WAVE_TICKS = 30 * 60 * 4;
 const REGICIDE_TICKS = 30 * 60 * 6;
 /** Regicide reinforcements: dead soldiers drop back in after this long. */
 const REGICIDE_RESPAWN_TICKS = 30 * 10;
+/** PvP waves run five minutes, and the dead are back in five seconds. */
+const PVP_TICKS = 30 * 60 * 5;
+const PVP_RESPAWN_TICKS = 30 * 5;
+/**
+ * Which modes the waves cycle through: Regicide, PvP and team waves (Last
+ * Team Standing) by turns, with Extraction now and then. Last Man Standing
+ * stays out of the rotation (a room can still be given it).
+ */
+const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction];
 /** Extraction waves run twelve minutes. */
 const EXTRACTION_TICKS = 30 * 60 * 12;
 /** How long the extraction rocket takes to come once the idol surfaces. */

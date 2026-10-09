@@ -129,7 +129,7 @@ describe('Regicide', () => {
   });
 
   it('rotates in as the third mode, and clients build the fortresses from the seed', () => {
-    const world = new World(46, { mode: 'ffa' });
+    const world = new World(46, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     expect(world.modeOfWave(3)).toBe(GameMode.Regicide);
     const frames: Uint8Array[] = [];
     const w2 = new World(47, { mode: 'ffa', rotation: [GameMode.Regicide] });

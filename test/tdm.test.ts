@@ -23,7 +23,7 @@ const tdmRoom = (seed: number, n: number) => {
 
 describe('Last Team Standing', () => {
   it('alternates with Last Man Standing, wave by wave', () => {
-    const world = new World(21, { mode: 'ffa' });
+    const world = new World(21, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const [a, b] = ['a', 'b'].map((n) => world.addPlayer(n, { send() {} })!);
     expect(world.waveMode).toBe(GameMode.Lms); // the first wave is announced as Last Man Standing
     until(world, () => a.alive && b.alive);

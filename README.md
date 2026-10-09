@@ -198,9 +198,27 @@ Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
 
 ## Last Team Standing
 
-Waves alternate between Last Man Standing and **Last Team Standing**: odd waves
-LMS, even waves LTS (`rotation` in the `World` options; `modeOfWave`).
-The countdown banner says which one is coming.
+**Last Team Standing** (the team waves): red against green, one life each,
+and the last team with a clone standing wins. The countdown banner says
+which mode is coming.
+
+**The rotation** (`DEFAULT_ROTATION` in `src/server/world.ts`; `rotation` in
+the `World` options): Regicide → PvP → Last Team Standing, twice over, then
+an Extraction, and round again. Last Man Standing (one life each, every
+clone for itself) is out of the rotation, though a room can still be given
+it.
+
+## PvP
+
+All against all, with respawns, no teams (`GameMode.Pvp`):
+- **Length.** A wave runs **5 minutes**.
+- **Respawns.** The fallen drop back in by rocket after 5 seconds, so
+  nobody sits out.
+- **Winning.** When time's up, the most kills this wave wins. Fewer deaths
+  breaks a tie, and if that's level too, it's a draw.
+- **HUD.** The top bar shows the clock, the current leader and their
+  kills, and your own kills and deaths this wave. The victory banner names
+  the winner and their kill count.
 
 - **Even teams.** When an LTS wave starts, everyone is dealt into **red** and
   **green** (`drawTeams`). Humans are dealt first, so two humans end up on
@@ -305,8 +323,7 @@ Bunkers are drawn like a Cortex Command or Metal Slug bunker from around
 
 ## Regicide
 
-The third mode in the rotation (waves go Last Man Standing → Last Team
-Standing → Regicide → Extraction; `rotation` in the `World` options).
+A team mode, and a favourite of the rotation (see above).
 - **Two fortresses.** A Regicide map always has two large fortresses built
   into it, one per team: red's in the west, green's in the east, about
   1500 cells apart. Each is six modules wide, with two- and three-storey

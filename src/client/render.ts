@@ -1833,9 +1833,10 @@ export class Renderer {
     const big = (text: string, sub: string, color = '#fff') => this.drawBanner(text, sub, color, s, W, H);
     const regicide = rs.mode === GameMode.Regicide;
     const extraction = rs.mode === GameMode.Extraction;
+    const pvp = rs.mode === GameMode.Pvp;
     const teams = rs.mode === GameMode.Lts || regicide || extraction;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
+    if (rs.phase === Phase.Waiting) big(extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for clones...');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
@@ -1844,6 +1845,8 @@ export class Renderer {
           ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
           : regicide
           ? 'regicide · kill their king · guard yours'
+          : pvp
+          ? 'pvp · all against all · respawns · most kills in 5 minutes wins'
           : teams
             ? 'last team standing · red vs green · one life each'
             : 'last man standing · one life each · every clone for itself'),
@@ -1853,6 +1856,12 @@ export class Renderer {
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
       if (rs.winner === 255) big('NOBODY GOT OUT', `the idol stays buried · wave ${rs.wave} · next wave in ${secs}`);
       else big(`${TEAM_NAMES[rs.winner]} EXTRACTED`, `${mine ? 'your team got' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' got'} the golden idol out · next wave in ${secs}`, teamCss(rs.winner));
+    } else if (rs.phase === Phase.Victory && pvp) {
+      const won = rs.winner === game.myId;
+      const who = (game.players.get(rs.winner)?.name ?? '').replace(/^BOT /, '');
+      const mine = rs.pvp ? ` · you: ${rs.pvp.kills} kills, ${rs.pvp.deaths} deaths` : '';
+      if (rs.winner === 255) big('DRAW', `nobody out-killed the rest${mine} · next wave in ${secs}`);
+      else big(won ? 'YOU WIN!' : `${who} WINS`, `most kills: ${rs.pvp?.leaderKills ?? '?'}${mine} · next wave in ${secs}`, won ? '#80ff80' : '#ffd34a');
     } else if (rs.phase === Phase.Victory && regicide) {
       const loser = rs.winner === Team.Red ? Team.Green : Team.Red;
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
@@ -1898,6 +1907,18 @@ export class Renderer {
         else if (evac?.state === Evac.Moving) line += ' · EXTRACTION MOVING';
         ctx.fillStyle = color;
         ctx.fillText(line, W / 2, 67 * s);
+      } else if (pvp) {
+        // PvP: the clock, then the leader and our own score beneath it.
+        ctx.fillText(`WAVE ${rs.wave} · PVP · ${clock}`, W / 2, 25 * s);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(W / 2 - 210 * s, 32 * s, 420 * s, 22 * s);
+        const st = rs.pvp;
+        if (st) {
+          const leading = st.leader === game.myId;
+          const lead = st.leader === 255 ? 'nobody yet' : `${leading ? 'YOU' : name(st.leader).replace(/^BOT /, '')} ${st.leaderKills}`;
+          ctx.fillStyle = leading ? '#80ff80' : '#ffd34a';
+          ctx.fillText(`LEAD: ${lead}   ·   YOU: ${st.kills} K  ${st.deaths} D`, W / 2, 48 * s);
+        }
       } else if (regicide) {
         // Regicide: the clock, then each side's king beneath it.
         ctx.fillText(`WAVE ${rs.wave} · REGICIDE · ${clock}`, W / 2, 25 * s);
@@ -1939,7 +1960,7 @@ export class Renderer {
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
         if (rs.out) big('FRAGGED', `(${watching})`, '#ff6050');
-        else if ((regicide || extraction) && rs.inWave) {
+        else if ((regicide || extraction || pvp) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           big('FRAGGED', back > 0 ? `reinforcements in ${back}s by drop rocket · ${watching}` : 'drop rocket inbound', '#ff6050');
         }

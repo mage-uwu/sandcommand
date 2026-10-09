@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Reader } from '../src/shared/codec.ts';
 import { CHUNK_COUNT } from '../src/shared/constants.ts';
-import { Phase } from '../src/shared/protocol.ts';
+import { Phase, GameMode } from '../src/shared/protocol.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 
@@ -16,7 +16,7 @@ const inWave = (world: World) => world.players.filter((p): p is Player => !!p &&
 
 describe('Last Man Standing', () => {
   it('waits for two clones, counts down, and lands everyone by rocket once', () => {
-    const world = new World(5, { mode: 'ffa' });
+    const world = new World(5, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const a = world.addPlayer('a', { send() {} })!;
     for (let t = 0; t < 60; t++) world.step();
     expect(world.phase).toBe(Phase.Waiting); // alone: no wave
@@ -29,7 +29,7 @@ describe('Last Man Standing', () => {
   });
 
   it('one life: the dead stay out, spectate, and the last one standing wins', () => {
-    const world = new World(6, { mode: 'ffa' });
+    const world = new World(6, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const ps = ['a', 'b', 'c'].map((n) => world.addPlayer(n, { send() {} })!);
     until(world, () => ps.every((p) => p.alive));
     const [a, b, c] = ps;
@@ -48,7 +48,7 @@ describe('Last Man Standing', () => {
   });
 
   it('after the victory, a new wave starts on a fresh map with everyone back', () => {
-    const world = new World(7, { mode: 'ffa' });
+    const world = new World(7, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const [a, b] = ['a', 'b'].map((n) => world.addPlayer(n, { send() {} })!);
     until(world, () => a.alive && b.alive);
     const seed0 = world.mapSeed;
@@ -64,7 +64,7 @@ describe('Last Man Standing', () => {
   });
 
   it('late joiners watch the wave and play in the next one', () => {
-    const world = new World(8, { mode: 'ffa' });
+    const world = new World(8, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const [a, b] = ['a', 'b'].map((n) => world.addPlayer(n, { send() {} })!);
     until(world, () => a.alive && b.alive);
     const late = world.addPlayer('late', { send() {} })!;
@@ -77,7 +77,7 @@ describe('Last Man Standing', () => {
   });
 
   it('bots fill every empty slot, and give theirs up to a human', () => {
-    const world = new World(9, { mode: 'ffa', bots: 64 });
+    const world = new World(9, { mode: 'ffa', bots: 64, rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     world.addPlayer('human', { send() {} });
     world.step();
     expect(world.playerCount).toBe(64);
@@ -91,7 +91,7 @@ describe('Last Man Standing', () => {
   it('bots fight: a room of bots plays a wave down to its winner', () => {
     // (A seed whose last two don't shoot each other dead on the same tick:
     // that ends a wave with no survivors, which is fine, but not this test.)
-    const world = new World(11, { mode: 'ffa', bots: 16 });
+    const world = new World(11, { mode: 'ffa', bots: 16, rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     world.addPlayer('watcher', { send() {} });
     until(world, () => world.phase === Phase.Live);
     const me = world.players.find((p) => p && !p.bot)!;
@@ -110,7 +110,7 @@ describe('Last Man Standing', () => {
   }, 60_000);
 
   it('a wave that runs out of time goes to the survivor with the most kills', () => {
-    const world = new World(12, { mode: 'ffa' });
+    const world = new World(12, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const [a, b, c] = ['a', 'b', 'c'].map((n) => world.addPlayer(n, { send() {} })!);
     until(world, () => a.alive && b.alive && c.alive);
     b.waveKills = 2;
@@ -126,7 +126,7 @@ describe('Last Man Standing', () => {
 
   it('clients make the new map from the seed and agree with the server chunk for chunk', () => {
     const frames: Uint8Array[] = [];
-    const world = new World(11, { mode: 'ffa' });
+    const world = new World(11, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     const a = world.addPlayer('a', { send: (d) => frames.push(d) })!;
     const b = world.addPlayer('b', { send() {} })!;
     const game = new Game();

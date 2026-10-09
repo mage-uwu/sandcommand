@@ -213,6 +213,8 @@ export interface RoundState {
   /** Extraction: where the golden idol is (and who carries it, 255 nobody), and the extraction rocket. */
   idol?: { x: number; y: number; holder: number };
   evac?: { state: number; x: number; y: number; eta: number };
+  /** PvP: the leader (player id, 255 none) and their kills; our own kills and deaths this wave. */
+  pvp?: { leader: number; leaderKills: number; kills: number; deaths: number };
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -413,6 +415,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const blue = r.u8();
         const gold = r.u8();
         const s: RoundState = { phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green, blue, gold], kings };
+        if (mode === GameMode.Pvp) s.pvp = { leader: r.u8(), leaderKills: r.u8(), kills: r.u8(), deaths: r.u8() };
         if (mode === GameMode.Extraction) {
           const holder = r.u8();
           const ix = r.u16();

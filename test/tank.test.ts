@@ -4,7 +4,7 @@ import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, ACTOR_MAX_HP } from '../src/shared/constants.ts';
 import { invByte } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
-import { Phase, quantizeAim } from '../src/shared/protocol.ts';
+import { Phase, quantizeAim, GameMode } from '../src/shared/protocol.ts';
 import { TANK_H, TANK_HP, TANK_PART_CENTER, TANK_W, TankPart, hasTankPart, newTank, tankMuzzle, tankPoint } from '../src/shared/tank.ts';
 import { ProjKind } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
@@ -80,7 +80,7 @@ describe('tanks', () => {
   });
 
   it('a round drops one or two of them each wave', () => {
-    const world = new World(32, { mode: 'ffa' });
+    const world = new World(32, { mode: 'ffa', rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     world.addPlayer('a', { send() {} });
     world.addPlayer('b', { send() {} });
     for (let k = 0; k < 400 && world.phase !== Phase.Live; k++) world.step();
