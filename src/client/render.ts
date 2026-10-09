@@ -20,6 +20,7 @@ import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES,
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
+import { drawRelics } from './relic-art.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
 
@@ -319,6 +320,9 @@ export class Renderer {
         runStart = x;
       }
     }
+
+    // Now and then, on a cave's back wall: a trace of whoever was here first.
+    if (game.relics.length) drawRelics(ctx, game.relics, camX - halfW, camY - halfH, camX + halfW, camY + halfH);
 
     // Terrain chunks in view.
     const vx0 = Math.max(0, Math.floor((camX - halfW) / CHUNK));

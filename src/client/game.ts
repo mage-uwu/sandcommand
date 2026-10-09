@@ -14,6 +14,7 @@ import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { generateWorld, lastBiome, lastCaves, lastDungeon } from '../shared/worldgen.ts';
+import { type Relic, placeRelics } from './relics.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
@@ -263,6 +264,8 @@ export class Game implements FrameHandler {
   biome = 0;
   /** Is the current map a cave map (a tunnel highway and citadels under it)? */
   caves = false;
+  /** Traces of whoever was here first (relics.ts): rare, cosmetic. */
+  relics: Relic[] = [];
 
   /** Scope lock-on (scope.ts): the clone locked onto and the point on it (hitbox-local), and the aim it gives. */
   scopeLock: { id: number; lx: number; ly: number } | null = null;
@@ -997,6 +1000,7 @@ export class Game implements FrameHandler {
     generateWorld(this.terrain, seed, kind, this.backdrop);
     this.biome = lastBiome;
     this.caves = lastCaves !== null;
+    this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.dungeon = lastDungeon;
     this.trapSpent = new Uint8Array(32);
     this.particles.n = 0;

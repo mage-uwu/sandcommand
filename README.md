@@ -919,6 +919,19 @@ out of sight, they take the nearest way there, walking ramps and passages,
 jetting up shafts (resting beside one when the jetpack runs low), and
 dropping down the shaft in a basement they stand in.
 
+**Traces** (`src/client/relics.ts`, drawn by `relic-art.ts`). Now and then, deep in a cave, something
+older than the war: a faded painting on the back wall, or a relic half sunk
+in a cave floor. Never explained, never in the way: purely cosmetic (each
+client places them from the seed and the terrain; no gameplay, no network),
+and rare, one or two a map at most, a few more on cave maps, sometimes none.
+The paintings are in weathered ochre, red, chalk: stencilled hands with six
+fingers; tall thin figures under a ringed world and two moons (the same sky
+as now); a six-legged beast and the hunters facing it; a procession to a
+stepped pyramid that shines. The relics: a long, high-domed fossil skull
+with great eye sockets; an arc of a vast ring of dark metal, notched, a seam
+of light still faintly in it; a toppled stone head, long-faced, crowned with
+a ring. Terrain in front hides them, so dug-out rock reveals what was there.
+
 **The ground** (`src/shared/materials.ts`, `soilAt` in worldgen). The soil
 is rust red (iron oxide), and a soil noise threads its varieties through
 it: **ochre** (yellow-orange) in pockets within 90 cells of the surface,
