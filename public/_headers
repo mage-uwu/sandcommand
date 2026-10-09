@@ -1,4 +1,9 @@
-/app.js
+# Everything is revalidated on every load (cheap: an ETag check), so nobody
+# ever runs an old build; the service worker itself is never cached at all.
+/*
   Cache-Control: no-cache
-/app.js.map
-  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-store
+  Service-Worker-Allowed: /
+/version.json
+  Cache-Control: no-store

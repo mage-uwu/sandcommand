@@ -4,3 +4,4 @@ public/app.js
 public/app.js.map
 dist/
 .dev.vars
+public/version.json

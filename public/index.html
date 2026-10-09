@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SandCommand" />
+  <meta name="theme-color" content="#141012" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <title>SandCommand</title>
   <meta name="description" content="64-player destructible-terrain sandbox shooter running on Cloudflare Durable Objects." />
   <link rel="stylesheet" href="/style.css" />
@@ -18,6 +24,7 @@
       <p class="tag">64 clones. One sandbox. Everything breaks.</p>
       <label>Callsign <input id="name" maxlength="16" autocomplete="off" /></label>
       <button id="play">Deploy</button>
+      <div id="install" class="hidden"><button id="installBtn">Install app</button><span id="installHint"></span></div>
       <div id="status"></div>
       <div id="rooms"></div>
       <table class="help">

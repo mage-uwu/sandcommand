@@ -19,6 +19,10 @@ label input { flex: 1; min-width: 0; padding: 10px; font: inherit; color: var(--
 button { width: 100%; margin-top: 12px; padding: 14px; font: inherit; font-size: 18px; font-weight: bold; letter-spacing: 0.1em; color: #1a1208; background: var(--accent); border: 0; cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: wait; }
 #status { min-height: 1.4em; margin-top: 12px; color: var(--accent); }
+#install { margin-top: 8px; text-align: center; color: var(--muted); font-size: 12px; }
+#install button { margin-top: 0; padding: 9px; font-size: 13px; color: var(--ink); background: transparent; border: 1px solid #4a3a2c; }
+#install span { display: block; margin-top: 6px; }
+#install span:empty { display: none; }
 #rooms { min-height: 1.2em; color: var(--muted); font-size: 12px; }
 .help { width: 100%; margin-top: 16px; font-size: 12px; color: var(--muted); border-collapse: collapse; }
 .help td { padding: 3px 4px; }

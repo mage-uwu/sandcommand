@@ -1480,6 +1480,35 @@ RTT tails in the local load test are dominated by the bot harness and workerd
 competing for the same CPU. Measure from a separate machine for real
 numbers.
 
+## Install as an app (PWA)
+
+The game installs to a phone's home screen (or as a desktop app) and runs
+**full screen, in landscape**, like a native game:
+
+- **Android, desktop Chrome and Edge.** An **Install app** button shows on
+  the menu.
+- **iPhone and iPad.** The menu says how: Share, then **Add to Home Screen**.
+- **Files.** `public/manifest.webmanifest` (fullscreen display, landscape,
+  icons from the clone sprite in `public/icons/`), Apple's home-screen tags
+  in `index.html`, and `src/client/pwa.ts`.
+
+It's **online only**, and an installed copy **never runs an old version**:
+
+- **The service worker caches nothing.** `public/sw.js` sends every request
+  straight to the network, past the HTTP cache too, and deletes any cache
+  it finds. Offline you get a "no connection" page with a retry button,
+  not a stale game that couldn't connect anyway.
+- **Everything is revalidated on every load** (`public/_headers`:
+  `no-cache`; the worker script and the build id `no-store`), and the
+  service worker is registered with `updateViaCache: 'none'`.
+- **Each build has an id.** `scripts/build-client.mjs` bakes it into
+  `app.js` and publishes it as `/version.json`. An open copy (an installed
+  app can stay open for days) checks it when it comes back to the
+  foreground and every 3 minutes. When a newer build is live, it reloads
+  onto it at the next safe moment: on the menu, or dead and waiting for a
+  respawn, never mid-fight. Then it puts you straight back into the match.
+  A protocol change (the server redeployed under you) does the same.
+
 ## Deploying
 
 ```

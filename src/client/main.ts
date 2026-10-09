@@ -16,6 +16,7 @@ import { InputState } from './input.ts';
 import { Net } from './net.ts';
 import { Renderer } from './render.ts';
 import { TouchControls } from './touch.ts';
+import { registerServiceWorker, setupInstall, takeRejoin, watchForUpdates } from './pwa.ts';
 
 const snapAt = { x: 0, y: 0 };
 
@@ -159,6 +160,9 @@ async function join(): Promise<void> {
           sessionStorage.setItem('sc-reload', String(w.version));
         } catch {}
         if (!tried) {
+          try {
+            sessionStorage.setItem('sc.rejoin', '1'); // (and straight back in: pwa.ts)
+          } catch {}
           location.reload();
           return;
         }
@@ -224,6 +228,17 @@ playBtn.addEventListener('click', join);
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') join();
 });
+
+// The installed app (pwa.ts): online-only service worker, the menu's
+// Install button, and reloading onto a newer build when one goes live (on
+// the menu, or dead and waiting, never mid-fight), straight back in.
+registerServiceWorker();
+setupInstall($('install'), $<HTMLButtonElement>('installBtn'), $('installHint'));
+watchForUpdates(
+  () => !game || (!game.alive && !game.ride && !game.myCraft()),
+  () => !!game,
+);
+if (takeRejoin()) join();
 
 // Chat.
 input.onChatKey = () => {
