@@ -91,26 +91,36 @@ export const Mat = {
    * and the aprons and caps of it poured over the dust, sealing it in.
    */
   Pour: 29,
+  /**
+   * GEMM crystals: bright faceted crystals grown through the ground, pink,
+   * turquoise or emerald like the deposits round them, worth
+   * GEM_CRYSTAL_VALUE GEMMs a cell. (Mat.Gold is the GEMM deposit itself:
+   * the veins, drawn in the same three gem colours; the planet is mined for
+   * exotic gems, the code just kept the old name.)
+   */
+  GemCrystal: 30,
 } as const;
 
-export const MAT_COUNT = 30;
+export const MAT_COUNT = 31;
 
-/** What a cell of rare earth banks, in gold, when dug (a cell of gold banks one). */
+/** What a cell of rare earth banks, in GEMMs, when dug (a cell of GEMM deposit banks one). */
 export const RARE_EARTH_VALUE = 10;
-/** Gold banked for the cells of each material a dig took (World: the digger). */
-export const digValue = (removed: Int32Array) => removed[Mat.Gold] + removed[Mat.RareEarth] * RARE_EARTH_VALUE;
+/** What a cell of GEMM crystal banks. */
+export const GEM_CRYSTAL_VALUE = 3;
+/** GEMMs banked for the cells of each material a dig took (World: the digger). */
+export const digValue = (removed: Int32Array) => removed[Mat.Gold] + removed[Mat.GemCrystal] * GEM_CRYSTAL_VALUE + removed[Mat.RareEarth] * RARE_EARTH_VALUE;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, true, true, true, false];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, true, true, true, false, false];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false, false, false];
 
 /** Natural ground (soil, sand, rock): what frosting settles on and bots dig through. */
 /** Tough materials: a carve's core takes only the inner half of its radius of them (a quarter of the area). */
@@ -129,7 +139,7 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [138, 66, 40], // rust soil
   [204, 156, 104], // pale sand
   [94, 84, 92], // basalt
-  [232, 188, 52],
+  [236, 112, 178], // GEMM deposit (drawn pink, turquoise or emerald)
   [40, 32, 40],
   [132, 80, 58], // rubble
   [150, 158, 170],
@@ -155,6 +165,7 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [168, 156, 134], // old concrete, stained
   [112, 62, 38], // rusted steel
   [126, 124, 116], // pour
+  [96, 236, 214], // GEMM crystal
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth', 'trinitite', 'gravel', 'ash', 'char', 'cement', 'old concrete', 'rusted steel', 'pour'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gemm', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth', 'trinitite', 'gravel', 'ash', 'char', 'cement', 'old concrete', 'rusted steel', 'pour', 'gemm crystal'];

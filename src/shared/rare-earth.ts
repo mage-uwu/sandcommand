@@ -61,3 +61,69 @@ export function placeRareEarth(m: Uint8Array, heights: Int32Array, seed: number)
     if (growCrystal(m, x, y, rng) >= 4) placed++;
   }
 }
+
+/**
+ * One GEMM crystal cluster at (cx, cy): two to four chunky prisms, each a
+ * few cells wide with a pointed tip, splaying out of one root (mostly
+ * upward, as crystals grow in a pocket). Returns the cells it took.
+ */
+export function growGem(m: Uint8Array, cx: number, cy: number, rng: Rng): number {
+  let n = 0;
+  const prisms = 2 + rng.int(3);
+  const base = -Math.PI / 2 + rng.range(-0.6, 0.6);
+  for (let k = 0; k < prisms; k++) {
+    const a = base + (k - (prisms - 1) / 2) * rng.range(0.35, 0.7);
+    const len = 6 + rng.int(8);
+    const half = 1.5 + rng.next() * 1.2;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const R = len + 3;
+    for (let y = cy - R; y <= cy + R; y++) {
+      for (let x = cx - R; x <= cx + R; x++) {
+        if (x < 4 || y < 0 || x >= WORLD_W - 4 || y >= WORLD_H - 12) continue;
+        const dx = x - cx;
+        const dy = y - cy;
+        const along = dx * c + dy * s;
+        const across = Math.abs(-dx * s + dy * c);
+        if (along < -1 || along > len) continue;
+        // Its tip: the last few cells taper to a point.
+        const tip = len - 3;
+        const w = along > tip ? half * (1 - (along - tip) / 3) : half;
+        if (across > w) continue;
+        const i = y * WORLD_W + x;
+        if (!natural(m[i])) continue;
+        m[i] = Mat.GemCrystal;
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
+/** How many GEMM crystals a map grows (commoner and shallower than rare earth). */
+export const GEM_CRYSTALS = 110;
+
+/**
+ * GEMM crystals: clusters of pointed prisms, bright and faceted, through the
+ * ground from a little under the surface down (a third of them right by a
+ * GEMM deposit, as if grown out of the vein).
+ */
+export function placeGemCrystals(m: Uint8Array, heights: Int32Array, seed: number): void {
+  const rng = new Rng(seed ^ 0x6e3c75);
+  let placed = 0;
+  for (let tries = 0; tries < GEM_CRYSTALS * 12 && placed < GEM_CRYSTALS; tries++) {
+    const x = 40 + rng.int(WORLD_W - 80);
+    const surf = heights[x];
+    const room = WORLD_H - 30 - (surf + 30);
+    if (room <= 0) continue;
+    let y = surf + 30 + rng.int(room);
+    if (placed % 3 === 0) {
+      // By a vein: hunt down the column for a deposit, and grow off its edge.
+      let yy = y;
+      while (yy < WORLD_H - 30 && m[yy * WORLD_W + x] !== Mat.Gold) yy++;
+      if (yy < WORLD_H - 30) y = Math.min(WORLD_H - 30, yy + 3);
+    }
+    if (!natural(m[y * WORLD_W + x])) continue;
+    if (growGem(m, x, y, rng) > 10) placed++;
+  }
+}

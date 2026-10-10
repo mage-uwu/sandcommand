@@ -772,6 +772,7 @@ export function rubbleOf(mat: number): number {
   if (mat === Mat.Glass) return Mat.Gravel;
   if (mat === Mat.Char) return Mat.Ash;
   if (mat === Mat.OldConcrete || mat === Mat.Pour) return Mat.Gravel; // (crumbles)
+  if (mat === Mat.GemCrystal) return Mat.Gold; // (shatters to GEMM grit, still worth banking)
   return Mat.Rubble;
 }
 

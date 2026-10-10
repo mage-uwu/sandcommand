@@ -97,6 +97,47 @@ function crystalColor(t: Terrain, x: number, y: number): number {
   return (255 << 24) | (b << 16) | (g << 8) | r;
 }
 
+/** The three GEMM colours: pink, turquoise, emerald. */
+const GEMS: readonly (readonly [number, number, number])[] = [
+  [236, 92, 172],
+  [48, 210, 204],
+  [52, 206, 104],
+];
+/** Which colour a GEMM deposit (or crystal) is: one per stretch of ground, so a vein is all one gem. */
+const gemOf = (x: number, y: number) => GEMS[hash2(Math.floor(x / 200), Math.floor(y / 200) + 911) % 3];
+const gemRgb = (r: number, g: number, b: number) => (255 << 24) | (Math.min(255, Math.round(b)) << 16) | (Math.min(255, Math.round(g)) << 8) | Math.min(255, Math.round(r));
+
+/**
+ * A GEMM deposit: the old vein texture (speckled, lit where it's exposed,
+ * darker where it meets the rock) in its gem's colour, with a glint of
+ * crystal here and there.
+ */
+function gemDepositColor(t: Terrain, x: number, y: number): number {
+  const [r, g, b] = gemOf(x, y);
+  const h = hash2(x, y);
+  let k = 0.74 + ((h >>> 4) & 15) / 40;
+  const own = (m: number) => m === Mat.Gold || m === Mat.GemCrystal;
+  if (t.get(x, y - 1) === Mat.Air) k *= 1.28;
+  else if (!own(t.get(x, y - 1)) || !own(t.get(x - 1, y))) k *= 1.1;
+  else if (!own(t.get(x, y + 1)) || !own(t.get(x + 1, y))) k *= 0.7;
+  if ((h & 31) === 0) return gemRgb(255, 250, 255); // a glint
+  if ((h & 31) < 3) k *= 0.62; // a speck of matrix
+  return gemRgb(r * k, g * k, b * k);
+}
+
+/** A GEMM crystal: bright, faceted (bands of light across its faces), lit top and left, a white glint at its heart now and then. */
+function gemCrystalColor(t: Terrain, x: number, y: number): number {
+  const [r, g, b] = gemOf(x, y);
+  const other = (dx: number, dy: number) => t.get(x + dx, y + dy) !== Mat.GemCrystal;
+  const h = hash2(x, y);
+  let k = [1.18, 1.0, 0.88, 1.36][((x - y) >> 1) & 3];
+  if (other(0, -1) || other(-1, 0)) k = 1.5;
+  else if (other(0, 1) || other(1, 0)) k = 0.6;
+  if ((h & 15) === 0) return gemRgb(255, 255, 255);
+  // Lighter than the deposit: mixed toward white.
+  return gemRgb((r * 0.8 + 50) * k, (g * 0.8 + 50) * k, (b * 0.8 + 50) * k);
+}
+
 /**
  * Trinitite: the deadland's green glass, fused out of the sand by the old
  * fires. Glossy: a pale sheen on its upper faces, deep bottle green under,
@@ -268,6 +309,8 @@ export class Renderer {
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else if (m === Mat.Dripstone) c = dripColor(t, wx, wy);
         else if (m === Mat.RareEarth) c = crystalColor(t, wx, wy);
+        else if (m === Mat.Gold) c = gemDepositColor(t, wx, wy);
+        else if (m === Mat.GemCrystal) c = gemCrystalColor(t, wx, wy);
         else if (m === Mat.Glass) c = glassColor(t, wx, wy);
         else if (m === Mat.Cement) c = cementColor(t, wx, wy);
         else if (m === Mat.OldConcrete) c = oldConcreteColor(t, wx, wy);
@@ -1847,7 +1890,7 @@ export class Renderer {
     });
   }
 
-  /** The radio's menu: call in a dropship or a tank, for gold. */
+  /** The radio's menu: call in a dropship or a tank, for GEMMs. */
   private drawCallMenu(game: Game, input: InputState, s: number, H: number): void {
     const ctx = this.ctx;
     const rowH = 46 * s;
@@ -1887,7 +1930,7 @@ export class Renderer {
       ctx.fillText(e.name, x0 + 8 * s, y + 20 * s);
       ctx.fillStyle = afford ? '#ffd34a' : '#ff7060';
       ctx.textAlign = 'right';
-      ctx.fillText(e.free ? 'remote' : `${cost} gold`, x0 + w - 8 * s, y + 20 * s);
+      ctx.fillText(e.free ? 'remote' : `${cost} GEMMs`, x0 + w - 8 * s, y + 20 * s);
       ctx.textAlign = 'left';
       ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = '#c8d0d8';
@@ -2069,7 +2112,7 @@ export class Renderer {
       ctx.fillStyle = '#fff';
       ctx.fillText(p.name, x0 + 44 * s, y + 18 * s);
       ctx.fillStyle = game.gold >= p.cost ? '#ffd34a' : '#ff7060';
-      ctx.fillText(`${p.cost} gold`, x0 + 44 * s, y + 33 * s);
+      ctx.fillText(`${p.cost} GEMMs`, x0 + 44 * s, y + 33 * s);
       this.menuRects.push({ x: x0, y, w, h: rowH, i });
     }
     // Turn (R) and mirror (X): buttons too, for touch.
@@ -2757,7 +2800,7 @@ export class Renderer {
     if (game.drive && game.myTankState) this.drawTankHud(game, input, s, W, H);
     const me = game.players.get(game.myId);
     ctx.fillStyle = '#ffd34a';
-    ctx.fillText(`GOLD ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
+    ctx.fillText(`GEMMS ${game.gold}   K ${me?.kills ?? 0}  D ${me?.deaths ?? 0}`, 14 * s, 62 * s);
     // (Under it, where the clone's vendor and class used to be: the match card, drawn with the round.)
     if (game.building) this.drawBuildMenu(game, input, s, H);
     else this.menuRects.length = 0;

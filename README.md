@@ -8,7 +8,7 @@ rubble. All of it is simulated on one authoritative Durable Object and
 streamed to every player at 30 Hz.
 
 The war is fought on **TABAR**, an alien world of coral and strange plant
-life whose gold and rare earth have drawn an intergalactic mining war. The
+life whose exotic gems (GEMMs) and rare earth have drawn an intergalactic mining war. The
 planet had masters once: the long-extinct **Progenitors** (Tabarians), an
 Atlantis-like, future-primitive people known now only by their pyramids,
 ziggurats and rare ornate ruins, the relics and cave art in Extraction's
@@ -31,11 +31,26 @@ to go prone; **S** while jetting dashes), **mouse** aim and
 fire, **right mouse / left Shift** scope, **R** reload, **1/2 (Q/E, wheel)** cycle
 through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
 drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** mute all sound, **N** sound effects, **V** aim assist, **I** info panel. With the Materializer out, the wheel or a click
-on the menu picks a fortification and a click builds it. Dig gold with the Digger.
+on the menu picks a fortification and a click builds it. Mine GEMMs with the Digger.
+
+**GEMMs.** TABAR is mined for exotic gems, not gold. GEMMs are the
+currency and the ore:
+- **Deposits.** The veins and pockets through the ground (`Mat.Gold` in the
+  code; the name stuck) are GEMM deposits. They keep the old vein texture
+  (speckled, lit where exposed, darker against the rock, the odd glint), but
+  in gem colours. Each stretch of ground has its own colour: pink, turquoise
+  or emerald. A cell dug banks 1 GEMM.
+- **Crystals.** About 110 clusters of bright faceted crystals
+  (`Mat.GemCrystal`, `growGem`) grow through the natural ground, a third of
+  them grown off a deposit's edge. Each cluster is two to four chunky prisms
+  with pointed tips, splaying up from one root. A cell dug banks 3 GEMMs
+  (`GEM_CRYSTAL_VALUE`). Shattered, a crystal falls as GEMM grit that is
+  still worth banking. Bots weigh crystals at their worth when they go
+  prospecting.
 
 **Rare earth** (`Mat.RareEarth`, `src/shared/rare-earth.ts`). Small violet
 crystals, deep in the natural ground, worth **ten times their weight in
-gold**: every cell dug out with the Digger banks 10 gold, against gold's 1
+GEMMs**: every cell dug out with the Digger banks 10 GEMMs, against a GEMM deposit's 1
 (`digValue`).
 - Each map grows about 56. Each crystal is a 3×3 core with two to four stubby
   shards splaying out of it, and likelier the deeper you go.
@@ -57,14 +72,14 @@ network.
   2. jetpack
   3. pick up the rifle lying ahead
   4. shoot it
-  5. dig the gold pocket under the ground
+  5. dig the GEMM pocket under the ground
   6. dig the rare earth crystals beside it
   7. call in a vehicle by radio: a tank, or a mole, watchdog or dropship
   8. get aboard: climb in, ride on top, or drive it by remote
   9. wipe out a mob of four beginner bots that drop in ahead (they don't
      respawn)
 - **The coach.** A card at the top gives the step, and a bobbing arrow points
-  at what to look for. Command tops your gold up to a tank's price once
+  at what to look for. Command tops your GEMMs up to a tank's price once
   you've dug the crystals.
 - **PC or mobile.** The prompts are written for the controls you're using:
   keyboard and mouse, or the touch sticks and buttons. That's detected from a
@@ -171,7 +186,7 @@ career record is your lifetime kills and deaths, kept in this browser
 (`sc.career`). Under it is a leaderboard of the top eight clones by K/D,
 with your own row added if you're not among them. **Tab** still shows the
 full scoreboard. Clones gib on
-death and spill half their gold as gold rubble that anyone can dig up.
+death and spill half their GEMMs as GEMM grit that anyone can dig up.
 
 **On phones and tablets** (`src/client/touch.ts`) touch controls switch on
 by themselves the first time a finger touches the screen, or straight away
@@ -496,7 +511,7 @@ map, a client has all 1024 chunks about 1.5 s after joining.
 
 Generating the map takes about 0.4 s. Each octave of the noise caches its
 lattice-corner hashes along a row, and each cell stops at the first material
-that applies (caves, then gold, rock, sand lenses), which gives bit-identical
+that applies (caves, then GEMM deposits, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
 ## Frosting: craters, gem caverns, geysers and flora
@@ -518,7 +533,7 @@ Worldgen does it, seeded, so every client grows the same
   surface.
 - A rock shell surrounds the hollow. A dozen or so big rare earth prisms,
   up to 15 cells long, point in from the walls, floor and roof.
-- Each cavern holds 250+ cells of rare earth: thousands of gold for
+- Each cavern holds 250+ cells of rare earth: thousands of GEMMs for
   whoever digs down to one.
 
 **Geysers.**
@@ -765,7 +780,7 @@ landing around their own team's well. A wave runs 12 minutes.
   - **Brass pressure plates** blow up under whoever steps on them, clone
     or tank, once (`R_TRAPS` carries which have gone off).
 
-  Rooms also hold loot: weapons on the floor, and gold nuggets to dig. Three
+  Rooms also hold loot: weapons on the floor, and GEMM nuggets to dig. Three
   **vacant tanks** wait in the labyrinth, in halls where there's room to
   drive.
 - **The idol** is an item (`WeaponId.Idol`). You carry it in your
@@ -864,7 +879,7 @@ is a mole, below).
 
 Every clone carries a **Radio** (`WeaponId.Radio`, always in the kit
 alongside the digger and the materializer). With the radio in hand, a menu
-comes up: click **Dropship** or **Tank** to call it in for **1500 gold**,
+comes up: click **Dropship** or **Tank** to call it in for **1500 GEMMs**,
 a **Mole** for **1100**, a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then needs 30 seconds to recharge
 (`World.call`, `C_CALL`).
 
@@ -1119,15 +1134,15 @@ each watchdog, each tarantula, in that order. **Shift+P** goes the other way.
   for this.
 - **Bots buy air support too.** Now and then a bot takes on a rare
   objective: prospecting. Each life it has a 15% chance.
-  - **Finding gold.** When no enemy is close and in sight, it looks for
-    real gold within about 220 cells either side and 250 down: a seam
-    with plenty of gold around it, not a stray speck.
+  - **Finding GEMMs.** When no enemy is close and in sight, it looks for
+    real GEMM deposits within about 220 cells either side and 250 down: a seam
+    with plenty of GEMM around it, not a stray speck.
   - **What it skips.** Seams under a bunker's concrete or steel, or under
     stone that never yields, are skipped. Rock in the way only makes a
     seam count as further off.
   - **Digging.** It walks until it's right over the seam and sinks a shaft
     straight down to it, the digger beam sweeping a little either way so
-    the shaft is wide enough to drop down. Then it banks the gold, moving
+    the shaft is wide enough to drop down. Then it banks the GEMMs, moving
     on through the seam.
   - **Giving up.** If four seconds of digging bring in nothing, it gives
     that seam up and finds another.
@@ -1136,7 +1151,7 @@ each watchdog, each tarantula, in that order. **Shift+P** goes the other way.
     and calls it in once it's banked, then picks the next.
   - **The odds.** Watchdogs are likeliest (cheap, and they fight beside
     it). Moles, tanks and dropships are about equal. A tarantula, at 3000
-    gold, is mostly for the better bots (`wishOdds` in `bots.ts`).
+    GEMMs, is mostly for the better bots (`wishOdds` in `bots.ts`).
   - **Never the impossible.** It never wishes for something it can't have.
     That rules out a second watchdog or tarantula of its own, a dropship
     while one of its side's is already up, and anything once the slots are
@@ -1200,7 +1215,7 @@ Complexes vary in style and layout:
   modules, with mezzanine ledges and a heavy gun on the floor (Gatling,
   shotgun, GL or laser).
 - **Bank vaults.** Some have a steel-lined vault in the deepest basement,
-  sometimes two modules wide, with gold bars stacked on its floor.
+  sometimes two modules wide, with GEMM ingots stacked on its floor.
 - **Sniper towers.** Narrow towers 3–5 storeys tall stand clear of the
   complexes. Each has doors on both sides, firing slits on every storey,
   holes in alternate floors, and a battlemented metal roof with a sniper
@@ -1244,7 +1259,7 @@ exactly as before.
     long, cast in pig iron with a steel floor.
   - **Way in.** A shaft drops into an antechamber, and a steel door leads
     on into the vault.
-  - **Inside.** Gold is stacked along its floor, and a heavy gun lies there.
+  - **Inside.** GEMM deposit is stacked along its floor, and a heavy gun lies there.
   - **Caves.** The cave highway keeps below it, and no cave shaft goes
     through it.
 - **Pig iron** (`Mat.Iron`). This material is hard and *tough*: a carve's
@@ -1368,7 +1383,7 @@ highway, and the countdown banner says so.
   at all. A vast mass of basalt hangs from the dome over the middle (the
   keep), its underside a low arch the highway runs under, with chambers
   inside it one over another: a hole up into the lowest from beneath, a
-  chimney between them, windows out each side, gold in their walls. Either
+  chimney between them, windows out each side, GEMM in their walls. Either
   side, a curtain of rock hangs from the roof over the highway (the gates).
   Rock ledges jut from the walls high enough for a tarantula to walk under,
   great stalactites hang from the dome, low stalagmites dot the rolling
@@ -1389,7 +1404,7 @@ highway, and the countdown banner says so.
   the highway, for tanks and anything else that can't jet. Where one passes
   under a bunker, it stays well below its basements.
 - **Galleries**: winding side tunnels off the highway, each ending in a
-  chamber with a seam of gold in its floor.
+  chamber with a seam of GEMM in its floor.
 
 Bots find their way through it (`caveNav` in `src/server/bots.ts`): with
 their target on another level (the surface, the highway, the deep run) and
@@ -1516,7 +1531,7 @@ workers. The tests check every kernel against a naive per-cell reference.
 Nothing moves through the world as a per-cell automaton, and there is no
 separate effects system. **One particle engine** (`src/shared/particles.ts`)
 computes everything that flies: terrain grains (debris, collapsing sand,
-spilled gold), sparks, flames, smoke, dust, blood and gibs. They are all one
+spilled GEMMs), sparks, flames, smoke, dust, blood and gibs. They are all one
 structure-of-arrays particle with a *kind*. A row of per-kind parameters sets
 gravity or buoyancy, drag, restitution, friction, how strongly the kind
 couples to each field, and what happens on contact: grains become terrain,
@@ -1798,7 +1813,7 @@ velocity, overkill and a seed. Each client bursts the clone into helmet,
 torso, limbs, jetpack and meat (`gibBurst` in `src/client/effects.ts`): gib particles in the shared engine. The parts tumble,
 bounce and leave blood trails, and blood droplets stain the terrain in a
 client-only stain layer that the chunk rasterizer blends in. Gibs are
-cosmetic, but the gold a clone spills is real. The server throws it from the
+cosmetic, but the GEMMs a clone spills are real. The server throws it from the
 seed and deposits it as terrain, and every client throws the same shower from
 the same seed. Explosive and high-overkill deaths scatter harder.
 
@@ -2045,7 +2060,7 @@ away after 90 s.
 
 ### Fortifications: the materializer
 
-The Materializer turns gold into terrain (`src/shared/build.ts`). Pick a
+The Materializer turns GEMMs into terrain (`src/shared/build.ts`). Pick a
 piece from the menu (click it, or use the mouse wheel).
 
 - **Turning and mirroring.** **R** turns the piece a quarter clockwise and
@@ -2061,7 +2076,7 @@ piece from the menu (click it, or use the mouse wheel).
 - **Building.** A ghost of the turned piece snaps to a 4-cell grid under
   the cursor, green where the server will accept it and red with the
   reason where it won't. Click to build. New players join with 60
-gold, enough for one bunker. After that, you dig gold up or take it off the
+GEMMs, enough for one bunker. After that, you dig GEMMs up or take them off the
 dead.
 
 | Piece | Size (cells) | Material | Cost |
@@ -2097,7 +2112,7 @@ crumbles into rubble when blown apart.
 position). It goes through the same chunk-version bookkeeping as carves.
 Every client replays `applyBuild` against its own terrain, so a whole bunker
 costs less bandwidth than a rifle burst. Clients add a cyan materialize
-shimmer and a beam from the builder. Your exact gold rides in your own
+shimmer and a beam from the builder. Your exact GEMM count rides in your own
 `R_SELF` record, so the HUD and the ghost's cost check never wait for the
 once-a-second scoreboard.
 
@@ -2291,7 +2306,7 @@ match's sockets pin to it.
 
 The server trusts nothing a client sends. Every action is validated on the
 authoritative tick: builds against the same rules the preview shows, radio
-calls against gold and cooldown, inputs against the body. On top of that,
+calls against GEMMs and cooldown, inputs against the body. On top of that,
 `src/server/guard.ts` sets limits that keep a bot or a flood from taking the
 match down.
 

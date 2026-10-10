@@ -316,18 +316,18 @@ export class Tutorial {
         return out('Shoot', touch ? 'Drag the right stick to aim. Push it past halfway to fire.' : 'Aim with the mouse and click to fire.');
       case TStep.Gold:
         return out(
-          'Dig gold',
+          'Dig GEMMs',
           (touch ? 'Tap ◀ / ▶ ITEM to take out the Digger, then aim it into the ground and fire.' : 'Press Q / E (or 1 / 2, or the mouse wheel) to take out the Digger, then aim it into the ground and click.') +
-            ' The yellow pocket below is gold: everything you dig out of it is banked.',
+            ' The glittering pocket below is a GEMM deposit: everything you dig out of it is banked.',
           { x: a.gold.x, y: a.gold.y - a.gold.ry - 6 },
         );
       case TStep.Rare:
-        return out('Dig rare earth', 'Those violet crystals are rare earth: worth ten times their weight in gold. Dig them out.', { x: (a.rare.x0 + a.rare.x1) / 2, y: a.rare.y0 - 4 });
+        return out('Dig rare earth', 'Those violet crystals are rare earth: worth ten times their weight in GEMMs. Dig them out.', { x: (a.rare.x0 + a.rare.x1) / 2, y: a.rare.y0 - 4 });
       case TStep.Tank:
         return out(
           'Buy a vehicle',
           (touch ? 'Take out the Radio (◀ / ▶ ITEM) and tap TANK on its menu' : 'Take out the Radio (Q / E) and click TANK on its menu') +
-            ` (${CALL_COST} gold). A mole, a watchdog or a dropship will do too.`,
+            ` (${CALL_COST} GEMMs). A mole, a watchdog or a dropship will do too.`,
         );
       case TStep.Board: {
         const v = this.vehicle();

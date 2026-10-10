@@ -7,7 +7,7 @@ import { clearWorks, fortifyComplexes, fortifyGround, lastWorks } from './fortif
 import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
-import { placeRareEarth } from './rare-earth.ts';
+import { placeGemCrystals, placeRareEarth } from './rare-earth.ts';
 import { type Buried, type Monument, crustCell, crustDepth, placeBuried, placeMonuments, placeRuins } from './deadland.ts';
 import { type Crater, type Flora, type GemCavern, type GeyserSite, placeCraters, placeFlora, placeGemCaverns, placeGeysers, relineCraters } from './frosting.ts';
 
@@ -417,6 +417,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   if (!dungeon) dripCaves(m, heights, seed);
   // Rare earth crystals, deep in the natural ground.
   placeRareEarth(m, heights, seed);
+  // GEMM crystals, bright and faceted, through the ground (some grown off the deposits).
+  if (!dungeon) placeGemCrystals(m, heights, seed);
   frost(m, biome, seed);
   relineCraters(m, lastCraters);
   // (The flora last: it grows on the ground as it ends up, frosting and all.)

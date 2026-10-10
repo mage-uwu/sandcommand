@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BTN_FIRE } from '../src/shared/actor.ts';
 import { ACTOR_H, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { invByte } from '../src/shared/items.ts';
-import { MAT_COUNT, MAT_COLOR, MAT_NAME, Mat, RARE_EARTH_VALUE } from '../src/shared/materials.ts';
+import { GEM_CRYSTAL_VALUE, MAT_COUNT, MAT_COLOR, MAT_NAME, Mat, RARE_EARTH_VALUE, digValue } from '../src/shared/materials.ts';
 import { rubbleOf } from '../src/shared/particles.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
@@ -83,7 +83,41 @@ describe('rare earth', () => {
     };
     const gold = dig(Mat.Gold);
     const rare = dig(Mat.RareEarth);
+    const gem = dig(Mat.GemCrystal);
     expect(gold).toBeGreaterThan(5);
     expect(rare).toBe(gold * RARE_EARTH_VALUE);
+    expect(gem).toBe(gold * GEM_CRYSTAL_VALUE);
+  });
+});
+
+describe('GEMMs', () => {
+  it('the planet is mined for exotic gems, not gold: GEMM deposits and GEMM crystals', () => {
+    expect(MAT_NAME[Mat.Gold]).toBe('gemm');
+    expect(MAT_NAME[Mat.GemCrystal]).toBe('gemm crystal');
+    expect(MAT_COLOR[Mat.GemCrystal]).toBeDefined();
+    // Shattered crystal falls as GEMM grit (still worth banking).
+    expect(rubbleOf(Mat.GemCrystal)).toBe(Mat.Gold);
+    const removed = new Int32Array(MAT_COUNT);
+    removed[Mat.Gold] = 2;
+    removed[Mat.GemCrystal] = 2;
+    removed[Mat.RareEarth] = 1;
+    expect(digValue(removed)).toBe(2 + 2 * GEM_CRYSTAL_VALUE + RARE_EARTH_VALUE);
+  });
+
+  it('crystals grow through the natural ground, many by the deposits, never on the surface', () => {
+    const t = new Terrain();
+    generateWorld(t, 7, MapKind.Plain);
+    let cells = 0;
+    let byVein = 0;
+    for (let y = 0; y < WORLD_H; y++) {
+      for (let x = 4; x < WORLD_W - 4; x++) {
+        if (t.get(x, y) !== Mat.GemCrystal) continue;
+        cells++;
+        if ([[-2, 0], [2, 0], [0, -2], [0, 2]].some(([dx, dy]) => t.get(x + dx, y + dy) === Mat.Gold)) byVein++;
+      }
+    }
+    expect(cells).toBeGreaterThan(2000);
+    expect(byVein).toBeGreaterThan(50);
+    for (let x = 8; x < WORLD_W - 8; x += 3) expect(t.get(x, t.surfaceY(x))).not.toBe(Mat.GemCrystal);
   });
 });

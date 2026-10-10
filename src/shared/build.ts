@@ -124,7 +124,7 @@ export const BuildResult = {
   Blocked: 6, // someone is standing there
 } as const;
 
-export const BUILD_RESULT_TEXT = ['', 'need more gold', 'out of reach', 'off the map', 'no room', 'nothing to anchor to', 'someone is in the way'];
+export const BUILD_RESULT_TEXT = ['', 'need more GEMMs', 'out of reach', 'off the map', 'no room', 'nothing to anchor to', 'someone is in the way'];
 
 /** A body that a piece may not be built over (top-left box). */
 export interface BuildBlocker {

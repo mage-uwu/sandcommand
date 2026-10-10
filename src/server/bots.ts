@@ -4,7 +4,7 @@ import { ClassId, DROID_MASK, stumps } from '../shared/body.ts';
 import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
 import { CallKind, Evac, Phase, Team, callCost, quantizeAim } from '../shared/protocol.ts';
-import { MAT_HARD, Mat, RARE_EARTH_VALUE } from '../shared/materials.ts';
+import { MAT_HARD, Mat, GEM_CRYSTAL_VALUE, RARE_EARTH_VALUE } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isDog, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
@@ -96,7 +96,7 @@ export function wishOdds(skill: number): [number, number][] {
 }
 
 /** What a cell's worth to a bot digging for gold (rare earth ten times gold). */
-const oreWorth = (m: number) => (m === Mat.Gold ? 1 : m === Mat.RareEarth ? RARE_EARTH_VALUE : 0);
+const oreWorth = (m: number) => (m === Mat.Gold ? 1 : m === Mat.GemCrystal ? GEM_CRYSTAL_VALUE : m === Mat.RareEarth ? RARE_EARTH_VALUE : 0);
 
 export class BotBrain {
   private readonly rng: Rng;
