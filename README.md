@@ -1377,12 +1377,15 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
   - **Sargasso rooms**: thick with slow-swaying sargasso weed (a new plant:
     ribbons with gas bladders) and coral.
   - **The basin** and **the cistern**: still, clear water.
-  - **The forest**: three or four great petrified trunks (`Mat.Petrified`),
-    branchless, straight and upright like redwoods, floor to roof, flaring
-    into buttresses at the foot. Stone that was wood: rounded, with deep
-    furrowed bark, fine grain and ochre mineral bands up the trunk. Their roots trail
-    down through the rock into the cistern below and hang in its water, as
-    if they draw the poison out of the world.
+  - **The forest**: a hall of petrified trunks (`Mat.Petrified`), after
+    the petrified forest under the Sea of Corruption. Six to eight slender,
+    branchless trunks stand straight and smooth as columns, pale cool
+    blue-grey. Near the roof each fans out into a vault of stone lattice,
+    honeycombed with holes and hung with drips, meeting its neighbours'
+    in pointed arches. Stumps (some snapped off at a slant) and a fallen
+    log or two lie on the floor. The trunks' roots trail down through the
+    rock into the cistern below and hang in its water, as if they draw the
+    poison out of the world.
   - **Gem caverns** of giant GEMM crystals jutting from floor and roof.
   - **The nest** at the bottom: a long, low hall spectacularly rich in
     GEMMs (deposits all through its walls, giant crystals, rare earth) and

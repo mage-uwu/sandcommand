@@ -144,7 +144,7 @@ export function valleyHeights(heights: Int32Array, seed: number): Valley {
   const maw: ValleyRoom = { kind: 'maw', x: cx, y: floor + 92, rx: 84, ry: 46 };
   const sarg: ValleyRoom = { kind: 'sargasso', x: cx - 250 + j(60), y: floor + 185 + j(10), rx: 78, ry: 46 };
   const basin: ValleyRoom = { kind: 'basin', x: cx + 270 + j(60), y: floor + 178 + j(10), rx: 92, ry: 54 };
-  const forest: ValleyRoom = { kind: 'forest', x: cx - 560 + j(80), y: floor + 268, rx: 135, ry: 62 };
+  const forest: ValleyRoom = { kind: 'forest', x: cx - 580 + j(60), y: floor + 272, rx: 168, ry: 78 };
   const cistern: ValleyRoom = { kind: 'cistern', x: forest.x + j(30), y: forest.y + forest.ry + 62, rx: 112, ry: 30 };
   const gems: ValleyRoom = { kind: 'gems', x: cx + 560 + j(80), y: floor + 278, rx: 112, ry: 56 };
   const nest: ValleyRoom = { kind: 'nest', x: cx + 110 + j(60), y: 0, rx: 250, ry: 44 };
@@ -362,27 +362,124 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     }
   }
 
-  // The forest: great petrified trunks, floor to roof, their roots trailing down into the cistern.
-  const trunks = 3 + rng.int(2);
+  // The forest: a hall of petrified trunks, floor to roof, their roots trailing down into the cistern.
+  // Tall and slender, smooth as columns, each fanning out near the roof into a
+  // vault of stone lattice that meets its neighbours' (after the Sea of
+  // Corruption's petrified forest under the sand). Stumps and fallen logs on the floor.
+  const roofOf = (x: number, y: number) => {
+    while (y > 0 && m[at(x, y)] === Mat.Air) y--;
+    return y;
+  };
+  const floorOf = (x: number, y: number) => {
+    while (y < WORLD_H - 14 && m[at(x, y)] === Mat.Air) y++;
+    return y;
+  };
+  /** Lattice: distance (in cells) to the nearest edge between jittered cells of size `s`, roughly. */
+  const lattice = (x: number, y: number, s: number) => {
+    const gx = Math.floor(x / s);
+    const gy = Math.floor(y / s);
+    let d1 = 1e9;
+    let d2 = 1e9;
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const h = hash2(gx + ox, gy + oy, seed ^ 0x1a77);
+        const px = (gx + ox + 0.15 + ((h & 0xff) / 255) * 0.7) * s;
+        const py = (gy + oy + 0.15 + (((h >>> 8) & 0xff) / 255) * 0.7) * s;
+        const dd = Math.hypot(x - px, (y - py) * 0.7);
+        if (dd < d1) {
+          d2 = d1;
+          d1 = dd;
+        } else if (dd < d2) d2 = dd;
+      }
+    }
+    return (d2 - d1) / 2;
+  };
+  // Stumps among them: short, flat-topped, a little splayed at the foot.
+  for (let k = 0; k < 4 + rng.int(3); k++) {
+    const sx = Math.round(forest.x + rng.range(-forest.rx * 0.8, forest.rx * 0.8));
+    const fy = floorOf(sx, forest.y);
+    if (fy > forest.y + forest.ry || m[at(sx, fy - 3)] !== Mat.Air) continue;
+    const w = 3 + rng.int(4);
+    const h = 6 + rng.int(14);
+    for (let y = fy - h; y <= fy + 2; y++) {
+      const splay = y > fy - 3 ? 1 : 0;
+      // (A broken one: its top snapped off at a slant.)
+      for (let x = sx - w - splay; x <= sx + w + splay; x++) if (y >= fy - h + Math.round(((x - sx) / w) * (k & 1 ? 3 : 0))) set(x, y, Mat.Petrified);
+    }
+  }
+  // A fallen log or two, lying on the floor.
+  for (let k = 0; k < 1 + rng.int(2); k++) {
+    const lx = Math.round(forest.x + rng.range(-forest.rx * 0.6, forest.rx * 0.6));
+    const len = 26 + rng.int(22);
+    const r = 3 + rng.int(3);
+    // (Only where the floor's level enough to lie on.)
+    let hi = WORLD_H;
+    let lo = 0;
+    for (let x = lx - (len >> 1); x <= lx + (len >> 1); x++) {
+      const f = floorOf(x, forest.y);
+      hi = Math.min(hi, f);
+      lo = Math.max(lo, f);
+    }
+    if (lo - hi > 3 || lo > forest.y + forest.ry) continue;
+    const fy = lo;
+    for (let x = lx - (len >> 1); x <= lx + (len >> 1); x++) for (let y = fy - 2 * r; y < fy; y++) if (m[at(x, y)] === Mat.Air) set(x, y, Mat.Petrified);
+  }
+
+  const trunks = 6 + rng.int(3);
+  const span = forest.rx * 1.7;
+  const gap = span / trunks;
   for (let k = 0; k < trunks; k++) {
-    const tx = Math.round(forest.x - forest.rx * 0.7 + ((k + 0.5) / trunks) * forest.rx * 1.4 + rng.range(-12, 12));
-    let fy = forest.y;
-    while (fy < WORLD_H - 14 && m[at(tx, fy)] === Mat.Air) fy++;
-    let cy = forest.y;
-    while (cy > 0 && m[at(tx, cy)] === Mat.Air) cy--;
-    // Straight and upright like a redwood: one girth all the way up, flaring into
-    // great buttress roots at its foot, a little where it meets the roof.
-    const w = 9 + rng.int(6);
-    for (let y = cy - 4; y <= fy + 6; y++) {
-      const foot = Math.max(0, 1 - (fy - y) / 30);
-      const flare = foot * foot * 16 + Math.max(0, 1 - (y - cy) / 12) * 4;
-      for (let x = tx - w - Math.round(flare); x <= tx + w + Math.round(flare); x++) set(x, y, Mat.Petrified);
+    const tx = Math.round(forest.x - span / 2 + (k + 0.5) * gap + rng.range(-gap * 0.18, gap * 0.18));
+    const fy = floorOf(tx, forest.y);
+    const cy = roofOf(tx, forest.y);
+    const w = 3 + rng.int(3); // (half its girth: slender)
+    const H = fy - cy;
+    const fan = 0.42 + rng.next() * 0.16; // (how far down from the roof the vault begins)
+    const reach = gap * (0.55 + rng.next() * 0.15); // (how wide it spreads at the roof)
+    // (Over the trunk's own roof, the vault fills only the room's open air up to its roof, wherever that is.)
+    const ceil = new Map<number, number>();
+    const ceilOf = (x: number) => {
+      let c = ceil.get(x);
+      if (c === undefined) ceil.set(x, (c = m[at(x, cy)] === Mat.Air ? roofOf(x, cy) : cy));
+      return c;
+    };
+    for (let y = cy - 60; y <= fy + 4; y++) {
+      // u: 0 where the vault begins, 1 at the roof (and over it, where the roof is higher off to the side).
+      const u = Math.min(1, Math.max(0, 1 - (y - cy) / (H * fan)));
+      const core = w + (y > fy - 6 ? (6 - (fy - y)) * 0.5 : 0) + u * u * 3;
+      const out = core + Math.pow(u, 1.8) * reach;
+      for (let x = Math.round(tx - out); x <= Math.round(tx + out); x++) {
+        const dx = Math.abs(x - tx);
+        if (dx <= core) {
+          if (y >= cy - 6 || m[at(x, y)] === Mat.Air) set(x, y, Mat.Petrified);
+        } else if (m[at(x, y)] === Mat.Air && (y >= cy || y > ceilOf(x))) {
+          // The vault: a rim along its underside, lattice within, thickening up into the roof.
+          const rim = out - dx < 1.5 + u;
+          const strut = lattice(x, y, 15) < 0.8 + u * u * u * 1.8;
+          if (rim || strut) set(x, y, Mat.Petrified);
+        }
+      }
+    }
+    // Drips of stone hanging from the vault's underside.
+    for (let k = 0; k < 3 + rng.int(4); k++) {
+      const dx = Math.round(tx + rng.range(-reach * 0.8, reach * 0.8));
+      if (Math.abs(dx - tx) < w + 3) continue;
+      // (Up from under the vault to the first stone over it: is that the vault?)
+      let y = Math.round(cy + H * fan);
+      if (m[at(dx, y)] !== Mat.Air) continue;
+      while (y > cy - 60 && m[at(dx, y - 1)] === Mat.Air) y--;
+      if (m[at(dx, y - 1)] !== Mat.Petrified) continue;
+      const len = 4 + rng.int(10);
+      for (let i = 0; i < len; i++) {
+        const half = i < len * 0.6 ? 1 : 0;
+        for (let x = dx - half; x <= dx + half; x++) if (m[at(x, y + i)] === Mat.Air) set(x, y + i, Mat.Petrified);
+      }
     }
     // Roots: down from its foot through the rock, into the cistern, trailing in the water.
     if (Math.abs(tx - cistern.x) < cistern.rx * 0.8) {
-      for (let r = 0; r < 3 + rng.int(3); r++) {
+      for (let r = 0; r < 2 + rng.int(3); r++) {
         let rx = tx + rng.range(-w, w);
-        const thick = 1 + rng.int(2);
+        const thick = 1;
         const end = cistern.y + cistern.ry * (0.2 + rng.next() * 0.5);
         for (let y = fy; y < end; y++) {
           rx += rng.range(-0.6, 0.6) + Math.sin(y * 0.2 + r) * 0.3;
@@ -391,7 +488,6 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
       }
     }
   }
-
   // Gem caverns and the nest: giant crystals off the floors and roofs; the nest's walls laced with GEMM and rare earth.
   const crystals = (r: ValleyRoom, n: number, scale: number) => {
     for (let k = 0; k < n; k++) {

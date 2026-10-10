@@ -115,37 +115,35 @@ function waterColor(t: Terrain, x: number, y: number, under: number): number {
 }
 
 /**
- * Petrified wood: wood turned to stone. Long bark furrows running the length
- * of the trunk (wavering a little, never broken up), slow bands of mineral
- * colour up it (slate grey, rust, amber, a cold blue-grey), and shading across
- * its girth as round as a column: lit on the left, dark on the right.
+ * Petrified wood, as in the Sea of Corruption's forest under the sand: pale,
+ * cool blue-grey stone, smooth as a column, shaded round across its girth
+ * (lit on the left, falling into blue shadow on the right). Cut tops pale,
+ * undersides dark, so stumps, logs and the vaults' lattice read.
  */
 function petrifiedColor(t: Terrain, x: number, y: number): number {
-  // Across the trunk: how far to its edge each side (the round shading).
+  // Across it: how far to its edge each side (the round shading of a column; a
+  // lattice strut is a little column too).
   let l = 0;
-  while (l < 26 && t.get(x - l - 1, y) === Mat.Petrified) l++;
+  while (l < 20 && t.get(x - l - 1, y) === Mat.Petrified) l++;
   let r = 0;
-  while (r < 26 && t.get(x + r + 1, y) === Mat.Petrified) r++;
+  while (r < 20 && t.get(x + r + 1, y) === Mat.Petrified) r++;
   const u = (l + 0.5) / (l + r + 1); // 0 at the left edge, 1 at the right
-  let k = 0.62 + 0.62 * Math.sin(Math.PI * Math.min(1, u * 1.15)) * (1.15 - u * 0.55);
-  // Bark furrows: dark vertical grooves every few cells, drifting slowly with height.
-  const drift = Math.sin(y * 0.021 + x * 0.002) * 1.6 + Math.sin(y * 0.0063) * 2.4;
-  const f = (((x + drift) % 5) + 5) % 5;
-  if (f < 0.9) k *= 0.58;
-  else if (f < 1.6) k *= 0.85;
-  else if (f > 4.2) k *= 1.08;
-  // Mineral banding up the trunk: slow, soft-edged layers.
-  const band = Math.sin(y * 0.085 + Math.sin(y * 0.017) * 3) * 0.5 + 0.5;
-  const rust = Math.max(0, band - 0.5) * 2.2;
-  const slate = Math.max(0, 0.3 - band) * 2;
-  // And a fine grain along the fibres (stretched tall: the old wood's lines turned to stone).
-  k *= 0.93 + hu(x, Math.floor(y / 7), 0x9e7) * 0.14;
-  const re = 126 + rust * 50 - slate * 30;
-  const gr = 108 + rust * 16 - slate * 20;
-  const bl = 92 - rust * 22 - slate * 12;
-  // Where the roof or the ground meets it: a hard dark edge.
-  if (t.get(x, y - 1) === Mat.Air || t.get(x, y + 1) === Mat.Air) k *= 0.8;
-  return gemRgb(re * k, gr * k, bl * k);
+  // Lit from the upper left, cool and pale; the far side falls into blue shadow.
+  // (A thin strut of the vaults' lattice: flat, a little shadowed, so the honeycomb reads.)
+  let k = l + r < 9 ? 0.82 - u * 0.12 : 0.5 + 0.7 * Math.sin(Math.PI * Math.min(1, u * 1.2)) * (1.2 - u * 0.75);
+  // Smooth, stone-hard bark: only faint long streaks up it.
+  const streak = Math.sin((x + Math.sin(y * 0.013) * 2) * 1.9) * 0.5 + 0.5;
+  k *= 0.95 + streak * 0.07 + (hu(x, Math.floor(y / 11), 0x9e7) - 0.5) * 0.06;
+  const above = t.get(x, y - 1) === Mat.Air;
+  const below = t.get(x, y + 1) === Mat.Air;
+  // A cut top (a stump's, a log's): pale, with a ring or two in it; an underside, dark.
+  if (above) k = Math.max(k, 1.05) * (((x * 7) % 5) === 0 ? 0.88 : 1);
+  else if (t.get(x, y - 2) === Mat.Air) k *= 1.08;
+  if (below) k *= 0.6;
+  const re = 128 * k;
+  const gr = 146 * k;
+  const bl = 160 * k;
+  return gemRgb(re, gr, bl);
 }
 
 /** A hash of (x, y) in [0, 1) (salted by `s`). */
