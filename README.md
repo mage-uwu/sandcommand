@@ -1022,9 +1022,18 @@ a **Mole** for **1100**, a **Watchdog** for **1000**, or a **Tarantula** for **3
     on through the seam.
   - **Giving up.** If four seconds of digging bring in nothing, it gives
     that seam up and finds another.
-  - **Calling it in.** With 1500 banked, it gets on the radio and calls a
-    dropship, for itself or, in team modes, for its whole team. It won't
-    call while one of its own is already up.
+  - **What it saves for.** Not only dropships. Each bot has a *wish*: a
+    watchdog, mole, tank, dropship or tarantula. It saves that wish's price
+    and calls it in once it's banked, then picks the next.
+  - **The odds.** Watchdogs are likeliest (cheap, and they fight beside
+    it). Moles, tanks and dropships are about equal. A tarantula, at 3000
+    gold, is mostly for the better bots (`wishOdds` in `bots.ts`).
+  - **Never the impossible.** It never wishes for something it can't have.
+    That rules out a second watchdog or tarantula of its own, a dropship
+    while one of its side's is already up, and anything once the slots are
+    full.
+  - **A tank or mole it bought.** It goes and climbs in, from further off
+    than for any other empty tank, whatever the fighting.
   - **Endgame.** With four enemies or fewer left in a wave, it stops
     digging and finishes the fight.
 - **Damage.** The dropship has about half a tank's toughness (3750 hull).

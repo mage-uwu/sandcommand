@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BTN_RIGHT } from '../src/shared/actor.ts';
 import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, ACTOR_W } from '../src/shared/constants.ts';
@@ -78,19 +78,22 @@ describe('riders on a vehicle', () => {
     for (let k = 0; k < 45; k++) {
       tick([BTN_RIGHT, 0]);
       const [driver, rider] = games;
+      // (One instant for every view compared: render time otherwise moves on between the calls.)
+      const now = vi.spyOn(performance, 'now').mockReturnValue(performance.now());
       // The driver's screen: the rider on the predicted mole's seat.
       const dv = driver.tankViews(0.5).find((v) => v.slot === 0)!;
       const seen = driver.remoteViews(0.5).find((v) => v.id === ps[1].id)!;
       const s = surfSeat(dv, ps[1].seat, { x: 0, y: 0 });
-      expect(seen.x).toBeCloseTo(s.x - ACTOR_W / 2, 1); // (render time moves on between the two calls)
-      expect(seen.y).toBeCloseTo(s.y - ACTOR_H, 1); // (render time moves on between the two calls)
+      expect(seen.x).toBeCloseTo(s.x - ACTOR_W / 2, 6);
+      expect(seen.y).toBeCloseTo(s.y - ACTOR_H, 6);
       expect(seen.moving).toBe(false);
       // The rider's own screen: itself on the seat of the mole as it draws it.
       const rv = rider.tankViews(0.5).find((v) => v.slot === 0)!;
       const me = rider.ridingAt(0.5)!;
       const s2 = surfSeat(rv, rider.surfSeatNo, { x: 0, y: 0 });
-      expect(me.x).toBeCloseTo(s2.x - ACTOR_W / 2, 1); // (render time moves on between the two calls)
-      expect(me.y).toBeCloseTo(s2.y - ACTOR_H, 1); // (render time moves on between the two calls)
+      expect(me.x).toBeCloseTo(s2.x - ACTOR_W / 2, 6);
+      expect(me.y).toBeCloseTo(s2.y - ACTOR_H, 6);
+      now.mockRestore();
     }
     // On its hull's top, not sunk into it: each seat's feet within a couple of cells of its roofline.
     const m = world.tanks[0]!;

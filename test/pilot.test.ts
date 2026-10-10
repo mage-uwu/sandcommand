@@ -3,6 +3,7 @@ import { BTN_FIRE, BTN_RIGHT, BTN_SCOPE } from '../src/shared/actor.ts';
 import { ACTOR_H } from '../src/shared/constants.ts';
 import { SHIP_BOMBS, SHIP_W } from '../src/shared/dropship.ts';
 import { Mat } from '../src/shared/materials.ts';
+import { isDog, isMole, isSpider } from '../src/shared/tank.ts';
 import { CALL_COST, CallKind, quantizeAim } from '../src/shared/protocol.ts';
 import { ProjKind, WeaponId } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
@@ -138,6 +139,7 @@ describe('bots that save up for air support', () => {
 
   it('with the gold banked, it gets on the radio and calls in a dropship', () => {
     const { world, bot } = lone(85);
+    (bot.bot as unknown as { wish: number }).wish = CallKind.Dropship;
     bot.gold = CALL_COST + 10;
     bot.callCd = 0;
     for (let k = 0; k < 30 * 3 && !world.ships.some(Boolean); k++) world.step();
@@ -147,4 +149,57 @@ describe('bots that save up for air support', () => {
     void ACTOR_H;
     void SHIP_W;
   });
+
+  it('saves for all sorts: watchdogs most, then moles, tanks and dropships; tarantulas mostly the better bots', () => {
+    const { bot } = lone(90);
+    const brain = bot.bot as unknown as { pickWish: (p: Player, can: (k: number) => boolean) => number };
+    const tally = (skill: number) => {
+      bot.skill = skill;
+      const n = new Map<number, number>();
+      for (let i = 0; i < 2000; i++) {
+        const k = brain.pickWish(bot, () => true);
+        n.set(k, (n.get(k) ?? 0) + 1);
+      }
+      return n;
+    };
+    const mid = tally(3);
+    for (const k of [CallKind.Watchdog, CallKind.Mole, CallKind.Tank, CallKind.Dropship, CallKind.Tarantula]) expect(mid.get(k) ?? 0).toBeGreaterThan(50);
+    expect(mid.get(CallKind.Watchdog)!).toBeGreaterThan(mid.get(CallKind.Tank)!);
+    expect(tally(5).get(CallKind.Tarantula)!).toBeGreaterThan(tally(1).get(CallKind.Tarantula)! * 3);
+    // Never what it can't have.
+    for (let i = 0; i < 200; i++) expect(brain.pickWish(bot, (k) => k !== CallKind.Watchdog)).not.toBe(CallKind.Watchdog);
+    expect(brain.pickWish(bot, () => false)).toBe(-1);
+  });
+
+  it('a bot that buys a tank (or a mole) goes and climbs into it', () => {
+    for (const kind of [CallKind.Tank, CallKind.Mole]) {
+      const { world, bot } = lone(91);
+      (bot.bot as unknown as { wish: number }).wish = kind;
+      bot.gold = 5000;
+      bot.callCd = 0;
+      for (let k = 0; k < 30 * 3 && !world.tanks.some(Boolean); k++) world.step();
+      const t = world.tanks.find(Boolean)!;
+      expect(t).toBeDefined();
+      expect(isMole(t)).toBe(kind === CallKind.Mole);
+      for (let k = 0; k < 30 * 30 && bot.tank < 0; k++) world.step();
+      expect(world.tanks[bot.tank]).toBe(t);
+    }
+  });
+
+  it('a watchdog or a tarantula, it lets fight beside it; and it never buys a second of either', () => {
+    const { world, bot } = lone(92);
+    const brain = bot.bot as unknown as { wish: number };
+    brain.wish = CallKind.Watchdog;
+    bot.gold = 20000;
+    for (let k = 0; k < 30 * 20; k++) {
+      bot.callCd = 0;
+      world.step();
+    }
+    const mine = (f: (t: NonNullable<World['tanks'][number]>) => boolean) => world.tanks.filter((t) => t && t.owner === bot.id && f(t)).length;
+    expect(mine(isDog)).toBe(1);
+    expect(mine(isSpider)).toBeLessThanOrEqual(1);
+    // With the gold, it went on to buy other things too.
+    expect(world.tanks.filter(Boolean).length + world.ships.filter(Boolean).length).toBeGreaterThan(1);
+  });
 });
+

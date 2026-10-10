@@ -187,6 +187,7 @@ import {
   R_SHIP_PART,
   R_SHIP_BOOM,
   CALL_COST,
+  callCost,
   WATCHDOG_COST,
   TARANTULA_COST,
   MOLE_COST,
@@ -3523,7 +3524,7 @@ export class World {
   call(id: number, kind: number): boolean {
     if (kind === CallKind.Pilot) return this.togglePilot(id);
     const p = this.players[id];
-    const cost = kind === CallKind.Watchdog ? WATCHDOG_COST : kind === CallKind.Tarantula ? TARANTULA_COST : kind === CallKind.Mole ? MOLE_COST : CALL_COST;
+    const cost = callCost(kind);
     if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < cost) return false;
     if (kind === CallKind.Tarantula) {
       // One tarantula each (a watchdog besides is fine).

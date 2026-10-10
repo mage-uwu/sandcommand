@@ -3,11 +3,11 @@ import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/acto
 import { ClassId, DROID_MASK, stumps } from '../shared/body.ts';
 import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
-import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/protocol.ts';
+import { CallKind, Evac, Phase, Team, callCost, quantizeAim } from '../shared/protocol.ts';
 import { MAT_HARD, Mat, RARE_EARTH_VALUE } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isDog, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -84,6 +84,17 @@ const ENDGAME_FOES = 4;
  * staggered: target choice every half second, line of sight every few
  * ticks, steering and aim every tick.
  */
+/** A bot's odds of saving for each radio call, by its skill (1-5): the better it is, the likelier the tarantula. */
+export function wishOdds(skill: number): [number, number][] {
+  return [
+    [CallKind.Watchdog, 3],
+    [CallKind.Mole, 2],
+    [CallKind.Tank, 2],
+    [CallKind.Dropship, 2],
+    [CallKind.Tarantula, skill >= 4 ? 1.5 : skill === 3 ? 0.7 : 0.25],
+  ];
+}
+
 /** What a cell's worth to a bot digging for gold (rare earth ten times gold). */
 const oreWorth = (m: number) => (m === Mat.Gold ? 1 : m === Mat.RareEarth ? RARE_EARTH_VALUE : 0);
 
@@ -136,6 +147,15 @@ export class BotBrain {
    * gold whenever the fighting's elsewhere, to buy a dropship.
    */
   private prospector = false;
+  /**
+   * What it's saving up for on the radio (CallKind): a watchdog, a mole, a
+   * tank, a dropship or a tarantula, picked by the odds in `wishOdds` and
+   * picked again once bought, or when it can't be had (it has one already;
+   * no room for another).
+   */
+  private wish = -1;
+  /** The tank or mole it called in, which it then goes and climbs into (tank slot; -1 none). */
+  private myRide = -1;
   /** The gold cell it's digging toward, and when it last looked for one. */
   private gold: { x: number; y: number } | null = null;
   private goldScanAt = -1e9;
@@ -163,6 +183,25 @@ export class BotBrain {
    * gold above (which would mean tunnelling up) for more. Re-scanned every
    * few seconds, or as soon as the cell it was after is dug out.
    */
+  /**
+   * The next thing to save for. Watchdogs most (cheap, and they fight
+   * alongside), then a mole, a tank or a dropship, alike; a tarantula, the
+   * dearest by far, is mostly for the better bots. Never one it can't have.
+   */
+  private pickWish(p: Player, can: (kind: number) => boolean): number {
+    const odds = wishOdds(p.skill);
+    let total = 0;
+    for (const [kind, w] of odds) if (can(kind)) total += w;
+    if (total <= 0) return -1;
+    let r = this.rng.next() * total;
+    for (const [kind, w] of odds) {
+      if (!can(kind)) continue;
+      r -= w;
+      if (r <= 0) return kind;
+    }
+    return -1;
+  }
+
   private findGold(world: World, p: Player): { x: number; y: number } | null {
     const t = world.tick;
     const g = this.gold;
@@ -252,6 +291,7 @@ export class BotBrain {
       this.wasAlive = true;
       this.holdFire = t + Math.round((45 + rng.int(45)) * skillOf(p).react); // just landed: look around first
       this.prospector = rng.next() < PROSPECT_CHANCE;
+      this.myRide = -1;
       this.gold = null;
       this.badGold.length = 0;
     }
@@ -299,16 +339,21 @@ export class BotBrain {
     }
 
     // An empty tank landed close by, and nobody to fight right here: take it.
+    // (The one it called in itself, it goes for whatever the fighting, from further off.)
     const near = tgt ? Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) : Infinity;
-    if (this.tanker && near > 120 && !world.extractionLive) {
+    const mine = this.myRide >= 0 ? world.tanks[this.myRide] : null;
+    if (this.myRide >= 0 && (!mine || mine.pilot !== 255 || isPet(mine))) this.myRide = -1; // (in it, someone else is, or it's gone)
+    if ((this.tanker || this.myRide >= 0) && (near > 120 || this.myRide >= 0) && !world.extractionLive && p.tank < 0) {
       for (let slot = 0; slot < world.tanks.length; slot++) {
         const k = world.tanks[slot];
         if (!k || k.pilot !== 255 || k.chute || isPet(k) || (slot === this.abandoned && t < this.abandonUntil)) continue;
-        const kx = k.x + TANK_W / 2;
-        if (Math.abs(kx - p.cx) > 260 || Math.abs(k.y + TANK_H / 2 - p.cy) > 80) continue;
+        const own = slot === this.myRide;
+        if (!this.tanker && !own) continue;
+        const kx = k.x + tankW(k) / 2;
+        if (Math.abs(kx - p.cx) > (own ? 600 : 260) || Math.abs(k.y + tankH(k) / 2 - p.cy) > (own ? 160 : 80)) continue;
         goalX = kx;
-        const dx = Math.max(k.x - (p.body.x + 8), 0, p.body.x - (k.x + TANK_W));
-        const dy = Math.max(k.y - (p.body.y + 14), 0, p.body.y - (k.y + TANK_H));
+        const dx = Math.max(k.x - (p.body.x + 8), 0, p.body.x - (k.x + tankW(k)));
+        const dy = Math.max(k.y - (p.body.y + 14), 0, p.body.y - (k.y + tankH(k)));
         pickup = dx <= 8 && dy <= 8 && (t & 7) === 0;
         break;
       }
@@ -356,16 +401,32 @@ export class BotBrain {
     // with enough banked, get on the radio (for itself, or its whole team).
     const near2 = tgt ? Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) : Infinity;
     // (Nearly there: it keeps its head down and digs unless they're right on it.)
-    const quiet = !tgt || near2 > (p.gold >= CALL_COST / 2 ? 130 : 220) || (!this.seeTarget && near2 > 110);
     const radioSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Radio);
     const airCover = world.ships.some((sh) => sh && !sh.leaving && (sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)));
+    // What it can have right now: one watchdog and one tarantula of its own at a time, a dropship only without air cover already up, and room for it.
+    const can = (kind: number) =>
+      kind === CallKind.Dropship
+        ? !airCover && world.ships.includes(null)
+        : world.tanks.includes(null) &&
+          !(kind === CallKind.Watchdog && world.tanks.some((k) => k && isDog(k) && k.owner === p.id)) &&
+          !(kind === CallKind.Tarantula && world.tanks.some((k) => k && isSpider(k) && k.owner === p.id));
+    if (this.wish < 0 || !can(this.wish)) this.wish = this.pickWish(p, can);
+    const cost = this.wish >= 0 ? callCost(this.wish) : Infinity;
+    const quiet = !tgt || near2 > (p.gold >= cost / 2 ? 130 : 220) || (!this.seeTarget && near2 > 110);
     const calling =
-      !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && radioSlot >= 0 && p.gold >= CALL_COST && p.callCd === 0 && !airCover && world.ships.includes(null) && (!tgt || near2 > 110);
-    if (calling && p.weapon === WeaponId.Radio) world.call(p.id, CallKind.Dropship);
+      !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && radioSlot >= 0 && this.wish >= 0 && p.gold >= cost && p.callCd === 0 && p.tank < 0 && (!tgt || near2 > 110);
+    if (calling && p.weapon === WeaponId.Radio) {
+      const before = world.tanks.map((k) => k !== null);
+      if (world.call(p.id, this.wish)) {
+        // A tank or a mole comes down empty: it's this bot's to climb into.
+        if (this.wish === CallKind.Tank || this.wish === CallKind.Mole) this.myRide = world.tanks.findIndex((k, i) => k !== null && !before[i]);
+        this.wish = this.pickWish(p, can);
+      }
+    }
     // (Not in the endgame: with only a few enemies left, it's time to finish them.)
     let foesLeft = 0;
     if (this.prospector) for (const o of world.players) if (o && o.alive && o !== p && (p.team === Team.None || o.team !== p.team)) foesLeft++;
-    const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && p.gold < CALL_COST && gunSlot >= 0 ? this.findGold(world, p) : null;
+    const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && p.gold < cost && gunSlot >= 0 ? this.findGold(world, p) : null;
     if (goldAt) goalX = goldAt.x;
     // A cave map, and the target somewhere else in the caves (or up top): the way there.
     const cave = !nav && !goldAt && !calling && tgt && !this.seeTarget ? this.caveNav(world, p, tgt) : null;

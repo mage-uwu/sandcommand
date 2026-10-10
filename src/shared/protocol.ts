@@ -28,6 +28,8 @@ export const WATCHDOG_COST = 1000;
 export const TARANTULA_COST = 3000;
 /** A mole's: a smaller tank with a flamethrower that digs. */
 export const MOLE_COST = 1100;
+/** What a radio call of each kind costs (a dropship or a tank CALL_COST). */
+export const callCost = (kind: number) => (kind === CallKind.Watchdog ? WATCHDOG_COST : kind === CallKind.Tarantula ? TARANTULA_COST : kind === CallKind.Mole ? MOLE_COST : CALL_COST);
 
 // Server -> client
 export const S_WELCOME = 0x81;
