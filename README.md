@@ -758,27 +758,48 @@ a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then nee
   tripod gait. You
   get one at a time (a watchdog besides is fine), nobody can climb in, and
   it shuts down if you leave the game.
-  - **Its guns.** An **automatic missile launcher**: a twin-tube rack on
-    its back that turns all the way round and fires a stream of small,
-    straight-flying missiles (about two a second, alternating tubes, each
-    about half a bazooka rocket's blast; `ProjKind.SpiderMissile`). And a
-    **laser** in its head: thin instant beams like the laser rifle's, five
-    a second, each weaker than a charged rifle shot, but automatic. Each
-    beam goes through every clone in its way and stops at terrain or a
-    vehicle (`World.beam`, shared with the laser rifle).
+  - **Its guns.**
+    - **Missiles.** An **automatic missile launcher**: a twin-tube rack on
+      its back that turns all the way round. It fires a stream of
+      straight-flying missiles, about two a second from alternating tubes
+      (`ProjKind.SpiderMissile`). Each has a **hand grenade's blast**.
+    - **Laser.** A **laser** in its head fires thin instant beams like the
+      laser rifle's, five a second, automatically. Each beam does three
+      times its old damage. It goes through every clone in its way and
+      stops at terrain or a vehicle (`World.beam`, shared with the laser
+      rifle).
+    - **Vaporizing.** The laser **vaporizes** what it touches. Every
+      soldier it passes through takes a burn on top of the beam. Where it
+      lands, it takes a bite out of the ground: 11 cells across, hard
+      material within 6, with almost no debris
+      (`SPIDER_VAPOR_R`/`_CORE`/`_BURN`).
+    - **Digging with it.** Five beams a second dig about as fast as a
+      digger in soil, and faster through concrete. Pig iron still resists
+      it, and a door takes damage instead.
   - **On its own** it thinks as the watchdog does, with its own kit
     (`SPIDER_KIT`): it looks further (560 cells) and screens further out
     (90). Its laser reaches 420 cells and needs no leading, its missiles
     520, and it fires both at once down the same line. It holds fire with
     you in the line, and saves the missiles for vehicles and clones over
     60 cells from you.
-  - **Getting about.** No treads, no jets: it walks, its legs stepping up
-    18 cells a stride and keeping the body level. Pushing into a sheer
-    wall, or holding W with one alongside, it **walks straight up it**
-    and over the top (S climbs down).
+  - **Getting about.**
+    - **Walking and climbing.** It walks, its legs stepping up 18 cells a
+      stride and keeping the body level. Pushing into a sheer wall, or
+      holding W with one alongside, it **walks straight up it** and over
+      the top (S climbs down).
+    - **Leaping.** On open ground, W **leaps**: about three bodies high
+      (120 cells), with a shove the way it's walking.
+    - **Gliding.** Holding W on the way down fires its **belly rockets**.
+      Their thrust is less than its weight, so they can't lift it, but they
+      ease its fall to a gentle 70 cells/s and let it steer wider than it
+      walks. A leap that would carry 90 cells glides almost 300.
+    - **Rocket charge.** The rockets run on a charge that lasts about 4.5 s
+      and refills on the ground.
+    - **Landing.** It lands on whoever is underneath.
   - **Its parts.** The laser head, the missile rack and the plating can
     each be shot off. Rounds flying under its belly pass between its legs.
-  - **By remote**: A/D walk (into a wall to climb it), W/S climb, click
+  - **By remote**: A/D walk (into a wall to climb it), W leaps (and,
+    held, glides) or climbs a wall alongside, S climbs down. Click fires
     the laser, right-click the missiles.
 
 - **Tank.** An empty tank is parachuted onto your position. Climb in, or

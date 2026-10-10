@@ -76,7 +76,7 @@ export const R_SHIP_PART = 30;
 export const R_SHIP_BOOM = 31;
 /** Extraction: which booby traps (mines) have gone off, as a bitset by trap id (sent when it changes). */
 export const R_TRAPS = 32;
-/** A laser beam fired: from, to, power (0..255) and who fired it. */
+/** A laser beam fired: from, to, power (0..255), who fired it, and whether it vaporizes (the tarantula's). */
 export const R_BEAM = 33;
 /** Enemies this client's side has spotted from the air (its dropships): ids and where they are. */
 export const R_SPOTTED = 34;
@@ -101,7 +101,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 37;
+export const PROTOCOL_VERSION = 38;
 
 /** Last Man Standing round phases. */
 export const Phase = {

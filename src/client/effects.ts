@@ -402,6 +402,30 @@ export function tankJets(p: Particles, x: number, y: number, vx: number, vy: num
   }
 }
 
+/** A tarantula gliding: blue-white rocket flame out of three vents under its belly (`w` x `h` its box), and haze. */
+export function spiderJets(p: Particles, x: number, y: number, w: number, h: number, vx: number, vy: number): void {
+  const vy0 = y + h * 0.62;
+  for (const u of [0.3, 0.5, 0.7]) {
+    const nx = x + w * u;
+    p.spawn(PK.Flame, nx + rnd(-2, 2), vy0, vx * 0.5 + rnd(-25, 25), vy * 0.4 + rnd(220, 340), rnd(5, 9));
+    if (Math.random() < 0.4) p.spawn(PK.Spark, nx, vy0 + 2, vx * 0.4 + rnd(-40, 40), rnd(200, 320), rnd(4, 7));
+    if (Math.random() < 0.35) p.spawn(PK.Smoke, nx, vy0 + 6, vx * 0.3 + rnd(-20, 20), rnd(40, 90), rnd(30, 50));
+  }
+}
+
+/**
+ * The tarantula's laser vaporizing what it touched: a flash of white-hot
+ * sparks, a gout of flame and a rolling cloud of vapour.
+ */
+export function vaporPuff(p: Particles, x: number, y: number, dx: number, dy: number): void {
+  for (let k = 0; k < 18; k++) {
+    const s = rnd(80, 320);
+    p.spawn(PK.Spark, x, y, -dx * s * 0.5 + rnd(-200, 200), -dy * s * 0.5 + rnd(-200, 200), rnd(6, 14));
+  }
+  burst(p, PK.Flame, x, y, 10, 110, 7);
+  burst(p, PK.Smoke, x, y, 14, 70, 60);
+}
+
 /** A dropship engine's downwash: a hot glow and a push of dust and haze below the pod. */
 /** A runaway engine's jet: flame and smoke out of the nozzle (behind its heading `a`), or just smoke once it's burnt out. */
 export function engineExhaust(p: Particles, x: number, y: number, vx: number, vy: number, a: number, burning: boolean): void {

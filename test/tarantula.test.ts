@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { BTN_FIRE, BTN_RIGHT, BTN_SCOPE } from '../src/shared/actor.ts';
+import { BTN_FIRE, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../src/shared/actor.ts';
 import { ClassId, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H, ACTOR_W, DT, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { CallKind, TARANTULA_COST, WATCHDOG_COST, quantizeAim } from '../src/shared/protocol.ts';
-import { TANK_HP, TARANTULA_SCALE, TankKind, TankPart, isPet, isSpider, newTarantula, stepTank, tankH, tankMaxHp, tankPartAt, tankW } from '../src/shared/tank.ts';
+import { SPIDER_BEAM_WOUND, SPIDER_JUMP, TANK_HP, TARANTULA_SCALE, TankKind, TankPart, isPet, isSpider, newTarantula, stepTank, tankH, tankMaxHp, tankPartAt, tankW } from '../src/shared/tank.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { ProjKind, WeaponId } from '../src/shared/weapons.ts';
+import { DIGGER_R, PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -174,5 +174,98 @@ describe('the tarantula', () => {
     world.removePlayer(a.id);
     world.step();
     expect(world.tanks[slot]).toBe(null);
+  });
+});
+
+describe('the tarantula, upgraded', () => {
+  /** Open flat ground, a tarantula standing on it (driven by player 0). */
+  function ground() {
+    const t = new Terrain();
+    for (let x = 0; x < WORLD_W; x++) for (let y = 600; y < 620; y++) t.mat[y * WORLD_W + x] = Mat.Bedrock;
+    t.rebuildAllPlanes();
+    const s = newTarantula(400, 600 - tankH({ kind: TankKind.Tarantula, s: TARANTULA_SCALE }) - 1, 0);
+    s.chute = false;
+    s.pilot = 0;
+    for (let k = 0; k < 30; k++) stepTank(s, t, DT, 0); // settle; charge up
+    return { t, s };
+  }
+  /** One leap to the right (up held throughout to glide, or just the first tick): how far, how high, how fast it came down. */
+  function leap(glide: boolean) {
+    const { t, s } = ground();
+    const x0 = s.x;
+    const y0 = s.y;
+    let top = y0;
+    let fall = 0;
+    for (let k = 0; k < 30 * 12; k++) {
+      stepTank(s, t, DT, BTN_RIGHT | (glide || k === 0 ? BTN_UP : 0));
+      top = Math.min(top, s.y);
+      fall = Math.max(fall, s.vy);
+      if (k > 3 && s.onGround) break;
+    }
+    return { dist: s.x - x0, rise: y0 - top, fall };
+  }
+
+  it('leaps three bodies high off its legs', () => {
+    const hop = leap(false);
+    expect(hop.rise).toBeGreaterThan(100);
+    expect(hop.dist).toBeGreaterThan(80);
+  });
+
+  it('glides on its belly rockets: much further, coming down gently, but it can\'t fly', () => {
+    const hop = leap(false);
+    const glide = leap(true);
+    expect(glide.dist).toBeGreaterThan(hop.dist * 1.8);
+    expect(glide.fall).toBeLessThan(SPIDER_JUMP * 0.4);
+    expect(glide.rise).toBeLessThan(hop.rise * 1.2); // (no extra height from them)
+    // Up in the air from a standstill, rockets on: it still comes down.
+    const { t, s } = ground();
+    s.y -= 200;
+    s.onGround = false;
+    s.fuel = 100;
+    const y = s.y;
+    for (let k = 0; k < 30; k++) stepTank(s, t, DT, BTN_UP);
+    expect(s.y).toBeGreaterThan(y);
+    expect(s.jetting).toBe(true);
+    // And the charge runs out.
+    for (let k = 0; k < 30 * 8 && !s.onGround; k++) {
+      s.y = Math.min(s.y, 300);
+      stepTank(s, t, DT, BTN_UP);
+    }
+    expect(s.fuel).toBe(0);
+  });
+
+  it('three times the laser, missiles with a grenade\'s blast', () => {
+    expect(SPIDER_BEAM_WOUND).toBe(66);
+    expect(PROJ[ProjKind.SpiderMissile].splashDamage).toBe(PROJ[ProjKind.Grenade].splashDamage);
+    expect(PROJ[ProjKind.SpiderMissile].splashR).toBeGreaterThanOrEqual(PROJ[ProjKind.Grenade].splashR - 2);
+    expect(PROJ[ProjKind.SpiderMissile].carveR).toBeGreaterThanOrEqual(PROJ[ProjKind.Grenade].carveR - 2);
+  });
+
+  it('its laser vaporizes what it hits: it digs about as fast as a digger, through concrete too', () => {
+    for (const [mat, least] of [
+      [Mat.Dirt, 1200],
+      [Mat.Concrete, 300],
+    ] as const) {
+      const { world, a } = yard(420);
+      const { spider } = callSpider(world, a);
+      // A thick wall ahead of it, at its laser's height.
+      const wx = Math.round(centre(spider)) + 80;
+      for (let x = wx; x < wx + 200; x++) for (let y = 100; y < FLOOR; y++) world.terrain.set(x, y, mat);
+      world.terrainReplaced();
+      spider.aim = 0;
+      spider.faceLeft = false;
+      const before = (() => {
+        let n = 0;
+        for (let x = wx; x < wx + 200; x++) for (let y = 100; y < FLOOR; y++) if (world.terrain.get(x, y) === mat) n++;
+        return n;
+      })();
+      // A second's worth of shots (five).
+      const fire = (world as unknown as { spiderBeam(t: unknown, by: number): void }).spiderBeam.bind(world);
+      for (let k = 0; k < 5; k++) fire(spider, a.id);
+      let after = 0;
+      for (let x = wx; x < wx + 200; x++) for (let y = 100; y < FLOOR; y++) if (world.terrain.get(x, y) === mat) after++;
+      expect(before - after).toBeGreaterThan(least);
+    }
+    void DIGGER_R;
   });
 });

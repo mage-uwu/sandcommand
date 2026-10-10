@@ -21,7 +21,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidWreck, smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -310,13 +310,14 @@ export class Game implements FrameHandler {
   /** Our own laser's charge (ticks held), tracked locally for the charge meter and muzzle glow. */
   laserCharge = 0;
 
-  beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number): void {
+  beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number, vapor = false): void {
     if (this.beamSeen.includes(seq)) return;
     this.beamSeen.push(seq);
     if (this.beamSeen.length > 16) this.beamSeen.shift();
     this.laserBeams.push({ x0, y0, x1, y1, power, at: performance.now() });
     if (this.laserBeams.length > 12) this.laserBeams.shift();
     laserHit(this.particles, x1, y1, (x1 - x0) / (Math.hypot(x1 - x0, y1 - y0) || 1), (y1 - y0) / (Math.hypot(x1 - x0, y1 - y0) || 1), power);
+    if (vapor) vaporPuff(this.particles, x1, y1, (x1 - x0) / (Math.hypot(x1 - x0, y1 - y0) || 1), (y1 - y0) / (Math.hypot(x1 - x0, y1 - y0) || 1));
     this.sfx?.laser(x0, y0, x1, y1, power);
     if (owner < 64) this.kicks.set(owner, { at: performance.now(), k: 0.3 + power * 0.7 });
     const me = this.body;
@@ -334,6 +335,12 @@ export class Game implements FrameHandler {
     if (this.healSeen.length > 16) this.healSeen.shift();
     this.healWaves.push({ x, y, team, owner, at: performance.now() });
     if (this.healWaves.length > 8) this.healWaves.shift();
+  }
+
+  /** A vehicle's jets: a tank's two, or a tarantula's belly rockets as it glides. */
+  private vehicleJets(t: { x: number; y: number; vx: number; vy: number; kind: number; s: number }): void {
+    if (isSpider(t)) spiderJets(this.particles, t.x, t.y, tankW(t), tankH(t), t.vx, t.vy);
+    else tankJets(this.particles, t.x, t.y, t.vx, t.vy);
   }
 
   /** Recent shots by clone id (when, how hard), for the gun kicking back in their hands. */
@@ -431,7 +438,7 @@ export class Game implements FrameHandler {
     } else if (this.alive && this.drive) {
       stepTank(this.drive, this.terrain, DT, buttons);
       this.seat(this.drive);
-      if (this.drive.jetting) tankJets(this.particles, this.drive.x, this.drive.y, this.drive.vx, this.drive.vy);
+      if (this.drive.jetting) this.vehicleJets(this.drive);
     } else if (this.alive) {
       this.body.burdened = this.inv.some((it) => it.weapon === WeaponId.Idol);
       stepBody(this.body, buttons, this.terrain, DT);
@@ -469,7 +476,7 @@ export class Game implements FrameHandler {
     }
     for (const [slot, ts] of this.tankSnaps) {
       const t = ts[ts.length - 1];
-      if (t && t.jetting && slot !== this.driveSlot) tankJets(this.particles, t.x, t.y, t.vx, t.vy);
+      if (t && t.jetting && slot !== this.driveSlot) this.vehicleJets(t);
     }
     // Dropship engines: glow and downwash under each pod still attached.
     for (const [, ss] of this.shipSnaps) {

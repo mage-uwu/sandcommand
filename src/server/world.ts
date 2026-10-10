@@ -64,6 +64,9 @@ import {
   SPIDER_BEAM_ENERGY,
   SPIDER_BEAM_WIDTH,
   SPIDER_BEAM_WOUND,
+  SPIDER_VAPOR_BURN,
+  SPIDER_VAPOR_CORE,
+  SPIDER_VAPOR_R,
   SPIDER_LASER_INTERVAL,
   SPIDER_MISSILE_INTERVAL,
   SPIDER_MISSILE_SPEED,
@@ -2233,7 +2236,7 @@ export class World {
   /** A tarantula's laser: a thin beam out of its head, at whatever it's aimed at. */
   private spiderBeam(t: Tank, by: number): void {
     const m = tankMuzzle(t, false, t.aim, this.tankMz);
-    this.beam(by, m.x, m.y, m.a, SPIDER_BEAM_WIDTH, SPIDER_BEAM_ENERGY, SPIDER_BEAM_WOUND, 0.12, 0, 255);
+    this.beam(by, m.x, m.y, m.a, SPIDER_BEAM_WIDTH, SPIDER_BEAM_ENERGY, SPIDER_BEAM_WOUND, 0.12, 0, 255, true);
     t.firedSmg = true;
   }
 
@@ -2242,9 +2245,11 @@ export class World {
    * with `energy` and `wound`): it goes straight through every soldier in its
    * way, and stops at terrain or a vehicle, which it hits; with `burn`, it
    * burns a crater where it lands. `power` (0..1) is how it looks; `shooter`
-   * is whose gun kicks on clients (255: nobody's).
+   * is whose gun kicks on clients (255: nobody's). `vapor` (the tarantula's):
+   * it vaporizes what it touches, a bite out of the ground where it lands
+   * and a burn on everyone it goes through.
    */
-  private beam(by: number, x0: number, y0: number, aim: number, w: number, energy: number, wound: number, power: number, burn: number, shooter: number): void {
+  private beam(by: number, x0: number, y0: number, aim: number, w: number, energy: number, wound: number, power: number, burn: number, shooter: number, vapor = false): void {
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
     // Out to the first solid cell (or a vehicle, which takes the hit and stops it).
@@ -2266,7 +2271,9 @@ export class World {
       res.detached.length = 0;
       res.vital = false;
       if (!this.friendly(by, v)) {
-        strike(v.parts, this.partHit(v, hx - b.x, hy - v.top), energy, wound, res);
+        const part = this.partHit(v, hx - b.x, hy - v.top);
+        strike(v.parts, part, energy, wound, res);
+        if (vapor) harm(v.parts, part, SPIDER_VAPOR_BURN, res);
         // A wide beam cuts through the body too, whatever it went in by.
         if (power > 0.45 && v.parts.mask & (1 << Part.Torso)) strike(v.parts, Part.Torso, energy, wound * 0.6, res);
       }
@@ -2277,6 +2284,7 @@ export class World {
     if (vehicle >= SHIP_ID_BASE) this.hitShip(vehicle - SHIP_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
     else if (vehicle >= TANK_ID_BASE) this.hitTank(vehicle - TANK_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
     else if (vehicle >= CRAFT_ID_BASE) this.hitCraft(vehicle - CRAFT_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
+    else if (vapor && len < 2400) this.carve(x1 + cos * 3, y1 + sin * 3, SPIDER_VAPOR_R, SPIDER_VAPOR_CORE, 4, by);
     else if (burn >= 0.1 && len < 2400) this.carve(x1 + cos * 2, y1 + sin * 2, Math.round(2 + 10 * burn), Math.round(1 + 6 * burn), Math.round(8 + 50 * burn), by);
     // Every client near either end sees the beam.
     const w2 = this.tmp.reset();
@@ -2288,6 +2296,7 @@ export class World {
     w2.u16(clampU16(y1 + Y_BIAS));
     w2.u8(Math.round(power * 255));
     w2.u8(shooter);
+    w2.u8(vapor ? 1 : 0);
     const bytes = w2.finish();
     this.hits.push({ bytes, id: 0, x: x0, y: y0 });
     if (len > 300) this.hits.push({ bytes, id: 0, x: x1, y: y1 });

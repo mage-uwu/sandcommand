@@ -178,13 +178,35 @@ export const SPIDER_MISSILE_INTERVAL = 60 / 140;
 export const SPIDER_MISSILE_SPEED = 380;
 /** Its laser's beam: narrower and weaker than a charged laser rifle's, but it never stops. */
 export const SPIDER_BEAM_WIDTH = 0.9;
-export const SPIDER_BEAM_WOUND = 22;
-export const SPIDER_BEAM_ENERGY = 560;
+export const SPIDER_BEAM_WOUND = 66;
+export const SPIDER_BEAM_ENERGY = 1680;
+/**
+ * And it vaporizes what it touches: a bite of SPIDER_VAPOR_R (hard material
+ * within SPIDER_VAPOR_CORE) out of the ground where it lands, five a second,
+ * about what a digger takes; and a burn on every soldier it passes through.
+ */
+export const SPIDER_VAPOR_R = 11;
+export const SPIDER_VAPOR_CORE = 6;
+export const SPIDER_VAPOR_BURN = 18;
 /** Walking pace, and climbing a wall. */
 const SPIDER_RUN = 72;
 const SPIDER_CLIMB = 64;
 /** Its legs step up this much per cell advanced. */
 const SPIDER_STEP_UP = 18;
+/**
+ * The tarantula's leap and glide: a jump off its legs (up, with a shove the
+ * way it's walking) about three bodies high; then, falling, its belly
+ * rockets ease it down (thrust under its weight: it can't climb on them,
+ * only glide), steering wider than it walks, on a charge that refills on
+ * the ground.
+ */
+export const SPIDER_JUMP = 400;
+const SPIDER_LEAP_VX = 110;
+const SPIDER_GLIDE_RUN = 130;
+const SPIDER_GLIDE_THRUST = GRAVITY * 0.72;
+const SPIDER_GLIDE_FALL = 70;
+const SPIDER_GLIDE_BURN = 22; // charge a second, gliding (of 100)
+const SPIDER_GLIDE_REFILL = 45; // a second, on the ground
 
 /** Seconds between shots. */
 export const SMG_INTERVAL = 60 / 720;
@@ -520,8 +542,8 @@ export function stepTank(k: Tank, t: Terrain, dt: number, buttons: number): numb
 }
 
 /**
- * The tarantula's tick: it walks (no treads, no jets, no tilt: its legs keep
- * the body level), steps up over anything up to SPIDER_STEP_UP a cell, and
+ * The tarantula's tick: it walks (no treads, no tilt: its legs keep the body
+ * level), leaps and glides (SPIDER_JUMP), steps up over anything up to SPIDER_STEP_UP a cell, and
  * where a wall stops it, walks straight up it: pushing into a wall, or
  * holding up (W) with one alongside, it climbs (and holding down, climbs
  * down), gravity off while it clings; at the top its legs carry it over.
@@ -538,7 +560,6 @@ function stepSpider(k: Tank, t: Terrain, dt: number, buttons: number): number {
   k.a = 0;
   k.w = 0;
   k.jetting = false;
-  k.fuel = 0;
   const driven = k.pilot !== 255 && !k.chute ? buttons : 0;
   const dir = (driven & BTN_RIGHT ? 1 : 0) - (driven & BTN_LEFT ? 1 : 0);
   // A wall alongside (either side), and the one it's walking into.
@@ -546,15 +567,33 @@ function stepSpider(k: Tank, t: Terrain, dt: number, buttons: number): number {
   const wallL = collides(t, k.x - 1, k.y);
   const into = (dir > 0 && wallR) || (dir < 0 && wallL);
   const cling = !k.chute && !k.onGround ? into || ((wallL || wallR) && (driven & (BTN_UP | BTN_DOWN)) !== 0) : into || ((wallL || wallR) && (driven & BTN_UP) !== 0);
+  // The glide charge refills on the ground (and on a wall).
+  if (k.onGround || cling) k.fuel = Math.min(100, k.fuel + SPIDER_GLIDE_REFILL * dt);
+  // Leap: up (W) on the ground with no wall to climb.
+  if (!cling && k.onGround && (driven & BTN_UP) !== 0) {
+    k.vy = -SPIDER_JUMP;
+    if (dir !== 0) k.vx = dir * Math.max(Math.abs(k.vx), SPIDER_LEAP_VX);
+    k.onGround = false;
+  }
+  // Gliding: up held in the air, falling, with charge left.
+  const glide = !cling && !k.onGround && !k.chute && (driven & BTN_UP) !== 0 && k.vy > 0 && k.fuel > 0;
   const accel = (k.onGround || cling ? GROUND_ACCEL : AIR_ACCEL) * dt;
-  const dv = dir * SPIDER_RUN - k.vx;
-  k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
+  // (In the air it keeps the way it was going; gliding, it steers out wider than it walks.)
+  const run = glide ? SPIDER_GLIDE_RUN : SPIDER_RUN;
+  const dv = dir * run - k.vx;
+  if (k.onGround || cling || dir !== 0) k.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   if (cling) {
     // Up the wall (down it, holding down), at a steady crawl.
     const up = into || (driven & BTN_UP) !== 0;
     k.vy = up ? -SPIDER_CLIMB : driven & BTN_DOWN ? SPIDER_CLIMB : 0;
   } else {
     k.vy += GRAVITY * dt;
+    if (glide) {
+      k.vy -= SPIDER_GLIDE_THRUST * dt;
+      if (k.vy > SPIDER_GLIDE_FALL) k.vy = Math.max(SPIDER_GLIDE_FALL, k.vy - GRAVITY * 2 * dt);
+      k.fuel = Math.max(0, k.fuel - SPIDER_GLIDE_BURN * dt);
+      k.jetting = true;
+    }
     if (k.chute) {
       k.vy = Math.min(k.vy, CHUTE_FALL);
       k.vx *= 1 - Math.min(1, 2 * dt);

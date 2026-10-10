@@ -268,7 +268,7 @@ export interface FrameHandler {
   /** FFA round state, every frame. */
   round(s: RoundState): void;
   /** A laser beam fired (seq: to drop the copy sent for its other end). */
-  beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number): void;
+  beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number, vapor: boolean): void;
   /** A repair kit's health wave set off (seq: to drop a repeat). */
   heal(seq: number, x: number, y: number, team: number, owner: number): void;
   /** Extraction: which traps have gone off (bit per trap id). */
@@ -468,7 +468,8 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const x1 = r.u16();
         const y1 = r.u16() - Y_BIAS;
         const power = r.u8() / 255;
-        h.beam(seq, x0, y0, x1, y1, power, r.u8());
+        const owner = r.u8();
+        h.beam(seq, x0, y0, x1, y1, power, owner, r.u8() !== 0);
         break;
       }
       case R_HEAL: {
