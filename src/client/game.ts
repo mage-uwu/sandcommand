@@ -19,9 +19,9 @@ import type { SiegeMap } from '../shared/siege.ts';
 import { type Relic, placeRelics } from './relics.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
-import { type BuildBlocker, PIECES, canBuild } from '../shared/build.ts';
+import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidWreck, smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -445,7 +445,8 @@ export class Game implements FrameHandler {
       if (this.body.jetting) {
         const b = this.body;
         const left = b.vx < 0;
-        for (let k = 0; k < 3; k++) jetExhaust(this.particles, b.x + (left ? 7 : 0), b.y + ACTOR_H - 5, b.vx, b.vy);
+        if (b.cls === ClassId.Droid) droidJets(this.particles, b.x, b.y, b.vx, b.vy);
+        else for (let k = 0; k < 3; k++) jetExhaust(this.particles, b.x + (left ? 7 : 0), b.y + ACTOR_H - 5, b.vx, b.vy);
       }
     }
     if (this.ride && !this.alive) {
@@ -497,7 +498,10 @@ export class Game implements FrameHandler {
     for (const [, s] of this.snaps) {
       const last = s[s.length - 1];
       if (!last || !(last.flags & F_ALIVE)) continue;
-      if (last.flags & F_JET) jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
+      if (last.flags & F_JET) {
+        if (classOfFlags(last.flags) === ClassId.Droid) droidJets(this.particles, last.x, last.y, last.vx, last.vy);
+        else jetExhaust(this.particles, last.x + (last.vx < 0 ? 7 : 0), last.y + ACTOR_H - 5, last.vx, last.vy);
+      }
       if (last.parts !== ALL_PARTS && classOfFlags(last.flags) !== ClassId.Droid) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
     }
     if (this.alive && this.parts !== ALL_PARTS && this.body.cls !== ClassId.Droid) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
@@ -888,7 +892,7 @@ export class Game implements FrameHandler {
 
   built(piece: number, builder: number, gx: number, gy: number, placed: number[]): void {
     materialize(this.particles, placed);
-    const p = PIECES[piece];
+    const p = pieceOf(piece);
     if (!p) return;
     // Beam from whoever built it (if we can see them).
     let bx = NaN;

@@ -402,6 +402,15 @@ export function tankJets(p: Particles, x: number, y: number, vx: number, vy: num
   }
 }
 
+/** A spider droid gliding: little blue thruster flames from under its chassis. */
+export function droidJets(p: Particles, x: number, y: number, vx: number, vy: number): void {
+  for (const nx of [1, 7]) {
+    if (Math.random() < 0.7) p.spawn(PK.Flame, x + nx + rnd(-1, 1), y + 10, vx * 0.5 + rnd(-15, 15), vy * 0.4 + rnd(160, 240), rnd(3, 6));
+    if (Math.random() < 0.25) p.spawn(PK.Spark, x + nx, y + 11, vx * 0.4 + rnd(-30, 30), rnd(150, 240), rnd(3, 5));
+  }
+  if (Math.random() < 0.3) p.spawn(PK.Smoke, x + 4, y + 13, vx * 0.3 + rnd(-15, 15), rnd(30, 70), rnd(20, 35));
+}
+
 /** A tarantula gliding: blue-white rocket flame out of three vents under its belly (`w` x `h` its box), and haze. */
 export function spiderJets(p: Particles, x: number, y: number, w: number, h: number, vx: number, vy: number): void {
   const vy0 = y + h * 0.62;

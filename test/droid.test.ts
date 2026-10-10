@@ -155,3 +155,49 @@ describe('a droid destroyed', () => {
     expect(watcher.feed.at(-1)?.text).toContain('droid scrapped');
   });
 });
+
+describe('the spider droid\'s leap and glide', () => {
+  /** One leap to the right from flat ground: up held throughout (gliding) or only the first tick. */
+  function leap(cls: number, glide: boolean) {
+    const t = wallWorld(0);
+    const b = body(cls);
+    for (let k = 0; k < 10; k++) stepBody(b, 0, t, DT);
+    const x0 = b.x;
+    const y0 = b.y;
+    let top = y0;
+    let fall = 0;
+    for (let k = 0; k < 30 * 10; k++) {
+      stepBody(b, BTN_RIGHT | (glide || k === 0 ? BTN_UP : 0), t, DT);
+      top = Math.min(top, b.y);
+      fall = Math.max(fall, b.vy);
+      if (k > 2 && b.onGround) break;
+    }
+    return { rise: y0 - top, dist: b.x - x0, fall, jetting: b.jetting };
+  }
+
+  it('springs far higher than a clone can jump', () => {
+    const droid = leap(ClassId.Droid, false);
+    const clone = leap(ClassId.Medium, false);
+    expect(droid.rise).toBeGreaterThan(clone.rise * 2);
+    expect(droid.rise).toBeGreaterThan(70);
+  });
+
+  it('glides down on its thrusters: much further, gently, but they never lift it', () => {
+    const hop = leap(ClassId.Droid, false);
+    const glide = leap(ClassId.Droid, true);
+    expect(glide.dist).toBeGreaterThan(hop.dist * 1.6);
+    expect(glide.fall).toBeLessThan(80);
+    expect(glide.rise).toBeLessThan(hop.rise * 1.15);
+    // In the air from a standstill, thrusters on: still it comes down.
+    const t = wallWorld(0);
+    const b = body(ClassId.Droid);
+    b.y = FLOOR - 200;
+    b.onGround = false;
+    b.vy = 10;
+    const y = b.y;
+    for (let k = 0; k < 30; k++) stepBody(b, BTN_UP, t, DT);
+    expect(b.y).toBeGreaterThan(y);
+    expect(b.jetting).toBe(true);
+    expect(b.fuel).toBeLessThan(100);
+  });
+});

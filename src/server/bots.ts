@@ -57,6 +57,22 @@ const PROSPECT_CHANCE = 0.15;
 const GOLD_HARD = 3;
 /** Ticks of digging with nothing to show for it before a seam is given up. */
 const GOLD_STALL = 120;
+/**
+ * Bot difficulty, 1 (beginner) to 5 (expert), the room's (World.botSkill):
+ * how far off its aim wanders, how long it takes to react to a new target,
+ * how well it leads a moving one, how far off it'll take a shot, and how
+ * often it hesitates on the trigger. 3 is the bots as they always were.
+ */
+const SKILL = [
+  null,
+  { noise: 2.6, react: 2.6, lead: 0.15, range: 210, pause: 0.5 },
+  { noise: 1.7, react: 1.7, lead: 0.55, range: 270, pause: 0.25 },
+  { noise: 1, react: 1, lead: 1, range: 340, pause: 0 },
+  { noise: 0.6, react: 0.6, lead: 1, range: 400, pause: 0 },
+  { noise: 0.3, react: 0.35, lead: 1, range: 470, pause: 0 },
+] as const;
+const skillOf = (world: World) => SKILL[Math.max(1, Math.min(5, world.botSkill))]!;
+
 /** With this many enemies left or fewer, prospectors stop digging and fight. */
 const ENDGAME_FOES = 4;
 
@@ -230,7 +246,7 @@ export class BotBrain {
     const rng = this.rng;
     if (!this.wasAlive) {
       this.wasAlive = true;
-      this.holdFire = t + 45 + rng.int(45); // just landed: look around first
+      this.holdFire = t + Math.round((45 + rng.int(45)) * skillOf(world).react); // just landed: look around first
       this.prospector = rng.next() < PROSPECT_CHANCE;
       this.gold = null;
       this.badGold.length = 0;
@@ -254,7 +270,7 @@ export class BotBrain {
       const king = world.kingLive && this.assault && p.team !== Team.None ? world.players[world.kings[1 - p.team]] : null;
       if (king && king.alive && best > 90 * 90) this.target = king.id;
       tgt = this.target >= 0 ? world.players[this.target] : null;
-      if (tgt && tgt.id !== prevTarget) this.holdFire = Math.max(this.holdFire, t + this.react);
+      if (tgt && tgt.id !== prevTarget) this.holdFire = Math.max(this.holdFire, t + Math.round(this.react * skillOf(world).react));
     }
 
     if (p.tank >= 0) return this.driveTank(world, p, tgt, cmd);
@@ -421,7 +437,7 @@ export class BotBrain {
     const weapon = p.inv[want]?.weapon ?? WeaponId.Digger;
 
     // Line of sight to the target, every few ticks.
-    if (tgt && (t + this.phase) % 4 === 0) this.seeTarget = clearLine(world, sx, sy, tgt.cx, tgt.cy);
+    if (tgt && (t + this.phase) % 4 === 0) this.seeTarget = clearLine(world, sx, sy, tgt.cx, tgt.cy, Math.max(MAX_SHOT, skillOf(world).range));
 
     // Movement: close to fighting range, back off if too close, strafe in between.
     let buttons = 0;
@@ -464,8 +480,9 @@ export class BotBrain {
     if (tgt && def) {
       const speed = def.speed || 400;
       const lead = dist / speed;
-      ax = tgt.cx + tgt.body.vx * lead;
-      ay = tgt.cy + tgt.body.vy * lead * 0.5;
+      const sk = skillOf(world).lead;
+      ax = tgt.cx + tgt.body.vx * lead * sk;
+      ay = tgt.cy + tgt.body.vy * lead * 0.5 * sk;
       if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
     }
     let sweep = 0;
@@ -521,7 +538,7 @@ export class BotBrain {
       if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
       sweep = 0;
     }
-    const aim = Math.atan2(ay - sy, ax - sx) + sweep + (rng.next() - 0.5) * 2 * this.noise;
+    const aim = Math.atan2(ay - sy, ax - sx) + sweep + (rng.next() - 0.5) * 2 * this.noise * skillOf(world).noise;
     cmd.aim = quantizeAim(aim);
 
     // Fire: with a clear line (or digging), in range; semi-auto weapons get a fresh press each shot.
@@ -535,7 +552,7 @@ export class BotBrain {
         ? healing
         : weapon === WeaponId.Digger
         ? digging
-        : tgt !== null && t >= this.holdFire && this.seeTarget && dist < MAX_SHOT && dist > minRange && (weapon !== WeaponId.Grenade || dist < 220);
+        : tgt !== null && t >= this.holdFire && this.seeTarget && dist < skillOf(world).range && dist > minRange && (weapon !== WeaponId.Grenade || dist < 220) && !(skillOf(world).pause > 0 && rng.next() < skillOf(world).pause);
     if (weapon === WeaponId.Laser) {
       // Laser: hold to charge (longer the further off they are), then let go to fire.
       if (shoot && p.charge < this.laserGoal) buttons |= BTN_FIRE;
@@ -797,11 +814,11 @@ export class BotBrain {
 }
 
 /** Is the straight line between two points free of terrain? (2-cell steps) */
-function clearLine(world: World, x0: number, y0: number, x1: number, y1: number): boolean {
+function clearLine(world: World, x0: number, y0: number, x1: number, y1: number, max = MAX_SHOT): boolean {
   const dx = x1 - x0;
   const dy = y1 - y0;
   const len = Math.sqrt(dx * dx + dy * dy);
-  if (len > MAX_SHOT) return false;
+  if (len > max) return false;
   const n = Math.ceil(len / 2);
   const t = world.terrain;
   for (let i = 2; i < n; i++) {

@@ -91,7 +91,7 @@ describe('Last Man Standing', () => {
   it('bots fight: a room of bots plays a wave down to its winner', () => {
     // (A seed whose last two don't shoot each other dead on the same tick:
     // that ends a wave with no survivors, which is fine, but not this test.)
-    const world = new World(17, { mode: 'ffa', bots: 16, rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
+    const world = new World(16, { mode: 'ffa', bots: 16, rotation: [GameMode.Lms, GameMode.Lts, GameMode.Regicide, GameMode.Extraction] });
     world.addPlayer('watcher', { send() {} });
     until(world, () => world.phase === Phase.Live);
     const me = world.players.find((p) => p && !p.bot)!;

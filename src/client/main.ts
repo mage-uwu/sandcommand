@@ -10,7 +10,8 @@ import { scopeLock } from './scope.ts';
 import { Music } from './music.ts';
 import { Sfx } from './sfx.ts';
 import { BTN_FIRE, BTN_LOCK, STANCE_H, shoulderAt } from '../shared/actor.ts';
-import { BuildResult, PIECES, snapPiece } from '../shared/build.ts';
+import { BuildResult, mirrorOrient, pieceCode, pieceOf, rotateOrient, snapPiece } from '../shared/build.ts';
+import { MENU_MIRROR, MENU_ROTATE } from './render.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
 import { Net } from './net.ts';
@@ -59,6 +60,9 @@ function storageSet(key: string, value: string): void {
 }
 
 nameInput.value = storageGet('sc.name') ?? `Clone${Math.floor(Math.random() * 900 + 100)}`;
+// Bot difficulty (1 beginner to 5 expert): the match plays at the median of what its humans ask for.
+const skillSelect = $<HTMLSelectElement>('skill');
+skillSelect.value = storageGet('sc.skill') ?? '3';
 
 async function refreshRooms(): Promise<void> {
   try {
@@ -140,6 +144,7 @@ async function join(): Promise<void> {
   }
   const name = nameInput.value.trim().slice(0, 16);
   storageSet('sc.name', name);
+  storageSet('sc.skill', skillSelect.value);
   playBtn.disabled = true;
   // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one).
   const room = new URLSearchParams(location.search).get('room') === 'siege' ? 'siege' : 'main';
@@ -147,7 +152,7 @@ async function join(): Promise<void> {
   const g = new Game();
   g.sfx = sfx;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${proto}//${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}`;
+  const url = `${proto}//${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}&skill=${encodeURIComponent(skillSelect.value)}`;
   net?.close();
   net = new Net(url, {
     welcome(w) {
@@ -537,10 +542,12 @@ function frame(now: number): void {
       if (click && g.building && !flying) {
         const hit = renderer.menuHit(input.mouseX, input.mouseY);
         if (hit >= 0) input.piece = hit;
+        else if (hit === MENU_ROTATE) input.orient = rotateOrient(input.orient);
+        else if (hit === MENU_MIRROR) input.orient = mirrorOrient(input.orient);
         else {
-          const piece = PIECES[input.piece];
-          const at = snapPiece(piece, wx, wy, snapAt);
-          if (g.canBuildHere(input.piece, at.x, at.y) === BuildResult.Ok) n.build(input.piece, at.x, at.y);
+          const code = pieceCode(input.piece, input.orient);
+          const at = snapPiece(pieceOf(code)!, wx, wy, snapAt);
+          if (g.canBuildHere(code, at.x, at.y) === BuildResult.Ok) n.build(code, at.x, at.y);
         }
       }
       if ((g.building || g.calling) && !flying) buttons &= ~BTN_FIRE;

@@ -122,6 +122,18 @@ export function copyBody(dst: Body, src: Body): void {
   dst.cling = src.cling;
 }
 
+/**
+ * The spider droid's leap and glide: it springs DROID_JUMP times a clone's
+ * jump (about six bodies high), and falling with up held, its leg thrusters
+ * ease it down (under its weight: they can't lift it) to DROID_GLIDE_FALL,
+ * steering out wider than it runs, on the jetpack fuel it otherwise has no
+ * use for.
+ */
+const DROID_JUMP = 1.55;
+const DROID_GLIDE_THRUST = GRAVITY * 0.78;
+const DROID_GLIDE_FALL = 50;
+const DROID_GLIDE_RUN = 1.35;
+const DROID_GLIDE_BURN = 16; // fuel a second
 /** Run speed and jump strength by legs attached (0, 1, 2). */
 const LEG_SPEED = [0.25, 0.55, 1];
 const LEG_JUMP = [0, 0.7, 1];
@@ -171,17 +183,24 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
   // Crouched on a burning jetpack in the air: the thrust swings forward into a dash.
   const dashDir = dir !== 0 ? dir : Math.sign(b.vx);
   const dashing = down && !b.onGround && buttons & BTN_UP && b.jet && b.fuel > 0 && dashDir !== 0;
+  // A droid gliding: up held, falling, legs to steer by, fuel left (and not on a wall).
+  const gliding = !!base.climb && !b.onGround && (buttons & BTN_UP) !== 0 && b.vy > 0 && b.legs > 0 && b.fuel > 0 && !(b.cling ?? 0);
   if ((dir !== 0 || b.onGround) && !dashing) {
     const accel = (b.onGround ? ACTOR_GROUND_ACCEL : ACTOR_AIR_ACCEL) * dt;
-    const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] * cls.run * STANCE_RUN[b.stance] - b.vx;
+    const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] * cls.run * STANCE_RUN[b.stance] * (gliding ? DROID_GLIDE_RUN : 1) - b.vx;
     b.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   }
 
   b.jetting = false;
   if (buttons & BTN_UP) {
     if (b.onGround && b.legs > 0 && b.stance !== Stance.Prone) {
-      b.vy = -ACTOR_JUMP_SPEED * LEG_JUMP[b.legs];
+      b.vy = -ACTOR_JUMP_SPEED * LEG_JUMP[b.legs] * (base.climb ? DROID_JUMP : 1);
       b.onGround = false;
+    } else if (gliding) {
+      b.vy -= DROID_GLIDE_THRUST * dt;
+      if (b.vy > DROID_GLIDE_FALL) b.vy = Math.max(DROID_GLIDE_FALL, b.vy - GRAVITY * 2 * dt);
+      b.fuel = Math.max(0, b.fuel - DROID_GLIDE_BURN * dt);
+      b.jetting = true;
     } else if (b.jet && b.fuel > 0) {
       const thrust = ACTOR_JET_ACCEL * cls.jet * dt;
       if (dashing) {
@@ -198,7 +217,8 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
 
   b.vy += GRAVITY * dt;
   if (b.vy > ACTOR_MAX_FALL) b.vy = ACTOR_MAX_FALL;
-  if (b.vy < -ACTOR_MAX_RISE) b.vy = -ACTOR_MAX_RISE;
+  const maxRise = base.climb ? Math.max(ACTOR_MAX_RISE, ACTOR_JUMP_SPEED * DROID_JUMP) : ACTOR_MAX_RISE; // (a droid's spring outruns a jetpack)
+  if (b.vy < -maxRise) b.vy = -maxRise;
 
   // Horizontal sweep in <=1 cell steps, auto-climbing small ledges (a
   // climber takes bigger ones, and grips on whatever it's touching).

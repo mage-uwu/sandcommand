@@ -400,6 +400,23 @@ room, a bot gives up its seat, a dead one if there is one.
 - **Fairness.** Bots get a beat to look around after landing, a reaction
   delay on each new target, per-bot aim error, and no point-blank bazooka
   shots.
+- **Difficulty, 1 to 5.** Each player picks a level on the portal: 1
+  Beginner, 2 Recruit, 3 Veteran, 4 Elite, 5 Expert. The match is shared,
+  so the bots play at the **median** of what the humans in it asked for
+  (`World.botSkill`), and an even split goes the easier way. Veteran is
+  the bots as they always were, and the default.
+  - **Aim error.** From 2.6× at Beginner to 0.3× at Expert.
+  - **Reaction time.** The delay before shooting at a new target, and the
+    look-around after landing, runs from 2.6× down to 0.35×.
+  - **Leading.** A Beginner leads a moving target by 15% of what it
+    should, a Recruit by 55%.
+  - **Range.** How far off it will shoot: 210 cells at Beginner, up to 470
+    at Expert.
+  - **Hesitation.** A Beginner holds off the trigger half the time, a
+    Recruit a quarter.
+
+  In a test duel against a target, Experts did several times a Beginner's
+  damage. The countdown banner says what level the bots are on.
 
 Thinking is cheap and staggered: targets twice a second, line of sight
 every 4 ticks, steering and aim every tick. A room of one human and 63 bots
@@ -1349,6 +1366,16 @@ shots leave from, so it fires exactly from its face.
   (up a shaft, say), it walks straight up it and over the top (`CLIMB_SPEED`
   in the shared `stepBody`, so prediction stays exact). It has no jetpack,
   and it never crouches or lies down.
+- **Leap and glide.** In place of a jetpack it has a spring and thrusters.
+  - **Leap.** **W** springs it 1.55× as hard as a clone's jump, about
+    80 cells (six bodies), over twice a clone's height.
+  - **Glide.** Holding W on the way down fires little blue thrusters under
+    its chassis. Their thrust is less than its weight, so they never lift
+    it, but they ease the fall to 50 cells/s and let it steer 1.35× wider
+    than it runs. A glide carries well over half again as far as a plain
+    leap.
+  - **Fuel.** They burn its fuel (16 a second, refilling on the ground).
+  - **Walls.** A wall within reach still catches it to climb.
 - **Its look.** Drawn procedurally, like a real spider. Six long legs
   splay wide from hips along the chassis, each a two-bone limb (a short
   thigh, a long needle shin) solved so the knee rides high above the body
@@ -1732,9 +1759,21 @@ away after 90 s.
 ### Fortifications: the materializer
 
 The Materializer turns gold into terrain (`src/shared/build.ts`). Pick a
-piece from the menu (click it, or use the mouse wheel). A ghost snaps to a
-4-cell grid under the cursor, green where the server will accept it and red
-with the reason where it won't. Click to build. New players join with 60
+piece from the menu (click it, or use the mouse wheel).
+
+- **Turning and mirroring.** **R** turns the piece a quarter clockwise and
+  **X** mirrors it left to right, as you see it. The menu has TURN and
+  MIRROR buttons for touch too.
+- **Uses.** A floor stands up as a wall, a bunker's roof becomes its side,
+  a ramp faces either way, or a bunker goes up with its door on the left.
+- **On the wire.** One byte names a piece with its orientation (`pieceCode`
+  and `pieceOf` in `build.ts`): the index in the low five bits, then two
+  bits of quarter turns and one of mirror. Requests and the `R_BUILD`
+  record stay the same size, and validation (`canBuild`) and replay
+  (`applyBuild`) are the same shared code.
+- **Building.** A ghost of the turned piece snaps to a 4-cell grid under
+  the cursor, green where the server will accept it and red with the
+  reason where it won't. Click to build. New players join with 60
 gold, enough for one bunker. After that, you dig gold up or take it off the
 dead.
 

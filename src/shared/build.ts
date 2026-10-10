@@ -67,6 +67,53 @@ export const PIECES: readonly PieceDef[] = [
   ]),
 ];
 
+/**
+ * Orientation: a piece can be turned (a quarter turn clockwise at a time)
+ * and mirrored (left to right, before turning). A built piece is named by
+ * one byte: its index in PIECES in the low five bits, then two bits of
+ * quarter turns and one of mirror (`pieceCode`), so the requests and the
+ * build record stay the size they were.
+ */
+export const ORIENTS = 8;
+export const pieceCode = (index: number, orient: number) => (index & 31) | ((orient & 7) << 5);
+/** Turn an orientation a quarter clockwise (keeping its mirror). */
+export const rotateOrient = (o: number) => (o & 4) | ((o + 1) & 3);
+/** Mirror an orientation (as seen: a turned piece flips across its own upright). */
+export const mirrorOrient = (o: number) => (o ^ 4) & 4 | ((4 - (o & 3)) & 3);
+
+const oriented = new Map<number, PieceDef>();
+
+/** The piece a code names, turned and mirrored as it says (undefined for no piece). */
+export function pieceOf(code: number): PieceDef | undefined {
+  const base = PIECES[code & 31];
+  if (!base) return undefined;
+  const o = (code >> 5) & 7;
+  if (o === 0) return base;
+  let p = oriented.get(code);
+  if (p) return p;
+  let w = base.w;
+  let h = base.h;
+  let cells = new Uint8Array(base.cells);
+  if (o & 4) {
+    const m = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) m[y * w + x] = cells[y * w + (w - 1 - x)];
+    cells = m;
+  }
+  for (let r = 0; r < (o & 3); r++) {
+    // A quarter turn clockwise: the left column becomes the top row.
+    const nw = h;
+    const nh = w;
+    const t = new Uint8Array(nw * nh);
+    for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) t[y * nw + x] = cells[(h - 1 - x) * w + y];
+    cells = t;
+    w = nw;
+    h = nh;
+  }
+  p = { name: base.name, cost: base.cost, w, h, cells };
+  oriented.set(code, p);
+  return p;
+}
+
 export const BuildResult = {
   Ok: 0,
   Gold: 1, // can't afford it
@@ -95,14 +142,14 @@ export function snapPiece(p: PieceDef, wx: number, wy: number, out: { x: number;
 }
 
 /**
- * May `piece` go at top-left (gx, gy) for a builder whose shoulder is at
+ * May the piece `code` names (pieceCode: which, and how it's turned) go at top-left (gx, gy) for a builder whose shoulder is at
  * (sx, sy) with `gold` to spend? Shared so the client's ghost preview shows
  * exactly what the server will accept. Pieces fill open cells and leave
  * existing terrain alone, so they can be set into a hillside; but at least
  * half must be open, and they must touch something to anchor to.
  */
-export function canBuild(t: Terrain, pieceIdx: number, gx: number, gy: number, sx: number, sy: number, gold: number, blockers: readonly BuildBlocker[]): number {
-  const p = PIECES[pieceIdx];
+export function canBuild(t: Terrain, code: number, gx: number, gy: number, sx: number, sy: number, gold: number, blockers: readonly BuildBlocker[]): number {
+  const p = pieceOf(code);
   if (!p) return BuildResult.World;
   if (gx < 0 || gy < 0 || gx + p.w > WORLD_W || gy + p.h > WORLD_H || gx % BUILD_GRID || gy % BUILD_GRID) return BuildResult.World;
   if (gold < p.cost) return BuildResult.Gold;
@@ -144,9 +191,9 @@ export function canBuild(t: Terrain, pieceIdx: number, gx: number, gy: number, s
  * that material. Deterministic given the terrain, so clients replay it.
  * Appends x, y, mat triples of the cells it set to `placed`.
  */
-export function applyBuild(t: Terrain, pieceIdx: number, gx: number, gy: number, placed: number[]): number {
+export function applyBuild(t: Terrain, code: number, gx: number, gy: number, placed: number[]): number {
   placed.length = 0;
-  const p = PIECES[pieceIdx];
+  const p = pieceOf(code);
   if (!p) return 0;
   for (let y = 0; y < p.h; y++) {
     for (let x = 0; x < p.w; x++) {

@@ -1,5 +1,5 @@
 import { BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
-import { PIECES } from '../shared/build.ts';
+import { PIECES, mirrorOrient, rotateOrient } from '../shared/build.ts';
 
 export class InputState {
   private keys = new Set<string>();
@@ -16,8 +16,9 @@ export class InputState {
   private drops = 0;
   /** Set each tick by the game loop: with the materializer out, the wheel picks pieces. */
   building = false;
-  /** Selected materializer piece (index into PIECES). */
+  /** Selected materializer piece (index into PIECES), and how it's turned and mirrored (build.ts orientation: R turns it, X mirrors it). */
   piece = 0;
+  orient = 0;
   scoreboard = false;
   /**
    * Touch auto mode: with no thumb on the fire pad, the gun tracks the
@@ -78,6 +79,9 @@ export class InputState {
         if (e.code === 'Digit2' || e.code === 'KeyE') this.cyclePresses++;
         if (e.code === 'Digit3' || e.code === 'KeyF') this.pickups++;
         if (e.code === 'Digit4' || e.code === 'KeyG') this.drops++;
+        // With the materializer out: R turns the piece a quarter, X mirrors it.
+        if (this.building && e.code === 'KeyR') this.orient = rotateOrient(this.orient);
+        if (this.building && e.code === 'KeyX') this.orient = mirrorOrient(this.orient);
       }
       // Right shift fires (and clicks: builds, picks radio calls at the reticle).
       if (e.code === 'ShiftRight' && !e.repeat) this.clicks++;

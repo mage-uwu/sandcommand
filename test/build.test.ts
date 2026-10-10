@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, WORLD_W } from '../src/shared/constants.ts';
-import { BUILD_GRID, BUILD_REACH, BuildResult, PIECES, applyBuild, canBuild } from '../src/shared/build.ts';
+import { BUILD_GRID, BUILD_REACH, BuildResult, PIECES, applyBuild, canBuild, mirrorOrient, pieceCode, pieceOf, rotateOrient } from '../src/shared/build.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { applyCarve } from '../src/shared/particles.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
@@ -159,5 +159,64 @@ describe('materializer on the server', () => {
     world.build(p.id, BLOCK, gx + 8, gy);
     holdTool(world, p, WeaponId.Materializer);
     expect(p.gold).toBe(60 - 2 * PIECES[BLOCK].cost);
+  });
+});
+
+describe('turning and mirroring pieces', () => {
+  const at = (code: number, x: number, y: number) => {
+    const p = pieceOf(code)!;
+    return p.cells[y * p.w + x];
+  };
+  it('a quarter turn stands a floor up as a wall; four bring it back; mirroring one ramp gives the other', () => {
+    const FLOOR_P = piece('Floor');
+    const floor = PIECES[FLOOR_P];
+    const turned = pieceOf(pieceCode(FLOOR_P, 1))!;
+    expect([turned.w, turned.h]).toEqual([floor.h, floor.w]);
+    let o = 0;
+    for (let k = 0; k < 4; k++) o = rotateOrient(o);
+    expect(o).toBe(0);
+    // The two ramps are mirror images of each other.
+    const ramps = PIECES.map((p, i) => [p, i] as const).filter(([p]) => p.name === 'Ramp').map(([, i]) => i);
+    const mirrored = pieceOf(pieceCode(ramps[0], mirrorOrient(0)))!;
+    expect(Array.from(mirrored.cells)).toEqual(Array.from(PIECES[ramps[1]].cells));
+    // Turned, the bunker's metal roof becomes its right-hand wall.
+    const b = pieceOf(pieceCode(BUNKER, 1))!;
+    expect(at(pieceCode(BUNKER, 1), b.w - 1, 2)).toBe(Mat.Metal);
+    // Mirroring what you see flips it left to right, however it's turned.
+    for (let r = 0; r < 4; r++) {
+      const a = pieceOf(pieceCode(BUNKER, r))!;
+      const m = pieceOf(pieceCode(BUNKER, mirrorOrient(r)))!;
+      expect([m.w, m.h]).toEqual([a.w, a.h]);
+      for (let y = 0; y < a.h; y++) for (let x = 0; x < a.w; x++) expect(m.cells[y * m.w + x]).toBe(a.cells[y * a.w + (a.w - 1 - x)]);
+    }
+  });
+
+  it('the server builds it turned, and clients replay the same cells', () => {
+    const { world, p, frames } = setup();
+    const game = new Game();
+    game.myId = p.id;
+    const feed = () => {
+      for (const f of frames) {
+        const r = new Reader(f);
+        r.u8();
+        const tick = r.u32();
+        const ack = r.u16();
+        game.applyFrame(tick, ack, r);
+      }
+      frames.length = 0;
+    };
+    feed();
+    holdTool(world, p, WeaponId.Materializer);
+    const code = pieceCode(piece('Wall'), 1); // a wall laid flat: a floor
+    const wall = pieceOf(code)!;
+    expect(wall.w).toBeGreaterThan(wall.h);
+    const gx = Math.round((p.body.x + 20) / BUILD_GRID) * BUILD_GRID;
+    const gy = GROUND - wall.h;
+    world.build(p.id, code, gx, gy);
+    holdTool(world, p, WeaponId.Materializer);
+    for (let x = gx; x < gx + wall.w; x++) expect(world.terrain.get(x, GROUND - 1)).toBe(Mat.Concrete);
+    expect(world.terrain.get(gx + 2, gy - 1)).toBe(Mat.Air);
+    feed();
+    for (let y = gy; y < GROUND; y++) for (let x = gx; x < gx + wall.w; x++) expect(game.terrain.get(x, y)).toBe(world.terrain.get(x, y));
   });
 });

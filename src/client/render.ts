@@ -7,7 +7,7 @@ import { BIOME_NAMES } from '../shared/worldgen.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
+import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, pieceCode, pieceOf, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
 import { bannerLines, layoutSub } from './banner.ts';
@@ -96,6 +96,13 @@ const SHADE_DIRS: readonly [number, number, number][] = [
   [1, 0, 0.42],
   [0, 1, 0.3],
 ];
+
+/** Bot difficulty names (1 beginner to 5 expert), for the banners. */
+const SKILL_LABELS = ['', 'beginner (1)', 'recruit (2)', 'veteran (3)', 'elite (4)', 'expert (5)'];
+
+/** Build menu buttons (Renderer.menuHit): turn the piece a quarter, mirror it. */
+export const MENU_ROTATE = -2;
+export const MENU_MIRROR = -3;
 
 export class Renderer {
   /** Scratch: the underground rects behind the terrain this frame (x, y, w, h). */
@@ -1571,10 +1578,11 @@ export class Renderer {
    * (same canBuild) and red with the reason where it won't.
    */
   private drawBuildGhost(ctx: CanvasRenderingContext2D, game: Game, input: InputState, wx: number, wy: number, selfX: number, selfY: number, z: number): void {
-    const piece = PIECES[input.piece];
+    const code = pieceCode(input.piece, input.orient);
+    const piece = pieceOf(code);
     if (!piece || this.overMenu(input.mouseX, input.mouseY)) return;
     const g = snapPiece(piece, wx, wy, this.snap);
-    const res = game.canBuildHere(input.piece, g.x, g.y);
+    const res = game.canBuildHere(code, g.x, g.y);
     const ok = res === BuildResult.Ok;
     // Grid, fading out from the cursor.
     const R = 40;
@@ -1739,6 +1747,7 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** What a click on the build menu hit: a piece (its index), MENU_ROTATE, MENU_MIRROR, or -1 (nothing). */
   menuHit(cssX: number, cssY: number): number {
     const dpr = this.canvas.width / innerWidth;
     const x = cssX * dpr;
@@ -1752,15 +1761,15 @@ export class Renderer {
     const dpr = this.canvas.width / innerWidth;
     const first = this.menuRects[0];
     const last = this.menuRects[this.menuRects.length - 1];
-    return cssX * dpr >= first.x && cssX * dpr < first.x + first.w && cssY * dpr >= first.y && cssY * dpr < last.y + last.h;
+    return cssX * dpr >= first.x && cssX * dpr < first.x + first.w + 4 && cssY * dpr >= first.y && cssY * dpr < last.y + last.h;
   }
 
-  /** A piece drawn in its materials, one pixel per cell (scaled up in the menu). */
-  private pieceIcon(i: number): HTMLCanvasElement {
-    let c = this.pieceIcons[i];
+  /** A piece (a build code: which, turned how) drawn in its materials, one pixel per cell (scaled up in the menu). */
+  private pieceIcon(code: number): HTMLCanvasElement {
+    let c = this.pieceIcons[code];
     if (c) return c;
-    const p = PIECES[i];
-    c = this.pieceIcons[i] = document.createElement('canvas');
+    const p = pieceOf(code)!;
+    c = this.pieceIcons[code] = document.createElement('canvas');
     c.width = p.w;
     c.height = p.h;
     const ctx = c.getContext('2d')!;
@@ -1819,10 +1828,11 @@ export class Renderer {
     const rowH = 40 * s;
     const w = 170 * s;
     const x0 = 14 * s;
-    const y0 = Math.max(250 * s, H / 2 - (PIECES.length * rowH) / 2);
+    const tools = 30 * s; // (the turn and mirror buttons under the list)
+    const y0 = Math.max(250 * s, H / 2 - (PIECES.length * rowH + tools) / 2);
     this.menuRects.length = 0;
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(x0 - 4 * s, y0 - 24 * s, w + 8 * s, PIECES.length * rowH + 28 * s);
+    ctx.fillRect(x0 - 4 * s, y0 - 24 * s, w + 8 * s, PIECES.length * rowH + tools + 28 * s);
     ctx.fillStyle = '#8ae8ff';
     ctx.textAlign = 'left';
     ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
@@ -1839,7 +1849,7 @@ export class Renderer {
         ctx.lineWidth = s;
         ctx.strokeRect(x0, y + 2 * s, w, rowH - 4 * s);
       }
-      const icon = this.pieceIcon(i);
+      const icon = this.pieceIcon(sel ? pieceCode(i, input.orient) : i);
       const k = Math.min((32 * s) / icon.width, (32 * s) / icon.height);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(icon, x0 + 4 * s + (32 * s - icon.width * k) / 2, y + 4 * s + (32 * s - icon.height * k) / 2, icon.width * k, icon.height * k);
@@ -1848,6 +1858,23 @@ export class Renderer {
       ctx.fillStyle = game.gold >= p.cost ? '#ffd34a' : '#ff7060';
       ctx.fillText(`${p.cost} gold`, x0 + 44 * s, y + 33 * s);
       this.menuRects.push({ x: x0, y, w, h: rowH, i });
+    }
+    // Turn (R) and mirror (X): buttons too, for touch.
+    const ty = y0 + PIECES.length * rowH + 2 * s;
+    const bw = (w - 4 * s) / 2;
+    for (const [k, label, id] of [
+      [0, input.touch ? '⟳ TURN' : '⟳ TURN  R', MENU_ROTATE],
+      [1, input.touch ? '⇋ MIRROR' : '⇋ MIRROR  X', MENU_MIRROR],
+    ] as const) {
+      const bx = x0 + k * (bw + 4 * s);
+      ctx.fillStyle = 'rgba(140,232,255,0.14)';
+      ctx.fillRect(bx, ty, bw, tools - 6 * s);
+      ctx.fillStyle = '#8ae8ff';
+      ctx.font = `bold ${Math.round(11 * s)}px ui-monospace, monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(label, bx + bw / 2, ty + 16 * s);
+      ctx.textAlign = 'left';
+      this.menuRects.push({ x: bx, y: ty, w: bw, h: tools - 6 * s, i: id });
     }
   }
 
@@ -2790,7 +2817,8 @@ export class Renderer {
           : teams
             ? 'last team standing · red vs green · one life each'
             : 'last man standing · one life each · every clone for itself') +
-          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`),
+          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`) +
+          ` · bots: ${SKILL_LABELS[rs.botSkill] ?? 'veteran'}`,
         '#ffd34a',
       );
     } else if (rs.phase === Phase.Victory && extraction) {

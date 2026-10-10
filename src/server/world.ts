@@ -119,7 +119,7 @@ import {
 import { Writer, rleEncode } from '../shared/codec.ts';
 import { BotBrain, botName } from './bots.ts';
 import { type GroundItem, INV_DROP, INV_MAX, INV_PICKUP, type InvItem, ITEM_LIFE, MAX_ITEMS, NO_WEAPON, PICKUP_R, invByte, invSlot, invVersionBits, newItem, spawnLoadout, stepItem } from '../shared/items.ts';
-import { BuildResult, type BuildBlocker, PIECES, applyBuild, canBuild } from '../shared/build.ts';
+import { BuildResult, type BuildBlocker, PIECES, pieceOf, applyBuild, canBuild } from '../shared/build.ts';
 import {
   ACTOR_H,
   ACTOR_MAX_HP,
@@ -289,6 +289,8 @@ export class Player {
   seat = 0;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
+  /** The bot difficulty this player asked for (1 beginner to 5 expert; the room plays at the humans' median: World.botSkill). */
+  skillPref = 3;
   /** Ticks of mending left from a health wave it was caught in, and the last wave that caught it. */
   mend = 0;
   mendWave = -1;
@@ -1108,6 +1110,21 @@ export class World {
   get respawnLive(): boolean {
     return this.regicideLive || this.extractionLive || this.pvpLive || this.siegeLive;
   }
+
+  /**
+   * How hard the bots play (1 beginner to 5 expert): the median of what the
+   * humans in the room asked for (3 with nobody to ask). `fixedBotSkill`
+   * overrides it (tests, a room set up so).
+   */
+  get botSkill(): number {
+    if (this.fixedBotSkill) return this.fixedBotSkill;
+    const prefs: number[] = [];
+    for (const p of this.players) if (p && !p.bot) prefs.push(p.skillPref);
+    if (!prefs.length) return 3;
+    prefs.sort((a, b) => a - b);
+    return prefs[(prefs.length - 1) >> 1];
+  }
+  fixedBotSkill = 0;
 
   /** Is this clone a king (this wave)? */
   isKing(p: Player): boolean {
@@ -2130,7 +2147,7 @@ export class World {
     }
     const res = canBuild(this.terrain, req.piece, req.gx, req.gy, p.body.x + SHOULDER_X, p.body.y + SHOULDER_Y, p.gold, bl);
     if (res !== BuildResult.Ok) return res;
-    const piece = PIECES[req.piece];
+    const piece = pieceOf(req.piece)!;
     if (applyBuild(this.terrain, req.piece, req.gx, req.gy, this.placedScratch) === 0) return BuildResult.Room;
     p.gold -= piece.cost;
     p.cooldown = fireInterval(def);
@@ -4426,6 +4443,7 @@ export class World {
         w.u8(this.remaining(Team.Green));
         w.u8(this.kings[0]);
         w.u8(this.kings[1]);
+        w.u8(this.botSkill);
         w.u8(this.remaining(Team.Blue));
         w.u8(this.remaining(Team.Gold));
         if (this.waveMode === GameMode.Siege) w.u16(this.siegeLives);
