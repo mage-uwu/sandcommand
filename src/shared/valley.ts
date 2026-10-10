@@ -497,29 +497,42 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     // The trunk: a bundle of strands grown together into one smooth column,
     // parting toward each end into roots, up into the roof and down into the
     // floor, each tapering as it goes.
+    // Its spread at each height: one girth up the middle, flaring smoothly (exponentially,
+    // like a real root flare) toward each end into the roots.
+    const Lb = footH / 2.6;
+    const Lt = (H * fan) / 2.8;
+    const flare = (y: number) => ({ b: Math.exp(-Math.max(0, fy - y) / Lb), t: Math.exp(-Math.max(0, y - cy) / Lt) });
+    const spread = (y: number) => {
+      const f = flare(y);
+      return w + f.b * foot + f.t * reach;
+    };
+    // The heart of it, solid: swelling a little way out into the flare, so the roots part from a smooth body, not a stump.
+    for (let y = cy; y <= fy; y++) {
+      const half = w + (spread(y) - w) * 0.16;
+      for (let x = Math.round(tx - half); x <= Math.round(tx + half); x++) set(x, y, Mat.Petrified);
+    }
     const n = 5 + rng.int(3);
     for (let i = 0; i < n; i++) {
       const o = n === 1 ? 0 : (i / (n - 1)) * 2 - 1 + rng.range(-0.12, 0.12); // (-1..1: its place across the trunk)
       const r0 = Math.max(1.6, (w * 1.7) / n + 0.6);
-      const spreadUp = reach * (0.75 + rng.next() * 0.5);
-      const spreadDown = foot * (0.7 + rng.next() * 0.6);
+      const own = 0.75 + rng.next() * 0.6; // (how far it reaches, against its neighbours)
       const wob = rng.range(0, Math.PI * 2);
       const xAt = (y: number) => {
-        const u = Math.max(0, 1 - (y - cy) / (H * fan));
-        const b = Math.max(0, 1 - (fy - y) / footH);
-        return tx + o * (w - r0 * 0.6) + o * spreadUp * Math.pow(u, 1.6) + o * spreadDown * b * b + Math.sin(y * 0.09 + wob) * (u + b) * 1.5;
+        const f = flare(y);
+        return tx + o * (w - r0 * 0.6 + (f.b * foot + f.t * reach) * own) + Math.sin(y * 0.09 + wob) * (f.b + f.t) * 1.5;
       };
+      // Thick where it leaves the trunk, tapering the farther out it gets.
       const rAt = (y: number) => {
-        const u = Math.max(0, 1 - (y - cy) / (H * fan));
-        const b = Math.max(0, 1 - (fy - y) / footH);
-        return r0 * (1 - 0.5 * u - 0.35 * b);
+        const f = flare(y);
+        const out = Math.abs(xAt(y) - tx) / (w + (f.b > f.t ? foot : reach));
+        return r0 * (1 + 0.3 * Math.max(f.b, f.t)) * Math.max(0.4, 1 - out * 0.7);
       };
       // Grown from its middle out to each end, and on past it, until it's well into the rock
       // (wherever the roof or the floor is: lower off to the side than over the trunk).
       const mid = Math.round((cy + fy) / 2);
       for (const dir of [-1, 1]) {
         const end = dir < 0 ? cy : fy;
-        const slope = (xAt(end) - xAt(end - dir * 3)) / 3;
+        const slope = Math.max(-2.2, Math.min(2.2, (xAt(end) - xAt(end - dir * 3)) / 3));
         let px = xAt(mid);
         let inRock = 0;
         let shrink = 0;

@@ -1384,8 +1384,9 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
   - **The forest**: a hall of petrified trunks (`Mat.Petrified`), after
     the petrified forest under the Sea of Corruption. Six to eight slender,
     branchless trunks stand straight and smooth as columns, pale cool
-    blue-grey. Each is a bundle of strands grown together, and toward both
-    ends it parts into roots: up through a vault of stone lattice into
+    blue-grey. Each is a bundle of strands grown together. Toward both
+    ends it flares smoothly (exponentially, like a real root flare) and
+    parts into roots, thick where they leave it and tapering as they go: up through a vault of stone lattice into
     the roof, and down as buttress roots arching over the floor and into
     it, every root tapering and forking, its tip buried in the rock. The
     vaults are honeycombed, meeting their neighbours' in pointed arches.
