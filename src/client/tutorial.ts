@@ -5,6 +5,8 @@ import { CALL_COST } from '../shared/protocol.ts';
 import { growCrystal } from '../shared/rare-earth.ts';
 import { Rng } from '../shared/rng.ts';
 import { WeaponId } from '../shared/weapons.ts';
+import { SHIP_W } from '../shared/dropship.ts';
+import { isDog, isMole, isSpider, tankW } from '../shared/tank.ts';
 import { type ClientLink, type Player, World } from '../server/world.ts';
 
 /**
@@ -242,10 +244,12 @@ export class Tutorial {
         break;
       }
       case TStep.Tank:
-        if (w.tanks.some((t) => t !== null)) this.next();
+        // Any vehicle will do: a tank, a mole, a watchdog, a tarantula or a dropship.
+        if (this.vehicle()) this.next();
         break;
       case TStep.Board:
-        if (me.tank >= 0) {
+        // In it, on top of it, or driving it by remote: all count.
+        if (this.aboard()) {
           this.next();
           for (let k = 0; k < MOB_SIZE; k++) {
             const b = w.addBot();
@@ -260,6 +264,21 @@ export class Tutorial {
         break;
     }
     if (this.note && w.tick - this.noteAt > 30 * 5) this.note = '';
+  }
+
+  /** The vehicle the player bought (the first there is), if any. */
+  vehicle(): { kind: 'tank' | 'mole' | 'dog' | 'spider' | 'ship'; x: number; y: number } | null {
+    const t = this.world.tanks.find((x) => x !== null);
+    if (t) return { kind: isDog(t) ? 'dog' : isMole(t) ? 'mole' : isSpider(t) ? 'spider' : 'tank', x: t.x + tankW(t) / 2, y: t.y - 10 };
+    const sh = this.world.ships.find((x) => x !== null);
+    if (sh) return { kind: 'ship', x: sh.x + SHIP_W / 2, y: sh.y - 6 };
+    return null;
+  }
+
+  /** Is the player in a vehicle, riding on top of one, or driving one by remote? */
+  aboard(): boolean {
+    const me = this.me;
+    return me.tank >= 0 || me.surf >= 0 || me.surfShip >= 0 || me.rc >= 0 || me.pilot >= 0;
   }
 
   private next(): void {
@@ -306,28 +325,33 @@ export class Tutorial {
         return out('Dig rare earth', 'Those violet crystals are rare earth: worth ten times their weight in gold. Dig them out.', { x: (a.rare.x0 + a.rare.x1) / 2, y: a.rare.y0 - 4 });
       case TStep.Tank:
         return out(
-          'Buy a tank',
-          touch
-            ? `Take out the Radio (◀ / ▶ ITEM) and tap TANK on its menu. A tank costs ${CALL_COST} gold.`
-            : `Take out the Radio (Q / E) and click TANK on its menu. A tank costs ${CALL_COST} gold.`,
+          'Buy a vehicle',
+          (touch ? 'Take out the Radio (◀ / ▶ ITEM) and tap TANK on its menu' : 'Take out the Radio (Q / E) and click TANK on its menu') +
+            ` (${CALL_COST} gold). A mole, a watchdog or a dropship will do too.`,
         );
       case TStep.Board: {
-        const tk = this.world.tanks.find((x) => x !== null);
-        return out(
-          'Climb in',
-          touch ? 'It comes down by parachute. Walk up to it and tap ▲ PICK to climb in.' : 'It comes down by parachute. Walk up to it and press F (or 3) to climb in.',
-          tk ? { x: tk.x + 16, y: tk.y - 10 } : null,
-        );
+        const v = this.vehicle();
+        const pick = touch ? 'tap ▲ PICK' : 'press F (or 3)';
+        const body =
+          v?.kind === 'ship'
+            ? `Your dropship is hovering overhead. Jetpack up level with its roof and ${pick} to ride on top${touch ? '' : ', or press P to fly it'}.`
+            : v?.kind === 'dog' || v?.kind === 'spider'
+              ? `Walk up to it and ${pick} to ride on top${touch ? '' : ', or press P to drive it by remote'}.`
+              : `It comes down by parachute. Walk up to it and ${pick} to climb in (or, beside a teammate's, to ride on top).`;
+        return out(v?.kind === 'ship' || v?.kind === 'dog' || v?.kind === 'spider' ? 'Get aboard' : 'Climb in', body, v ? { x: v.x, y: v.y } : null);
       }
       case TStep.Mob: {
         const foe = [...this.mob].map((id) => this.world.players[id]).find((p) => p?.alive);
-        return out(
-          'Wipe out the mob',
-          touch
-            ? 'A mob is coming from the right. Drive with the left stick, aim and fire the machine gun with the right stick, and tap ◎ for the cannon.'
-            : 'A mob is coming from the right. Drive with A / D, aim with the mouse: left click fires the machine gun, right click the cannon.',
-          foe ? { x: foe.cx, y: foe.body.y - 8 } : null,
-        );
+        const me = this.me;
+        const body =
+          me.tank >= 0
+            ? touch
+              ? 'A mob is coming from the right. Drive with the left stick, aim and fire the machine gun with the right stick, and tap ◎ for the cannon.'
+              : 'A mob is coming from the right. Drive with A / D, aim with the mouse: left click fires the machine gun, right click the cannon.'
+            : me.surf >= 0 || me.surfShip >= 0
+              ? `A mob is coming from the right. Your ride carries you; shoot from up top (${touch ? 'right stick' : 'mouse'}), and its guns fight for you too.`
+              : `A mob is coming from the right. Take them on any way you like: ${touch ? 'aim and fire with the right stick' : 'aim with the mouse and click'}.`;
+        return out('Wipe out the mob', body, foe ? { x: foe.cx, y: foe.body.y - 8 } : null);
       }
       default:
         return out('Tutorial complete', 'You know the basics. Head back to the menu and deploy into the real thing.');

@@ -3,7 +3,7 @@ import { BTN_FIRE, type Body, copyBody, newBody, stepBody } from '../shared/acto
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, applyFrameRecords } from '../shared/frame.ts';
-import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, shipPoint } from '../shared/dropship.ts';
+import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
@@ -83,6 +83,8 @@ const SHIP_SCRAP = 0x6e7a86;
 /** Where a driver's clone sits inside its tank (top-left of the clone, from the tank's). */
 const SEAT_X = TANK_W / 2 - ACTOR_W / 2;
 const SEAT_Y = 2;
+/** In ridingNow's codes: the vehicle is a dropship, not a tank. */
+const SHIP_RIDE = 1 << 16;
 
 const wrapAngle = (a: number) => a - Math.PI * 2 * Math.floor((a + Math.PI) / (Math.PI * 2));
 
@@ -430,7 +432,17 @@ export class Game implements FrameHandler {
     const charging = this.alive && !this.drive && this.weapon === WeaponId.Laser && (buttons & BTN_FIRE) !== 0 && this.reloadLeft === 0 && this.ammo > 0;
     this.laserCharge = charging ? Math.min(LASER_MAX, this.laserCharge + 1) : 0;
     const ridden = this.alive && this.surf >= 0 ? this.tankViews().find((v) => v.slot === this.surf) : undefined;
-    if (ridden) {
+    const riddenShip = this.alive && this.surfShip >= 0 ? this.shipViews().find((v) => v.slot === this.surfShip) : undefined;
+    if (riddenShip) {
+      // Riding on a dropship's roof: wherever it flies, on our seat.
+      const sp = shipSeat(riddenShip, this.surfSeatNo, { x: 0, y: 0 });
+      this.body.x = sp.x - ACTOR_W / 2;
+      this.body.y = sp.y - ACTOR_H;
+      this.body.vx = riddenShip.vx;
+      this.body.vy = riddenShip.vy;
+      this.body.onGround = true;
+      this.body.jetting = false;
+    } else if (ridden) {
       // Riding on top of a vehicle: wherever it is, on our seat.
       const sp = surfSeat(ridden, this.surfSeatNo, { x: 0, y: 0 });
       this.body.x = sp.x - ACTOR_W / 2;
@@ -726,7 +738,7 @@ export class Game implements FrameHandler {
       this.smoothX = this.smoothY = 0;
       return;
     }
-    if (this.surf >= 0) {
+    if (this.surf >= 0 || this.surfShip >= 0) {
       // Surfing: the vehicle carries us (localTick seats us on it).
       b.x = rawX;
       b.y = rawY;
@@ -759,12 +771,14 @@ export class Game implements FrameHandler {
   }
 
   /**
-   * Who rides on top of which vehicle (tank surfing), from the latest word
-   * on the vehicles: player id -> slot | seat << 8.
+   * Who rides on top of which vehicle (tank and dropship surfing), from the
+   * latest word on the vehicles: player id -> slot | seat << 8 (| SHIP_RIDE
+   * for a dropship).
    */
   private ridingNow(): Map<number, number> {
     const out = new Map<number, number>();
     for (const [slot, s] of this.tankSnaps) for (const r of s[s.length - 1].riders) out.set(r & 255, slot | (r & 0xff00));
+    for (const [slot, s] of this.shipSnaps) for (const r of s[s.length - 1].riders) out.set(r & 255, slot | (r & 0xff00) | SHIP_RIDE);
     return out;
   }
 
@@ -782,9 +796,19 @@ export class Game implements FrameHandler {
     return { x: sp.x - ACTOR_W / 2, y: sp.y - ACTOR_H };
   }
 
+  /** The same on a dropship's roof. */
+  private seatOnShip(ships: ShipView[], slot: number, seat: number): { x: number; y: number } | null {
+    const sh = ships.find((v) => v.slot === slot);
+    if (!sh) return null;
+    const sp = shipSeat(sh, seat, { x: 0, y: 0 });
+    return { x: sp.x - ACTOR_W / 2, y: sp.y - ACTOR_H };
+  }
+
   /** Our own clone, riding on top of a vehicle: where it stands on the vehicle as drawn (by `alpha`), or null when not riding. */
   ridingAt(alpha = 1): { x: number; y: number } | null {
-    if (!this.alive || this.surf < 0) return null;
+    if (!this.alive) return null;
+    if (this.surfShip >= 0) return this.seatOnShip(this.shipViews(), this.surfShip, this.surfSeatNo);
+    if (this.surf < 0) return null;
     return this.seatOn(this.tankViews(alpha), this.surf, this.surfSeatNo);
   }
 
@@ -793,6 +817,7 @@ export class Game implements FrameHandler {
     const out: RemoteView[] = [];
     const riding = this.ridingNow();
     const views = riding.size ? this.tankViews(alpha) : [];
+    const ships = riding.size ? this.shipViews() : [];
     for (const [id, s] of this.snaps) {
       if (s.length === 0) continue;
       let a = s[0];
@@ -823,7 +848,12 @@ export class Game implements FrameHandler {
       }
       // On top of a vehicle: on its seat, wherever the vehicle is drawn (and standing, not walking).
       const ride = riding.get(id);
-      const seat = ride !== undefined && b.flags & F_ALIVE ? this.seatOn(views, ride & 255, ride >> 8) : null;
+      const seat =
+        ride === undefined || !(b.flags & F_ALIVE)
+          ? null
+          : ride & SHIP_RIDE
+            ? this.seatOnShip(ships, ride & 255, (ride >> 8) & 255)
+            : this.seatOn(views, ride & 255, (ride >> 8) & 255);
       if (seat) {
         x = seat.x;
         y = seat.y;
@@ -842,13 +872,18 @@ export class Game implements FrameHandler {
   /** Tank surfing: the vehicle (tank slot) we ride on top of, or -1, and our seat on it. */
   surf = -1;
   surfSeatNo = 0;
+  /** Dropship surfing: the dropship (ship slot) we ride on the roof of, or -1 (our seat is surfSeatNo). */
+  surfShip = -1;
 
   self(s: SelfState): void {
     this.lastSelf = s;
     this.pilot = s.pilot === 255 ? -1 : s.pilot;
     this.rc = s.rc === 255 ? -1 : s.rc;
-    this.surf = s.surf === 255 ? -1 : s.surf & 15;
-    this.surfSeatNo = s.surf === 255 ? 0 : s.surf >> 4;
+    // (slot | seat << 4, the top bit set for a dropship; 255 when not riding.)
+    const ship = s.surf !== 255 && (s.surf & 128) !== 0;
+    this.surf = s.surf === 255 || ship ? -1 : s.surf & 15;
+    this.surfShip = ship ? s.surf & 15 : -1;
+    this.surfSeatNo = s.surf === 255 ? 0 : (s.surf >> 4) & 7;
   }
 
   /** The watchdog we're driving by remote, if we are. */
@@ -1521,7 +1556,7 @@ export class Game implements FrameHandler {
    * watchdog or tarantula), if any.
    */
   surfableTank(): TankView | null {
-    if (!this.alive || this.drive || this.surf >= 0) return null;
+    if (!this.alive || this.drive || this.surf >= 0 || this.surfShip >= 0) return null;
     const b = this.body;
     const team = this.myTeam;
     for (const t of this.tankViews()) {
@@ -1532,6 +1567,27 @@ export class Game implements FrameHandler {
       const dx = Math.max(t.x - (b.x + ACTOR_W), 0, b.x - (t.x + tankW(t)));
       const dy = Math.max(t.y - (b.y + ACTOR_H), 0, b.y - (t.y + tankH(t)));
       if (dx <= 14 && dy <= 14) return t;
+    }
+    return null;
+  }
+
+  /**
+   * The friendly dropship we could climb onto the roof of right now (ours,
+   * or with teams our side's; a free seat; one within reach, the server's
+   * rule), if any.
+   */
+  surfableShip(): ShipView | null {
+    if (!this.alive || this.drive || this.surf >= 0 || this.surfShip >= 0) return null;
+    const b = this.body;
+    const team = this.myTeam;
+    const pt = { x: 0, y: 0 };
+    for (const sh of this.shipViews()) {
+      if (sh.leaving || sh.riders.length >= SHIP_RIDERS) continue;
+      if (sh.owner !== this.myId && (team === Team.None || sh.team !== team)) continue;
+      for (let i = 0; i < SHIP_RIDERS; i++) {
+        const s = shipSeat(sh, i, pt);
+        if (Math.abs(s.x - (b.x + ACTOR_W / 2)) + Math.abs(s.y - (b.y + ACTOR_H)) * 0.5 < 26) return sh;
+      }
     }
     return null;
   }

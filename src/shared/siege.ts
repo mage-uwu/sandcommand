@@ -27,6 +27,9 @@ export const DEFENDERS = Team.Red;
 export const ATTACKERS = Team.Green;
 /** The attackers' lives, shared: every death spends one, and at none left the dead stay dead. */
 export const SIEGE_LIVES = 300;
+/** How often each side starts with a tarantula as well (rolled apart: some sieges both do, some neither). */
+export const SIEGE_ATK_TARANTULA = 0.5;
+export const SIEGE_DEF_TARANTULA = 0.2;
 /** How long the defenders have to hold (ticks: ten minutes). */
 export const SIEGE_TICKS = 30 * 60 * 10;
 

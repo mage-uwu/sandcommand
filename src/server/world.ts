@@ -23,6 +23,8 @@ import {
   shipSegmentSolid,
   shipSolidAt,
   shipPoint,
+  SHIP_RIDERS,
+  shipSeat,
   stepShip,
 } from '../shared/dropship.ts';
 import {
@@ -224,7 +226,7 @@ import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, 
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastSiege } from '../shared/worldgen.ts';
-import { ATTACKERS, DEFENDERS, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
+import { ATTACKERS, DEFENDERS, SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
 import type { CaveNet } from '../shared/caves.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
@@ -296,6 +298,8 @@ export class Player {
   /** Tank surfing: the vehicle (tank slot) this clone rides on top of, or -1; and its seat on it. */
   surf = -1;
   seat = 0;
+  /** Dropship surfing: the dropship (ship slot) this clone rides on top of, or -1 (its seat is `seat`). */
+  surfShip = -1;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
   /** A bot's skill, 1 (beginner) to 5 (expert): dealt out by World.dealSkills. */
@@ -1238,6 +1242,12 @@ export class World {
       for (const x of sg.atkTanks) this.placeVehicle(x, -1);
       for (const x of sg.defDogs) this.placeVehicle(x, DEFENDERS);
       for (const x of sg.atkDogs) this.placeVehicle(x, ATTACKERS);
+      // Now and then a tarantula too: half the sieges for the attackers (beside
+      // their landing zone, on its far side), one in five for the defenders
+      // (out past their gate's armour); rolled apart, so sometimes both.
+      const out = sg.side === 0 ? 1 : -1;
+      if (this.rng.next() < SIEGE_ATK_TARANTULA) this.placeTarantula(sg.side === 0 ? sg.lz[1] + 20 : sg.lz[0] - 20 - ACTOR_W * TARANTULA_SCALE, ATTACKERS, out);
+      if (this.rng.next() < SIEGE_DEF_TARANTULA) this.placeTarantula((sg.defDogs[0] ?? sg.fort[out > 0 ? 1 : 0]) + out * 60, DEFENDERS, out);
     }
     this.teamsRev++;
   }
@@ -1263,6 +1273,27 @@ export class World {
     let top = WORLD_H;
     for (let gx = x; gx < x + w; gx += 2) top = Math.min(top, this.terrain.surfaceY(gx));
     this.tanks[slot] = newTank(x, top - h - 2, s, owner);
+    this.dogMem.delete(slot);
+  }
+
+  /**
+   * A tarantula standing at x at the start of a wave, one of `team`'s (a
+   * soldier's, not its king's), stepped along `dir` clear of any vehicle
+   * already there.
+   */
+  private placeTarantula(x: number, team: number, dir: number): void {
+    const slot = this.tanks.indexOf(null);
+    if (slot < 0) return;
+    const free = this.players.filter((p): p is Player => !!p && p.team === team && !this.isKing(p));
+    if (!free.length) return;
+    const owner = free[this.rng.int(free.length)].id;
+    const w = Math.round(ACTOR_W * TARANTULA_SCALE);
+    const h = tankH({ kind: TankKind.Tarantula, s: TARANTULA_SCALE });
+    for (let n = 0; n < 12 && this.tanks.some((t) => t !== null && x + w + 6 > t.x && x - 6 < t.x + tankW(t)); n++) x += dir * 40;
+    x = Math.max(60, Math.min(WORLD_W - 60 - w, Math.round(x)));
+    let top = WORLD_H;
+    for (let gx = x; gx < x + w; gx += 2) top = Math.min(top, this.terrain.surfaceY(gx));
+    this.tanks[slot] = newTarantula(x, top - h - 2, owner);
     this.dogMem.delete(slot);
   }
 
@@ -1370,6 +1401,7 @@ export class World {
       p.pilot = -1;
       p.rc = -1;
       p.surf = -1;
+      p.surfShip = -1;
       p.pendingSpawn = false;
       p.delivering = -1;
       p.inv = [];
@@ -1597,6 +1629,7 @@ export class World {
           const rt = this.tanks[o.surf];
           if (rt && (rt.pilot === owner || (isPet(rt) && rt.owner === owner))) continue;
         }
+        if (o.surfShip >= 0 && owner !== 255 && this.ships[o.surfShip]?.owner === owner) continue;
         const b = o.body;
         // A driver whose shield is gone: only the head and shoulders stick out.
         const t = o.tank >= 0 ? segmentBox(x0, y0, dx, dy, b.x, b.y, b.x + ACTOR_W, b.y + EXPOSED_H) : segmentBox(x0, y0, dx, dy, b.x, o.top, b.x + ACTOR_W, b.y + ACTOR_H);
@@ -1644,6 +1677,7 @@ export class World {
     for (let k = 0; k < MAX_SHIPS; k++) {
       const sh = this.ships[k];
       if (!sh || owner === sh.owner) continue; // its own guns and bombs (and its caller's) never hit it
+      if (owner < MAX_PLAYERS && this.players[owner]?.surfShip === k) continue; // (nor its riders')
       if (kind === ProjKind.Engine) continue; // a runaway engine is off and away from the hull it left
       const la = shipLocal(sh, x0, y0, this.segA);
       const lb = shipLocal(sh, x1, y1, this.segB);
@@ -2066,7 +2100,7 @@ export class World {
     // onto a friendly vehicle to ride on top of it (tank surfing), and off.
     if (b & INV_PICKUP && !(prev & INV_PICKUP)) {
       if (p.tank >= 0) this.leaveTank(p, true);
-      else if (p.surf >= 0) this.dismount(p, true);
+      else if (p.surf >= 0 || p.surfShip >= 0) this.dismount(p, true);
       else if (!this.boardTank(p) && !this.mount(p)) this.pickUp(p);
     }
     if (b & INV_DROP && !(prev & INV_DROP) && p.tank < 0) this.dropHeld(p);
@@ -2871,6 +2905,29 @@ export class World {
     let best = -1;
     let bestSeat = 0;
     let bestD = Infinity;
+    // Dropships first: their roofs, three seats each, for a clone that's got up to one.
+    for (let k = 0; k < MAX_SHIPS; k++) {
+      const sh = this.ships[k];
+      if (!sh || !this.shipSurfable(p, sh)) continue;
+      const taken = this.shipRidersOf(k).map((o) => o.seat);
+      for (let i = 0; i < SHIP_RIDERS; i++) {
+        if (taken.includes(i)) continue;
+        const s = shipSeat(sh, i, this.pt);
+        const d = Math.abs(s.x - p.cx) + Math.abs(s.y - (b.y + ACTOR_H)) * 0.5;
+        if (d < SHIP_SURF_REACH && d < bestD) {
+          bestD = d;
+          best = k;
+          bestSeat = i;
+        }
+      }
+    }
+    if (best >= 0) {
+      p.surfShip = best;
+      p.seat = bestSeat;
+      p.body.stance = 0;
+      this.seatShipRider(p, this.ships[best]!);
+      return true;
+    }
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
       if (!t || !this.surfable(p, t)) continue;
@@ -2899,8 +2956,9 @@ export class World {
 
   /** Off the vehicle: a hop clear (`jump`), or just let go (it's gone). */
   dismount(p: Player, jump: boolean): void {
-    const t = p.surf >= 0 ? this.tanks[p.surf] : null;
+    const t = p.surf >= 0 ? this.tanks[p.surf] : p.surfShip >= 0 ? this.ships[p.surfShip] : null;
     p.surf = -1;
+    p.surfShip = -1;
     const b = p.body;
     b.onGround = false;
     if (t) {
@@ -2908,6 +2966,29 @@ export class World {
       b.vy = Math.min(0, t.vy);
     }
     if (jump) b.vy -= 190;
+  }
+
+  /** May `p` ride on dropship `sh`? Its caller, or (with teams) its side. */
+  shipSurfable(p: Player, sh: Ship): boolean {
+    return !sh.leaving && (sh.owner === p.id || (p.team !== Team.None && sh.team === p.team));
+  }
+
+  /** Riders on dropship `slot`. */
+  private shipRidersOf(slot: number): Player[] {
+    const out: Player[] = [];
+    for (const o of this.players) if (o && o.alive && o.surfShip === slot) out.push(o);
+    return out;
+  }
+
+  private seatShipRider(p: Player, sh: Ship): void {
+    const s = shipSeat(sh, p.seat, this.pt);
+    const b = p.body;
+    b.x = s.x - ACTOR_W / 2;
+    b.y = s.y - ACTOR_H;
+    b.vx = sh.vx;
+    b.vy = sh.vy;
+    b.onGround = true;
+    b.jetting = false;
   }
 
   private seatRider(p: Player, t: Tank): void {
@@ -3007,6 +3088,18 @@ export class World {
   /** Every rider onto its seat, wherever its vehicle went this tick; thrown off if it's gone (or no longer friendly). */
   private seatRiders(): void {
     for (const p of this.players) {
+      if (p && p.surfShip >= 0) {
+        // On a dropship's roof: carried wherever it flies; thrown off if it's gone, going home, or no longer friendly.
+        const sh = this.ships[p.surfShip];
+        if (!p.alive || !sh || !this.shipSurfable(p, sh) || p.tank >= 0) {
+          this.dismount(p, false);
+          continue;
+        }
+        this.seatShipRider(p, sh);
+        p.camX = p.cx;
+        p.camY = p.cy;
+        continue;
+      }
       if (!p || p.surf < 0) continue;
       const t = this.tanks[p.surf];
       if (!p.alive || !t || !this.surfable(p, t) || p.tank >= 0) {
@@ -3251,7 +3344,7 @@ export class World {
   /** Clones in the tank's way are shoved aside; one it lands on is crushed. */
   private tankCrush(t: Tank, impact: number, by: number): void {
     for (const p of this.players) {
-      if (!p || !p.alive || p.tank >= 0 || p.surf >= 0) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.surf >= 0 || p.surfShip >= 0) continue;
       // A watchdog slips past its own owner (and its owner's side) rather than shoving them about.
       if (isPet(t) && (p.id === t.owner || (p.team !== Team.None && p.team === this.players[t.owner]?.team))) continue;
       const b = p.body;
@@ -3983,7 +4076,7 @@ export class World {
    */
   private bodyCollisions(): void {
     const ps = this.players;
-    const live = (p: Player | null): p is Player => !!p && p.alive && p.tank < 0 && p.surf < 0 && p.delivering < 0;
+    const live = (p: Player | null): p is Player => !!p && p.alive && p.tank < 0 && p.surf < 0 && p.surfShip < 0 && p.delivering < 0;
     for (let i = 0; i < ps.length; i++) {
       const a = ps[i];
       if (!live(a)) continue;
@@ -4263,8 +4356,8 @@ export class World {
       // Remote control: still at the controls? (The watchdog may be gone.)
       if (p.rc >= 0 && this.tanks[p.rc]?.pilot !== p.id) p.rc = -1;
       // Surfing: jump (W) to leap off; otherwise the vehicle carries it (seatRiders, after the vehicles move).
-      if (p.surf >= 0 && p.buttons & BTN_UP && !(prev & BTN_UP) && p.rc < 0 && p.pilot < 0) this.dismount(p, true);
-      const impact = p.tank >= 0 || p.surf >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT);
+      if ((p.surf >= 0 || p.surfShip >= 0) && p.buttons & BTN_UP && !(prev & BTN_UP) && p.rc < 0 && p.pilot < 0) this.dismount(p, true);
+      const impact = p.tank >= 0 || p.surf >= 0 || p.surfShip >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -4326,11 +4419,12 @@ export class World {
 
     this.stepCrafts();
     this.stepTanks();
-    this.seatRiders();
     this.stepDoors();
     this.stepWaves();
     this.stepShips();
     this.shipCollisions();
+    // (Riders onto their seats once every vehicle, tanks and dropships alike, has moved.)
+    this.seatRiders();
     this.bodyCollisions();
     this.shipSpotting();
     this.stepItems();
@@ -4607,7 +4701,8 @@ export class World {
       w.u8(b.stance | (b.downTicks << 2) | (b.faction << 6));
       w.u8(p.pilot >= 0 ? p.pilot : 255);
       w.u8(p.rc >= 0 ? p.rc : 255);
-      w.u8(p.surf >= 0 ? p.surf | (p.seat << 4) : 255);
+      // (Riding: the vehicle's slot | seat << 4, and the top bit for a dropship.)
+      w.u8(p.surf >= 0 ? p.surf | (p.seat << 4) : p.surfShip >= 0 ? p.surfShip | (p.seat << 4) | 128 : 255);
 
       // Riding in: the rocket at full precision too, since the client
       // predicts it from this state the same way it predicts its clone.
@@ -4782,6 +4877,10 @@ export class World {
           w.u16(quantizeAim(sh.aim[1]));
           w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4) | (sh.pilot !== 255 ? 64 : 0) | ((sh.mission >> 2) << 7));
           for (let e = 0; e < 4; e++) w.u8(Math.round(sh.thrust[e] * 255));
+          // Its riders, as a tank's: each id | seat << 8.
+          const riders = this.shipRidersOf(k);
+          w.u8(riders.length);
+          for (const o of riders) w.u16(o.id | (o.seat << 8));
         }
       }
 
@@ -4990,6 +5089,8 @@ const CALL_COOLDOWN = 30 * 30;
 const BOARD_REACH = 10;
 /** How close (cells, box to box) a clone must be to a friendly vehicle to climb up and ride it. */
 const SURF_REACH = 14;
+/** How near a dropship seat a clone must get (cells, across plus half of up and down) to climb onto it. */
+const SHIP_SURF_REACH = 26;
 /** A bunker door's hit points: most of a tank's hull. */
 export const DOOR_HP = TANK_HP * 0.6;
 /** A laid landmine: where it sits (on the ground cell at x, y), who laid it and their side, and ticks until it's armed. */

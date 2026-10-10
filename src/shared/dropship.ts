@@ -230,6 +230,17 @@ export function shipSegmentSolid(mask: number, ax: number, ay: number, dx: numbe
 
 type Posed = { x: number; y: number; a: number };
 
+/**
+ * Dropship surfing: up to three friendly clones ride on the roof of its
+ * hull, between the pylons (local x of each seat; their feet on the roof).
+ */
+export const SHIP_SEATS = [27, 40, 53] as const;
+export const SHIP_RIDERS = SHIP_SEATS.length;
+/** Where rider `i` stands on it (world): its centre x, and its feet. */
+export function shipSeat(s: Posed, i: number, out: { x: number; y: number }): { x: number; y: number } {
+  return shipPoint(s, SHIP_SEATS[Math.min(i, SHIP_RIDERS - 1)], HULL_TOP, out);
+}
+
 /** A local point (untilted, from the box's top-left) in world cells, tilted with the hull about its centre. */
 export function shipPoint(s: Posed, lx: number, ly: number, out: { x: number; y: number }): { x: number; y: number } {
   const dx = lx - SHIP_W / 2;

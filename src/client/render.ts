@@ -579,6 +579,21 @@ export class Renderer {
       ctx.fillRect(ct.x - 1, ay - 6, 2, 6);
     }
 
+    // Up by a friendly dropship's roof: how to climb on.
+    const roof = game.surfableShip();
+    if (roof && !boardable) {
+      ctx.font = `${Math.max(4, Math.round(11 / z))}px ui-monospace, monospace`;
+      const label = `${input.touch ? '⬆' : '[3]'} ride on top`;
+      const tx = roof.x + SHIP_W / 2;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(tx - tw / 2 - 1, roof.y - 7, tw + 2, 6);
+      ctx.fillStyle = '#9fe870';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, tx, roof.y - 2);
+      ctx.textAlign = 'left';
+    }
+
     // Materializer beams (anyone's), fading out.
     for (const bm of game.beams) {
       const t = (now - bm.at) / 300;

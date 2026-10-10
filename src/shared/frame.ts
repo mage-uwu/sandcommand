@@ -184,6 +184,8 @@ export interface ShipState {
   mission: number;
   /** Being flown by remote control (by its caller). */
   piloted: boolean;
+  /** Who rides on its roof (dropship surfing): each player id | seat << 8. */
+  riders: number[];
 }
 
 /** The tank this client drives, at full precision: everything stepTank needs, plus its damage. */
@@ -706,7 +708,9 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const aim: [number, number] = [dequantizeAim(r.u16()), dequantizeAim(r.u16())];
           const f = r.u8();
           const thrust = [r.u8() / 255, r.u8() / 255, r.u8() / 255, r.u8() / 255];
-          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: ((f >> 4) & 3) | ((f >> 7) << 2), piloted: (f & 64) !== 0 });
+          const riders: number[] = [];
+          for (let k = r.u8(); k > 0; k--) riders.push(r.u16());
+          list.push({ slot, x, y, vx, vy, a, parts, hp, bombs, owner, team, aim, doors: (f & 1) !== 0, fired: [(f & 2) !== 0, (f & 4) !== 0], leaving: (f & 8) !== 0, thrust, mission: ((f >> 4) & 3) | ((f >> 7) << 2), piloted: (f & 64) !== 0, riders });
         }
         h.ships(list);
         break;

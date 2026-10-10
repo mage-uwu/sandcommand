@@ -51,8 +51,8 @@ network.
   4. shoot it
   5. dig the gold pocket under the ground
   6. dig the rare earth crystals beside it
-  7. call in a tank by radio
-  8. climb in
+  7. call in a vehicle by radio: a tank, or a mole, watchdog or dropship
+  8. get aboard: climb in, ride on top, or drive it by remote
   9. wipe out a mob of four beginner bots that drop in ahead (they don't
      respawn)
 - **The coach.** A card at the top gives the step, and a bobbing arrow points
@@ -614,6 +614,12 @@ from the first second.
   soldier's. They stand in front of the gate and among the outposts.
 - **Attackers.** Three tanks and four watchdogs, waiting in the landing
   zone.
+- **Tarantulas, sometimes.** Half of all sieges, the attackers also get a
+  tarantula, standing beside their landing zone. One in five, the defenders
+  get one, out past their gate's armour. The two are rolled separately, so
+  some sieges open with one on each side (`SIEGE_ATK_TARANTULA`,
+  `SIEGE_DEF_TARANTULA`). Each belongs to one of its side's soldiers, never
+  the king.
 
 `MAX_TANKS` is 16 to make room for both sides' armour and some radio calls.
 
@@ -917,6 +923,18 @@ a **Mole** for **1100**, a **Watchdog** for **1000**, or a **Tarantula** for **3
   heading for it, they get on, shoot from the deck, and hop off when the
   fight is close, or the ride stops or turns away (`World.mount`,
   `seatRiders`; seats in `surfSeat`, `src/shared/tank.ts`).
+  **Dropships carry riders too.** Three clones can stand on the roof of a
+  friendly dropship's hull, between its pylons: one of your own, or (with
+  teams) one of your side's. Jetpack up level with the roof and press **3**.
+  - You ride wherever its brain flies it: scouting, covering, strafing,
+    bombing. You shoot from up top; its turrets and bombs never hit you, and
+    your shots never hit it.
+  - Jump or press **3** to get off. You're thrown clear if it's shot down or
+    turns for home (`shipSeat`, `SHIP_RIDERS` in `src/shared/dropship.ts`).
+  - Its record lists its riders like a tank's. Clients draw them on its roof
+    as they draw it.
+  - Your own riding state reaches you as the vehicle's slot and seat, with a
+    top bit marking a dropship.
   Each vehicle's record lists its riders and their seats. Every client draws
   them on those seats on the vehicle as it draws it, never from the riders'
   own snapshots. The driver's vehicle is predicted ahead of those snapshots,

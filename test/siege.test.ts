@@ -3,7 +3,8 @@ import { WORLD_W } from '../src/shared/constants.ts';
 import { GameMode, Phase, Team } from '../src/shared/protocol.ts';
 import { ATTACKERS, DEFENDERS, SIEGE_LIVES, SIEGE_TICKS, siegeSide } from '../src/shared/siege.ts';
 import { MOD_H, MOD_W } from '../src/shared/structures.ts';
-import { isDog } from '../src/shared/tank.ts';
+import { isDog, isSpider, tankW } from '../src/shared/tank.ts';
+import { SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA } from '../src/shared/siege.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { MapKind, generateWorld, lastComplexes, lastSiege } from '../src/shared/worldgen.ts';
 import { type Player, World } from '../src/server/world.ts';
@@ -145,4 +146,32 @@ describe('siege', () => {
     expect(world.winner).toBe(DEFENDERS);
     void Team;
   });
+
+  it('sometimes a tarantula for either side (half the time the attackers, a fifth the defenders): a soldier\'s, on the ground, clear of the rest', () => {
+    expect(SIEGE_ATK_TARANTULA).toBe(0.5);
+    expect(SIEGE_DEF_TARANTULA).toBe(0.2);
+    const world = siegeWorld(26);
+    const spiders = () => world.tanks.filter((t) => t && isSpider(t));
+    // At the start: at most one a side.
+    const start = spiders();
+    for (const team of [ATTACKERS, DEFENDERS]) expect(start.filter((t) => world.players[t!.owner]!.team === team).length).toBeLessThanOrEqual(1);
+    // Both can have one at once: place them as a wave start would.
+    for (const t of start) world.tanks[world.tanks.indexOf(t)] = null;
+    const sg = world.siege!;
+    const out = sg.side === 0 ? 1 : -1;
+    const place = (world as unknown as { placeTarantula: (x: number, team: number, dir: number) => void }).placeTarantula.bind(world);
+    place(sg.side === 0 ? sg.lz[1] + 20 : sg.lz[0] - 44, ATTACKERS, out);
+    place(sg.defDogs[0] + out * 60, DEFENDERS, out);
+    const both = spiders();
+    expect(both.length).toBe(2);
+    expect(new Set(both.map((t) => world.players[t!.owner]!.team))).toEqual(new Set([ATTACKERS, DEFENDERS]));
+    for (const t of both) {
+      expect(world.isKing(world.players[t!.owner]!)).toBe(false);
+      for (const o of world.tanks) if (o && o !== t) expect(t!.x + tankW(t!) <= o.x || t!.x >= o.x + tankW(o)).toBe(true);
+    }
+    // They stand and walk: a few seconds on, both still there.
+    for (let k = 0; k < 90; k++) world.step();
+    expect(spiders().length).toBe(2);
+  });
 });
+

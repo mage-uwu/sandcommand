@@ -5,6 +5,7 @@ import { invByte } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { CALL_COST, CallKind, quantizeAim } from '../src/shared/protocol.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
+import { shipSeat } from '../src/shared/dropship.ts';
 import { MOB_SIZE, STEP_COUNT, TStep, Tutorial } from '../src/client/tutorial.ts';
 
 /** Play the tutorial by driving the World directly, as a player would press keys. */
@@ -85,5 +86,66 @@ describe('tutorial', () => {
     expect(w.players.filter((p) => p?.bot).length).toBe(0);
     expect(tut.coach(true).done).toBe(true);
     expect(STEP_COUNT).toBe(9);
+  });
+});
+
+describe('tutorial: any vehicle, any way aboard', () => {
+  /** Landed, and skipped ahead to buying a vehicle, gold in hand and the radio out. */
+  const atShop = () => {
+    const tut = new Tutorial('Recruit', { send() {} });
+    const w = tut.world;
+    const me = tut.me;
+    for (let k = 0; k < 1200 && !me.alive; k++) {
+      w.step();
+      tut.update();
+    }
+    tut.step = TStep.Tank;
+    me.gold = 5000;
+    w.equip(me, WeaponId.Radio);
+    me.callCd = 0;
+    let seq = 0;
+    const press = (buttons: number, pickup = false) => {
+      w.input(me.id, { seq: ++seq & 0xffff, buttons, aim: quantizeAim(0), inv: invByte(me.slot, me.invVersion, pickup) });
+      w.step();
+      tut.update();
+    };
+    return { tut, w, me, press };
+  };
+
+  it('a dropship counts as the vehicle, and riding on its roof as getting aboard', () => {
+    const { tut, w, me, press } = atShop();
+    expect(w.call(me.id, CallKind.Dropship)).toBe(true);
+    press(0);
+    expect(tut.step).toBe(TStep.Board);
+    expect(tut.coach(false).body).toMatch(/roof/);
+    const sh = w.ships.find((s) => s !== null)!;
+    for (let k = 0; k < 400 && tut.step === TStep.Board; k++) {
+      // Hold just over a roof seat (as if jetpacking up to it) and press pick-up.
+      const s = shipSeat(sh, 0, { x: 0, y: 0 });
+      me.body.x = s.x - ACTOR_W / 2;
+      me.body.y = s.y - 16;
+      me.body.vx = me.body.vy = 0;
+      press(0, k % 2 === 0);
+    }
+    expect(me.surfShip).toBeGreaterThanOrEqual(0);
+    expect(tut.step).toBe(TStep.Mob);
+    expect(tut.coach(false).body).toMatch(/up top/);
+  });
+
+  it('a watchdog counts too, and riding on top of it', () => {
+    const { tut, w, me, press } = atShop();
+    expect(w.call(me.id, CallKind.Watchdog)).toBe(true);
+    press(0);
+    expect(tut.step).toBe(TStep.Board);
+    const dog = w.tanks.find((t) => t !== null)!;
+    for (let k = 0; k < 900 && !(dog.onGround && !dog.chute); k++) press(0);
+    for (let k = 0; k < 300 && tut.step === TStep.Board; k++) {
+      me.body.x = dog.x + 4;
+      me.body.y = dog.y - 14;
+      me.body.vx = me.body.vy = 0;
+      press(0, k % 2 === 0);
+    }
+    expect(me.surf).toBeGreaterThanOrEqual(0);
+    expect(tut.step).toBe(TStep.Mob);
   });
 });
