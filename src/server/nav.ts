@@ -106,6 +106,19 @@ function classify(t: Terrain, gx: number, gy: number): number {
   return c;
 }
 
+/** Searches allowed per tick across a world's bots (findPath costs up to a few ms). */
+export const NAV_PER_TICK = 2;
+/** May a bot of this world plan a path this tick? (Counts it if so.) */
+export function navBudget(w: { tick: number; navTick: number; navUsed: number }): boolean {
+  if (w.tick !== w.navTick) {
+    w.navTick = w.tick;
+    w.navUsed = 0;
+  }
+  if (w.navUsed >= NAV_PER_TICK) return false;
+  w.navUsed++;
+  return true;
+}
+
 export interface NavPath {
   /** Waypoints (node centres, world cells), from the start to as near the goal as it got. */
   pts: { x: number; y: number; dig: boolean }[];

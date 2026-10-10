@@ -13,8 +13,7 @@ import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
 import { cellCentreX, cellOfFeet, inShaftUnder, mazeDistances, nextHop } from './maze.ts';
 import { type Ramp, caveLevel, onPassage } from '../shared/caves.ts';
-import { Biome } from '../shared/worldgen.ts';
-import { type NavPath, findPath, undiggable } from './nav.ts';
+import { type NavPath, findPath, navBudget, undiggable } from './nav.ts';
 
 /** Names for bots (shown with a BOT tag). */
 const NAMES = [
@@ -110,7 +109,7 @@ export class BotBrain {
   private strafeUntil = 0;
   private stuck = 0;
   /** On foot: the nearest it has come to where it's going, and when; and a detour when that stalls. */
-  /** Deadland map sense: the path it's following (nav.ts), how far along, and when and toward where it was planned. */
+  /** Map sense: the path it's following (nav.ts), how far along, and when and toward where it was planned. */
   private path: NavPath | null = null;
   private pathAt = 0;
   private pathIdx = 0;
@@ -257,6 +256,17 @@ export class BotBrain {
    * pod still on its pylon first (they hang out, and losing two brings it
    * down), else the hull.
    */
+  /** Is an enemy dropship within anti-air range above it (line of sight or not)? */
+  private airThreat(world: World, p: Player): boolean {
+    for (const sh of world.ships) {
+      if (!sh || sh.leaving || sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)) continue;
+      const cx = sh.x + SHIP_W / 2;
+      const cy = sh.y + SHIP_H / 2;
+      if (cy < p.cy && Math.hypot(cx - p.cx, cy - p.cy) < AA_RANGE) return true;
+    }
+    return false;
+  }
+
   private airTarget(world: World, p: Player, sx: number, sy: number, fight: number): { x: number; y: number; vx: number; vy: number } | null {
     let best: { x: number; y: number; vx: number; vy: number } | null = null;
     let bestD = Math.min(AA_RANGE, fight * 1.2);
@@ -443,10 +453,12 @@ export class BotBrain {
     // A cave map, and the target somewhere else in the caves (or up top): the way there.
     const cave = !nav && !goldAt && !calling && tgt && !this.seeTarget ? this.caveNav(world, p, tgt) : null;
     if (cave) goalX = cave.goalX;
-    // The deadland: a field of monuments it can't dig through. A target out
-    // of sight (or a long way off) is reached by a planned path, round and
-    // over the cement, digging only through what yields.
-    const route = !nav && !goldAt && !calling && !cave && tgt && world.biome === Biome.Deadland && (!this.seeTarget || Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) > 160) ? this.pathNav(world, p, tgt.cx, tgt.body.y + ACTOR_H) : null;
+    // A target out of sight (or a long way off) is reached by a planned path
+    // (nav.ts), round and over whatever won't yield, digging only through
+    // what does.
+    // (An enemy craft overhead it has no line on comes first: it pops up for a shot instead.)
+    const skyThreat = this.airThreat(world, p);
+    const route = !nav && !goldAt && !calling && !cave && !skyThreat && tgt && (!this.seeTarget || Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) > 160) ? this.pathNav(world, p, tgt.cx, tgt.body.y + ACTOR_H) : null;
     if (route) goalX = route.goalX;
     else this.path = null;
     // Siege defenders hold their ground: the fortress and the ground in front
@@ -580,6 +592,8 @@ export class BotBrain {
       if (route.up && b.fuel > 4) buttons |= BTN_UP;
     } else if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
     if (b.vy > 260 && b.fuel > 5) buttons |= BTN_UP;
+    // An enemy dropship or drone overhead with no line on it from here: up on the jetpack for one.
+    if (skyThreat && !this.air && b.fuel > 30 && headClear) buttons |= BTN_UP;
 
     // Aim: lead the target by the shot's flight time, lift lobbed shots, add skill noise.
     let ax = goalX;
@@ -817,12 +831,15 @@ export class BotBrain {
   private pathNav(world: World, p: Player, tx: number, ty: number): { goalX: number; up: boolean; dig: boolean; digX: number; digY: number } | null {
     const t = world.tick;
     const feet = p.body.y + ACTOR_H;
-    if (!this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2) {
+    const stale = !this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2;
+    // (The planning is shared out: a few searches a tick across all the bots; the rest keep to their old paths a moment longer.)
+    if (stale && navBudget(world)) {
       this.path = findPath(world.terrain, p.cx, feet, tx, ty);
       this.pathAt = t + (this.phase % 15); // (staggered: the bots don't all plan on one tick)
       this.pathIdx = 0;
       this.pathTo = { x: tx, y: ty };
     }
+    if (!this.path) return null;
     const pts = this.path.pts;
     if (pts.length < 2) return null;
     // Along it as far as it has come: the nearest waypoint over the next few.

@@ -1176,6 +1176,32 @@ each watchdog, each tarantula, in that order. **Shift+P** goes the other way.
   mission and per-engine throttle for the exhaust. Parts lost and the final explosion
   are seeded records (`R_SHIP_PART`, `R_SHIP_BOOM`).
 
+
+### Bots plan their way
+
+A bot with a target out of sight, or a long way off, follows a path
+planned over a coarse grid of the map (`src/server/nav.ts`: 8 cells a node,
+A*), on every map. The labyrinth's and the caves' own guides still come
+first where they apply.
+- **Costs.** Open air is cheap. Climbing costs a little more, and so does
+  every node of air under the bot, since a jetpack runs dry. So the way
+  over a wall is up something that bears its weight (a slope, an arm's
+  back, a pile), not a long hover.
+- **Digging.** Soft ground costs a dig. The bot takes the digger out only
+  where its path runs into ground. What a digger can't realistically get
+  through (cement and ruin masonry, pig iron, fixed stone) is a wall, and
+  the path goes round or over it. On every map, a bot never picks the
+  digger to bore into material that won't yield (`undiggable`).
+- **Jetpack.** It jets in bursts, letting the pack refill when it runs dry.
+- **Replanning.** About every second and a half, or when the target moves
+  off. The searches are shared out, two a tick across a world's bots, and
+  the rest keep to their old paths a moment longer. With 64 players this
+  adds about 1 ms a tick.
+- **Air threats first.** With an enemy dropship overhead and no line on
+  it, a bot drops its route and pops up on its jetpack for a shot.
+- **Unstuck.** If a bot walks toward its goal but gets no nearer for five
+  seconds (wedged under an overhang, say), it backs off and jets up, then
+  comes at the goal again from higher up.
 ## Bunkers
 
 Every map has bunker complexes on the surface (`src/shared/structures.ts`),
@@ -1360,18 +1386,7 @@ A hostile brutalist architect's wet dream, left to rot for eons
   - Their masonry (`Mat.RuinStone`, `Mat.RuinGlyph`, drawn like the labyrinth's cobble and glyph stone) yields as grudgingly as the caltrops' cement: hard and adamant. The labyrinth's own stone still never yields.
 - **Regicide on the Deadland.** The two fortresses are deep ruins, red's in the west and green's in the east. Each has three chambers, with the king's chamber at the bottom and spawns down its length. The caltrops round them are their walls.
 - **Sky and backdrop.** The sky is an ashen, sallow gradient. The parallax layers hold grey mountains and two ranks of thorn silhouettes: caltrops, spikes and slabs over rubble (`Backdrop.setBiome`).
-- **Bots plan their way** (`src/server/nav.ts`). On the Deadland a bot heading for a target it can't see (or one far off) follows a path planned over a coarse grid (8 cells a node, A*, replanned every second and a half):
-  - **Costs.** Open air is cheap. Climbing costs a little more, and so does every node of air under it, since a jetpack runs dry. So the way over a wall is up something that bears the bot's weight: a slope, an arm's back, a footing pile.
-  - **Digging.** Soft ground costs a dig, and the bot takes out the digger only where the path runs into it.
-  - **Walls.** What a digger can't realistically get through (cement, ruin masonry, pig iron, the labyrinth's stone) is a wall, and the path goes round or over it.
-  - **Jetpack.** The bot jets in bursts, letting it refill when it runs dry.
-  - **Everywhere else.** On every map, a bot never picks the digger to bore into material that won't yield (`undiggable`).
-  - **Stuck.** If a bot walks toward its goal but gets no nearer for five seconds (wedged under a caltrop's arm, say), it backs off and jets up, then comes at the goal again from higher up.
-
-**Cave maps** (`src/shared/caves.ts`). About two marslike maps in five (ordinary
-or Regicide, never the labyrinth or the Deadland; `cavesOf` by the seed) are cave maps:
-under the bunkers runs a vast tunnel system, the underground battle
-highway, and the countdown banner says so.
+- **Bots** plan their way across it like anywhere else; see [Bots plan their way](#bots-plan-their-way).
 - **The highway**: one tunnel 60–80 cells high the length of the map,
   following the land above it some 210 cells down, wandering, always below
   every bunker's deepest basement, and never steeper than you can walk or
