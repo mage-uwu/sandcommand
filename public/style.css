@@ -10,10 +10,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: none; image-rendering: pixelated; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.35); }
 #overlay.hidden, .hidden { display: none !important; }
-.panel { width: min(520px, 100%); background: var(--panel); border: 1px solid #3a2e24; padding: 28px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+.panel { min-width: 0; max-width: 100%; width: min(520px, 100%); background: var(--panel); border: 1px solid #3a2e24; padding: 28px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
 h1 { margin: 0; font-size: clamp(28px, 7vw, 44px); letter-spacing: 0.08em; }
 h1 span { color: var(--accent); }
-.tag { margin: 4px 0 20px; color: var(--muted); }
+/* The COMSAND logo: ANSI-shadow block letters (68 columns, sized to fit the panel), CRT glow and scanlines. */
+.logo { position: relative; margin: 0 0 6px; letter-spacing: 0; min-width: 0; overflow: hidden; }
+.logo pre {
+  margin: 0; font: inherit; line-height: 1; white-space: pre; overflow: hidden;
+  font-size: clamp(4px, calc((min(100vw, 520px) - 92px) / 46), 11px); max-width: 100%;
+  filter: drop-shadow(0 0 6px rgba(255, 150, 40, 0.35)) drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
+  animation: crt 6s infinite steps(1);
+}
+.logo .c { background: linear-gradient(180deg, #fff6e4 0%, #e9dcc6 45%, #9c8a72 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.logo .s { background: linear-gradient(180deg, #fff0a8 0%, #ffc23d 40%, #ff8a1f 70%, #c8441a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.logo::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(180deg, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.28) 2px 3px); mix-blend-mode: multiply; }
+@keyframes crt { 0%, 100% { opacity: 1; transform: none; } 92% { opacity: 0.86; transform: translateX(1px); } 93% { opacity: 1; transform: none; } 97% { opacity: 0.93; } }
+.boot { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.32em; color: var(--accent); white-space: nowrap; overflow: hidden; text-align: center; }
+.boot span { color: #c8441a; letter-spacing: 0; }
+.tag { margin: 10px 0 20px; color: var(--muted); }
+.cursor { font-style: normal; margin-left: 2px; color: var(--accent); animation: blink 1.05s infinite steps(1); }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .logo pre, .cursor { animation: none; } }
 label { display: flex; align-items: center; gap: 12px; margin: 10px 0; color: var(--muted); }
 label input { flex: 1; min-width: 0; padding: 10px; font: inherit; color: var(--ink); background: #0c0908; border: 1px solid #4a3a2c; }
 button { width: 100%; margin-top: 12px; padding: 14px; font: inherit; font-size: 18px; font-weight: bold; letter-spacing: 0.1em; color: #1a1208; background: var(--accent); border: 0; cursor: pointer; }
@@ -68,3 +85,4 @@ body.touch .help:not(.touch-help) { display: none; }
 @media (orientation: portrait) {
   body.touch #overlay .panel::after { content: 'Tip: turn your phone sideways to play.'; display: block; margin-top: 12px; color: var(--accent); font-size: 12px; }
 }
+@media (max-width: 480px) { .boot { font-size: 9px; letter-spacing: 0.16em; } }

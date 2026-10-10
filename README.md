@@ -1,4 +1,4 @@
-# SandCommand
+# COMSAND
 
 A Cloudflare-native multiplayer shooter inspired by **Cortex Command**: up to
 **64 clones per room** fight waves of Last Man Standing and Last Team Standing in one fully destructible

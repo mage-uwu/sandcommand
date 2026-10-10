@@ -1,6 +1,6 @@
 {
-  "name": "SandCommand",
-  "short_name": "SandCommand",
+  "name": "COMSAND",
+  "short_name": "COMSAND",
   "description": "64-player destructible-terrain sandbox shooter.",
   "id": "/",
   "start_url": "/",

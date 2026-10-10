@@ -1,5 +1,5 @@
 /*
- * SandCommand's service worker: online only, on purpose.
+ * COMSAND's service worker: online only, on purpose.
  *
  * It exists so the game can be installed (added to the home screen and run
  * full screen), not to work offline. It never caches anything: every
@@ -21,10 +21,10 @@ self.addEventListener('activate', (event) => {
 
 const OFFLINE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#141012"><title>SandCommand</title>
+<meta name="theme-color" content="#141012"><title>COMSAND</title>
 <style>html,body{margin:0;height:100%;background:#141012;color:#9fe89f;font:15px ui-monospace,Menlo,Consolas,monospace;display:grid;place-items:center;text-align:center}
 h1{color:#ffd34a;letter-spacing:.2em;font-size:22px}button{margin-top:14px;background:#1f2a1f;color:#e8ffe8;border:1px solid #4a7a4a;padding:10px 22px;font:inherit;cursor:pointer}</style></head>
-<body><div><h1>SANDCOMMAND</h1><p>&gt; NO CONNECTION_</p><p>The battle is online only.<br>Reconnect and try again.</p>
+<body><div><h1>COMSAND</h1><p>&gt; NO CONNECTION_</p><p>The battle is online only.<br>Reconnect and try again.</p>
 <button onclick="location.reload()">RETRY</button></div>
 <script>addEventListener('online',()=>location.reload())</script></body></html>`;
 
