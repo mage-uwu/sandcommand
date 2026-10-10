@@ -35,7 +35,22 @@ export const WATCHDOG_SCALE = 2 / 3;
  * tarantula. The last two are unmanned (radio purchases that guard whoever
  * called them in, and that their owner can drive by remote).
  */
-export const TankKind = { Tank: 0, Watchdog: 1, Tarantula: 2 } as const;
+export const TankKind = { Tank: 0, Watchdog: 1, Tarantula: 2, Mole: 3 } as const;
+/**
+ * The mole: a smaller tank (four-fifths the size) with 70% of a tank's hull
+ * and no cannon. In its place, a plasma flamethrower on the back that
+ * swivels all the way round, burns whoever it reaches and burns through the
+ * ground (it digs as it goes); a heavier, faster SMG on the nose; and out
+ * front a great steel frill, triceratops-style, horns and all, that stands
+ * above the deck and takes the fire meant for the three soldiers riding
+ * behind it, until it's shot away. Its design cells are a tank's (scaled by
+ * `s`); the cannon slot holds the flamethrower, the armour slot the frill.
+ */
+export const MOLE_SCALE = 0.8;
+export const MOLE_HP = 0.7;
+/** The frill's hit points (strong: most of a tank's armour plate and more), and the box it stands in (design cells, facing right). */
+export const MOLE_FRILL_HP = 3600;
+export const MOLE_FRILL_BOX = [18, -21, 32, 10] as const;
 /**
  * The tarantula: an ultraheavy spider droid, three times a spider droid's
  * size. Its "design" cells are a spider droid's own (ACTOR_W x ACTOR_H,
@@ -51,6 +66,7 @@ type Kinded = { s?: number; kind?: number };
 export const isDog = (t: Kinded) => (t.kind ?? (t.s && t.s < 1 ? TankKind.Watchdog : TankKind.Tank)) === TankKind.Watchdog;
 export const isSpider = (t: Kinded) => t.kind === TankKind.Tarantula;
 export const isPet = (t: Kinded) => isDog(t) || isSpider(t);
+export const isMole = (t: Kinded) => t.kind === TankKind.Mole;
 /** Its design box (unscaled cells): a tank's, or (a tarantula) a spider droid's. */
 export const designW = (t: Kinded) => (isSpider(t) ? ACTOR_W : TANK_W);
 export const designH = (t: Kinded) => (isSpider(t) ? ACTOR_H : TANK_H);
@@ -58,7 +74,7 @@ export const designH = (t: Kinded) => (isSpider(t) ? ACTOR_H : TANK_H);
 export const tankW = (t: Kinded) => (t.s && t.s !== 1 ? Math.round(designW(t) * t.s) : designW(t));
 export const tankH = (t: Kinded) => (t.s && t.s !== 1 ? Math.round(designH(t) * t.s) : designH(t));
 /** How much of a tank's hull (and parts) it has. */
-export const hullScale = (t: Kinded) => (isSpider(t) ? TARANTULA_HP : (t.s ?? 1));
+export const hullScale = (t: Kinded) => (isSpider(t) ? TARANTULA_HP : isMole(t) ? MOLE_HP : (t.s ?? 1));
 /** A tank's full hull, for its scale. */
 export const tankMaxHp = (t: Kinded) => TANK_HP * hullScale(t);
 /**
@@ -120,13 +136,16 @@ const TANK_SEATS = [4, 22, 27];
 const DOG_SEATS = [4, 24];
 const SPIDER_SEATS = [-1.2, 0.6, 2.2, 5.9, 7.6];
 const SPIDER_DECK = 6.6;
+/** A mole's: its back, behind the frill (its deck sits lower than a tank's roof). */
+const MOLE_SEATS = [2, 7.5, 13];
+const MOLE_DECK = 5;
 /** How many soldiers can ride on it. */
-export const surfCapacity = (t: Kinded) => (isSpider(t) ? SPIDER_SEATS.length : isDog(t) ? DOG_SEATS.length : TANK_SEATS.length);
+export const surfCapacity = (t: Kinded) => (isSpider(t) ? SPIDER_SEATS.length : isDog(t) ? DOG_SEATS.length : isMole(t) ? MOLE_SEATS.length : TANK_SEATS.length);
 const seatPt = { x: 0, y: 0 };
 /** Where rider `i` stands on it (world): its centre x, and its feet. */
 export function surfSeat(t: Posed, i: number, out: { x: number; y: number }): { x: number; y: number } {
-  const seats = isSpider(t) ? SPIDER_SEATS : isDog(t) ? DOG_SEATS : TANK_SEATS;
-  const p = tankPoint(t, seats[Math.min(i, seats.length - 1)], isSpider(t) ? SPIDER_DECK : 0, seatPt);
+  const seats = isSpider(t) ? SPIDER_SEATS : isDog(t) ? DOG_SEATS : isMole(t) ? MOLE_SEATS : TANK_SEATS;
+  const p = tankPoint(t, seats[Math.min(i, seats.length - 1)], isSpider(t) ? SPIDER_DECK : isMole(t) ? MOLE_DECK : 0, seatPt);
   out.x = p.x;
   out.y = p.y;
   return out;
@@ -134,7 +153,7 @@ export function surfSeat(t: Posed, i: number, out: { x: number; y: number }): { 
 
 /** Where to shoot a tank (its middle; a tarantula's chassis, not the air between its legs), and where its guns turn (world y). */
 export const tankCoreY = (t: Kinded & { y: number }) => t.y + tankH(t) * (isSpider(t) ? 0.7 : 0.5);
-export const gunPivotY = (t: Kinded & { y: number }) => t.y + (isSpider(t) ? SPIDER_LASER_PIVOT[1] : CANNON_PIVOT[1]) * (t.s ?? 1);
+export const gunPivotY = (t: Kinded & { y: number }) => t.y + (isSpider(t) ? SPIDER_LASER_PIVOT[1] : isMole(t) ? MOLE_PLASMA_PIVOT[1] : CANNON_PIVOT[1]) * (t.s ?? 1);
 
 /** The tarantula's parts' centres (its design cells: the spider droid's). */
 const SPIDER_PART_CENTER: readonly (readonly [number, number])[] = [
@@ -144,8 +163,16 @@ const SPIDER_PART_CENTER: readonly (readonly [number, number])[] = [
   [4, 9],
   [4, 4],
 ];
-/** Where a part is (design cells, facing right), for a tank or a tarantula. */
-export const partCenter = (t: Kinded, part: number) => (isSpider(t) ? SPIDER_PART_CENTER : TANK_PART_CENTER)[part];
+/** The mole's: hull, flamethrower, SMG, frill, hatch cover. */
+const MOLE_PART_CENTER: readonly (readonly [number, number])[] = [
+  [14, 12],
+  [13, 4],
+  [26, 12],
+  [27, -5],
+  [5, 4],
+];
+/** Where a part is (design cells, facing right), for a tank, a tarantula or a mole. */
+export const partCenter = (t: Kinded, part: number) => (isSpider(t) ? SPIDER_PART_CENTER : isMole(t) ? MOLE_PART_CENTER : TANK_PART_CENTER)[part];
 
 /** How high a driver's head sits out of the hatch (clone top, from the tank's top) once the shield is gone. */
 export const EXPOSED_SEAT_Y = -8;
@@ -160,6 +187,10 @@ export const CANNON_DOWN = 0.45;
 /** The vulcan: pivot and barrel length. It swivels all the way round. */
 export const SMG_PIVOT = [25, 11] as const;
 export const SMG_LEN = 12;
+/** The mole's flamethrower nozzle (it turns all the way round) and its SMG on the nose, under the frill. */
+export const MOLE_PLASMA_PIVOT = [13, 4] as const;
+export const MOLE_PLASMA_LEN = 8;
+export const MOLE_SMG_PIVOT = [25, 12] as const;
 
 /**
  * The tarantula's guns (in its design cells, the spider droid's): the laser
@@ -210,6 +241,10 @@ const SPIDER_GLIDE_REFILL = 45; // a second, on the ground
 
 /** Seconds between shots. */
 export const SMG_INTERVAL = 60 / 720;
+/** The mole's: a faster, heavier SMG (900 a minute), and plasma at twenty puffs a second. */
+export const MOLE_SMG_INTERVAL = 60 / 900;
+export const MOLE_PLASMA_INTERVAL = 1 / 20;
+export const PLASMA_SPEED = 360;
 export const CANNON_INTERVAL = 60 / 40;
 export const SMG_SPEED = 900;
 export const SMG_SPREAD = 0.06;
@@ -258,6 +293,7 @@ export function newTank(x: number, y: number, s = 1, owner = 255, kind: number =
   const partHp = new Float32Array(TANK_PARTS);
   const hs = hullScale({ s, kind });
   for (let i = 0; i < TANK_PARTS; i++) partHp[i] = TANK_PART_HP[i] * hs;
+  if (kind === TankKind.Mole) partHp[TankPart.Armor] = MOLE_FRILL_HP;
   return {
     x,
     y,
@@ -287,6 +323,11 @@ export function newTank(x: number, y: number, s = 1, owner = 255, kind: number =
   };
 }
 
+/** A mole, coming down over `x` (anyone's to climb into). */
+export function newMole(x: number, y: number): Tank {
+  return newTank(x, y, MOLE_SCALE, 255, TankKind.Mole);
+}
+
 /** A tarantula, called in over `x`, for its owner. */
 export function newTarantula(x: number, y: number, owner: number): Tank {
   return newTank(x, y, TARANTULA_SCALE, owner, TankKind.Tarantula);
@@ -305,6 +346,15 @@ export function tankPartAt(t: { faceLeft: boolean; parts: number; kind?: number 
   }
   const fx = t.faceLeft ? TANK_W - lx : lx;
   let p: number = TankPart.Hull;
+  if (isMole(t)) {
+    // The mole (tank cells): the frill out front and above, the flamethrower on its back, the SMG on its nose, the hatch cover at the rear.
+    const [f0, f1, , f3] = MOLE_FRILL_BOX;
+    if (fx >= f0 && ly >= f1 && ly <= f3 && hasTankPart(t.parts, TankPart.Armor)) return TankPart.Armor;
+    if (fx >= 9 && fx <= 17 && ly < 7 && hasTankPart(t.parts, TankPart.Cannon)) return TankPart.Cannon;
+    if (fx >= 22 && ly >= 10 && ly <= 14 && hasTankPart(t.parts, TankPart.Smg)) return TankPart.Smg;
+    if (fx >= 2 && fx <= 8 && ly < 6 && hasTankPart(t.parts, TankPart.Shield)) return TankPart.Shield;
+    return TankPart.Hull;
+  }
   // Matches the sprite (client/sprites.ts): cannon out of the dome front,
   // vulcan housing on the nose, the plate over the roof and the glacis.
   if (fx >= 9 && fx <= 18 && ly < 2 && hasTankPart(t.parts, TankPart.Shield)) p = TankPart.Shield;
@@ -371,10 +421,11 @@ const mzPt = { x: 0, y: 0 };
 /** Muzzle of the cannon or the SMG (world), and the angle it fires at. */
 export function tankMuzzle(t: Posed, cannon: boolean, aim: number, out: { x: number; y: number; a: number }): { x: number; y: number; a: number } {
   const spider = isSpider(t);
-  const [px, py] = spider ? (cannon ? SPIDER_RACK_PIVOT : SPIDER_LASER_PIVOT) : cannon ? CANNON_PIVOT : SMG_PIVOT;
-  // (A tarantula's rack and head both turn all the way round.)
-  const a = cannon && !spider ? cannonAngle(t.faceLeft, aim, t.a) : aim;
-  const len = (spider ? (cannon ? SPIDER_RACK_LEN : SPIDER_LASER_LEN) : cannon ? CANNON_LEN : SMG_LEN) * (t.s ?? 1);
+  const mole = isMole(t);
+  const [px, py] = spider ? (cannon ? SPIDER_RACK_PIVOT : SPIDER_LASER_PIVOT) : mole ? (cannon ? MOLE_PLASMA_PIVOT : MOLE_SMG_PIVOT) : cannon ? CANNON_PIVOT : SMG_PIVOT;
+  // (A tarantula's rack and head, and a mole's flamethrower, all turn all the way round.)
+  const a = cannon && !spider && !mole ? cannonAngle(t.faceLeft, aim, t.a) : aim;
+  const len = (spider ? (cannon ? SPIDER_RACK_LEN : SPIDER_LASER_LEN) : mole && cannon ? MOLE_PLASMA_LEN : cannon ? CANNON_LEN : SMG_LEN) * (t.s ?? 1);
   const p = tankPoint(t, px, py, mzPt);
   out.x = p.x + Math.cos(a) * len;
   out.y = p.y + Math.sin(a) * len;

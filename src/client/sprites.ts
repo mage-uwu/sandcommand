@@ -818,6 +818,42 @@ export class SpriteCache {
     }
     return g;
   }
+
+  /** The mole: its hull, its frill, its hatch cover, its flamethrower nozzle turned to `a`. */
+  moleHull(left: boolean): HTMLCanvasElement {
+    return this.tankSprite(`mhull${left ? 1 : 0}`, () => bake(MOLE_HULL, MOLE_PAL, left));
+  }
+  moleFrill(left: boolean): HTMLCanvasElement {
+    return this.tankSprite(`mfrill${left ? 1 : 0}`, () => bake(moleFrill(), MOLE_PAL, left));
+  }
+  moleHatch(left: boolean): HTMLCanvasElement {
+    return this.tankSprite(`mhatch${left ? 1 : 0}`, () => bake(MOLE_HATCH, MOLE_PAL, left));
+  }
+  moleTread(frame: number, left: boolean): HTMLCanvasElement {
+    const f = ((frame % TREAD_FRAMES) + TREAD_FRAMES) % TREAD_FRAMES;
+    return this.tankSprite(`mtread${f}${left ? 1 : 0}`, () => bake(tankTread(f), MOLE_PAL, left));
+  }
+  moleNozzle(a: number): { c: HTMLCanvasElement; r: number } {
+    const step = ((Math.round((a / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
+    const key = 10000 + step;
+    let g = this.tankGuns.get(key);
+    if (!g) {
+      g = bakeRotatedGrid(MOLE_NOZZLE, MOLE_PAL, (step / ANGLE_STEPS) * Math.PI * 2, 1, 2);
+      this.tankGuns.set(key, g);
+    }
+    return g;
+  }
+  /** The mole's SMG: the tank's vulcan in its livery. */
+  moleGun(a: number): { c: HTMLCanvasElement; r: number } {
+    const step = ((Math.round((a / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
+    const key = 20000 + step;
+    let g = this.tankGuns.get(key);
+    if (!g) {
+      g = bakeRotatedGrid(TANK_VULCAN, MOLE_PAL, (step / ANGLE_STEPS) * Math.PI * 2, 1, 3);
+      this.tankGuns.set(key, g);
+    }
+    return g;
+  }
   private tankSprite(key: string, make: () => HTMLCanvasElement): HTMLCanvasElement {
     let c = this.tankSprites.get(key);
     if (!c) this.tankSprites.set(key, (c = make()));
@@ -935,6 +971,126 @@ const STEEL_PAL: Record<string, number> = {
   W: 0x8e969e,
   R: 0x50575e,
 };
+
+/**
+ * The mole's livery: a mining machine's ochre and rust over dark iron, a
+ * hazard-striped skirt, the frill's plate in blued steel with bone-white
+ * horns, and the flamethrower's nozzle glowing plasma blue.
+ */
+const MOLE_PAL: Record<string, number> = {
+  ...TANK_PAL,
+  K: 0x1a1008,
+  H: 0xf2c868, // sunlit ochre
+  L: 0xd09a3c, // ochre
+  O: 0xa86c26, // rust
+  D: 0x784818, // dark rust
+  d: 0x4a2a10, // deepest
+  g: 0x24262a, // iron
+  m: 0x4c545c, // blued steel
+  s: 0x8a98a6, // light steel
+  S: 0xd4dee6, // steel glint
+  b: 0xeae0c4, // horn
+  B: 0xb8aa88, // horn shadow
+  c: 0x6ee8ff, // plasma
+  C: 0xe0ffff, // plasma core
+};
+/** Mole hull (32 x 18, from TANK_SPRITE_TOP above its box): low and rounded, a hump for the flamethrower, a dark iron jaw. */
+const MOLE_HULL: Grid = [
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '................................',
+  '..........KKKKKKK...............',
+  '.........KgmmmmmgK..............',
+  '......KKKKKKKKKKKKKKKK..........',
+  '....KKLHHHHHHHHHHHHHLLKK........',
+  '...KLHHLLLLLLLLLLLLLLLOOKKKK....',
+  '..KLHLLKLLLLKLLLLKLLLLOOOKgmK...',
+  '.KLHLLLLLLLLLLLLLLLLLLOOODKgmK..',
+  'KgLLLLLLLLLLLLLLLLLLLLOOODDKgmKK',
+  'KgOOOOOOOOOOOOOOOOOOOOODDDDKgwwK',
+  '.KDDDDDDDDDDDDDDDDDDDDDDDddKggK.',
+  '.KOYYrrYYrrOOOOOOOOOOOODDddKgK..',
+  '..KYYrrYYrrDDDDDDDDDDDDDddKKK...',
+  '..KKKKKKKKKKKKKKKKKKKKKKKKK.....',
+];
+/** The flamethrower's nozzle (pivot at (1, 2)): an iron body, a steel throat, a plasma-blue mouth. */
+const MOLE_NOZZLE: Grid = [
+  '.KKK.....',
+  'KgmgKKKKK',
+  'KmsSsscCK',
+  'KgmgKKKKK',
+  '.KKK.....',
+];
+/** The hatch cover at the rear of the mole's back. */
+const MOLE_HATCH: Grid = [
+  '.KKKKK.',
+  'KmsssmK',
+  'KgmmmgK',
+];
+/** Where the frill grid sits (design cells: its top-left, facing right) and its size. */
+export const MOLE_FRILL_AT = [16, -22] as const;
+const FRILL_W = 21;
+const FRILL_H = 34;
+/**
+ * The frill: a great curved plate rising from the mole's nose and sweeping
+ * up and back over its deck, spikes along its rim, two horns jutting
+ * forward at its foot and a boss of rivets down its face.
+ */
+function moleFrill(): Grid {
+  const g: string[][] = Array.from({ length: FRILL_H }, () => new Array<string>(FRILL_W).fill('.'));
+  const put = (x: number, y: number, c: string) => {
+    if (x >= 0 && y >= 0 && x < FRILL_W && y < FRILL_H) g[y][x] = c;
+  };
+  // The plate: a band whose middle runs from its foot (front) up and back.
+  const band: [number, number][] = [];
+  for (let y = 2; y < FRILL_H; y++) {
+    const u = (FRILL_H - 1 - y) / (FRILL_H - 3); // 0 at the foot, 1 at the crest
+    // (Its foot on the nose, the plate leaning back and flaring wide as it rises: a fan.)
+    const cx = 13 - 6 * Math.pow(u, 1.3);
+    const half = 2.2 + 3.6 * Math.pow(u, 0.8);
+    band[y] = [Math.round(cx - half), Math.round(cx + half)];
+  }
+  for (let y = 2; y < FRILL_H; y++) {
+    const [a, b] = band[y];
+    for (let x = a; x <= b; x++) put(x, y, x === b ? 'S' : x >= b - 1 ? 's' : x <= a + 1 ? 'g' : (x + y) % 7 === 0 ? 's' : 'm');
+  }
+  // Outline.
+  const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < FRILL_W && y < FRILL_H && g[y][x] !== '.' && g[y][x] !== 'K';
+  for (let y = 0; y < FRILL_H; y++) for (let x = 0; x < FRILL_W; x++) if (g[y][x] === '.' && (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1))) g[y][x] = 'K';
+  // Spikes round its rim: up over the crest and down its back edge, bone-tipped.
+  for (let y = 3; y < 24; y += 3) {
+    const a = band[y][0];
+    put(a - 1, y, 'b');
+    put(a - 2, y - 1, 'b');
+    put(a - 2, y, 'K');
+    put(a - 3, y - 1, 'K');
+  }
+  for (let x = band[2][0] + 1; x < band[2][1]; x += 3) {
+    put(x, 1, 'b');
+    put(x, 0, 'K');
+  }
+  // Two horns jutting forward at its foot.
+  for (const [hy, len] of [
+    [FRILL_H - 10, 5],
+    [FRILL_H - 4, 3],
+  ] as const) {
+    const b = band[hy][1];
+    for (let k = 1; k <= len; k++) {
+      put(b + k, hy, k === len ? 'b' : 'B');
+      put(b + k, hy - 1, k === len ? 'K' : 'b');
+    }
+    put(b + len + 1, hy, 'K');
+  }
+  // Rivets down its face.
+  for (let y = 6; y < FRILL_H - 2; y += 5) {
+    const [a, b] = band[y];
+    put(Math.round((a + b) / 2), y, 'g');
+  }
+  return g.map((r) => r.join(''));
+}
+
 /** Rows of hull sprite above the tank's box. */
 export const TANK_SPRITE_TOP = 3;
 const TANK_HULL: Grid = [
@@ -1175,7 +1331,7 @@ function bakeChute(): HTMLCanvasElement {
 }
 
 export function spriteGridsAreRectangular(): boolean {
-  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT, TANK_HULL, TANK_ARMOR, TANK_CANNON, TANK_VULCAN, TANK_SHIELD, tankTread(0)];
+  const all: Grid[] = [...Object.values(BODY), ...GUNS.map((g) => g.grid), ...GIBS, CRAFT, TANK_HULL, TANK_ARMOR, TANK_CANNON, TANK_VULCAN, TANK_SHIELD, tankTread(0), MOLE_HULL, MOLE_NOZZLE, MOLE_HATCH, moleFrill()];
   return all.every((g) => g.every((row) => row.length === g[0].length)) &&
     Object.values(BODY).every((g) => g.length === BODY_H && g[0].length === BODY_W);
 }

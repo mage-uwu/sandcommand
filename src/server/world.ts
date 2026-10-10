@@ -54,6 +54,13 @@ import {
   isDog,
   TankKind,
   isPet,
+  isMole,
+  newMole,
+  MOLE_SCALE,
+  MOLE_FRILL_BOX,
+  MOLE_SMG_INTERVAL,
+  MOLE_PLASMA_INTERVAL,
+  PLASMA_SPEED,
   isSpider,
   surfCapacity,
   surfSeat,
@@ -180,6 +187,7 @@ import {
   CALL_COST,
   WATCHDOG_COST,
   TARANTULA_COST,
+  MOLE_COST,
   CallKind,
   R_TANK_PART,
   R_TANK_BOOM,
@@ -1616,7 +1624,14 @@ export class World {
       // In the tank's own frame its (tilted) hull is an axis-aligned box.
       const la = tankLocal(t, x0, y0, this.segA);
       const lb = tankLocal(t, x1, y1, this.segB);
-      const tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, designW(t), hitH(t));
+      let tt = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, 0, 0, designW(t), hitH(t));
+      // A mole's frill stands up above its deck, out front: it's struck first (its riders behind it aren't).
+      if (isMole(t) && hasTankPart(t.parts, TankPart.Armor)) {
+        const [f0, f1, f2, f3] = MOLE_FRILL_BOX;
+        const fx0 = t.faceLeft ? TANK_W - f2 : f0;
+        const tf = segmentBox(la.x, la.y, lb.x - la.x, lb.y - la.y, fx0, f1, fx0 + (f2 - f0), f3);
+        if (tf >= 0 && (tt < 0 || tf < tt)) tt = tf;
+      }
       if (tt >= 0 && tt < bestT) {
         bestT = tt;
         best = TANK_ID_BASE + k;
@@ -1836,6 +1851,8 @@ export class World {
         this.damageDoor(d, (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? TANK_HP * def.antiArmor : 0), owner);
       }
     }
+    // Plasma leaves a lick of flame where it landed (that burns whoever stands in it).
+    if (kind === ProjKind.Plasma) for (let n = 0; n < 2; n++) this.grains.spawn(PK.Flame, x + this.rng.range(-2, 2), y + this.rng.range(-2, 2), this.rng.range(-30, 30), this.rng.range(-60, 10), 8 + this.rng.int(8), 0, 0, owner);
     const seed = this.rng.nextU32();
     if (detonate) {
       if (def.carveR > 0 && (actor < 0 || !def.ballistic)) {
@@ -2802,7 +2819,8 @@ export class World {
           x = cx;
         }
       }
-      this.tanks[slot] = newTank(x, -TANK_H - 40 - this.rng.int(160));
+      // (One in three a mole.)
+      this.tanks[slot] = this.rng.next() < 1 / 3 ? newMole(x, -TANK_H - 40 - this.rng.int(160)) : newTank(x, -TANK_H - 40 - this.rng.int(160));
     }
   }
 
@@ -3097,18 +3115,19 @@ export class World {
       t.smgCd -= DT;
       t.cannonCd -= DT;
       const spider = isSpider(t);
+      const mole = isMole(t);
       if (gunner >= 0 && buttons & BTN_FIRE && hasTankPart(t.parts, TankPart.Smg)) {
         // (A tarantula's is its laser: a beam a fifth of a second.)
         while (t.smgCd <= 0) {
           if (spider) this.spiderBeam(t, gunner);
           else this.tankShot(t, gunner, false);
-          t.smgCd += spider ? SPIDER_LASER_INTERVAL : SMG_INTERVAL;
+          t.smgCd += spider ? SPIDER_LASER_INTERVAL : mole ? MOLE_SMG_INTERVAL : SMG_INTERVAL;
         }
       }
       if (gunner >= 0 && buttons & BTN_SCOPE && hasTankPart(t.parts, TankPart.Cannon) && t.cannonCd <= 0) {
-        // (A tarantula's rack: missiles for as long as it's held.)
+        // (A tarantula's rack: missiles for as long as it's held. A mole's flamethrower: plasma, likewise.)
         this.tankShot(t, gunner, true);
-        t.cannonCd += spider ? SPIDER_MISSILE_INTERVAL : CANNON_INTERVAL * (isDog(t) ? 1.3 : 1);
+        t.cannonCd += spider ? SPIDER_MISSILE_INTERVAL : mole ? MOLE_PLASMA_INTERVAL : CANNON_INTERVAL * (isDog(t) ? 1.3 : 1);
       }
       t.smgCd = Math.max(0, t.smgCd);
       t.cannonCd = Math.max(0, t.cannonCd);
@@ -3174,6 +3193,20 @@ export class World {
       const oy = Math.cos(m.a) * side * 2.2;
       this.spawnProj(this.nextProjId++, ProjKind.SpiderMissile, owner, m.x + ox, m.y + oy, Math.cos(a) * SPIDER_MISSILE_SPEED, Math.sin(a) * SPIDER_MISSILE_SPEED);
       t.firedCannon = true;
+      return;
+    }
+    if (isMole(t)) {
+      if (cannon) {
+        // A gout of plasma, a little ragged, carried along with the hull.
+        const a = m.a + (this.rng.next() - 0.5) * 0.16;
+        const sp = PLASMA_SPEED * (0.92 + this.rng.next() * 0.16);
+        this.spawnProj(this.nextProjId++, ProjKind.Plasma, owner, m.x, m.y, Math.cos(a) * sp + t.vx * 0.5, Math.sin(a) * sp + t.vy * 0.5);
+        t.firedCannon = true;
+      } else {
+        const a = m.a + (this.rng.next() - 0.5) * 2 * SMG_SPREAD * 0.8;
+        this.spawnProj(this.nextProjId++, ProjKind.MoleRound, owner, m.x, m.y, Math.cos(a) * SMG_SPEED + t.vx * 0.25, Math.sin(a) * SMG_SPEED + t.vy * 0.25);
+        t.firedSmg = true;
+      }
       return;
     }
     const a = m.a + (this.rng.next() - 0.5) * 2 * (cannon ? 0.01 : SMG_SPREAD);
@@ -3382,7 +3415,7 @@ export class World {
   call(id: number, kind: number): boolean {
     if (kind === CallKind.Pilot) return this.togglePilot(id);
     const p = this.players[id];
-    const cost = kind === CallKind.Watchdog ? WATCHDOG_COST : kind === CallKind.Tarantula ? TARANTULA_COST : CALL_COST;
+    const cost = kind === CallKind.Watchdog ? WATCHDOG_COST : kind === CallKind.Tarantula ? TARANTULA_COST : kind === CallKind.Mole ? MOLE_COST : CALL_COST;
     if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < cost) return false;
     if (kind === CallKind.Tarantula) {
       // One tarantula each (a watchdog besides is fine).
@@ -3412,6 +3445,20 @@ export class World {
       this.broadcast.u8(R_CHAT);
       this.broadcast.u8(p.id);
       this.broadcast.str('*radio* watchdog inbound, it has my back');
+      return true;
+    }
+    if (kind === CallKind.Mole) {
+      // A mole, parachuted onto the caller like a tank.
+      const slot = this.tanks.indexOf(null);
+      if (slot < 0) return false;
+      const w = Math.round(TANK_W * MOLE_SCALE);
+      const x = Math.max(60, Math.min(WORLD_W - 60 - w, p.cx - w / 2 + this.rng.range(-24, 24)));
+      this.tanks[slot] = newMole(x, -TANK_H - 40);
+      p.gold -= MOLE_COST;
+      p.callCd = CALL_COOLDOWN;
+      this.broadcast.u8(R_CHAT);
+      this.broadcast.u8(p.id);
+      this.broadcast.str('*radio* mole inbound on my position');
       return true;
     }
     if (kind === CallKind.Tank) {

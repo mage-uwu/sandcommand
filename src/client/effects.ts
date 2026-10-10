@@ -127,6 +127,13 @@ export function laserHit(p: Particles, x: number, y: number, dx: number, dy: num
   if (power > 0.3) burst(p, PK.Flame, x, y, Math.round(power * 14), 120, 8);
 }
 
+/** Mole plasma in flight: blue-white sparks shed off it and a little heat haze. */
+export function plasmaTrail(p: Particles, x: number, y: number, vx: number, vy: number): void {
+  if (Math.random() < 0.6) p.spawn(PK.Spark, x, y, vx * 0.2 + rnd(-40, 40), vy * 0.2 + rnd(-60, 20), rnd(3, 6));
+  if (Math.random() < 0.25) p.spawn(PK.Flame, x, y, vx * 0.15 + rnd(-20, 20), vy * 0.15 + rnd(-40, 0), rnd(3, 5));
+  if (Math.random() < 0.15) p.spawn(PK.Smoke, x, y, rnd(-8, 8), rnd(-20, -5), rnd(15, 25));
+}
+
 /** An autocannon shell's wake: a thin grey smoke trail, no flame. */
 export function smokeTrail(p: Particles, x: number, y: number): void {
   p.spawn(PK.Smoke, x, y, rnd(-6, 6), rnd(-6, 6), rnd(18, 32));

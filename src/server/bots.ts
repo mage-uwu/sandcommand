@@ -7,7 +7,7 @@ import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/p
 import { MAT_HARD, Mat } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, surfCapacity, tankH, tankW } from '../shared/tank.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
@@ -784,7 +784,16 @@ export class BotBrain {
       // Close but out of sight (a floor or wall between): shell toward it to
       // open a way; still nothing after a while, go on foot and dig.
       this.blind = !this.seeTarget && dist < 240 ? this.blind + 1 : 0;
-      if (this.blind > 60 && k.cannonCd <= 0) {
+      if (isMole(k)) {
+        // A mole: the SMG at range, the flamethrower up close; blocked or blind, it burns its way through.
+        if (this.blind > 30 || (this.tankStuck > 30 && dir !== 0)) {
+          cmd.aim = quantizeAim(this.blind > 30 ? Math.atan2(tgt.cy - cy, tgt.cx - cx) : dir > 0 ? 0.15 : Math.PI - 0.15);
+          buttons |= BTN_SCOPE;
+        } else if (t >= this.holdFire && this.seeTarget && dist < 380) {
+          buttons |= BTN_FIRE;
+          if (dist < 105) buttons |= BTN_SCOPE;
+        }
+      } else if (this.blind > 60 && k.cannonCd <= 0) {
         cmd.aim = quantizeAim(Math.atan2(tgt.cy - cy, tgt.cx - cx));
         buttons |= BTN_SCOPE;
       } else if (this.tankStuck > 45 && dir !== 0) {

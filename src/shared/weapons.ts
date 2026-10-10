@@ -42,6 +42,10 @@ export const ProjKind = {
   Landmine: 19,
   /** A tarantula's missile: a small, fast, straight-flying rocket, fired in a stream off the rack on its back. */
   SpiderMissile: 20,
+  /** A mole's plasma: a short-lived gout of burning gas that sears whoever it reaches and burns into the ground. */
+  Plasma: 21,
+  /** A mole's SMG round: heavier than a tank's. */
+  MoleRound: 22,
 } as const;
 
 export interface ProjDef {
@@ -118,6 +122,12 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 1, life: 2, damage: 0, mass: 0.6, sharp: 0.1, carveR: 14, coreR: 6, splashR: 30, splashDamage: 70, debris: 40, bounce: 0, ballistic: false },
   // Tarantula missile: dead straight (it burns all the way), a hand grenade's blast.
   { gravity: 0, life: 75, damage: 30, mass: 1.6, sharp: 0.6, carveR: 24, coreR: 11, splashR: 40, splashDamage: 90, debris: 56, bounce: 0, ballistic: false },
+  // Mole plasma: twenty puffs a second, out to about 110 cells (it drifts up a little as it burns
+  // out). Each sears through clothing (10 a layer) and burns a hole where it lands, hard material
+  // included: a mole digs as it fires.
+  { gravity: -0.05, life: 9, damage: 10, mass: 0.35, sharp: 0.8, carveR: 5, coreR: 3, splashR: 0, splashDamage: 0, debris: 0, bounce: 0, ballistic: false, knock: 0.2 },
+  // Mole SMG round: heavier than a tank's (22 a layer, a vest's worth of punch).
+  { gravity: 0.12, life: 40, damage: 22, mass: 0.65, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1 },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -274,6 +284,8 @@ export function projName(kind: number): string {
   if (kind === ProjKind.Bomblet) return 'GL';
   if (kind === ProjKind.Landmine) return 'Mine';
   if (kind === ProjKind.SpiderMissile) return 'Tarantula';
+  if (kind === ProjKind.Plasma) return 'Mole Plasma';
+  if (kind === ProjKind.MoleRound) return 'Mole SMG';
   return weaponOfProj(kind)?.name ?? '';
 }
 

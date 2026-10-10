@@ -670,7 +670,8 @@ rivets and a hazard stripe, tracks whose links crawl and road wheels turn,
 a riveted steel plate, a cannon with a muzzle brake, twin vulcan barrels,
 and a striped parachute. Each part is a separate layer, so it disappears
 when blown off. Each wave, **one or two
-come down by parachute** at spread-out spots and land empty.
+come down by parachute** at spread-out spots and land empty (one in three
+is a mole, below).
 - **Getting in and out.** Walk up to an empty tank and press **3 / F**
   (touch: ⬆) to climb in. The same key climbs back out through the roof
   hatch. Your clone rides inside; you can see its head poking out of the
@@ -731,7 +732,7 @@ come down by parachute** at spread-out spots and land empty.
 Every clone carries a **Radio** (`WeaponId.Radio`, always in the kit
 alongside the digger and the materializer). With the radio in hand, a menu
 comes up: click **Dropship** or **Tank** to call it in for **1500 gold**,
-a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then needs 30 seconds to recharge
+a **Mole** for **1100**, a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then needs 30 seconds to recharge
 (`World.call`, `C_CALL`).
 
 - **Watchdog** (`src/server/watchdog.ts`). A small unmanned robot tank,
@@ -828,12 +829,47 @@ a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then nee
 
 - **Tank.** An empty tank is parachuted onto your position. Climb in, or
   leave it for a teammate.
+- **Mole** (`TankKind.Mole`, `newMole`). A smaller tank for tunnel fighting,
+  parachuted in empty like a tank, and one in three of the wave's tank
+  drops.
+  - **Size and hull.** It is four-fifths a tank's size (26 x 18 cells) with
+    **70% of its hull**.
+  - **No cannon.** In its place is a **plasma flamethrower** on a hump on
+    its back that swivels all the way round. Right mouse / Shift fires it,
+    twenty gouts a second, for as long as it's held (`ProjKind.Plasma`).
+    - **Range.** Each gout reaches about 110 cells, drifting up as it burns
+      out, so it falls short of anyone further off.
+    - **Damage.** It sears whoever it reaches (10 a layer), and leaves a lick
+      of flame where it lands that burns whoever stands in it.
+    - **Digging.** Each gout burns a hole into the ground (5 cells, hard
+      material within 3), so a mole digs as it fires. Two seconds of it
+      clears a tunnel through soil or concrete. Pig iron still resists it,
+      and a door takes the damage instead.
+  - **SMG.** A **heavier, faster SMG** sits on its iron jaw: 900 rounds a
+    minute of 22-a-layer rounds (`ProjKind.MoleRound`), against the tank's
+    720 of 14.
+  - **The frill.** Out front stands a great steel **frill**, triceratops
+    style: a fan-shaped plate rising from its nose and flaring back over the
+    deck, spikes round its rim, two bone-white horns at its foot.
+    - **Cover.** It has a hit box of its own, standing above the hull
+      (`MOLE_FRILL_BOX`), so fire from the front strikes it before the
+      **three riders** standing on the mole's back behind it.
+    - **Toughness.** It has 3600 hit points (more than a tank's armour
+      plate).
+    - **Losing it.** Shot away, it flies off as steel scrap, and the riders
+      are open from the front too. From behind they always were.
+  - **Livery.** Its own pixel art in a mining machine's ochre and rust,
+    with a blue-glowing nozzle (`moleHull`/`moleFrill`/`moleNozzle` in
+    `sprites.ts`).
+  - **Bots.** Driving one, a bot uses the SMG at range and the flamethrower
+    up close, and burns its way through when blocked or when its target is
+    behind a wall.
 - **Tank surfing.** Press **3** beside a friendly vehicle to climb up and
   ride on top of it, and **3** again (or jump) to get off. A teammate's tank,
   watchdog or tarantula is friendly; in a free-for-all, only your own
-  watchdog or tarantula is. A watchdog carries two riders, a tank three, a
-  tarantula five, standing on its deck (the tank's rear deck and glacis, the
-  tarantula's back) and going wherever it goes, so vehicles become convoys.
+  watchdog or tarantula is. A watchdog carries two riders, a tank or a mole three,
+  a tarantula five, standing on its deck (the tank's rear deck and glacis,
+  the mole's back behind its frill, the tarantula's back) and going wherever it goes, so vehicles become convoys.
   Riders aim and shoot as ever: their shots pass over their own vehicle, and
   its guns fire over them. They're thrown clear when it's destroyed.
   Bots use it: with a fight still a way off and a friendly vehicle near them

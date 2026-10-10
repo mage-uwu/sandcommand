@@ -21,7 +21,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidWreck, smokeTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
@@ -469,6 +469,7 @@ export class Game implements FrameHandler {
       const k = pr.kind[i];
       if (k === ProjKind.Rocket || k === ProjKind.Shell || k === ProjKind.Missile || k === ProjKind.SpiderMissile) rocketTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.AutoShell) smokeTrail(this.particles, pr.x[i], pr.y[i]);
+      else if (k === ProjKind.Plasma) plasmaTrail(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i]);
       else if (k === ProjKind.Engine) {
         // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
         const burning = PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0);
@@ -603,6 +604,13 @@ export class Game implements FrameHandler {
     d.a = s.a;
     d.w = s.w;
     d.pilot = this.myId;
+    // Its size and kind from the last we saw of it (a mole is smaller than a tank).
+    const seen = this.tankSnaps.get(s.slot);
+    const last = seen?.[seen.length - 1];
+    if (last) {
+      d.kind = last.kind;
+      d.s = last.s;
+    }
     // pending was already trimmed to unacked commands by reconcile().
     for (const p of this.pending) stepTank(d, this.terrain, DT, p.buttons);
     this.seat(d);

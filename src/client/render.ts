@@ -1,6 +1,6 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { CALL_COST, TARANTULA_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES } from '../shared/worldgen.ts';
@@ -17,7 +17,7 @@ import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '.
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
-import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE } from '../shared/tank.ts';
+import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
@@ -26,7 +26,7 @@ import { drawDecor } from './decor-art.ts';
 import type { Terrain } from '../shared/terrain.ts';
 import { RACK_MOUTHS, RACK_PIVOT, TarantulaArt } from './tarantula-sprites.ts';
 import { Backdrop } from './backdrop.ts';
-import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
+import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, MOLE_FRILL_AT, WALK_CYCLE } from './sprites.ts';
 
 /** Most terrain chunks re-rasterized per frame (the rest wait for the next). */
 const CHUNKS_PER_FRAME = 64;
@@ -437,6 +437,7 @@ export class Renderer {
       // (Driving it ourselves: the guns follow our mouse now, not the last word from the server.)
       const aim = mine ? (game.rc === t.slot && game.lockAim !== null ? game.lockAim : Math.atan2(wmy - gunPivotY(t), wmx - (t.x + tankW(t) / 2))) : t.aim;
       if (isSpider(t)) this.drawTarantula(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
+      else if (isMole(t)) this.drawMole(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
       else this.drawTank(ctx, t, mine ? Math.cos(aim) < 0 : t.faceLeft, aim, game, now);
     }
 
@@ -586,6 +587,16 @@ export class Renderer {
         ctx.fillStyle = (now / 90) % 2 < 1 ? '#ff3030' : '#a01010';
         ctx.fillRect(3, -1, 2, 2);
         ctx.restore();
+      } else if (k === ProjKind.Plasma) {
+        // Mole plasma: a white-hot core in a blue glow, swelling and fading as it burns out.
+        const age = 1 - p.life[i] / PROJ[k].life;
+        const r = 1.5 + age * 3;
+        ctx.fillStyle = `rgba(80,180,255,${0.35 * (1 - age * 0.6)})`;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = age < 0.5 ? '#e8ffff' : '#8ae8ff';
+        ctx.fillRect(x - r / 2, y - r / 2, r, r);
       } else if (k === ProjKind.SpiderMissile) {
         // Tarantula missile: a slim grey dart, a yellow nose band, a flame out the back.
         ctx.save();
@@ -836,7 +847,7 @@ export class Renderer {
     // Tanks: who's driving, and how much hull is left.
     for (const t of game.tankViews(alpha)) {
       const sx = offX + (t.x + tankW(t) / 2) * z;
-      const sy = offY + (t.y - (isDog(t) ? 14 : isSpider(t) ? 4 : 8)) * z - 10 * dpr;
+      const sy = offY + (t.y - (isDog(t) ? 14 : isSpider(t) ? 4 : isMole(t) ? 22 : 8)) * z - 10 * dpr;
       // A watchdog (or a tarantula) wears its owner's name; a tank its driver's.
       const who = isPet(t) ? t.owner : t.pilot;
       if (who !== 255 && (who !== game.myId || isPet(t))) {
@@ -849,7 +860,7 @@ export class Renderer {
       }
       const max = tankMaxHp(t);
       if (t.hp < max) {
-        const w = (isDog(t) ? 28 : isSpider(t) ? 48 : 40) * dpr;
+        const w = (isDog(t) ? 28 : isSpider(t) ? 48 : isMole(t) ? 32 : 40) * dpr;
         ctx.fillStyle = '#300';
         ctx.fillRect(sx - w / 2, sy + 3 * dpr, w, 3 * dpr);
         ctx.fillStyle = t.hp > max * 0.35 ? '#d8c040' : '#e33';
@@ -1638,6 +1649,7 @@ export class Renderer {
     const entries: { kind: number; name: string; blurb: string; free?: boolean; cost?: number }[] = [
       { kind: CallKind.Dropship, name: 'DROPSHIP', blurb: 'air support · 2 turrets · 8 bombs' },
       { kind: CallKind.Tank, name: 'TANK', blurb: 'parachuted onto your position' },
+      { kind: CallKind.Mole, name: 'MOLE', blurb: 'small tank · plasma flamer digs · frill shields 3 riders', cost: MOLE_COST },
     ];
     // A watchdog, if we haven't one out already.
     const dog = game.myDog();
@@ -1793,7 +1805,7 @@ export class Renderer {
     ctx.fillRect(x0, y0, 460 * s, 44 * s);
     ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
     ctx.textAlign = 'left';
-    const names = ['HULL', 'CANNON', 'SMG', 'ARMOUR', 'SHIELD'];
+    const names = game.drive && isMole(game.drive) ? ['HULL', 'PLASMA', 'SMG', 'FRILL', 'HATCH'] : ['HULL', 'CANNON', 'SMG', 'ARMOUR', 'SHIELD'];
     for (let part = 0; part < TANK_PARTS; part++) {
       const x = x0 + 8 * s + part * 90 * s;
       const on = hasTankPart(st.parts, part);
@@ -2219,6 +2231,90 @@ export class Renderer {
         ctx.fillStyle = (now / 60) % 2 < 1 ? '#ff9a30' : '#ffd060';
         ctx.fillRect(wx(19, 2), ty + 7, 2, 2);
         ctx.fillRect(wx(7, 1), ty + 6, 1, 2);
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * A mole, in its own pixel art (sprites.ts): the low ochre hull with its
+   * flamethrower on a hump, the hatch cover at the back, the SMG on its iron
+   * jaw, and out front the great steel frill, spikes and horns, standing up
+   * over the deck (gone once it's shot away). Drawn in a tank's design cells
+   * at its scale, tilted with its treads.
+   */
+  private drawMole(ctx: CanvasRenderingContext2D, t: TankView, faceLeft: boolean, aim: number, game: Game, now: number): void {
+    const sp = this.sprites;
+    const k = t.s ?? MOLE_SCALE;
+    const x = 0;
+    const ty = 0;
+    const y = ty - TANK_SPRITE_TOP;
+    const wx = (lx: number, w = 0) => (faceLeft ? x + TANK_W - lx - w : x + lx);
+    ctx.save();
+    ctx.translate(t.x + tankW(t) / 2, t.y + tankH(t) + tankSink(t.a, k));
+    ctx.rotate(t.a);
+    ctx.scale(k, k);
+    ctx.translate(-(x + TANK_W / 2), -(ty + TANK_H));
+    if (t.chute) ctx.drawImage(sp.tankChute(), x - 8, ty - 34);
+    const hatch = hasTankPart(t.parts, TankPart.Shield);
+    if (t.pilot !== 255 && !hatch) {
+      // Hatch cover blown off: the driver's head out of the hole.
+      const rgb = game.players.get(t.pilot)?.rgb ?? 0x7a8a50;
+      ctx.fillStyle = '#141012';
+      ctx.fillRect(wx(2, 6), ty - 1, 6, 5);
+      ctx.fillStyle = `#${rgb.toString(16).padStart(6, '0')}`;
+      ctx.fillRect(wx(3, 4), ty, 4, 2);
+      ctx.fillStyle = '#e0b48c';
+      ctx.fillRect(wx(3, 4), ty + 2, 4, 2);
+    }
+    ctx.drawImage(sp.moleHull(faceLeft), x, y);
+    if (hatch) ctx.drawImage(sp.moleHatch(faceLeft), wx(2, 7), ty + 1);
+    // Treads: one frame per two cells rolled.
+    ctx.drawImage(sp.moleTread(Math.floor((faceLeft ? -t.x : t.x) / 2), faceLeft), x, y + 18);
+    if (hasTankPart(t.parts, TankPart.Cannon)) {
+      const a = aim - t.a;
+      const g = sp.moleNozzle(a);
+      const px = faceLeft ? x + TANK_W - MOLE_PLASMA_PIVOT[0] : x + MOLE_PLASMA_PIVOT[0];
+      const py = ty + MOLE_PLASMA_PIVOT[1];
+      ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
+      if (t.firedCannon) {
+        // A blue-white glow at the mouth while it's firing.
+        const fx = px + Math.cos(a) * (MOLE_PLASMA_LEN + 1);
+        const fy = py + Math.sin(a) * (MOLE_PLASMA_LEN + 1);
+        ctx.fillStyle = 'rgba(110,232,255,0.35)';
+        ctx.fillRect(fx - 3, fy - 3, 7, 7);
+        ctx.fillStyle = (now / 40) % 2 < 1 ? '#e0ffff' : '#6ee8ff';
+        ctx.fillRect(fx - 1, fy - 1, 3, 3);
+      }
+    }
+    if (hasTankPart(t.parts, TankPart.Smg)) {
+      const a = aim - t.a;
+      const g = sp.moleGun(a);
+      const px = faceLeft ? x + TANK_W - MOLE_SMG_PIVOT[0] : x + MOLE_SMG_PIVOT[0];
+      const py = ty + MOLE_SMG_PIVOT[1];
+      ctx.drawImage(g.c, Math.round(px - g.r), Math.round(py - g.r));
+      if (t.firedSmg && (now / 45) % 2 < 1) {
+        const fx = Math.round(px + Math.cos(a) * (SMG_LEN + 1));
+        const fy = Math.round(py + Math.sin(a) * (SMG_LEN + 1));
+        ctx.fillStyle = '#fff4b0';
+        ctx.fillRect(fx - 1, fy - 1, 3, 3);
+        ctx.fillStyle = '#ffb030';
+        ctx.fillRect(fx - 2, fy, 5, 1);
+        ctx.fillRect(fx, fy - 2, 1, 5);
+      }
+    }
+    if (hasTankPart(t.parts, TankPart.Armor)) {
+      const f = sp.moleFrill(faceLeft);
+      ctx.drawImage(f, wx(MOLE_FRILL_AT[0], f.width), ty + MOLE_FRILL_AT[1]);
+    }
+    const wear = 1 - t.hp / tankMaxHp(t);
+    if (wear > 0.25) {
+      ctx.fillStyle = 'rgba(16,12,8,0.55)';
+      ctx.fillRect(wx(6, 4), ty + 9, 4, 2);
+      if (wear > 0.5) ctx.fillRect(wx(15, 5), ty + 10, 5, 2);
+      if (wear > 0.75 && (now / 90) % 3 < 2) {
+        ctx.fillStyle = (now / 60) % 2 < 1 ? '#ff9a30' : '#ffd060';
+        ctx.fillRect(wx(16, 2), ty + 8, 2, 2);
       }
     }
     ctx.restore();

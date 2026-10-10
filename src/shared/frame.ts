@@ -1,7 +1,7 @@
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
 import { CRAFT_PARTS } from './craft.ts';
-import { TANK_PARTS, TARANTULA_SCALE, TankKind, WATCHDOG_SCALE } from './tank.ts';
+import { TANK_PARTS, TARANTULA_SCALE, TankKind, WATCHDOG_SCALE, MOLE_SCALE } from './tank.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
@@ -664,7 +664,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             kind: r.u8(),
           });
           const v = list[list.length - 1];
-          v.s = v.kind === TankKind.Tarantula ? TARANTULA_SCALE : v.kind === TankKind.Watchdog ? WATCHDOG_SCALE : 1;
+          v.s = v.kind === TankKind.Tarantula ? TARANTULA_SCALE : v.kind === TankKind.Watchdog ? WATCHDOG_SCALE : v.kind === TankKind.Mole ? MOLE_SCALE : 1;
         }
         h.tanks(list);
         break;
