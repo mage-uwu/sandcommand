@@ -1354,14 +1354,21 @@ seven is the Valley of Souls, again by a roll of its own.
 
 The Deadland's semiotic warning reaches its peak here, and the horror is
 what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
-- **The canyon.** A grand canyon across the middle of the map: terraced
-  walls banded with rock, rims capped in grey rock, a mesa or two standing
-  in it, and a shallow pool on its sandy floor. No bunkers.
+- **The canyon.** A grand canyon across the middle of the map, truly
+  deep: the rims stand high (little sky over them) and the floor lies some
+  400 cells below, between sheer cliffs broken by a few narrow ledges.
+  The walls are banded with rock and the rims capped in grey rock. A tall
+  mesa or two stands in it, and a shallow pool lies on its sandy floor.
+  No bunkers.
 - **The dome.** At the heart of the floor, a massive cement dome seals the
   shaft down into the caves. It has a masonry band and keystone and squat
   pylons at its foot, and is ringed by standing caltrops, with a field of
-  teeth across the floor. Inside, it's an enclosed chamber with a back
-  wall. The ground round it is soft enough to dig through, so the way in is
+  teeth across the floor. Inside it's a rotunda after the Pantheon,
+  bleak, ancient and brutal. A drum of great stone courses has niches sunk
+  between plain pilasters, under a heavy cornice. Above it, the far half
+  of the dome is coffered in rows that narrow toward the crown, each coffer
+  stepped twice. The oculus is sealed with a plug of cement, so no light
+  comes in. The shaft below is lined with dark ashlar. The ground round it is soft enough to dig through, so the way in is
   under or round, not through.
 - **The Maw.** Under the dome, the warning goes on: a chamber whose walls
   are lined with cement teeth pointing in, like jaws, with blocks half sunk
@@ -1371,7 +1378,9 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
     ribbons with gas bladders) and coral.
   - **The basin** and **the cistern**: still, clear water.
   - **The forest**: three or four great petrified trunks (`Mat.Petrified`),
-    branchless, floor to roof, flaring into buttresses. Their roots trail
+    branchless, straight and upright like redwoods, floor to roof, flaring
+    into buttresses at the foot. Stone that was wood: rounded, with deep
+    furrowed bark, fine grain and ochre mineral bands up the trunk. Their roots trail
     down through the rock into the cistern below and hang in its water, as
     if they draw the poison out of the world.
   - **Gem caverns** of giant GEMM crystals jutting from floor and roof.

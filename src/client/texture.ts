@@ -23,7 +23,7 @@ function h(x: number, y: number, s = 0): number {
 }
 
 /** Smooth value noise in [0, 1) at `scale` cells. */
-function noise(x: number, y: number, scale: number, s: number): number {
+export function noise(x: number, y: number, scale: number, s: number): number {
   const fx = x / scale;
   const fy = y / scale;
   const ix = Math.floor(fx);

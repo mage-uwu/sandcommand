@@ -27,6 +27,9 @@ import type { WaterBody } from './water.ts';
  * Seeded and deterministic like the rest of worldgen.
  */
 
+/** The valley's own back walls (after structures.ts Backdrop and the labyrinth's 3 and 4): the dome's rotunda, the shaft's ashlar. */
+export const VBack = { Rotunda: 5, Ashlar: 6 } as const;
+
 export type RoomKind = 'maw' | 'sargasso' | 'basin' | 'forest' | 'cistern' | 'gems' | 'nest';
 
 export interface ValleyRoom {
@@ -82,16 +85,17 @@ export function valleyHeights(heights: Int32Array, seed: number): Valley {
   const hw = 950 + rng.int(180);
   const x0 = cx - hw;
   const x1 = cx + hw;
-  const rim = Math.round(WORLD_H * 0.3);
+  // Towering cliffs: the rims stand high (little sky over them), the floor far below. A DEEP valley.
+  const rim = Math.round(WORLD_H * 0.12);
   const floor = 520 + rng.int(20);
-  const wall = 70 + rng.int(50);
+  const wall = 110 + rng.int(60);
   // The mesas: towers of rock standing in the canyon, off its heart.
   const mesas: { x: number; w: number; top: number }[] = [];
   for (let k = 1 + rng.int(2), tries = 0; k > 0 && tries < 20; tries++) {
     const side = rng.next() < 0.5 ? -1 : 1;
     const x = cx + side * (300 + rng.int(Math.max(1, hw - 520)));
     if (mesas.some((o) => Math.abs(o.x - x) < 260)) continue;
-    mesas.push({ x, w: 45 + rng.int(45), top: rim + 30 + rng.int(60) });
+    mesas.push({ x, w: 45 + rng.int(45), top: rim + 60 + rng.int(120) });
     k--;
   }
   // The pool: on the floor, clear of the mesas and the dome and its caltrops.
@@ -111,10 +115,10 @@ export function valleyHeights(heights: Int32Array, seed: number): Valley {
       // The rim: a plateau, ragged at the edge.
       h = rim + n * 40 + (d > -40 ? (vnoise(x, 3, 9, seed ^ 0x77) - 0.5) * 24 : 0);
     } else if (d < wall) {
-      // The walls: terraces stepping down.
+      // The walls: sheer cliffs, a few narrow ledges on the way down.
       const t = d / wall;
-      const step = Math.floor(t * 5) / 5 + (t * 5 - Math.floor(t * 5)) * 0.12;
-      h = rim + (floor - rim) * Math.min(1, step) + n * 18;
+      const step = Math.floor(t * 6) / 6 + (t * 6 - Math.floor(t * 6)) * 0.08;
+      h = rim + (floor - rim) * Math.min(1, step) + n * 22;
     } else {
       h = floor + n * 14;
     }
@@ -242,9 +246,10 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
 
   // The shaft from the canyon floor down into the Maw, and the dome sealing it.
   const d = v.dome;
-  // (Its walls and the dome's hollow get a back wall: an enclosed, made space, not open sky.)
-  const wall = (x: number, y: number) => {
-    if (backdrop && inside(x, y)) backdrop[at(x, y)] = 1;
+  // (Its walls and the dome's hollow get a back wall: an enclosed, made space,
+  // not open sky. The dome's an ancient rotunda; the shaft is lined with ashlar.)
+  const wall = (x: number, y: number, kind: number = VBack.Ashlar) => {
+    if (backdrop && inside(x, y)) backdrop[at(x, y)] = kind;
   };
   for (let y = d.y - 4; y <= maw.y - maw.ry * 0.6; y++) {
     for (let x = d.x - 18; x <= d.x + 18; x++) {
@@ -259,7 +264,7 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
       if (dist <= d.r && dist >= d.r - shell) set(x, y, Mat.Cement);
       else if (dist < d.r - shell) {
         set(x, y, Mat.Air);
-        wall(x, y);
+        wall(x, y, VBack.Rotunda);
       }
     }
   }
@@ -365,13 +370,13 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     while (fy < WORLD_H - 14 && m[at(tx, fy)] === Mat.Air) fy++;
     let cy = forest.y;
     while (cy > 0 && m[at(tx, cy)] === Mat.Air) cy--;
-    const w = 7 + rng.int(6);
-    const ph = rng.next() * Math.PI * 2;
+    // Straight and upright like a redwood: one girth all the way up, flaring into
+    // great buttress roots at its foot, a little where it meets the roof.
+    const w = 9 + rng.int(6);
     for (let y = cy - 4; y <= fy + 6; y++) {
-      // Flaring into buttresses where it meets the floor and the roof.
-      const flare = Math.max(0, 1 - (fy - y) / 22) * 9 + Math.max(0, 1 - (y - cy) / 16) * 6;
-      const sway = Math.sin(y * 0.045 + ph) * 3;
-      for (let x = Math.round(tx - w - flare + sway); x <= Math.round(tx + w + flare + sway); x++) set(x, y, Mat.Petrified);
+      const foot = Math.max(0, 1 - (fy - y) / 30);
+      const flare = foot * foot * 16 + Math.max(0, 1 - (y - cy) / 12) * 4;
+      for (let x = tx - w - Math.round(flare); x <= tx + w + Math.round(flare); x++) set(x, y, Mat.Petrified);
     }
     // Roots: down from its foot through the rock, into the cistern, trailing in the water.
     if (Math.abs(tx - cistern.x) < cistern.rx * 0.8) {

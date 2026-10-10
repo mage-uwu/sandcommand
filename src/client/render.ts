@@ -4,6 +4,7 @@ import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, Ga
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES, Biome } from '../shared/worldgen.ts';
+import { VBack } from '../shared/valley.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
@@ -21,7 +22,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
+import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
 import { drawDecor } from './decor-art.ts';
@@ -114,19 +115,105 @@ function waterColor(t: Terrain, x: number, y: number, under: number): number {
 }
 
 /**
- * Petrified wood: dark teal-grey, its grain running along the trunk in fine
- * wavering lines, ridged bark, and mineral glints where the wood turned to stone.
+ * Petrified wood: wood turned to stone. Long bark furrows running the length
+ * of the trunk (wavering a little, never broken up), slow bands of mineral
+ * colour up it (slate grey, rust, amber, a cold blue-grey), and shading across
+ * its girth as round as a column: lit on the left, dark on the right.
  */
 function petrifiedColor(t: Terrain, x: number, y: number): number {
-  const h = hash2(x, y);
-  const grain = Math.sin(x * 1.3 + Math.sin(y * 0.07) * 2.2);
-  let k = 0.82 + grain * 0.1 + ((h >>> 5) & 7) / 60;
-  const air = (dx: number, dy: number) => t.get(x + dx, y + dy) === Mat.Air;
-  if (air(-1, 0) || air(0, -1)) k *= 1.25;
-  else if (air(1, 0) || air(0, 1)) k *= 0.6;
-  else if (air(-2, 0)) k *= 1.1;
-  if ((h & 63) === 0) return gemRgb(150, 220, 214); // a glint of mineral
-  return gemRgb(46 * k, 86 * k, 100 * k);
+  // Across the trunk: how far to its edge each side (the round shading).
+  let l = 0;
+  while (l < 26 && t.get(x - l - 1, y) === Mat.Petrified) l++;
+  let r = 0;
+  while (r < 26 && t.get(x + r + 1, y) === Mat.Petrified) r++;
+  const u = (l + 0.5) / (l + r + 1); // 0 at the left edge, 1 at the right
+  let k = 0.62 + 0.62 * Math.sin(Math.PI * Math.min(1, u * 1.15)) * (1.15 - u * 0.55);
+  // Bark furrows: dark vertical grooves every few cells, drifting slowly with height.
+  const drift = Math.sin(y * 0.021 + x * 0.002) * 1.6 + Math.sin(y * 0.0063) * 2.4;
+  const f = (((x + drift) % 5) + 5) % 5;
+  if (f < 0.9) k *= 0.58;
+  else if (f < 1.6) k *= 0.85;
+  else if (f > 4.2) k *= 1.08;
+  // Mineral banding up the trunk: slow, soft-edged layers.
+  const band = Math.sin(y * 0.085 + Math.sin(y * 0.017) * 3) * 0.5 + 0.5;
+  const rust = Math.max(0, band - 0.5) * 2.2;
+  const slate = Math.max(0, 0.3 - band) * 2;
+  // And a fine grain along the fibres (stretched tall: the old wood's lines turned to stone).
+  k *= 0.93 + hu(x, Math.floor(y / 7), 0x9e7) * 0.14;
+  const re = 126 + rust * 50 - slate * 30;
+  const gr = 108 + rust * 16 - slate * 20;
+  const bl = 92 - rust * 22 - slate * 12;
+  // Where the roof or the ground meets it: a hard dark edge.
+  if (t.get(x, y - 1) === Mat.Air || t.get(x, y + 1) === Mat.Air) k *= 0.8;
+  return gemRgb(re * k, gr * k, bl * k);
+}
+
+/** A hash of (x, y) in [0, 1) (salted by `s`). */
+const hu = (x: number, y: number, s: number) => (hash2(x, y, s) >>> 0) / 4294967296;
+
+/**
+ * The dome's hollow, seen from inside: an ancient rotunda after the
+ * Pantheon, bleak and brutal. A drum wall of great stone courses, niches
+ * sunk in it between plain pilasters, a heavy cornice; over that the dome's
+ * far half, coffered in rows that narrow toward the top (latitude and
+ * longitude projected), each coffer stepped in twice; at the crown the
+ * oculus, sealed with a plug of cement. No light comes in: grey, dim,
+ * streaked with the grime of ages, a little paler toward the top.
+ */
+function rotundaColor(t: Terrain, x: number, y: number, d: { x: number; y: number; r: number }): number {
+  const R = d.r - 14;
+  const dx = x - d.x;
+  const e = Math.max(0, ((d.y - y) * 1.08) / R); // up the wall: 0 at the floor, 1 at the crown
+  let k = 0.5 + e * 0.14 + 0.05 * noise(x, y, 20, 62) + hu(x, y, 61) * 0.035;
+  // Grime streaks down from the coffers.
+  if (hu(x >> 1, 0, 63) > 0.82) k *= 0.9;
+  if (e < 0.3) {
+    // The drum: courses of great blocks, niches between pilasters.
+    const nh = d.y - y; // height above the floor
+    const course = Math.floor(nh / 9);
+    const bx = (((x + (course & 1) * 9) % 18) + 18) % 18;
+    if (nh % 9 === 0 || bx === 0) k *= 0.78;
+    const bay = ((((dx + 408) % 34) + 34) % 34) - 17; // -17..16 across each bay
+    const top = R * 0.24;
+    if (Math.abs(bay) < 6 && nh < top + Math.sqrt(Math.max(0, 36 - bay * bay)) * 0.9) k *= Math.abs(bay) > 4 ? 0.62 : 0.4; // a niche, its arched head
+    else if (Math.abs(bay) > 14) k *= 1.12; // a pilaster
+  } else if (e < 0.36) {
+    // The cornice: a pale band, its shadow under it.
+    k *= e < 0.315 ? 0.55 : 1.18;
+  } else {
+    const lat = Math.asin(Math.min(1, e));
+    if (lat > 1.32) {
+      // The oculus, sealed: a dark ring round a plug of cement.
+      k *= lat < 1.38 ? 0.42 : 0.7;
+    } else {
+      const lon = Math.asin(Math.max(-1, Math.min(1, dx / (R * Math.cos(lat) + 0.001))));
+      // Five rows of coffers up to the crown, twenty-eight round (the Pantheon's count).
+      const rowF = ((lat - 0.39) / (1.32 - 0.39)) * 5;
+      const colF = (lon / Math.PI) * 28;
+      const fr = rowF - Math.floor(rowF);
+      const fc = colF - Math.floor(colF);
+      const edge = Math.min(fr, 1 - fr, fc, 1 - fc);
+      if (edge < 0.07) k *= 1.1; // the ribs between coffers
+      else if (edge < 0.15) k *= 0.82; // the first step in
+      else if (edge < 0.24) k *= 0.68; // the second
+      else k *= 0.6; // the coffer's deep panel
+      if (fr < 0.12) k *= 0.85; // each row's shadowed lower lip
+    }
+  }
+  void t;
+  return gemRgb(112 * k, 109 * k, 104 * k);
+}
+
+/** The shaft's lining: great weathered ashlar blocks, dark, their joints darker. */
+function ashlarColor(t: Terrain, x: number, y: number): number {
+  const course = Math.floor(y / 12);
+  const bx = (((x + (course & 1) * 13) % 26) + 26) % 26;
+  const by = ((y % 12) + 12) % 12;
+  let k = 0.48 + 0.08 * noise(x, y, 16, 64) + hu(x, y, 65) * 0.04;
+  if (by === 0 || bx === 0) k *= 0.62;
+  else if (by === 1 || bx === 1) k *= 1.08;
+  void t;
+  return gemRgb(104 * k, 100 * k, 94 * k);
 }
 
 /** The three GEMM colours: pink, turquoise, emerald. */
@@ -331,7 +418,9 @@ export class Renderer {
           // Inside a bunker: its back wall instead of the open backdrop.
           const bd = backdrop[row + x];
           let c: number;
-          if (bd) c = backWallColor(t, bd, ox + x, wy);
+          if (bd === VBack.Rotunda && game.valley) c = rotundaColor(t, ox + x, wy, game.valley.dome);
+          else if (bd === VBack.Ashlar) c = ashlarColor(t, ox + x, wy);
+          else if (bd) c = backWallColor(t, bd, ox + x, wy);
           else if (wy > skyline[ox + x] + 3) c = caveShade(t, ox + x, wy);
           else c = grassBlade(t, ox + x, wy);
           // Under standing water: tinted deep and clear, a bright line at its surface.
