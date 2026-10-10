@@ -159,7 +159,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -181,6 +181,7 @@ import {
   R_MINES,
   R_GEYSERS,
   R_GEYSER_BLOW,
+  R_FLORA,
   GF_CAVE,
   GF_RUMBLE,
   GF_TOXIC,
@@ -232,8 +233,8 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastGeysers, lastSiege } from '../shared/worldgen.ts';
-import { GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege } from '../shared/worldgen.ts';
+import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { ATTACKERS, DEFENDERS, SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
 import type { CaveNet } from '../shared/caves.ts';
 import type { Fortress } from '../shared/structures.ts';
@@ -326,6 +327,8 @@ export class Player {
   minesSeen = -1;
   /** The geysers' state as this client last heard it (World.geysersRev). */
   geysersSeen = -1;
+  /** The flora's state as this client last heard it (World.floraRev). */
+  floraSeen = -1;
   spikeCd = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
@@ -477,6 +480,17 @@ export class World {
    */
   geysers: { x: number; y: number; cave: boolean; hp: number; cd: number; calm: number; fuse: number; toxic: number; by: number; dead: boolean }[] = [];
   geysersRev = 0;
+  /**
+   * The map's flora (frosting.ts placeFlora): which plants are gone (shot
+   * through, blasted, crushed, dug out from under), the blister corals
+   * swelling to burst (index: ticks left, and who set it off), and by
+   * column (64 wide) for the hit tests.
+   */
+  flora: Flora[] = [];
+  floraDead = new Uint8Array(0);
+  readonly floraFuse = new Map<number, { t: number; by: number }>();
+  floraRev = 0;
+  private floraCols: number[][] = [];
   /** The geysers' own dice (so they never shift the rest of the world's). */
   private geyserRng = new Rng(1);
   private nextMineId = 1;
@@ -541,6 +555,14 @@ export class World {
       this.geysers = this.geysers.filter(vent);
       this.geysersRev++;
     }
+    // And the plants whose ground went with it, quietly (no gibs, no bursts: there was nothing to see).
+    this.flora.forEach((f, i) => {
+      if (!this.floraDead[i] && !this.rooted(f)) {
+        this.floraDead[i] = 1;
+        this.floraRev++;
+      }
+    });
+    this.floraFuse.clear();
   }
 
   /** The kind of map wave `n` is fought on. */
@@ -565,6 +587,12 @@ export class World {
     this.geyserRng = new Rng(this.mapSeed ^ 0x6e75e5);
     this.geysers = lastGeysers.map((g) => ({ ...g, hp: GEYSER_HP, cd: 0, calm: 30 * 30 + this.geyserRng.int(30 * 90), fuse: 0, toxic: 0, by: 255, dead: false }));
     this.geysersRev++;
+    this.flora = lastFlora;
+    this.floraDead = new Uint8Array(lastFlora.length);
+    this.floraFuse.clear();
+    this.floraCols = Array.from({ length: (WORLD_W >> 6) + 1 }, () => []);
+    lastFlora.forEach((f, i) => this.floraCols[f.x >> 6].push(i));
+    this.floraRev++;
     this.trapSpent.fill(0);
     this.trapCd.fill(0);
     this.trapsRev++;
@@ -1327,6 +1355,98 @@ export class World {
     this.dogMem.delete(slot);
   }
 
+  /** Visit the living plants whose boxes overlap a rectangle. */
+  private floraIn(x0: number, y0: number, x1: number, y1: number, fn: (i: number) => void): void {
+    const c0 = Math.max(0, (x0 - 8) >> 6);
+    const c1 = Math.min(this.floraCols.length - 1, (x1 + 8) >> 6);
+    for (let c = c0; c <= c1; c++) {
+      for (const i of this.floraCols[c]) {
+        if (this.floraDead[i]) continue;
+        const b = floraBox(this.flora[i]);
+        if (b.x1 >= x0 && b.x0 <= x1 && b.y1 >= y0 && b.y0 <= y1) fn(i);
+      }
+    }
+  }
+
+  /** Does the plant's ground still stand (and its own spot stay open)? */
+  private rooted(f: Flora): boolean {
+    const t = this.terrain;
+    if (!t.isSolid(f.x, f.y)) return false;
+    return f.kind === FloraKind.Hanging ? !t.isSolid(f.x, f.y + 1) : !t.isSolid(f.x, f.y - 1);
+  }
+
+  /** A blast of radius r at (x, y) reaching plant i: torn up if the disc touches its box. */
+  private hurtFlora(i: number, owner: number, x: number, y: number, r: number): void {
+    const b = floraBox(this.flora[i]);
+    const dx = Math.max(b.x0 - x, 0, x - b.x1);
+    const dy = Math.max(b.y0 - y, 0, y - b.y1);
+    if (dx * dx + dy * dy <= r * r) this.killFlora(i, owner);
+  }
+
+  /**
+   * Plant i is hit: it's gone (the clients gib it). A blister coral doesn't
+   * just go: it swells for a moment and bursts.
+   */
+  killFlora(i: number, owner: number, fuse = BLISTER_FUSE_HIT): void {
+    if (this.floraDead[i]) return;
+    if (this.flora[i].kind === FloraKind.Blister) {
+      const f = this.floraFuse.get(i);
+      if (!f) {
+        this.floraFuse.set(i, { t: fuse, by: owner });
+        this.floraRev++;
+      } else if (f.t > fuse) {
+        f.t = fuse;
+        if (owner !== NO_OWNER) f.by = owner;
+      }
+      return;
+    }
+    this.floraDead[i] = 1;
+    this.floraRev++;
+  }
+
+  /**
+   * The flora, each tick: shots are handled as they fly (segmentActor) and
+   * blasts as they carve; here, clones and vehicles brushing a blister coral
+   * set it swelling, treads crush the rest, and swollen blisters burst.
+   */
+  private stepFlora(): void {
+    if (!this.flora.length) return;
+    if (this.tick % 3 === 0) {
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0) continue;
+        const b = p.body;
+        this.floraIn(b.x - BLISTER_TOUCH, p.top - BLISTER_TOUCH, b.x + ACTOR_W + BLISTER_TOUCH, b.y + ACTOR_H + BLISTER_TOUCH, (i) => {
+          if (this.flora[i].kind === FloraKind.Blister) this.killFlora(i, NO_OWNER, BLISTER_FUSE_TOUCH);
+        });
+      }
+      for (const k of this.tanks) {
+        if (!k || k.chute) continue;
+        this.floraIn(k.x, k.y, k.x + tankW(k), k.y + tankH(k) + 2, (i) => this.killFlora(i, isPet(k) ? k.owner : k.pilot === 255 ? NO_OWNER : k.pilot, BLISTER_FUSE_TOUCH));
+      }
+    }
+    for (const [i, f] of this.floraFuse) {
+      if (--f.t > 0) continue;
+      this.floraFuse.delete(i);
+      this.burstBlister(i, f.by);
+    }
+  }
+
+  /** A blister coral bursts: a spray of caustic sap that scalds everyone close (sealed in a vehicle, they're safe). */
+  private burstBlister(i: number, by: number): void {
+    const f = this.flora[i];
+    this.floraDead[i] = 1;
+    this.floraRev++;
+    const cx = f.x;
+    const cy = f.y - 8;
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0) continue;
+      const d = Math.hypot(p.cx - cx, p.cy - cy);
+      if (d < BLISTER_R) this.damage(p, BLISTER_DAMAGE * (1 - d / BLISTER_R), by === NO_OWNER ? 255 : by, W_BLISTER);
+    }
+    // Its neighbours burst with it, a moment later: a thicket goes up in a chain.
+    this.floraIn(cx - BLISTER_R * 0.6, cy - BLISTER_R * 0.6, cx + BLISTER_R * 0.6, cy + BLISTER_R * 0.6, (j) => this.killFlora(j, by, BLISTER_FUSE_HIT + 2));
+  }
+
   /** Shots and blasts near a geyser's mouth wear its vent down; out of hit points, it blows (after a moment's rumble). */
   private hitGeysers(x: number, y: number, r: number, owner: number): void {
     for (const g of this.geysers) {
@@ -1628,6 +1748,8 @@ export class World {
     y = Math.max(0, Math.min(WORLD_H - 1, Math.round(y)));
     // A geyser's vent in (or right by) the bite takes a knock: enough of them and it blows.
     if (this.geysers.length) this.hitGeysers(x, y, r, owner);
+    // Plants in (or right by) the bite are torn up.
+    if (this.flora.length) this.floraIn(x - r - 2, y - r - 2, x + r + 2, y + r + 2, (i) => this.hurtFlora(i, owner, x, y, r + 2));
     // A door in the bite takes the damage instead (its steel never carves): cutters and lasers wear it down.
     if (core > 0) {
       const d = this.doorAt(x, y, core);
@@ -1637,6 +1759,8 @@ export class World {
     const detached = this.detachedScratch;
     const n = applyCarve(this.terrain, x, y, r, core, removed, detached);
     if (n === 0) return 0;
+    // And any whose ground the bite took from under them.
+    if (this.flora.length) this.floraIn(x - r - 1, y - r - 1, x + r + 1, y + r + 1, (i) => !this.rooted(this.flora[i]) && this.killFlora(i, owner));
     const seed = this.rng.nextU32();
     releaseCarve(this.grains, removed, detached, x, y, debrisMax, new Rng(seed), this.overflow, owner);
     const w = this.tmp.reset();
@@ -1727,6 +1851,15 @@ export class World {
 
   /** First actor box entered by a swept segment, via the actor spatial hash. */
   private segmentActor = (x0: number, y0: number, x1: number, y1: number, owner: number, out: { t: number }, kind = -1): number => {
+    // Plants in the way are shot through (the round flies on).
+    if (this.flora.length) {
+      const sdx = x1 - x0;
+      const sdy = y1 - y0;
+      this.floraIn(Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1), (i) => {
+        const b = floraBox(this.flora[i]);
+        if (segmentBox(x0, y0, sdx, sdy, b.x0, b.y0, b.x1 + 1, b.y1 + 1) >= 0) this.killFlora(i, owner);
+      });
+    }
     // (A laser beam passes through clones: only vehicles stop it.)
     const players = kind !== LASER_VEHICLES_ONLY;
     const dx = x1 - x0;
@@ -4553,6 +4686,7 @@ export class World {
     this.stepTanks();
     this.stepDoors();
     this.stepGeysers();
+    this.stepFlora();
     this.stepWaves();
     this.stepShips();
     this.shipCollisions();
@@ -4751,6 +4885,19 @@ export class World {
           w.u16(clampU16(g.y + Y_BIAS));
           w.u8((g.cave ? GF_CAVE : 0) | (g.fuse > 0 ? GF_RUMBLE : 0) | (g.toxic > 0 ? GF_TOXIC : 0) | (g.dead ? GF_DEAD : 0));
         }
+      }
+      if (p.floraSeen !== this.floraRev) {
+        p.floraSeen = this.floraRev;
+        const n = this.flora.length;
+        w.u8(R_FLORA);
+        w.u16(n);
+        for (let b = 0; b < n; b += 8) {
+          let byte = 0;
+          for (let k = 0; k < 8 && b + k < n; k++) if (this.floraDead[b + k]) byte |= 1 << k;
+          w.u8(byte);
+        }
+        w.u16(this.floraFuse.size);
+        for (const i of this.floraFuse.keys()) w.u16(i);
       }
       if (p.minesSeen !== this.minesRev) {
         p.minesSeen = this.minesRev;

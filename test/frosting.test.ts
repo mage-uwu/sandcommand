@@ -52,7 +52,7 @@ describe('frosting: the ground', () => {
     }
   });
 
-  it('flora: centipede plants and puffballs on the open ground, coral and hanging coral in the caves, tube worms by every vent', () => {
+  it('flora, all underground: coral, puffballs, centipede plants and blister coral on cave floors, hanging coral, tube worms by every cave vent', () => {
     const kinds = new Set(flora.map((f) => f.kind));
     for (const k of Object.values(FloraKind)) expect(kinds).toContain(k);
     for (const f of flora) {
@@ -60,7 +60,7 @@ describe('frosting: the ground', () => {
       else expect(t.get(f.x, f.y - 1)).toBe(Mat.Air);
       expect(t.get(f.x, f.y)).not.toBe(Mat.Air);
     }
-    for (const g of geysers) expect(flora.some((f) => f.kind === FloraKind.Tubes && Math.abs(f.x - g.x) < 30)).toBe(true);
+    for (const g of geysers.filter((v) => v.cave)) expect(flora.some((f) => f.kind === FloraKind.Tubes && Math.abs(f.x - g.x) < 30)).toBe(true);
   });
 
   it('never over the labyrinth: an Extraction map has no craters, caverns or geysers', () => {

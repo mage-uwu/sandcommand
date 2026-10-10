@@ -34,6 +34,7 @@ import {
   R_MINES,
   R_GEYSERS,
   R_GEYSER_BLOW,
+  R_FLORA,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -292,6 +293,8 @@ export interface FrameHandler {
   geysers(list: GeyserState[]): void;
   /** Geyser `i` blows (R_GEYSER_BLOW): mirror its burst from `seed`. */
   geyserBlow(i: number, seed: number): void;
+  /** The flora's state (R_FLORA): which plants are gone (one byte per plant), and the blister corals swelling to burst. */
+  floraState(dead: Uint8Array, swelling: number[]): void;
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
@@ -507,6 +510,18 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       case R_GEYSER_BLOW: {
         const i = r.u8();
         h.geyserBlow(i, r.u32());
+        break;
+      }
+      case R_FLORA: {
+        const n = r.u16();
+        const dead = new Uint8Array(n);
+        for (let b = 0; b < n; b += 8) {
+          const byte = r.u8();
+          for (let k = 0; k < 8 && b + k < n; k++) dead[b + k] = (byte >> k) & 1;
+        }
+        const swelling: number[] = [];
+        for (let k = r.u16(); k > 0; k--) swelling.push(r.u16());
+        h.floraState(dead, swelling);
         break;
       }
       case R_MINES: {
@@ -803,6 +818,7 @@ export const nullHandler: FrameHandler = {
   mines() {},
   geysers() {},
   geyserBlow() {},
+  floraState() {},
   beam() {},
   heal() {},
   teams() {},

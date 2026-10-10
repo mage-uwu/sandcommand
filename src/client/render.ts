@@ -463,7 +463,7 @@ export class Renderer {
     }
 
     // The alien flora, on the ground and in the caves.
-    if (game.flora.length) drawFlora(ctx, game.terrain, game.flora, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);
+    if (game.flora.length) drawFlora(ctx, game.terrain, game.flora, game.floraDead, game.floraSwell, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);
 
     // The bunkers' fittings: lamps, pipes, signs and the like, on their back walls.
     if (game.decor.length) drawDecor(ctx, game.terrain, game.decor, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);

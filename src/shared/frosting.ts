@@ -274,6 +274,12 @@ export const FloraKind = {
   Hanging: 3,
   /** Puffball fungi: a clump of swollen caps, on soil and in caves. */
   Puffs: 4,
+  /**
+   * Blister coral: a stubby coral hung with swollen, glowing sacs of caustic
+   * sap. Shot, blasted, or brushed against, it swells and bursts: a spray
+   * that scalds anyone close (World: the flora's state).
+   */
+  Blister: 5,
 } as const;
 
 export interface Flora {
@@ -284,26 +290,42 @@ export interface Flora {
   seed: number;
 }
 
+/** Each kind's size (half width, height in cells; a hanging coral's hangs down): what a shot, a blast or a tread has to touch. */
+export const FLORA_SIZE: readonly (readonly [number, number])[] = [
+  [5, 26], // centipede
+  [8, 20], // coral
+  [6, 14], // tube worms
+  [5, 22], // hanging coral
+  [7, 10], // puffballs
+  [6, 15], // blister coral
+];
+
+/** A plant's box (world cells). */
+export function floraBox(f: Flora): { x0: number; y0: number; x1: number; y1: number } {
+  const [hw, h] = FLORA_SIZE[f.kind] ?? [5, 12];
+  return f.kind === FloraKind.Hanging ? { x0: f.x - hw, y0: f.y + 1, x1: f.x + hw, y1: f.y + 1 + h } : { x0: f.x - hw, y0: f.y - h, x1: f.x + hw, y1: f.y };
+}
+
+/** A blister coral's caustic burst: its reach, and the scald at its heart (falling off to nothing at the edge). */
+export const BLISTER_R = 24;
+export const BLISTER_DAMAGE = 45;
+/** Ticks it swells before it bursts: brushed against (time to jump clear), or hit. */
+export const BLISTER_FUSE_TOUCH = 12;
+export const BLISTER_FUSE_HIT = 3;
+/** How close a clone (or a vehicle) has to come to set one off, from its box. */
+export const BLISTER_TOUCH = 3;
+
 /**
- * Where the flora grows: on the open ground (centipede plants and
- * puffballs; dense on the meadows, sparse in the dunes, none on snow), on
- * cave floors (coral fans, puffballs), from cave roofs (hanging coral),
- * and in thickets round every geyser (tube worms).
+ * Where the flora grows: only underground. The surface is barren (bar the
+ * odd tuft of lichen, worldgen frost); in the caves, coral fans, puffballs,
+ * centipede plants and blister coral on the floors, hanging coral from the
+ * roofs, and tube-worm thickets round the cave geysers.
  */
 export function placeFlora(m: Uint8Array, seed: number, biome: number, geysers: readonly GeyserSite[], spans: readonly { x0: number; x1: number }[]): Flora[] {
   const rng = new Rng(seed ^ 0xf107a);
   const out: Flora[] = [];
-  // Open ground: one chance every few cells, by biome (dunes, canyons, highlands, meadows).
-  const every = [30, 18, 14, 8, 1e9][biome] ?? 16; // (nothing grows on the deadland's crust)
-  for (let x = 8; x < WORLD_W - 8; x += 2) {
-    if (rng.int(every) !== 0) continue;
-    if (!clearOf(x - 6, x + 6, spans, 6)) continue;
-    const y = topOf(m, x);
-    const g = m[at(x, y)];
-    if (g === Mat.Snow || !(natural(g) || g === Mat.Grass)) continue;
-    if (Math.abs(topOf(m, x - 3) - topOf(m, x + 3)) > 4) continue;
-    out.push({ kind: g === Mat.Rock ? FloraKind.Coral : rng.next() < 0.68 ? FloraKind.Centipede : FloraKind.Puffs, x, y, seed: rng.nextU32() });
-  }
+  // (Nothing on the open ground: the surface is barren, bar the odd tuft of lichen; life is down in the dark.)
+  void biome;
   // Caves: floors and roofs.
   for (let n = 0; n < 1800; n++) {
     const x = 10 + rng.int(WORLD_W - 20);
@@ -318,11 +340,13 @@ export function placeFlora(m: Uint8Array, seed: number, biome: number, geysers: 
     } else {
       while (y < WORLD_H - 14 && m[at(x, y)] === Mat.Air) y++;
       if (!(natural(m[at(x, y)]) || m[at(x, y)] === Mat.RareEarth) || m[at(x, y - 10)] !== Mat.Air) continue;
-      out.push({ kind: rng.next() < 0.6 ? FloraKind.Coral : FloraKind.Puffs, x, y, seed: rng.nextU32() });
+      const r = rng.next();
+      out.push({ kind: r < 0.4 ? FloraKind.Coral : r < 0.62 ? FloraKind.Puffs : r < 0.82 ? FloraKind.Centipede : FloraKind.Blister, x, y, seed: rng.nextU32() });
     }
   }
-  // Tube-worm thickets round every vent.
+  // Tube-worm thickets round every vent down in the caves.
   for (const g of geysers) {
+    if (!g.cave) continue;
     const n = 3 + rng.int(4);
     for (let k = 0; k < n; k++) {
       const x = g.x + (rng.next() < 0.5 ? -1 : 1) * (11 + rng.int(14));

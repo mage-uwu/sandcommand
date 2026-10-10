@@ -52,13 +52,13 @@ describe('biomes', () => {
     expect(frac(Mat.Snow)).toBeGreaterThan(0.02);
   });
 
-  it('meadows are mostly grass; the desert has only patches', () => {
+  it('the surface is barren: lichen in rare tufts (a few more on the meadows); the desert is rust dust', () => {
     generateWorld(t, seedFor(Biome.Meadows));
     const meadow = surface(t).frac(Mat.Grass);
-    expect(meadow).toBeGreaterThan(0.3);
+    expect(meadow).toBeGreaterThan(0.002);
+    expect(meadow).toBeLessThan(0.08);
     generateWorld(t, seedFor(Biome.Dunes));
     const dunes = surface(t);
-    expect(dunes.frac(Mat.Grass)).toBeGreaterThan(0.01);
     expect(dunes.frac(Mat.Grass)).toBeLessThan(meadow);
     expect(dunes.frac(Mat.RustSand)).toBeGreaterThan(0.3); // dunes of rust dust
   });

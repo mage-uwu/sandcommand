@@ -1,5 +1,6 @@
 import type { GeyserState } from '../shared/frame.ts';
 import { type Flora, FloraKind } from '../shared/frosting.ts';
+import { CORAL_PALS, PALETTES, rnd } from './flora-palette.ts';
 import { Mat } from '../shared/materials.ts';
 import { GF_DEAD, GF_RUMBLE } from '../shared/protocol.ts';
 import type { Terrain } from '../shared/terrain.ts';
@@ -19,23 +20,16 @@ import type { Terrain } from '../shared/terrain.ts';
  *   pulsing crimson plume.
  * - **Hanging coral**: strands from cave roofs, beads of light along them.
  * - **Puffballs**: a clump of swollen, spotted caps.
+ * - **Blister coral**: a stubby trunk hung with glowing sacs of caustic
+ *   sap; swelling (about to burst) they grow and flash.
+ *
+ * Plants the server says are gone (World.flora) aren't drawn; the client
+ * gibs them as they go (Game.floraState).
  *
  * And the geysers' glowing mouths (their smoke is particles: Game.geyserSmoke).
  */
 
-const rnd = (seed: number, k: number) => {
-  let h = Math.imul(seed ^ (k * 0x9e3779b1), 0x85ebca6b);
-  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-};
 
-/** Palettes (stem dark, stem light, accent, glow), one picked per plant. */
-const PALETTES = [
-  ['#3a1f4f', '#6d3b8f', '#b06ad8', '#d8ff7a'],
-  ['#163f45', '#2d7a7a', '#5fd0c0', '#f4ff9a'],
-  ['#4a1a28', '#8a2e48', '#e0607e', '#ffe08a'],
-  ['#2a2a50', '#4f4f9a', '#8f9cff', '#9affea'],
-];
 
 /** Is the plant's ground still there (and its own spot open)? */
 function standing(t: Terrain, f: Flora): boolean {
@@ -46,10 +40,15 @@ function standing(t: Terrain, f: Flora): boolean {
 /** Deep enough under the surface to be a cave: its glow shows. */
 const inCave = (t: Terrain, f: Flora) => f.y > t.surfaceY(f.x) + 12;
 
-export function drawFlora(ctx: CanvasRenderingContext2D, t: Terrain, list: readonly Flora[], x0: number, y0: number, x1: number, y1: number, now: number): void {
-  for (const f of list) {
+export function drawFlora(ctx: CanvasRenderingContext2D, t: Terrain, list: readonly Flora[], dead: Uint8Array, swelling: ReadonlySet<number>, x0: number, y0: number, x1: number, y1: number, now: number): void {
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i];
     if (f.x < x0 - 24 || f.x > x1 + 24 || f.y < y0 - 30 || f.y > y1 + 30) continue;
-    if (!standing(t, f)) continue;
+    if (dead[i] || !standing(t, f)) continue;
+    if (f.kind === FloraKind.Blister) {
+      blister(ctx, f, now, swelling.has(i));
+      continue;
+    }
     const pal = PALETTES[Math.floor(rnd(f.seed, 0) * PALETTES.length)];
     if (f.kind === FloraKind.Centipede) centipede(ctx, f, pal, now);
     else if (f.kind === FloraKind.Coral) coral(ctx, f, now, inCave(t, f));
@@ -109,15 +108,6 @@ function centipede(ctx: CanvasRenderingContext2D, f: Flora, pal: string[], now: 
  * edge on its upper left, darker toward the root, and grit through it all
  * (pores and specks). In the caves its tips glow.
  */
-const CORAL_PALS: readonly (readonly string[])[] = [
-  // outline, dark, mid, light, highlight, glow
-  ['#2a0f1e', '#6e1f45', '#a8326a', '#d85a92', '#ffa8cc', '#ffd0ea'],
-  ['#2a120a', '#7a2e14', '#b8501e', '#e88a3a', '#ffc98a', '#ffe8a0'],
-  ['#0a2224', '#14555a', '#1f8a88', '#46c4b4', '#a8f0e0', '#c8fff4'],
-  ['#1a1030', '#3e2a6e', '#6544a8', '#9a78dc', '#d4c0ff', '#e8dcff'],
-  ['#221e18', '#5e5444', '#9a8e74', '#cfc4a8', '#f4ecd8', '#fff8e0'],
-  ['#14220a', '#3a5a14', '#64901e', '#9cc83c', '#dcf08a', '#f4ffb0'],
-];
 
 interface CoralSprite {
   c: HTMLCanvasElement;
@@ -375,6 +365,49 @@ function puffs(ctx: CanvasRenderingContext2D, f: Flora, pal: string[], now: numb
     }
   }
 }
+
+/** A blister coral: a stubby forked trunk, sacs of glowing sap hung off it; swelling, they bloat and flash. */
+function blister(ctx: CanvasRenderingContext2D, f: Flora, now: number, swell: boolean): void {
+  const pal = CORAL_PALS[Math.floor(rnd(f.seed, 0) * CORAL_PALS.length)];
+  const h = 6 + Math.floor(rnd(f.seed, 1) * 5);
+  const jit = swell ? Math.round(Math.sin(now / 30)) : 0;
+  // The trunk, two cells thick, and a branch or two off it.
+  ctx.fillStyle = pal[1];
+  ctx.fillRect(f.x, f.y - h, 2, h);
+  ctx.fillStyle = pal[0];
+  ctx.fillRect(f.x + 1, f.y - h + 1, 1, h - 1);
+  const arms = 1 + Math.floor(rnd(f.seed, 2) * 2);
+  const ends: [number, number][] = [[f.x + 1, f.y - h - 1]];
+  for (let a = 0; a < arms; a++) {
+    const side = a % 2 ? 1 : -1;
+    const at = f.y - 2 - Math.floor(rnd(f.seed, 3 + a) * (h - 3));
+    const len = 2 + Math.floor(rnd(f.seed, 5 + a) * 3);
+    ctx.fillStyle = pal[1];
+    for (let k = 1; k <= len; k++) ctx.fillRect(f.x + (side > 0 ? 1 : 0) + side * k, at - Math.floor(k / 2), 1, 1);
+    ends.push([f.x + (side > 0 ? 1 : 0) + side * len, at - Math.floor(len / 2) - 1]);
+  }
+  // The sacs: swollen, translucent, the sap glowing in them.
+  const pulse = 0.5 + 0.5 * Math.sin(now / (swell ? 60 : 900) + f.seed);
+  ends.forEach(([ex, ey], k) => {
+    const r = 1 + Math.floor(rnd(f.seed, 9 + k) * 2) + (swell ? 1 : 0);
+    const x = ex + jit;
+    const y = ey - r + 1;
+    ctx.fillStyle = swell && pulse > 0.5 ? '#fff8c0' : '#d8f060';
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(x - r, y - r + 1, r * 2 + 1, r * 2 - 1);
+    ctx.fillRect(x - r + 1, y - r, r * 2 - 1, r * 2 + 1);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#f8ffd0';
+    ctx.fillRect(x - Math.floor(r / 2), y - Math.floor(r / 2), 1, 1);
+    // Its glow.
+    ctx.globalAlpha = (swell ? 0.35 : 0.12) * (0.6 + 0.4 * pulse);
+    ctx.fillStyle = '#c8f040';
+    ctx.fillRect(x - r - 2, y - r - 2, r * 2 + 5, r * 2 + 5);
+    ctx.globalAlpha = 1;
+  });
+}
+
+
 
 /**
  * The geysers in view: just the hot glow in each mouth (flickering harder as

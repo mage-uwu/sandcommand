@@ -203,9 +203,9 @@ function soilAt(n: number, depth: number, y: number): number {
 }
 
 /**
- * Frosting on the natural ground (never on bunkers): patches of grass turf on
- * gentle slopes (sparse in the desert, nearly everywhere on the meadows),
- * and snow capping the Highlands' peaks.
+ * Frosting on the natural ground (never on bunkers): the rare tuft of
+ * lichen turf on a gentle slope (the surface is barren; a little less so on
+ * the meadows), and snow capping the Highlands' peaks.
  */
 function frost(m: Uint8Array, biome: number, seed: number): void {
   const top = new Int32Array(WORLD_W);
@@ -215,7 +215,9 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
     top[x] = y;
   }
   const patch = new Fbm(110, seed ^ 0x6a55, 3);
-  const cover = [0.66, 0.6, 0.52, 0.3, 1][biome] ?? 1; // grass where the patch noise is above this (none in the deadland)
+  // The surface is barren: lichen only in the odd tuft, a few cells across,
+  // a little commoner on the meadows (none in the deadland).
+  const tufts = [0.025, 0.02, 0.03, 0.06, 0][biome] ?? 0;
   const snowline = WORLD_H * 0.3;
   for (let x = 6; x < WORLD_W - 6; x++) {
     const y = top[x];
@@ -229,9 +231,11 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
       for (let k = 0; k < depth; k++) if (m[(y + k) * WORLD_W + x] !== Mat.Air) m[(y + k) * WORLD_W + x] = Mat.Snow;
       continue;
     }
-    if (slope > 1.3 || mat === Mat.Rock || patch.at(x, 0) < cover) continue;
-    // A turf two or three cells deep, on soil (a little dirt under it if it's on sand).
-    const depth = 2 + Math.floor(h * 2);
+    const cell = Math.floor(x / 6);
+    const tuft = (hash2(cell, 0, seed ^ 0x7af7) >>> 0) / 4294967296 < tufts && x % 6 >= 1 && x % 6 <= 1 + ((hash2(cell, 1, seed) >>> 0) % 4);
+    if (slope > 1.3 || mat === Mat.Rock || !tuft) continue;
+    // A tuft of turf a cell or two deep, on soil (a little dirt under it if it's on sand).
+    const depth = 1 + Math.floor(h * 2);
     for (let k = 0; k < depth; k++) m[(y + k) * WORLD_W + x] = Mat.Grass;
     for (let k = depth; k < depth + 2; k++) if (MAT_LOOSE[m[(y + k) * WORLD_W + x]]) m[(y + k) * WORLD_W + x] = Mat.Dirt;
   }

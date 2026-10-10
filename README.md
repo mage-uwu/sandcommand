@@ -544,12 +544,19 @@ Worldgen does it, seeded, so every client grows the same
 - *Network.* The geysers' state (rumbling, venting, choked) reaches clients
   in `R_GEYSERS`.
 
-**Flora** (client-drawn, `src/client/flora-art.ts`). Placed by worldgen and
-drawn only while the ground it grows from stands, so digging or blasting it
-out takes the plant with it.
+**Flora** (`src/client/flora-art.ts`, state in `World.flora`). Life on TABAR
+is underground: the surface is barren, bar the rare tuft of lichen.
+Worldgen grows the flora on cave floors and roofs and round the cave
+geysers, never on the open ground. The server keeps which plants are gone:
+- **Destroyable.** A round through a plant cuts it down and flies on
+  (`segmentActor`), a blast tears up the plants it reaches, digging their
+  ground out from under them takes them, and vehicle treads crush them.
+- **Replicated.** `R_FLORA` carries a bitset of the dead and the blister
+  corals swelling to burst, sent on join and whenever it changes.
+- **Gibs.** Every plant that dies is torn to pieces where it stood, in its
+  own colours: lengths of stalk, fronds, chunks of cap, glowing buds.
 - **Centipede plants:** segmented, curling stalks with a pair of barbed
-  legs on every segment and a glowing bud. They sway. Dense on the meadows,
-  sparse in the dunes, none on snow.
+  legs on every segment and a glowing bud. They sway.
 - **Coral:** gritty pixel-art sprites, each grown from its seed in one of
   seven real-coral forms: staghorn, lattice sea fan, grooved brain dome,
   frilled table plates, pipe organ, knobbly finger, swaying whip.
@@ -558,9 +565,16 @@ out takes the plant with it.
   - Tips glow in the caves.
   - Six reef palettes.
 - **Tube worms:** white tubes with pulsing crimson plumes, round every
-  geyser.
+  cave geyser.
 - **Hanging coral:** strands from cave roofs, beaded with light.
 - **Puffballs:** clumps of swollen, spotted caps.
+- **Blister coral:** a stubby forked trunk hung with glowing sacs of
+  caustic sap, on cave floors. Shot or blasted, it
+  swells for a tick or two and bursts. Brushed by a clone or a vehicle, it
+  swells for 12 ticks first, time to jump clear. The burst scalds everyone
+  within 24 cells (up to 45 damage, falling off with distance; a vehicle's
+  crew is safe), credited to whoever set it off, and sets off its
+  neighbours a moment later, so a thicket goes up in a chain.
 
 ## Scenery
 
@@ -1277,10 +1291,10 @@ included. The fifth is the **Deadland**.
 
 | Biome | Terrain |
 |---|---|
-| **Marslike dunes** | Rolling dunes of rust dust over the soil. Patches of lichen. |
+| **Marslike dunes** | Rolling dunes of rust dust over the soil, barren but for the rare tuft of lichen. |
 | **Marslike canyons** | A high rock plateau cut by 3–5 deep ravines, 45–120 cells wide and up to 340 deep. The rock is banded with strata and the ravine floors are sand. Some ravines have a natural rock bridge. Extra sniper towers. |
 | **Marslike highlands** | Ridged mountains up to 330 cells above the valleys, rockier underground, and capped with snow above the snowline. Many sniper towers. |
-| **Marslike meadows** | Gentle hills under a thin crust of rust dust, mostly lichened over. |
+| **Marslike meadows** | Gentle hills under a thin crust of rust dust, with tufts of lichen a little less rare than elsewhere. |
 | **Deadland** | A crust of Progenitor debris over the marslike deep, and a landscape of thorns: cement caltrops on a menacing scale. No bunkers; ancient ruins instead. See below. |
 
 About one ordinary map in four is Deadland, rolled separately from the seed
@@ -1425,8 +1439,9 @@ clods in the rust soil, basalt pebbles in the regolith, bright grains in
 the ochre, streaks in the clay, wind ripples in the dust.
 
 **Frosting.** After the bunkers are built, the top of the natural ground
-gets a cover: alien lichen 2–3 cells deep in patches (not on rock or steep
-slopes), or frost on the high Highlands. Bunkers never get it. The lichen
+gets a cover: the rare tuft of alien lichen, a few cells across and one
+or two deep (not on rock or steep slopes; the surface is otherwise
+barren), or frost on the high Highlands. Bunkers never get it. The lichen
 (`Mat.Grass`) is a teal crust tipped pale aqua and violet, with fronds
 poking into the air above it and the odd glowing violet spore-head. Frost
 (`Mat.Snow`) is drawn with a bright crust, lilac shadows and glints.

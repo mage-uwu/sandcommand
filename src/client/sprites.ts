@@ -381,6 +381,12 @@ const GIBS: Grid[] = [
   ['KLH.', '.KLH', '..KH', '..KL'], // a droid's leg: a bent tin strut
   ['.KMMK.', 'KGMMGK', 'KMMMMK'], // a droid's turret dome
   ['KGGGK', 'GMMMG', 'KGGGK'], // a droid's chassis plate
+  // Flora (tinted by the plant: T its colour, t its shade, h its light):
+  ['hT', 'Tt', 'Tt', 'tK'], // a length of stalk
+  ['h..', 'Th.', '.Tt', '..t'], // a frond or branch tip
+  ['.hh.', 'hTTh', 'tTTt'], // a chunk of cap
+  ['h.', 'Th'], // a shred of sac
+  ['hh', 'hT'], // a glowing bud
 ];
 
 /**

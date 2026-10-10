@@ -93,6 +93,13 @@ export const R_HEAL = 36;
 export const R_GEYSERS = 37;
 /** A geyser blows: u8 index, u32 seed (clients mirror its burst from it). */
 export const R_GEYSER_BLOW = 38;
+/**
+ * The flora's state (frosting.ts placeFlora's list, by index): u16 count,
+ * then a bitset of which are gone (ceil(count / 8) bytes, low bit first),
+ * then u16 how many blister corals are swelling to burst and u16 each one's
+ * index. Sent on join and whenever a plant dies or starts to swell.
+ */
+export const R_FLORA = 39;
 /** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
 export const GF_CAVE = 1;
 export const GF_RUMBLE = 2;
@@ -115,7 +122,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 48;
+export const PROTOCOL_VERSION = 49;
 
 /** Last Man Standing round phases. */
 export const Phase = {

@@ -27,6 +27,12 @@ export const GIB_CROWN = 16;
 export const GIB_DROID_LEG = 17;
 export const GIB_DROID_TURRET = 18;
 export const GIB_DROID_PLATE = 19;
+/** Flora gib pieces (tinted by the plant). */
+export const GIB_STALK = 20;
+export const GIB_FROND = 21;
+export const GIB_CAP = 22;
+export const GIB_SAC = 23;
+export const GIB_BUD = 24;
 
 const rnd = (a: number, b: number) => a + (b - a) * Math.random();
 
@@ -507,4 +513,44 @@ export function droidWreck(p: Particles, cx: number, cy: number, vx: number, vy:
 export function droidHit(p: Particles, x: number, y: number, amount: number): void {
   burst(p, PK.Spark, x, y, Math.min(18, 4 + Math.round(amount / 2)), 160 + amount * 2, 10);
   burst(p, PK.Smoke, x, y, 2, 30, 40);
+}
+
+/**
+ * A plant torn up: its pieces flung (stalk, fronds, caps, buds by kind, in
+ * its own colours), from its box `x`, `y0`..`y1`. `colors`: stem, body, glow.
+ */
+export function floraGibs(p: Particles, kind: number, x: number, y0: number, y1: number, colors: readonly number[], hanging: boolean): void {
+  const n = 5 + Math.floor(Math.random() * 5);
+  // By kind (frosting.ts FloraKind): centipede, coral, tubes, hanging, puffs, blister.
+  const pieces = [
+    [GIB_STALK, GIB_STALK, GIB_FROND, GIB_BUD],
+    [GIB_FROND, GIB_FROND, GIB_STALK, GIB_BUD],
+    [GIB_STALK, GIB_STALK, GIB_BUD],
+    [GIB_STALK, GIB_FROND, GIB_BUD],
+    [GIB_CAP, GIB_CAP, GIB_STALK],
+    [GIB_SAC, GIB_SAC, GIB_STALK, GIB_BUD],
+  ][kind] ?? [GIB_STALK];
+  for (let k = 0; k < n; k++) {
+    const piece = pieces[k % pieces.length];
+    const color = piece === GIB_BUD || piece === GIB_SAC ? colors[2] : piece === GIB_STALK ? colors[0] : colors[1];
+    const y = y0 + Math.random() * (y1 - y0);
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+    const s = 40 + Math.random() * 90;
+    const vy = hanging ? Math.random() * 40 : Math.sin(a) * s;
+    p.spawn(PK.Gib, x + (Math.random() - 0.5) * 6, y, Math.cos(a) * s, vy, 300 + Math.random() * 200, piece | GIB_INORGANIC, color);
+  }
+}
+
+/** A blister coral bursting: shreds of its sacs and a cloud of caustic sap, all round it. */
+export function blisterBurst(p: Particles, x: number, y: number, glow: number): void {
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2 + Math.random() * 0.4;
+    const s = 60 + Math.random() * 120;
+    p.spawn(PK.Smoke, x, y, Math.cos(a) * s, Math.sin(a) * s - 30, 30 + Math.random() * 30, 0, Math.random() < 0.6 ? 0xb8e840 : 0xe8f070);
+  }
+  for (let k = 0; k < 8; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 80 + Math.random() * 120;
+    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 60, 300 + Math.random() * 200, GIB_SAC | GIB_INORGANIC, glow);
+  }
 }

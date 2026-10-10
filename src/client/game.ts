@@ -8,11 +8,11 @@ import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank,
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
-import { type Flora, GEYSER_CLOUD_R, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
+import { type Flora, FloraKind, floraBox, GEYSER_CLOUD_R, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
 import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastSiege , lastFlora } from '../shared/worldgen.ts';
@@ -22,7 +22,8 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs } from './effects.ts';
+import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
 import type { Coach } from './tutorial.ts';
@@ -289,6 +290,9 @@ export class Game implements FrameHandler {
   decor: Decor[] = [];
   /** Where the alien flora grows on this map (frosting.ts; drawn by flora-art.ts while its ground stands). */
   flora: Flora[] = [];
+  /** Which of them are gone, and the blister corals swelling to burst (R_FLORA). */
+  floraDead: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+  floraSwell = new Set<number>();
   /** The bunkers' steel doors this wave (their cells, and whose). */
   doors: { x0: number; y0: number; x1: number; y1: number; team: number }[] = [];
 
@@ -1011,6 +1015,30 @@ export class Game implements FrameHandler {
     });
   }
 
+  /**
+   * The flora's state: every plant that's just gone is torn to pieces where
+   * it stood (in its own colours), and a blister coral bursts in a spray of
+   * caustic sap.
+   */
+  floraState(dead: Uint8Array, swelling: number[]): void {
+    if (dead.length !== this.flora.length) return; // (not this map's)
+    for (let i = 0; i < dead.length; i++) {
+      if (!dead[i] || this.floraDead[i]) continue;
+      const f = this.flora[i];
+      if (Math.abs(f.x - this.body.x) > 900 || Math.abs(f.y - this.body.y) > 600) continue;
+      const b = floraBox(f);
+      const colors = floraColors(f);
+      floraGibs(this.particles, f.kind, f.x, b.y0, b.y1, colors, f.kind === FloraKind.Hanging);
+      if (f.kind === FloraKind.Blister) {
+        blisterBurst(this.particles, f.x, f.y - 8, colors[2]);
+        this.flashes.push({ x: f.x, y: f.y - 8, r: 18, at: performance.now() });
+        this.sfx?.explode(f.x, f.y - 8, 8);
+      }
+    }
+    this.floraDead = dead;
+    this.floraSwell = new Set(swelling);
+  }
+
   /** A geyser blows: the same fountain of rock and shrapnel the server threw, a flash, a jolt. */
   geyserBlow(i: number, seed: number): void {
     const g = this.geyserList[i];
@@ -1264,6 +1292,8 @@ export class Game implements FrameHandler {
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
     this.flora = lastFlora;
+    this.floraDead = new Uint8Array(lastFlora.length);
+    this.floraSwell = new Set();
     this.geyserBlownAt.clear();
     this.siege = lastSiege;
     this.dungeon = lastDungeon;
@@ -1490,7 +1520,7 @@ export class Game implements FrameHandler {
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
-    const how = weapon === W_GEYSER ? 'Geyser' : weapon === W_ROCKFALL ? 'Falling Rock' : weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
+    const how = weapon === W_BLISTER ? 'Blister Coral' : weapon === W_GEYSER ? 'Geyser' : weapon === W_ROCKFALL ? 'Falling Rock' : weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (weapon === W_LASER && killer !== victim) text = `${kn} [Laser] ${vn}`;
@@ -1860,6 +1890,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';
   if (weapon === W_GEYSER) return by ? `caught in a geyser's blast [${by} set it off]` : "caught in a geyser's blast";
+  if (weapon === W_BLISTER) return by ? `scalded by a bursting blister coral [${by} burst it]` : 'scalded by a bursting blister coral';
   if (weapon === W_ROCKFALL) return by ? `crushed by falling rock [${by} brought it down]` : 'crushed by falling rock';
   if (weapon === W_DEBRIS) return by ? `buried in a cave-in [${by}'s doing]` : 'buried in a cave-in';
   if (weapon === W_BURN) return by ? `burned to death [${by}]` : 'burned to death';
