@@ -2092,11 +2092,24 @@ match down.
 - Chat loses control characters, invisible characters and bidi-override
   characters. It loses stacked combining marks ("zalgo") and is capped at
   120 characters.
-- The client draws all text on the canvas, never as HTML.
+- Chat and names never execute.
+  - They travel as length-prefixed strings, are scrubbed by the server
+    before broadcast and again by the client on receipt
+    (`src/shared/text.ts`), and are painted with canvas `fillText`.
+  - No path turns player text into HTML, a URL or script. The client has no
+    HTML-string sinks at all: no `innerHTML`, `eval` or string timers. The
+    touch controls are built node by node.
+  - The page's CSP enforces Trusted Types (`require-trusted-types-for
+    'script'`), so even a future slip that assigned player text to an HTML
+    sink would be refused by the browser. The only policy, `sw`, passes
+    `/sw.js` to the service worker registration and nothing else.
+  - `test/chatsafe.test.ts` sends XSS payloads through the real
+    server-to-wire-to-client path, scans every client module for sinks, and
+    checks the CSP.
 
 **Static pages** (`public/_headers`) carry these headers:
-- A strict Content-Security-Policy: own scripts only, no framing, no
-  plugins.
+- A strict Content-Security-Policy: own scripts only, no eval, Trusted
+  Types, no framing, no plugins.
 - `X-Frame-Options: DENY`, `nosniff`, a same-origin referrer policy and
   COOP.
 - A Permissions-Policy that denies camera, microphone and geolocation.

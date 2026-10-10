@@ -23,6 +23,7 @@ import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
 import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
+import { cleanChat, inert } from '../shared/text.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
 /** Remote actors are rendered this many ticks in the past for smooth interpolation. */
@@ -1276,6 +1277,7 @@ export class Game implements FrameHandler {
       return;
     }
     const c = TEAM_COLORS[this.teamOf[id]] ?? playerColor(id);
+    name = inert(name, 20);
     this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, wins: 0, bot: name.startsWith('BOT '), color: c.css, rgb: c.rgb });
   }
 
@@ -1301,7 +1303,7 @@ export class Game implements FrameHandler {
 
   chat(id: number, text: string): void {
     const p = this.players.get(id);
-    this.chatLog.push({ text: `${p?.name ?? '?'}: ${text}`, color: p?.color ?? '#ccc', at: performance.now() });
+    this.chatLog.push({ text: `${p?.name ?? '?'}: ${cleanChat(text)}`, color: p?.color ?? '#ccc', at: performance.now() });
     if (this.chatLog.length > 8) this.chatLog.shift();
   }
 

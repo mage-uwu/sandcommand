@@ -34,10 +34,28 @@ export function installed(): boolean {
   return matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
 
+/**
+ * The service worker's URL, as a Trusted Type where the browser enforces
+ * them (the page's CSP requires them for every script sink, and this is
+ * the one place the game uses one: the policy passes '/sw.js' and nothing else).
+ */
+let swPolicy: { createScriptURL(s: string): unknown } | null = null;
+function swUrl(): unknown {
+  const tt = (globalThis as { trustedTypes?: { createPolicy(name: string, rules: { createScriptURL(s: string): string }): { createScriptURL(s: string): unknown } } }).trustedTypes;
+  if (!tt) return '/sw.js';
+  swPolicy ??= tt.createPolicy('sw', {
+    createScriptURL: (s) => {
+      if (s !== '/sw.js') throw new TypeError('blocked script URL');
+      return s;
+    },
+  });
+  return swPolicy.createScriptURL('/sw.js');
+}
+
 export function registerServiceWorker(): void {
   if (!('serviceWorker' in navigator) || !isSecureContext) return;
   // (updateViaCache none: the browser fetches sw.js itself fresh every time it checks.)
-  navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).then(
+  navigator.serviceWorker.register(swUrl() as string, { scope: '/', updateViaCache: 'none' }).then(
     (reg) => {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') void reg.update().catch(() => {});

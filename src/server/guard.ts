@@ -171,31 +171,7 @@ export class IpGauge {
   }
 }
 
-/** Invisible and direction-flipping characters (zero-width, bidi overrides and isolates, BOM). */
-const INVISIBLE = /[​-‏‪-‮⁠-⁯﻿]/g;
-
-/** Chat line as broadcast: no control or invisible characters, no stacked combining marks ("zalgo"), spaces collapsed, 120 at most. */
-export function cleanChat(text: string): string {
-  return text
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-    .replace(INVISIBLE, '')
-    .replace(/(\p{M}{2})\p{M}+/gu, '$1')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
-}
-
-/** Player name: letters, digits, space, _ - . only; 16 at most; never wearing the bots' BOT tag. */
-export function cleanName(name: string): string {
-  return name
-    .slice(0, 64)
-    .replace(/[^\p{L}\p{N} _\-.]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^(bot\s+)+/i, '')
-    .slice(0, 16)
-    .trim();
-}
+export { cleanChat, cleanName } from '../shared/text.ts';
 
 /** Is a WebSocket upgrade's Origin this site (or a local dev server)? Browsers always send one; a missing one is refused too. */
 export function originAllowed(origin: string | null, host: string): boolean {

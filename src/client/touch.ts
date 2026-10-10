@@ -74,20 +74,24 @@ export class TouchControls {
     const root = document.createElement('div');
     root.id = 'touch';
     root.className = 'hidden';
-    root.innerHTML = `
-      <div class="stick-base"><div class="stick-knob"></div></div>
-      <div class="fire-pad"><i class="tick n"></i><i class="tick e"></i><i class="tick s"></i><i class="tick w"></i><div class="fire-knob"></div></div>
-      <div class="tbtns">
-        <button data-act="prev">◀<small>ITEM</small></button>
-        <button data-act="next">▶<small>ITEM</small></button>
-        <button data-act="scope">◎<small>ZOOM</small></button>
-        <button data-act="pick">▲<small>PICK</small></button>
-      </div>
-      <div class="ttop">
-        <button data-act="scores">SCORE</button>
-        <button data-act="chat">CHAT</button>
-        <button data-act="auto">AUTO</button>
-      </div>`;
+    // (Built node by node, never from an HTML string: the page's CSP admits no HTML parsing from script at all.)
+    const el = (tag: string, cls = '', ...kids: (Node | string)[]) => {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      e.append(...kids);
+      return e;
+    };
+    const btn = (act: string, label: string, small?: string) => {
+      const b = el('button', '', label, ...(small ? [el('small', '', small)] : []));
+      b.dataset.act = act;
+      return b;
+    };
+    root.append(
+      el('div', 'stick-base', el('div', 'stick-knob')),
+      el('div', 'fire-pad', el('i', 'tick n'), el('i', 'tick e'), el('i', 'tick s'), el('i', 'tick w'), el('div', 'fire-knob')),
+      el('div', 'tbtns', btn('prev', '◀', 'ITEM'), btn('next', '▶', 'ITEM'), btn('scope', '◎', 'ZOOM'), btn('pick', '▲', 'PICK')),
+      el('div', 'ttop', btn('scores', 'SCORE'), btn('chat', 'CHAT'), btn('auto', 'AUTO')),
+    );
     document.body.appendChild(root);
     this.root = root;
     this.base = root.querySelector('.stick-base') as HTMLDivElement;
