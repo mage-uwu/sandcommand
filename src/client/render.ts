@@ -97,9 +97,6 @@ const SHADE_DIRS: readonly [number, number, number][] = [
   [0, 1, 0.3],
 ];
 
-/** Bot difficulty names (1 beginner to 5 expert), for the banners. */
-const SKILL_LABELS = ['', 'beginner (1)', 'recruit (2)', 'veteran (3)', 'elite (4)', 'expert (5)'];
-
 /** Build menu buttons (Renderer.menuHit): turn the piece a quarter, mirror it. */
 export const MENU_ROTATE = -2;
 export const MENU_MIRROR = -3;
@@ -2817,8 +2814,7 @@ export class Renderer {
           : teams
             ? 'last team standing · red vs green · one life each'
             : 'last man standing · one life each · every clone for itself') +
-          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`) +
-          ` · bots: ${SKILL_LABELS[rs.botSkill] ?? 'veteran'}`,
+          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`),
         '#ffd34a',
       );
     } else if (rs.phase === Phase.Victory && extraction) {

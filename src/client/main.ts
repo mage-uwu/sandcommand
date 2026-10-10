@@ -60,9 +60,6 @@ function storageSet(key: string, value: string): void {
 }
 
 nameInput.value = storageGet('sc.name') ?? `Clone${Math.floor(Math.random() * 900 + 100)}`;
-// Bot difficulty (1 beginner to 5 expert): the match plays at the median of what its humans ask for.
-const skillSelect = $<HTMLSelectElement>('skill');
-skillSelect.value = storageGet('sc.skill') ?? '3';
 
 async function refreshRooms(): Promise<void> {
   try {
@@ -144,7 +141,6 @@ async function join(): Promise<void> {
   }
   const name = nameInput.value.trim().slice(0, 16);
   storageSet('sc.name', name);
-  storageSet('sc.skill', skillSelect.value);
   playBtn.disabled = true;
   // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one).
   const room = new URLSearchParams(location.search).get('room') === 'siege' ? 'siege' : 'main';
@@ -152,7 +148,7 @@ async function join(): Promise<void> {
   const g = new Game();
   g.sfx = sfx;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const url = `${proto}//${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}&skill=${encodeURIComponent(skillSelect.value)}`;
+  const url = `${proto}//${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}`;
   net?.close();
   net = new Net(url, {
     welcome(w) {

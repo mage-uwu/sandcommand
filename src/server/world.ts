@@ -289,8 +289,8 @@ export class Player {
   seat = 0;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
-  /** The bot difficulty this player asked for (1 beginner to 5 expert; the room plays at the humans' median: World.botSkill). */
-  skillPref = 3;
+  /** A bot's skill, 1 (beginner) to 5 (expert): dealt out by World.dealSkills. */
+  skill = 3;
   /** Ticks of mending left from a health wave it was caught in, and the last wave that caught it. */
   mend = 0;
   mendWave = -1;
@@ -560,7 +560,57 @@ export class World {
   addBot(): Player | null {
     const id = this.players.indexOf(null);
     if (id < 0) return null;
-    return this.join(id, botName(this.rng), { send() {} }, new BotBrain(this.rng.nextU32()));
+    const p = this.join(id, botName(this.rng), { send() {} }, new BotBrain(this.rng.nextU32()));
+    p.skill = drawSkill(this.rng.next());
+    return p;
+  }
+
+  /**
+   * Deal the bots their skills for a wave: a spread clustered round veteran
+   * (SKILL_SHARE), so a match has a few beginners and a few experts among
+   * mostly middling bots, and dealt so that every team comes out even (its
+   * humans counting as veterans): strongest first, each to the team whose
+   * total is lowest that still has a bot to give it to.
+   */
+  dealSkills(teams: number): void {
+    const bots = this.players.filter((p): p is Player => !!p && !!p.bot);
+    if (!bots.length) return;
+    // The pool: shares of each level, rounded so they add up (largest remainders).
+    const want = SKILL_SHARE.map((w) => w * bots.length);
+    const count = want.map(Math.floor);
+    const order = want.map((w, i) => [w - Math.floor(w), i] as const).sort((a, b) => b[0] - a[0] || Math.abs(a[1] - 2) - Math.abs(b[1] - 2));
+    for (let k = 0, left = bots.length - count.reduce((a, b) => a + b, 0); k < left; k++) count[order[k][1]]++;
+    const pool: number[] = [];
+    for (let lv = 5; lv >= 1; lv--) for (let n = 0; n < count[lv - 1]; n++) pool.push(lv);
+    const shuffle = <T>(a: T[]) => {
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = this.rng.int(i + 1);
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    if (teams === 0) {
+      shuffle(pool);
+      bots.forEach((p, i) => (p.skill = pool[i]));
+      return;
+    }
+    const sides = Array.from({ length: teams }, (_, t) => ({
+      bots: shuffle(bots.filter((p) => p.team === t)),
+      sum: 3 * this.players.filter((p) => p && !p.bot && p.team === t).length,
+      dealt: 0,
+    }));
+    for (const lv of pool) {
+      let best = -1;
+      for (let t = 0; t < teams; t++) {
+        const sd = sides[t];
+        if (sd.dealt >= sd.bots.length) continue;
+        if (best < 0 || sd.sum < sides[best].sum || (sd.sum === sides[best].sum && sd.bots.length - sd.dealt > sides[best].bots.length - sides[best].dealt)) best = t;
+      }
+      if (best < 0) break;
+      const sd = sides[best];
+      sd.bots[sd.dealt++].skill = lv;
+      sd.sum += lv;
+    }
   }
 
   get humanCount(): number {
@@ -1111,21 +1161,6 @@ export class World {
     return this.regicideLive || this.extractionLive || this.pvpLive || this.siegeLive;
   }
 
-  /**
-   * How hard the bots play (1 beginner to 5 expert): the median of what the
-   * humans in the room asked for (3 with nobody to ask). `fixedBotSkill`
-   * overrides it (tests, a room set up so).
-   */
-  get botSkill(): number {
-    if (this.fixedBotSkill) return this.fixedBotSkill;
-    const prefs: number[] = [];
-    for (const p of this.players) if (p && !p.bot) prefs.push(p.skillPref);
-    if (!prefs.length) return 3;
-    prefs.sort((a, b) => a - b);
-    return prefs[(prefs.length - 1) >> 1];
-  }
-  fixedBotSkill = 0;
-
   /** Is this clone a king (this wave)? */
   isKing(p: Player): boolean {
     return p.team !== Team.None && this.kings[p.team] === p.id;
@@ -1266,6 +1301,7 @@ export class World {
     this.winner = 255;
     const mode = this.modeOfWave(this.wave);
     this.drawTeams(TEAMS_IN_MODE[mode]);
+    this.dealSkills(TEAMS_IN_MODE[mode]);
     this.kings[0] = this.kings[1] = 255;
     for (const p of this.players) {
       if (!p) continue;
@@ -4443,7 +4479,6 @@ export class World {
         w.u8(this.remaining(Team.Green));
         w.u8(this.kings[0]);
         w.u8(this.kings[1]);
-        w.u8(this.botSkill);
         w.u8(this.remaining(Team.Blue));
         w.u8(this.remaining(Team.Gold));
         if (this.waveMode === GameMode.Siege) w.u16(this.siegeLives);
@@ -4826,6 +4861,17 @@ const SIEGE_RESPAWN_TICKS = 30 * 6;
 const EXTRACTION_TICKS = 30 * 60 * 12;
 /** How long the extraction rocket takes to come once the idol surfaces. */
 const EVAC_ETA = 30 * 20;
+
+/**
+ * How a match's bots spread over the skill levels (1 beginner to 5 expert):
+ * clustered round veteran, a few at either end.
+ */
+export const SKILL_SHARE = [0.08, 0.22, 0.4, 0.22, 0.08];
+/** A skill level drawn from that spread (`u` uniform in [0, 1)). */
+export function drawSkill(u: number): number {
+  for (let lv = 1, acc = 0; lv <= 5; lv++) if (u < (acc += SKILL_SHARE[lv - 1])) return lv;
+  return 3;
+}
 
 /** Gold a new player joins with (enough for one bunker), Cortex Command style starting funds. */
 const STARTING_GOLD = 60;

@@ -51,7 +51,6 @@ export class GameRoom extends DurableObject<Env> {
     const url = new URL(request.url);
     this.roomName = url.searchParams.get('room') ?? this.roomName;
     const name = url.searchParams.get('name') ?? '';
-    const skill = Math.max(1, Math.min(5, Math.round(Number(url.searchParams.get('skill')) || 3)));
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -75,7 +74,6 @@ export class GameRoom extends DurableObject<Env> {
       },
     });
 
-    if (player) player.skillPref = skill;
     if (!player) {
       const w = new Writer(64);
       w.u8(S_REJECT);

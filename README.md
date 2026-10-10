@@ -400,11 +400,18 @@ room, a bot gives up its seat, a dead one if there is one.
 - **Fairness.** Bots get a beat to look around after landing, a reaction
   delay on each new target, per-bot aim error, and no point-blank bazooka
   shots.
-- **Difficulty, 1 to 5.** Each player picks a level on the portal: 1
-  Beginner, 2 Recruit, 3 Veteran, 4 Elite, 5 Expert. The match is shared,
-  so the bots play at the **median** of what the humans in it asked for
-  (`World.botSkill`), and an even split goes the easier way. Veteran is
-  the bots as they always were, and the default.
+- **Skill, 1 to 5.** Every bot has its own (`Player.skill`): 1 Beginner,
+  2 Recruit, 3 Veteran, 4 Elite, 5 Expert. A match is an ensemble, not one
+  setting.
+  - **The spread.** It clusters round Veteran: about 8% Beginners, 22%
+    Recruits, 40% Veterans, 22% Elites and 8% Experts (`SKILL_SHARE`). So
+    a full match has a couple of pushovers and a couple of aces among
+    mostly middling bots.
+  - **Balanced teams.** At each wave's start, `World.dealSkills` deals the
+    pool so every team comes out even. It goes strongest first, each level
+    to the team with the lowest total that still has a bot to give it to,
+    and humans count as Veterans. A bot that joins mid-wave draws from the
+    same spread.
   - **Aim error.** From 2.6× at Beginner to 0.3× at Expert.
   - **Reaction time.** The delay before shooting at a new target, and the
     look-around after landing, runs from 2.6× down to 0.35×.
@@ -415,8 +422,8 @@ room, a bot gives up its seat, a dead one if there is one.
   - **Hesitation.** A Beginner holds off the trigger half the time, a
     Recruit a quarter.
 
-  In a test duel against a target, Experts did several times a Beginner's
-  damage. The countdown banner says what level the bots are on.
+  Veteran is the bots as they always were. In a test duel against a target,
+  Experts did several times a Beginner's damage.
 
 Thinking is cheap and staggered: targets twice a second, line of sight
 every 4 ticks, steering and aim every tick. A room of one human and 63 bots

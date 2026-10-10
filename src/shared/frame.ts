@@ -231,7 +231,6 @@ export interface RoundState {
   mode: number; // GameMode of this wave (between waves: the next one)
   teamLeft: number[]; // team modes: each team's clones still in the wave (red, green, blue, gold)
   kings: [number, number]; // Regicide: red's and green's king (player id, 255 none)
-  botSkill: number; // how hard the bots play (1 beginner to 5 expert)
   /** Extraction: where the golden idol is (and who carries it, 255 nobody), and the extraction rocket. */
   idol?: { x: number; y: number; holder: number };
   evac?: { state: number; x: number; y: number; eta: number };
@@ -444,10 +443,9 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const red = r.u8();
         const green = r.u8();
         const kings: [number, number] = [r.u8(), r.u8()];
-        const botSkill = r.u8();
         const blue = r.u8();
         const gold = r.u8();
-        const s: RoundState = { phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green, blue, gold], kings, botSkill };
+        const s: RoundState = { phase, wave, timer, winner, left, inWave: status !== 0, out: status === 2, mode, teamLeft: [red, green, blue, gold], kings };
         if (mode === GameMode.Siege) s.lives = r.u16();
         if (mode === GameMode.Pvp) s.pvp = { leader: r.u8(), leaderKills: r.u8(), kills: r.u8(), deaths: r.u8() };
         if (mode === GameMode.Extraction) {
