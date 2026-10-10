@@ -228,6 +228,7 @@ import { ATTACKERS, DEFENDERS, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '.
 import type { CaveNet } from '../shared/caves.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
+import { cleanChat, cleanName } from './guard.ts';
 
 export interface ClientLink {
   send(data: Uint8Array): void;
@@ -555,12 +556,7 @@ export class World {
       id = bot.id;
     }
     // (The BOT tag is the bots' alone: clients tell humans from bots by it.)
-    const clean =
-      name
-        .replace(/[^\p{L}\p{N} _\-.]/gu, '')
-        .trim()
-        .replace(/^(bot\s+)+/i, '')
-        .slice(0, 16) || `Clone${id}`;
+    const clean = cleanName(name) || `Clone${id}`;
     return this.join(id, clean, link, null);
   }
 
@@ -1461,7 +1457,7 @@ export class World {
     const p = this.players[id];
     if (!p || this.tick - p.lastChat < 15) return;
     p.lastChat = this.tick;
-    const clean = text.replace(/[\u0000-\u001f]/g, '').slice(0, 120);
+    const clean = cleanChat(text);
     if (!clean) return;
     this.broadcast.u8(R_CHAT);
     this.broadcast.u8(id);

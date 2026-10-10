@@ -2043,6 +2043,77 @@ clone, ships the game and not just the menu. Rooms are created on demand. A
 `GameRoom` lives wherever its first player connected from, and all of that
 match's sockets pin to it.
 
+## Security and abuse limits
+
+The server trusts nothing a client sends. Every action is validated on the
+authoritative tick: builds against the same rules the preview shows, radio
+calls against gold and cooldown, inputs against the body. On top of that,
+`src/server/guard.ts` sets limits that keep a bot or a flood from taking the
+match down.
+
+**At the Worker** (`worker.ts`), before a Durable Object wakes:
+- `/ws` takes only a GET WebSocket upgrade whose `Origin` is this site (or
+  localhost, for development). Other pages can't open game sockets in a
+  visitor's browser, and lazy scripts without an Origin are refused.
+- `/api/*` is GET only. Each isolate caches `/api/rooms` for 2 s, so a flood
+  of menu loads never reaches the Lobby.
+
+**Per address** (in each room, keyed by Cloudflare's `CF-Connecting-IP`):
+- At most 6 live sockets, which allows for households, LAN parties and
+  carrier NAT.
+- Connection attempts: a burst of 10, then 12 a minute.
+- Refusals arrive as an `S_REJECT` with the reason, so a real player sees
+  why.
+
+**Per socket:**
+
+| Budget | Limit |
+| --- | --- |
+| All messages | 60/s, burst 120 |
+| Chat | 1 per 2 s, burst 4 |
+| Builds | 5/s |
+| Radio calls | 2/s |
+| Pings | 2/s |
+| Map resyncs | 128 chunks/s, burst a full map |
+
+- An honest client sends one input a tick plus a ping a second, so these
+  budgets have room to spare.
+- Over-budget messages are dropped and count as strikes. Oversized messages
+  (over 4 KB), text frames, unknown messages and malformed messages count
+  for more.
+- Strikes decay over time. A socket that piles up 200 is closed with 1008,
+  and the kick is logged.
+- A socket silent for 90 s is closed. Clients ping every second, and a
+  throttled background tab still pings once a minute.
+
+**Text:**
+- Names keep only letters, digits, space, `_ - .`, up to 16 characters. A
+  name can't wear the bots' BOT tag.
+- Chat loses control characters, invisible characters and bidi-override
+  characters. It loses stacked combining marks ("zalgo") and is capped at
+  120 characters.
+- The client draws all text on the canvas, never as HTML.
+
+**Static pages** (`public/_headers`) carry these headers:
+- A strict Content-Security-Policy: own scripts only, no framing, no
+  plugins.
+- `X-Frame-Options: DENY`, `nosniff`, a same-origin referrer policy and
+  COOP.
+- A Permissions-Policy that denies camera, microphone and geolocation.
+
+**In the Cloudflare dashboard** (not code; recommended for a public
+deployment):
+- DDoS protection for L3/4 and HTTP is on by default for every zone.
+- **Security → WAF → Rate limiting rules:** for example, block an IP that
+  sends more than 30 requests to `/ws` or 100 to `/api/` in 10 s. This stops
+  a connect flood at the edge before it costs a Worker invocation.
+- **Security → Bots → Bot Fight Mode** (or Super Bot Fight Mode on paid
+  plans) challenges known automation. The game's own requests are ordinary
+  browser traffic, so it doesn't get in the way.
+- **Security → Settings → Security Level:** "High" during an attack, or
+  "I'm Under Attack" mode. It puts a JS challenge in front of the menu page,
+  and the game socket follows from a page that passed it.
+
 ## Not done yet
 
 - Brains, buying bodies and drop ships, which are the Cortex Command

@@ -14,11 +14,37 @@ import {
   S_REJECT,
   S_WELCOME,
 } from '../shared/protocol.ts';
+import { ConnGuard, IpGauge, MsgClass, Verdict } from './guard.ts';
 import { World } from './world.ts';
 import type { Env } from './worker.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
 const MAX_CATCHUP_TICKS = 4;
+
+interface Conn {
+  id: number;
+  ip: string;
+  guard: ConnGuard;
+}
+
+/** The class of each client message, for its rate limit. */
+function msgClass(type: number): MsgClass | null {
+  switch (type) {
+    case C_INPUT:
+      return MsgClass.Input;
+    case C_CHAT:
+      return MsgClass.Chat;
+    case C_BUILD:
+      return MsgClass.Build;
+    case C_CALL:
+      return MsgClass.Call;
+    case C_RESYNC:
+      return MsgClass.Resync;
+    case C_PING:
+      return MsgClass.Ping;
+  }
+  return null;
+}
 
 function seedFromName(name: string): number {
   let h = 0x811c9dc5;
@@ -34,7 +60,10 @@ function seedFromName(name: string): number {
 export class GameRoom extends DurableObject<Env> {
   private world: World | null = null;
   private roomName = '';
-  private sockets = new Map<WebSocket, number>();
+  private sockets = new Map<WebSocket, Conn>();
+  /** Per-address connection limits. */
+  private ips = new IpGauge();
+  private lastSweep = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastTick = 0;
   private lastReport = 0;
@@ -45,12 +74,15 @@ export class GameRoom extends DurableObject<Env> {
   private statLate = 0;
 
   override async fetch(request: Request): Promise<Response> {
-    if (request.headers.get('Upgrade') !== 'websocket') {
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('expected websocket', { status: 426 });
     }
     const url = new URL(request.url);
     this.roomName = url.searchParams.get('room') ?? this.roomName;
-    const name = url.searchParams.get('name') ?? '';
+    const name = (url.searchParams.get('name') ?? '').slice(0, 64);
+    // (Set by Cloudflare's edge, not the client; absent only under local tools.)
+    const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
+    const now = Date.now();
 
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -59,6 +91,18 @@ export class GameRoom extends DurableObject<Env> {
     // Newer compatibility dates default server sockets to Blob messages; the
     // input path must stay synchronous so commands keep their order.
     (server as unknown as { binaryType: string }).binaryType = 'arraybuffer';
+
+    const refuse = (reason: string, code: number) => {
+      const w = new Writer(64);
+      w.u8(S_REJECT);
+      w.str(reason);
+      server.send(w.finish());
+      server.close(code, reason);
+      return new Response(null, { status: 101, webSocket: client });
+    };
+    const admit = this.ips.admit(ip, now);
+    if (admit === 'rate') return refuse('too many connection attempts: wait a minute', 1008);
+    if (admit === 'busy') return refuse('too many connections from your address', 1008);
 
     // Last Man Standing, with bots in every slot no human has.
     // The siege room plays nothing but Siege; any other, the usual rotation.
@@ -74,16 +118,10 @@ export class GameRoom extends DurableObject<Env> {
       },
     });
 
-    if (!player) {
-      const w = new Writer(64);
-      w.u8(S_REJECT);
-      w.str('room full');
-      server.send(w.finish());
-      server.close(1013, 'room full');
-      return new Response(null, { status: 101, webSocket: client });
-    }
+    if (!player) return refuse('room full', 1013);
 
-    this.sockets.set(server, player.id);
+    this.ips.open(ip);
+    this.sockets.set(server, { id: player.id, ip, guard: new ConnGuard(now) });
     const welcome = new Writer(64);
     welcome.u8(S_WELCOME);
     welcome.u8(player.id);
@@ -104,11 +142,20 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private onMessage(ws: WebSocket, data: unknown): void {
-    const id = this.sockets.get(ws);
+    const conn = this.sockets.get(ws);
     const world = this.world;
-    if (id === undefined || !world || !(data instanceof ArrayBuffer)) return;
+    if (!conn || !world) return;
+    const now = Date.now();
+    const { id, guard } = conn;
+    // (Text frames are no part of the protocol: they count as malformed.)
+    const buf = data instanceof ArrayBuffer ? new Uint8Array(data) : null;
+    const type = buf && buf.length > 0 ? buf[0] : -1;
+    const cost = type === C_RESYNC && buf ? Math.max(1, (buf.length - 1) >> 1) : 1;
+    const verdict = guard.check(now, buf ? buf.length : typeof data === 'string' ? data.length : 0, msgClass(type), cost);
+    if (verdict === Verdict.Kick) return this.kick(ws, 'flooding');
+    if (verdict === Verdict.Drop || !buf) return;
     try {
-      const r = new Reader(new Uint8Array(data));
+      const r = new Reader(buf);
       switch (r.u8()) {
         case C_INPUT:
           world.input(id, { seq: r.u16(), buttons: r.u8(), aim: r.u16(), inv: r.u8() });
@@ -135,15 +182,29 @@ export class GameRoom extends DurableObject<Env> {
           break;
       }
     } catch {
-      // Malformed client message: ignore it.
+      // Malformed client message: dropped, and a strike against the socket.
+      if (guard.malformed(now) === Verdict.Kick) this.kick(ws, 'malformed messages');
     }
   }
 
+  /** Close an abusive (or silent) socket; the close handler takes the player out. */
+  private kick(ws: WebSocket, reason: string): void {
+    const conn = this.sockets.get(ws);
+    console.log(JSON.stringify({ room: this.roomName, kick: reason, ip: conn?.ip }));
+    try {
+      ws.close(1008, reason);
+    } catch {
+      // already closed
+    }
+    this.onClose(ws);
+  }
+
   private onClose(ws: WebSocket): void {
-    const id = this.sockets.get(ws);
-    if (id === undefined) return;
+    const conn = this.sockets.get(ws);
+    if (!conn) return;
     this.sockets.delete(ws);
-    this.world?.removePlayer(id);
+    this.ips.close(conn.ip);
+    this.world?.removePlayer(conn.id);
     try {
       ws.close(1000, 'bye');
     } catch {
@@ -181,6 +242,11 @@ export class GameRoom extends DurableObject<Env> {
     }
     if (steps > 1) this.statLate++;
     if (now - this.lastTick > TICK_MS * MAX_CATCHUP_TICKS) this.lastTick = now; // drop backlog
+    if (now - this.lastSweep > 1000) {
+      // Sockets gone silent (a dead link the runtime hasn't noticed, or a client holding a slot without playing).
+      this.lastSweep = now;
+      for (const [ws, conn] of this.sockets) if (conn.guard.idle(now)) this.kick(ws, 'idle');
+    }
     if (now - this.lastReport > 10_000) {
       this.report();
       this.logStats();

@@ -1,7 +1,16 @@
 # Everything is revalidated on every load (cheap: an ETag check), so nobody
 # ever runs an old build; the service worker itself is never cached at all.
+# Every page also carries the security headers: nothing but this site's own
+# scripts runs, no other site may frame the game (clickjacking), and the
+# browser never second-guesses a file's type.
 /*
   Cache-Control: no-cache
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
 /sw.js
   Cache-Control: no-store
   Service-Worker-Allowed: /
