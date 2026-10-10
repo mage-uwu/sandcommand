@@ -108,11 +108,12 @@ describe('the deadland', () => {
     // Some of it lies over the dust: pour, with ash, gravel or char straight under it.
     let over = 0;
     for (let x = 8; x < WORLD_W - 8; x++) {
-      const y = t.surfaceY(x);
-      if (t.get(x, y) !== Mat.Pour) continue;
-      let yy = y;
-      while (t.get(x, yy) === Mat.Pour) yy++;
-      if ([Mat.Ash, Mat.Gravel, Mat.Char, Mat.Glass].includes(t.get(x, yy) as never)) over++;
+      // (Under whatever stands on it: the first pour down the column.)
+      let y = t.surfaceY(x);
+      while (y < 900 && t.get(x, y) !== Mat.Pour) y++;
+      if (y >= 900) continue;
+      while (t.get(x, y) === Mat.Pour) y++;
+      if ([Mat.Ash, Mat.Gravel, Mat.Char, Mat.Glass].includes(t.get(x, y) as never)) over++;
     }
     expect(over).toBeGreaterThan(100);
   });

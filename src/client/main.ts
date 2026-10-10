@@ -192,7 +192,7 @@ async function join(tutorial = false): Promise<void> {
           g.carved(x, y, r, 1, 0, removed, detached);
           return detached.length / 3;
         };
-        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve, mark, targets: () => assistTargets(g), frosting: () => ({ craters: lastCraters, caverns: lastGemCaverns, monuments: lastMonuments, buried: lastBuried, ruins: lastComplexes.filter((c) => c.ruin) }) };
+        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve, mark, link: () => net, targets: () => assistTargets(g), frosting: () => ({ craters: lastCraters, caverns: lastGemCaverns, monuments: lastMonuments, buried: lastBuried, ruins: lastComplexes.filter((c) => c.ruin) }) };
       }
       g.myId = w.id;
       g.room = w.room;
@@ -575,7 +575,8 @@ function frame(now: number): void {
       if (g.calling) {
         const entries = g.radioEntries();
         const hoverKind = renderer.callMenuHit(input.mouseX, input.mouseY);
-        const r = radio.update(g.radioSel, entries.length, raw, entries.findIndex((e) => e.kind === hoverKind), input.takeRadioSteps(), trigger);
+        // (A click counts as well as the held trigger: a quick one goes down and up between two frames.)
+        const r = radio.update(g.radioSel, entries.length, raw, entries.findIndex((e) => e.kind === hoverKind), input.takeRadioSteps(), trigger || click);
         g.radioSel = r.sel;
         if (r.call) n.call(entries[r.sel].kind);
       } else radio.reset();

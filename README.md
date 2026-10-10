@@ -1317,6 +1317,7 @@ A hostile brutalist architect's wet dream, left to rot for eons
   - Pour has the same hard outline as the cement.
   - Caltrop legs are driven into the ground where they come down, not just level with the hub's foot.
 - **Balanced wrong, but standing.** Every caltrop is placed so it would stand, however it looks. Either its hub (the centre of mass, since the arms are alike) lies between the feet of two or more legs, however hard it leans, or it is poised on one leg straight down with the hub right over the point and two arms in the air. A placement that would topple is turned again or dropped.
+- **Never merged.** The pieces crowd in and lean on one another (an arm may rest its end on a piece already standing, and that counts as holding it up), but no piece is drawn touching another's cement. Where two meet, a seam is left, so each keeps its own hard outline. A piece whose hub or mid-arm would run into another is turned again or dropped, and the dragon's teeth are strewn last, never on a monument.
 - **It was civilised once.** The crust is an archaeological pile that has passed through eons:
   - **Buildings.** 12–17 buildings of old concrete lie buried in it: one to four storeys, settled askew, their far ends fallen in and their top floors sheared away. They have window holes and floor slabs with rusted rebar drooping off the broken ends, and some are steel-framed.
   - **Rooms.** Most are silted up with level bands of char, ash and gravel. About a third are still hollow.

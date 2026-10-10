@@ -235,6 +235,32 @@ export interface Monument {
   w?: number;
 }
 
+/**
+ * While the monuments go up: which piece each cell of cement is (0: none),
+ * and the piece being drawn. No piece is ever drawn touching another's
+ * cement: where two meet a seam is left between them, so each keeps its own
+ * hard outline, leaning on the other but never merging into it.
+ */
+let own: Uint8Array | null = null;
+let piece = 0;
+/** A new piece (a whole caltrop, a slab, a spike, a tooth). */
+const nextPiece = () => (piece = (piece % 255) + 1);
+
+/** Write `mat` at (x, y), unless it's cement that would touch another piece's. */
+function put(m: Uint8Array, x: number, y: number, mat: number): void {
+  const i = at(x, y);
+  if (own) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const o = own[i + dy * WORLD_W + dx];
+        if (o !== 0 && o !== piece) return;
+      }
+    }
+    own[i] = piece;
+  }
+  m[i] = mat;
+}
+
 /** Fill a convex polygon (world cells) with `mat`, inside the map. */
 function poly(m: Uint8Array, pts: readonly [number, number][], mat: number): void {
   let y0 = Infinity;
@@ -255,7 +281,7 @@ function poly(m: Uint8Array, pts: readonly [number, number][], mat: number): voi
         xb = Math.max(xb, x);
       }
     }
-    for (let x = Math.ceil(xa); x <= Math.floor(xb); x++) if (inside(x, y)) m[at(x, y)] = mat;
+    for (let x = Math.ceil(xa); x <= Math.floor(xb); x++) if (inside(x, y)) put(m, x, y, mat);
   }
 }
 
@@ -290,6 +316,15 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
   const rng = new Rng(seed ^ 0xde4d1a);
   const out: Monument[] = [];
   const clear = (x0: number, x1: number) => spans.every((c) => x1 + 24 < c.x0 || x0 - 24 > c.x1);
+  own = new Uint8Array(WORLD_W * WORLD_H);
+  piece = 0;
+  const teeth: [number, number, number][] = [];
+  /** Is (px, py) already some piece's cement? */
+  const taken2 = (px: number, py: number) => {
+    const ix = Math.round(px);
+    const iy = Math.round(py);
+    return inside(ix, iy) && own![at(ix, iy)] !== 0;
+  };
   // The ground as it lay before any monument came down on it.
   const top0 = new Int32Array(WORLD_W);
   for (let x = 4; x < WORLD_W - 4; x++) top0[x] = topOf(m, x);
@@ -354,7 +389,8 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
     // Caltrops on a menacing scale: a few small, most towering, one in six colossal (a clone is 14 cells tall).
     const len = size < 0.15 ? 50 + rng.int(30) : size > 0.84 ? 200 + rng.int(100) : 100 + rng.int(70);
     const span = r < 0.84 ? len * 0.8 : 70;
-    if (!clear(x - span * 0.5, x + span * 0.5) || out.some((o, i) => Math.abs(o.x - x) < (reach[i] + span) * 0.55)) continue;
+    // (They crowd in and lean on one another; they never merge: see `put`.)
+    if (!clear(x - span * 0.5, x + span * 0.5) || out.some((o, i) => Math.abs(o.x - x) < (reach[i] + span) * 0.48)) continue;
     const g = topOf(m, x);
     if (g >= WORLD_H - 80) continue;
     if (r < 0.84) {
@@ -392,6 +428,22 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
           hubY = Math.max(hubY, top0[tx] + 8 - sa * L * 0.92);
           feet.push(tx);
         }
+        // Up against a piece already standing: an arm may rest its end on it
+        // (that holds it up too), but nothing runs through one.
+        let clash = taken2(x, hubY);
+        for (const a of dirs) {
+          const ca = Math.cos(a);
+          const sa = Math.sin(a);
+          for (let q = 0; q <= L && !clash; q += 3) {
+            const px = x + ca * q;
+            const py = hubY + sa * q;
+            if (![0, -0.9, 0.9].some((f) => taken2(px - sa * w * f, py + ca * w * f))) continue;
+            if (q < L * 0.7) clash = true;
+            else if (sa > -0.2) feet.push(Math.round(px));
+            break;
+          }
+        }
+        if (clash) continue;
         if (feet.length >= 2) ok = Math.min(...feet) + w * 0.3 <= x && x <= Math.max(...feet) - w * 0.3;
         else if (feet.length === 1) ok = Math.abs(feet[0] - x) <= w * 0.4;
         legs = feet;
@@ -411,6 +463,7 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
           }
         }
       }
+      nextPiece();
       for (const a of dirs) arm(m, x, hubY, a, L, w);
       const hc = Math.cos(rot);
       const hs = Math.sin(rot);
@@ -430,6 +483,8 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
       reach.push(L * 0.8);
     } else if (r < 0.9) {
       // A slab, tilted and half sunk.
+      if (taken2(x, g)) continue;
+      nextPiece();
       const hw = 60 + rng.int(70);
       const hh = 14 + rng.int(12);
       const a = (rng.next() < 0.5 ? -1 : 1) * (0.08 + rng.next() * 0.35);
@@ -453,6 +508,7 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
       // Thorns: a cluster of tall, leaning spikes, in one footing.
       const n = 3 + rng.int(5);
       for (let k = 0; k < n; k++) {
+        nextPiece();
         const sx = x + (k - n / 2) * (10 + rng.int(8));
         const sg = topOf(m, Math.max(5, Math.min(WORLD_W - 6, sx)));
         const h = 60 + rng.int(90);
@@ -476,22 +532,24 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
       out.push({ kind: 'teeth', x, y: g });
       reach.push(30);
     }
-    // Teeth strewn round every piece: small upright or toppled pyramids.
+    // Teeth strewn round every piece (once all the monuments stand, so none ends up inside one).
     const t = 2 + rng.int(5);
-    for (let k = 0; k < t; k++) {
-      const tx = x + (rng.next() - 0.5) * 140;
-      const ix = Math.max(6, Math.min(WORLD_W - 7, Math.round(tx)));
-      if (!clear(ix - 8, ix + 8)) continue;
-      const tg = topOf(m, ix);
-      const h = 6 + rng.int(8);
-      const a = (rng.next() - 0.5) * (rng.next() < 0.4 ? 2.4 : 0.4);
-      const c = Math.cos(a);
-      const s = Math.sin(a);
-      const base = h * 0.7;
-      const P = (px: number, py: number): [number, number] => [ix + px * c - py * s, tg + 3 + px * s + py * c];
-      poly(m, [P(-base, 0), P(base, 0), P(0, -h)], Mat.Cement);
-    }
+    for (let k = 0; k < t; k++) teeth.push([x + (rng.next() - 0.5) * 140, 6 + rng.int(8), (rng.next() - 0.5) * (rng.next() < 0.4 ? 2.4 : 0.4)]);
   }
+  // The teeth: small upright or toppled pyramids, never on a monument.
+  for (const [tx, h, a] of teeth) {
+    const ix = Math.max(6, Math.min(WORLD_W - 7, Math.round(tx)));
+    if (!clear(ix - 8, ix + 8)) continue;
+    const tg = topOf(m, ix);
+    if (taken2(ix, tg) || taken2(ix, tg - 4)) continue;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const base = h * 0.7;
+    const P = (px: number, py: number): [number, number] => [ix + px * c - py * s, tg + 3 + px * s + py * c];
+    nextPiece();
+    poly(m, [P(-base, 0), P(base, 0), P(0, -h)], Mat.Cement);
+  }
+  own = null;
   // And here and there, a seal on its own: a broad cap of pour over the dust, nothing standing on it.
   for (let k = 2 + rng.int(4), tries = 0; k > 0 && tries < 40; tries++) {
     const x = 120 + rng.int(WORLD_W - 240);
