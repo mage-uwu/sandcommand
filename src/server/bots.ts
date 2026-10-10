@@ -107,6 +107,11 @@ export class BotBrain {
   private strafe = 1;
   private strafeUntil = 0;
   private stuck = 0;
+  /** On foot: the nearest it has come to where it's going, and when; and a detour when that stalls. */
+  private walkBest = Infinity;
+  private walkAt = 0;
+  private detourUntil = 0;
+  private detourDir = 0;
   /** Tank surfing: ticks its ride has been heading away from the fight, or standing still. */
   private surfAway = 0;
   private surfStill = 0;
@@ -526,10 +531,29 @@ export class BotBrain {
       }
       dir = this.strafe;
     }
+    // Walking toward it and getting no nearer for seconds (wedged under an
+    // overhang, a caltrop's arm, a face too tall to jet): back off and jet
+    // up for a moment, then come at it again from higher up.
+    const closing = !onTask && !cave && !goldAt && !calling && !mining && dir !== 0 && dir === Math.sign(dx) && Math.abs(dx) > 60;
+    if (!closing && t >= this.detourUntil) {
+      this.walkBest = Infinity;
+      this.walkAt = t;
+    } else if (closing && Math.abs(dx) < this.walkBest - 12) {
+      this.walkBest = Math.abs(dx);
+      this.walkAt = t;
+    } else if (closing && t - this.walkAt > 150) {
+      this.detourDir = -dir;
+      this.detourUntil = t + 30 + rng.int(40);
+      this.walkBest = Infinity;
+      this.walkAt = this.detourUntil;
+    }
+    const detour = t < this.detourUntil;
+    if (detour) dir = this.detourDir;
     if (dir > 0) buttons |= BTN_RIGHT;
     if (dir < 0) buttons |= BTN_LEFT;
     // Jump or jet: over walls, up to a target above, and to break a long fall.
     const b = p.body;
+    if ((detour || t < this.detourUntil + 45) && b.fuel > 20) buttons |= BTN_UP;
     if (dir !== 0 && this.stuck > 6 && headClear) buttons |= BTN_UP;
     if (onTask) {
       if (nav.up) buttons |= BTN_UP;

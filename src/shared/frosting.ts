@@ -1,5 +1,5 @@
 import { WORLD_H, WORLD_W } from './constants.ts';
-import { Mat, isSoil } from './materials.ts';
+import { Mat, isDeadGround, isSoil } from './materials.ts';
 import { PK, type Particles } from './particles.ts';
 import { Rng } from './rng.ts';
 
@@ -50,7 +50,7 @@ export interface Crater {
  * sand or rust dust, a raised rim of rust soil around it fading out into the
  * ground. Never on a bunker, a tower or the siege works.
  */
-export function placeCraters(m: Uint8Array, seed: number, spans: readonly { x0: number; x1: number }[]): Crater[] {
+export function placeCraters(m: Uint8Array, seed: number, spans: readonly { x0: number; x1: number }[], dead = false): Crater[] {
   const rng = new Rng(seed ^ 0xc4a7e5);
   const out: Crater[] = [];
   const want = 7 + rng.int(6);
@@ -65,12 +65,13 @@ export function placeCraters(m: Uint8Array, seed: number, spans: readonly { x0: 
     for (let x = x0; x <= x1; x++) tops.push(topOf(m, x));
     const base = tops[Math.floor(tops.length / 2)];
     if (Math.max(...tops) - Math.min(...tops) > Math.max(8, r * 0.5)) continue; // (flat ground: on a slope it's just a pit)
-    if (!natural(m[at(cx, base)])) continue;
+    if (!(natural(m[at(cx, base)]) || (dead && isDeadGround(m[at(cx, base)])))) continue;
     const depth = Math.max(6, Math.floor(r * (0.45 + rng.next() * 0.2)));
     const rim = Math.max(3, Math.floor(r * 0.22));
     // (Pale drift sand, dark scorched regolith, or rust dust: never just soil, so the bowl reads against the ground.)
     const pick = rng.next();
-    const lining = pick < 0.45 ? Mat.Sand : pick < 0.7 ? Mat.Regolith : Mat.RustSand;
+    // (In the deadland: glazed with trinitite, the glass the old fires left.)
+    const lining = dead ? (pick < 0.85 ? Mat.Glass : Mat.Ash) : pick < 0.45 ? Mat.Sand : pick < 0.7 ? Mat.Regolith : Mat.RustSand;
     for (let x = x0; x <= x1; x++) {
       const top = tops[x - x0];
       const u = (x - cx) / r;
@@ -80,13 +81,14 @@ export function placeCraters(m: Uint8Array, seed: number, spans: readonly { x0: 
         const floor = base + Math.round(depth * (1 - u * u)) - Math.round((1 - au) * 0);
         for (let y = Math.min(top, base - rim - 2); y < floor; y++) if (inside(x, y) && m[at(x, y)] !== Mat.Bedrock) m[at(x, y)] = Mat.Air;
         const line = 3 + (hashCell(x, seed) % 2);
-        for (let k = 0; k < line; k++) if (inside(x, floor + k) && natural(m[at(x, floor + k)])) m[at(x, floor + k)] = lining;
+        for (let k = 0; k < line; k++) if (inside(x, floor + k) && (natural(m[at(x, floor + k)]) || isDeadGround(m[at(x, floor + k)]))) m[at(x, floor + k)] = lining;
       } else {
         // The rim: thrown-up rust soil, highest at the lip, fading out over half a radius.
         const fall = 1 - (au - 1) / 0.5;
         if (fall <= 0) continue;
         const h = Math.round(rim * fall * fall);
-        for (let k = 1; k <= h; k++) if (inside(x, top - k) && m[at(x, top - k)] === Mat.Air) m[at(x, top - k)] = (hashCell(x + k * 31, seed) & 7) === 0 ? lining : Mat.Dirt;
+        const rimMat = dead ? ((hashCell(x, seed) & 1) === 0 ? Mat.Gravel : Mat.Ash) : Mat.Dirt;
+        for (let k = 1; k <= h; k++) if (inside(x, top - k) && m[at(x, top - k)] === Mat.Air) m[at(x, top - k)] = (hashCell(x + k * 31, seed) & 7) === 0 ? lining : rimMat;
       }
     }
     out.push({ x: cx, y: base, r, lining });
@@ -104,7 +106,7 @@ export function relineCraters(m: Uint8Array, craters: readonly Crater[]): void {
       const y = topOf(m, x);
       for (let k = 0; k < 4; k++) {
         const v = m[at(x, y + k)];
-        if (inside(x, y + k) && (v === Mat.Grass || v === Mat.Snow || natural(v))) m[at(x, y + k)] = c.lining;
+        if (inside(x, y + k) && (v === Mat.Grass || v === Mat.Snow || natural(v) || isDeadGround(v))) m[at(x, y + k)] = c.lining;
       }
     }
   }
@@ -292,7 +294,7 @@ export function placeFlora(m: Uint8Array, seed: number, biome: number, geysers: 
   const rng = new Rng(seed ^ 0xf107a);
   const out: Flora[] = [];
   // Open ground: one chance every few cells, by biome (dunes, canyons, highlands, meadows).
-  const every = [30, 18, 14, 8][biome] ?? 16;
+  const every = [30, 18, 14, 8, 1e9][biome] ?? 16; // (nothing grows on the deadland's crust)
   for (let x = 8; x < WORLD_W - 8; x += 2) {
     if (rng.int(every) !== 0) continue;
     if (!clearOf(x - 6, x + 6, spans, 6)) continue;

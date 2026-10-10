@@ -320,9 +320,47 @@ export function soilColor(m: number, x: number, y: number, c: number): number {
   } else if (m === Mat.RustSand) {
     // Ripples: faint diagonal bands, as the wind leaves them.
     k = (x + y * 3 + Math.floor(noise(x, y, 9, 75) * 6)) % 9 < 2 ? 1.1 : 1;
+  } else if (m === Mat.Gravel) {
+    // Pebbles: light and dark stones in it.
+    if (n < 0.18) k = 0.7;
+    else if (n > 0.85) k = 1.3;
+    else k = 0.92 + 0.12 * noise(x, y, 3, 76);
+  } else if (m === Mat.Ash) {
+    // Drifts of soot-black and bone-white ash, smeared grey where they meet, flecked with each other.
+    const w = Math.min(1, Math.max(0, (noise(x * 0.6, y * 1.8, 34, 77) - 0.4) * 2.2));
+    const v = h(x, y, 79) < 0.015 ? 1 - w : w; // a fleck of the other
+    const g = 0.9 + 0.14 * noise(x, y, 3, 80);
+    return abgr((28 + v * 172) * g, (27 + v * 170) * g, (28 + v * 164) * g);
+  } else if (m === Mat.Char) {
+    // Burnt fill: grainy, streaked, cinders in it.
+    k = 0.8 + 0.3 * noise(x, y * 0.6, 4, 78);
+    if (n < 0.06) k = 0.5;
+    else if (n > 0.975) return abgr(150, 64, 40); // a cinder's glow, long cold
   } else return c;
   if (k === 1) return c;
   return abgr((c & 255) * k, ((c >> 8) & 255) * k, ((c >> 16) & 255) * k);
+}
+
+/**
+ * The Progenitors' cement: each monument one single pour, a sterile monolith.
+ * No courses or joints, only a slow cloud of tone across the whole mass and
+ * the faint streaks of eons of weather running down it; a hard dark outline
+ * wherever it ends, a lit lip inside it on the top and left and a
+ * shaded one on the bottom and right, so it reads as a cut, made thing.
+ */
+export function cementColor(t: Terrain, x: number, y: number): number {
+  const air = (dx: number, dy: number) => matAt(t, x + dx, y + dy) === Mat.Air;
+  const edge = (dx: number, dy: number) => matAt(t, x + dx, y + dy) !== Mat.Cement;
+  if (edge(0, -1) || edge(-1, 0) || edge(0, 1) || edge(1, 0) || edge(-1, -1) || edge(1, -1) || edge(-1, 1) || edge(1, 1)) return abgr(40, 39, 38);
+  if (edge(0, -2) || edge(-2, 0) || edge(0, 2) || edge(2, 0)) return abgr(70, 69, 66);
+  let k = 0.95 + 0.07 * noise(x, y, 90, 91) + 0.012 * h(x >> 2, y >> 2, 92);
+  // Weather streaks: some columns stained a touch darker, fading in and out down the face.
+  const streak = h(x >> 1, 0, 93);
+  if (streak > 0.86) k *= 1 - (streak - 0.86) * 0.5 * noise(x, y, 26, 94);
+  if (h(x, y, 95) < 0.002) k *= 0.8; // a rare air pit
+  if (air(0, -3) || air(-3, 0) || air(0, -4) || air(-4, 0)) k *= 1.14;
+  else if (air(0, 3) || air(3, 0) || air(0, 4) || air(4, 0)) k *= 0.8;
+  return abgr(162 * k, 160 * k, 154 * k);
 }
 
 /** Pig iron: great cast blocks, dark and mottled, casting seams, a bloom of rust here and there. */

@@ -3,7 +3,7 @@ import { WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { caveLevel } from '../src/shared/caves.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { MapKind, cavesOf, generateWorld, lastCaves, lastComplexes } from '../src/shared/worldgen.ts';
+import { Biome, MapKind, biomeOf, cavesOf, generateWorld, lastCaves, lastComplexes } from '../src/shared/worldgen.ts';
 
 const t = new Terrain();
 const air = (x: number, y: number) => t.get(Math.round(x), Math.round(y)) === Mat.Air;
@@ -13,10 +13,11 @@ const caveSeed = (kind: number, from = 1) => {
 };
 
 describe('cave maps', () => {
-  it('about two maps in five, ordinary or Regicide; never the labyrinth', () => {
+  it('about two marslike maps in five, ordinary or Regicide; never the labyrinth or the deadland', () => {
     let n = 0;
     for (let s = 1; s <= 500; s++) if (cavesOf(s, MapKind.Plain)) n++;
-    expect(n / 500).toBeGreaterThan(0.3);
+    expect(n / 500).toBeGreaterThan(0.25);
+    for (let s = 1; s <= 200; s++) if (biomeOf(s, MapKind.Plain) === Biome.Deadland) expect(cavesOf(s, MapKind.Plain)).toBe(false);
     expect(n / 500).toBeLessThan(0.5);
     for (let s = 1; s <= 50; s++) expect(cavesOf(s, MapKind.Dungeon)).toBe(false);
     // An ordinary map without the flag has no caves.

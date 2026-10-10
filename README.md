@@ -7,6 +7,14 @@ Every explosion carves terrain, throws debris, and the debris settles back as
 rubble. All of it is simulated on one authoritative Durable Object and
 streamed to every player at 30 Hz.
 
+The war is fought on **TABAR**, an alien world of coral and strange plant
+life whose gold and rare earth have drawn an intergalactic mining war. The
+planet had masters once: the long-extinct **Progenitors** (Tabarians), an
+Atlantis-like, future-primitive people known now only by their pyramids,
+ziggurats and rare ornate ruins, the relics and cave art in Extraction's
+labyrinth, and the landscape of thorns they left over the **Deadland** (see
+[Biomes](#biomes)).
+
 ```
 npm install
 npm run dev          # builds the client and runs wrangler dev on :8787
@@ -598,8 +606,9 @@ Bunkers are drawn like a Cortex Command or Metal Slug bunker from around
 ## Regicide
 
 A team mode, and a favourite of the rotation (see above).
-- **Two fortresses.** A Regicide map always has two large fortresses built
-  into it, one per team: red's in the west, green's in the east, about
+- **Two fortresses.** A marslike Regicide map always has two large fortresses built
+  into it (on the Deadland they are deep Progenitor ruins instead; see
+  [The Deadland](#the-deadland)), one per team: red's in the west, green's in the east, about
   1500 cells apart. Each is six modules wide, with two- and three-storey
   towers and battlements on every roof. It has steel facing on its outer
   walls, gates at both ends, and three basement levels. Ordinary bunkers
@@ -1262,20 +1271,56 @@ exactly as before.
 ## Biomes
 
 Each map's seed picks a biome (`biomeOf` in `src/shared/worldgen.ts`). The
-countdown banner names it.
+countdown banner names it. Four biomes are **marslike**: rust soil over
+basalt, the base of everything, and the deep of every map, the Deadland's
+included. The fifth is the **Deadland**.
 
 | Biome | Terrain |
 |---|---|
-| **Dunes** | Rolling dunes of rust dust over the soil. Patches of lichen. |
-| **Canyons** | A high rock plateau cut by 3–5 deep ravines, 45–120 cells wide and up to 340 deep. The rock is banded with strata and the ravine floors are sand. Some ravines have a natural rock bridge. Extra sniper towers. |
-| **Highlands** | Ridged mountains up to 330 cells above the valleys, rockier underground, and capped with snow above the snowline. Many sniper towers. |
-| **Meadows** | Gentle hills under a thin crust of rust dust, mostly lichened over. |
+| **Marslike dunes** | Rolling dunes of rust dust over the soil. Patches of lichen. |
+| **Marslike canyons** | A high rock plateau cut by 3–5 deep ravines, 45–120 cells wide and up to 340 deep. The rock is banded with strata and the ravine floors are sand. Some ravines have a natural rock bridge. Extra sniper towers. |
+| **Marslike highlands** | Ridged mountains up to 330 cells above the valleys, rockier underground, and capped with snow above the snowline. Many sniper towers. |
+| **Marslike meadows** | Gentle hills under a thin crust of rust dust, mostly lichened over. |
+| **Deadland** | A crust of Progenitor debris over the marslike deep, and a landscape of thorns: cement caltrops on a menacing scale. No bunkers; ancient ruins instead. See below. |
 
-Fortress maps are only Dunes or Meadows, so the forts have room to stand.
-Extraction's labyrinth is always Dunes.
+About one ordinary map in four is Deadland, rolled separately from the seed
+so the marslike maps keep their biomes. Regicide maps are Deadland one time
+in five and otherwise Dunes or Meadows, so the forts have room to stand.
+Siege maps are only Dunes or Meadows, since the megafortress wants marslike
+ground. Extraction's labyrinth is always Dunes.
 
-**Cave maps** (`src/shared/caves.ts`). About two maps in five (ordinary
-or Regicide, never the labyrinth; `cavesOf` by the seed) are cave maps:
+### The Deadland
+
+A hostile brutalist architect's wet dream, left to rot for eons
+(`src/shared/deadland.ts`).
+- **Materials.** Five new ones (`Mat.Glass`..`Mat.Cement`, with
+  `isDeadGround`):
+  - **Trinitite**: green glass, with a sheen on top, flaws, bubbles and glints. Knocked loose, it breaks to gravel.
+  - **Gravel**: loose, with light and dark pebbles.
+  - **Ash**: loose drifts of soot-black and bone-white ash, flecked with each other.
+  - **Char**: burnt fill, with the odd long-cold cinder. It crumbles to ash.
+  - **Cement**: the Progenitors' cement, hard and tough like the bunkers' concrete (small arms barely mark it).
+- **The crust.** Some 45–155 cells deep (20–200 ft), over the marslike ground:
+  - On top: a skin of ash, glass, cement pavement and gravel.
+  - Below: char, with toppled cement blocks, broken dragon's teeth, glass slivers, cement strata, and lenses of ash and gravel.
+  - Nothing grows on it. There is no grass or flora, the caves stay out of it, and no works are dug into it.
+- **The landscape of thorns.** Fields of cement monuments across the map, inspired by the proposed "landscape of thorns" nuclear-waste marker. The caltrops are the Deadland:
+  - **Caltrops.** Three blunt arms with a squared hub, 50–300 cells long against a clone's 14. One in six is colossal, standing as a tripod with one arm to the sky and two legs splayed over an arch you can pass beneath. The rest lie at any angle, with the lowest tip driven into the ground.
+  - **Other pieces.** Tilted slabs, groves of spikes, and dragon's teeth strewn round every piece.
+  - **The look.** Each piece reads as one single pour, a sterile monolith. It has a slow cloud of tone and faint weather streaks, but no courses or joints. A hard dark outline runs wherever it ends, with a lit lip on the top and left and a shaded one below and right, so it reads as made, not grown.
+  - **The sky.** Under and between the arms, the sky shows, not a cave's dark. The client's skyline skips pure-cement runs with air beneath them (`groundFrom` in `src/client/game.ts`).
+- **Ruins, not bunkers.** No player bunkers are built on the Deadland. The massive caltrops are the fortification. Instead there are 4–7 small Progenitor ruins, each a passage:
+  - A stepped glyph-stone portal on the surface.
+  - A cobble tunnel slanting down through the crust.
+  - One to three cobble chambers, banded with glyphs, breached here and there, with rubble on their floors.
+  - A stair climbing out the far side to daylight again.
+  - Cobble and glyph stone never yield.
+- **Regicide on the Deadland.** The two fortresses are deep ruins, red's in the west and green's in the east. Each has three chambers, with the king's chamber at the bottom and spawns down its length. The caltrops round them are their walls.
+- **Sky and backdrop.** The sky is an ashen, sallow gradient. The parallax layers hold grey mountains and two ranks of thorn silhouettes: caltrops, spikes and slabs over rubble (`Backdrop.setBiome`).
+- **Bots.** If a bot walks toward its goal but gets no nearer for five seconds (wedged under a caltrop's arm, say), it backs off and jets up, then comes at the goal again from higher up.
+
+**Cave maps** (`src/shared/caves.ts`). About two marslike maps in five (ordinary
+or Regicide, never the labyrinth or the Deadland; `cavesOf` by the seed) are cave maps:
 under the bunkers runs a vast tunnel system, the underground battle
 highway, and the countdown banner says so.
 - **The highway**: one tunnel 60–80 cells high the length of the map,

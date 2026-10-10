@@ -14,6 +14,8 @@ const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 /** Tile width (cells): every layer repeats with this period. */
 const TW = 1024;
+/** worldgen's Biome.Deadland (not imported: this module stays free of worldgen). */
+const DEADLAND = 4;
 
 function hash(x: number, s: number): number {
   let n = (Math.imul(x, 374761393) + Math.imul(s, 668265263)) | 0;
@@ -287,6 +289,112 @@ function heavens(height: number): HTMLCanvasElement {
   });
 }
 
+/**
+ * The deadland's skyline: the Progenitors' monuments on the horizon, a
+ * Landscape of Thorns in silhouette. Colossal three-armed caltrops (on two
+ * legs, or stabbed in on one), thorn spikes, tilted slabs, over low rubble.
+ * Lit on their left faces, shaded on their right, as the mountains are.
+ */
+function thorns(height: number, s: number, scale: number, col: { lit: RGB; base: RGB; shade: RGB }): HTMLCanvasElement {
+  type Quad = [number, number][];
+  const shapes: Quad[] = [];
+  const ground = new Float32Array(TW);
+  for (let x = 0; x < TW; x++) ground[x] = 6 + noise1(x, 70, s + 1) * 10 + (noise1(x, 9, s + 2) - 0.5) * 3;
+  const armQuad = (x: number, y: number, a: number, len: number, w: number): Quad => {
+    const c = Math.cos(a);
+    const n = Math.sin(a);
+    const w1 = w * 0.65;
+    return [
+      [x - n * w, y + c * w],
+      [x + c * len - n * w1, y + n * len + c * w1],
+      [x + c * len + n * w1, y + n * len - c * w1],
+      [x + n * w, y - c * w],
+    ];
+  };
+  const count = Math.round(16 / scale);
+  for (let i = 0; i < count; i++) {
+    const cx = (i + 0.15 + hash(i, s + 3) * 0.7) * (TW / count);
+    const g = height - 1 - ground[Math.floor(cx) % TW];
+    const kind = hash(i, s + 4);
+    if (kind < 0.55) {
+      const len = (20 + hash(i, s + 5) * 26) * scale;
+      const w = (4 + hash(i, s + 6) * 3) * scale;
+      const rot = hash(i, s + 7) * Math.PI * 2;
+      const dirs = [0, 1, 2].map((k) => rot + (k * Math.PI * 2) / 3);
+      const low = Math.max(...dirs.map((a) => Math.sin(a)));
+      const hy = g - low * len + 4 * scale;
+      for (const a of dirs) shapes.push(armQuad(cx, hy, a, len, w));
+      shapes.push(armQuad(cx - w, hy, 0, w * 2, w)); // the hub
+    } else if (kind < 0.8) {
+      const n = 3 + Math.floor(hash(i, s + 8) * 4);
+      for (let k = 0; k < n; k++) {
+        const sx = cx + (k - n / 2) * 4 * scale;
+        const h = (16 + hash(i * 7 + k, s + 9) * 34) * scale;
+        const lean = (hash(i * 7 + k, s + 10) - 0.5) * 0.5;
+        const w = (1.5 + hash(i * 7 + k, s + 11) * 1.5) * scale;
+        shapes.push([
+          [sx - w, g + 3],
+          [sx + w, g + 3],
+          [sx + lean * h + 0.4, g - h],
+          [sx + lean * h - 0.4, g - h],
+        ]);
+      }
+    } else {
+      const hw = (16 + hash(i, s + 12) * 18) * scale;
+      const hh = (4 + hash(i, s + 13) * 4) * scale;
+      const a = (hash(i, s + 14) < 0.5 ? -1 : 1) * (0.1 + hash(i, s + 15) * 0.35);
+      const c = Math.cos(a);
+      const n = Math.sin(a);
+      const y = g - hh * 0.6;
+      shapes.push([
+        [cx - c * hw + n * hh, y - n * hw - c * hh],
+        [cx + c * hw + n * hh, y + n * hw - c * hh],
+        [cx + c * hw - n * hh, y + n * hw + c * hh],
+        [cx - c * hw - n * hh, y - n * hw + c * hh],
+      ]);
+    }
+  }
+  // Rasterize: a pixel is solid if it's in the rubble or inside any shape (wrapping round the layer's width).
+  const solid = new Uint8Array(TW * height);
+  for (let x = 0; x < TW; x++) for (let y = Math.floor(height - 1 - ground[x]); y < height; y++) solid[y * TW + x] = 1;
+  const inQuad = (q: Quad, x: number, y: number) => {
+    let inside = false;
+    for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+      const [xi, yi] = q[i];
+      const [xj, yj] = q[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  for (const q of shapes) {
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (const [x, y] of q) {
+      x0 = Math.min(x0, x);
+      x1 = Math.max(x1, x);
+      y0 = Math.min(y0, y);
+      y1 = Math.max(y1, y);
+    }
+    for (let y = Math.max(0, Math.floor(y0)); y <= Math.min(height - 1, Math.ceil(y1)); y++) {
+      for (let x = Math.floor(x0); x <= Math.ceil(x1); x++) if (inQuad(q, x + 0.5, y + 0.5)) solid[y * TW + (((x % TW) + TW) % TW)] = 1;
+    }
+  }
+  return canvasOf(TW, height, (d) => {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < TW; x++) {
+        if (!solid[y * TW + x]) continue;
+        const l = solid[y * TW + ((x + TW - 1) % TW)];
+        const r = solid[y * TW + ((x + 1) % TW)];
+        const c = !l ? col.lit : !r ? col.shade : col.base;
+        // A little dither in the deep of the rubble.
+        d[y * TW + x] = rgb((BAYER[(y & 3) * 4 + (x & 3)] & 7) === 0 && y > height - 6 ? col.shade : c);
+      }
+    }
+  });
+}
+
 interface Layer {
   img: HTMLCanvasElement;
   /** Parallax factor (0 = fixed to the sky, 1 = moves with the world). */
@@ -301,8 +409,27 @@ interface Layer {
 
 export class Backdrop {
   private layers: Layer[] | null = null;
+  /** Which biome's skyline (worldgen Biome): the deadland has its own. */
+  private biome = -1;
+
+  /** Show the skyline for `biome` (rebuilt only when it changes). */
+  setBiome(biome: number): void {
+    if (biome === this.biome) return;
+    this.biome = biome;
+    this.layers = null;
+  }
 
   private build(): Layer[] {
+    if (this.biome === DEADLAND) {
+      // Ash-grey ranges far off, and in front of them the monuments on the horizon, nearer and darker.
+      return [
+        { img: heavens(220), f: 0.02, base: 330, fill: '', drift: 0 },
+        { img: clouds(110, 41), f: 0.05, base: 250, fill: '', drift: 3 },
+        { img: mountains(130, 90, [260, 120, 60, 24], 11, { lit: [150, 146, 140], base: [124, 120, 118], shade: [102, 98, 100] }), f: 0.12, base: 400, fill: 'rgb(124,120,118)', drift: 0 },
+        { img: thorns(190, 61, 1.8, { lit: [138, 136, 130], base: [106, 104, 100], shade: [80, 78, 78] }), f: 0.25, base: 425, fill: 'rgb(106,104,100)', drift: 0 },
+        { img: thorns(240, 83, 2.8, { lit: [120, 118, 112], base: [80, 78, 76], shade: [56, 54, 56] }), f: 0.42, base: 455, fill: 'rgb(80,78,76)', drift: 0 },
+      ];
+    }
     return [
       { img: heavens(220), f: 0.02, base: 330, fill: '', drift: 0 },
       { img: clouds(110, 41), f: 0.05, base: 250, fill: '', drift: 3 },

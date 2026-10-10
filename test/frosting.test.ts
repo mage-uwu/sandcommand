@@ -5,14 +5,17 @@ import { FloraKind, GEYSER_TOXIC_TICKS, geyserCloud } from '../src/shared/frosti
 import { Mat } from '../src/shared/materials.ts';
 import { GF_DEAD, GF_RUMBLE, GF_TOXIC } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { MapKind, generateWorld, lastCraters, lastFlora, lastGemCaverns, lastGeysers } from '../src/shared/worldgen.ts';
+import { Biome, MapKind, biomeOf, cavesOf, generateWorld, lastCraters, lastFlora, lastGemCaverns, lastGeysers } from '../src/shared/worldgen.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { deliverAll } from './helpers.ts';
 
 describe('frosting: the ground', () => {
   const t = new Terrain();
-  generateWorld(t, 1, MapKind.Plain);
+  // A marslike cave map (the deadland's crust has its own frosting, below).
+  let seed = 1;
+  while (biomeOf(seed, MapKind.Plain) === Biome.Deadland || !cavesOf(seed, MapKind.Plain)) seed++;
+  generateWorld(t, seed, MapKind.Plain);
   const craters = [...lastCraters];
   const caverns = [...lastGemCaverns];
   const geysers = [...lastGeysers];

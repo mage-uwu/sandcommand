@@ -3,7 +3,7 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { BIOME_NAMES } from '../shared/worldgen.ts';
+import { BIOME_NAMES, Biome } from '../shared/worldgen.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
@@ -21,7 +21,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
+import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor, cementColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
 import { drawDecor } from './decor-art.ts';
@@ -54,8 +54,17 @@ for (let m = 0; m < MAT_COLOR.length; m++) {
  * The sky of an alien world, Mars-like: a dark violet zenith, dusty rose,
  * then butterscotch haze down to the horizon (world y 500 at the bottom).
  */
-function skyGradient(ctx: CanvasRenderingContext2D, offY: number, z: number): CanvasGradient {
+function skyGradient(ctx: CanvasRenderingContext2D, offY: number, z: number, biome = 0): CanvasGradient {
   const g = ctx.createLinearGradient(0, offY + -300 * z, 0, offY + 500 * z);
+  if (biome === Biome.Deadland) {
+    // The deadland's sky: soot-dark overhead, an ashen haze down to a sickly olive horizon.
+    g.addColorStop(0, '#16141a');
+    g.addColorStop(0.4, '#3e3c40');
+    g.addColorStop(0.72, '#6e6a5e');
+    g.addColorStop(0.9, '#8e8a70');
+    g.addColorStop(1, '#a29c7c');
+    return g;
+  }
   g.addColorStop(0, '#1e1030');
   g.addColorStop(0.4, '#6a3f5c');
   g.addColorStop(0.72, '#c27a5a');
@@ -85,6 +94,37 @@ function crystalColor(t: Terrain, x: number, y: number): number {
     b = 168;
   }
   if ((h & 15) === 0) r = g = b = 255;
+  return (255 << 24) | (b << 16) | (g << 8) | r;
+}
+
+/**
+ * Trinitite: the deadland's green glass, fused out of the sand by the old
+ * fires. Glossy: a pale sheen on its upper faces, deep bottle green under,
+ * bubbles and dark flaws through it, and a glint here and there.
+ */
+function glassColor(t: Terrain, x: number, y: number): number {
+  const h = hash2(x, y);
+  let r = 74;
+  let g = 156;
+  let b = 84;
+  if (t.get(x, y - 1) !== Mat.Glass || t.get(x - 1, y) !== Mat.Glass) {
+    r = 150;
+    g = 214;
+    b = 140;
+  } else if (t.get(x, y + 1) !== Mat.Glass) {
+    r = 36;
+    g = 92;
+    b = 50;
+  } else if ((h & 31) < 3) {
+    r = 40;
+    g = 100;
+    b = 56; // a flaw
+  } else if ((h & 31) === 5) {
+    r = 120;
+    g = 196;
+    b = 128; // a bubble
+  }
+  if ((h & 63) === 7) r = g = b = 230;
   return (255 << 24) | (b << 16) | (g << 8) | r;
 }
 
@@ -228,6 +268,8 @@ export class Renderer {
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else if (m === Mat.Dripstone) c = dripColor(t, wx, wy);
         else if (m === Mat.RareEarth) c = crystalColor(t, wx, wy);
+        else if (m === Mat.Glass) c = glassColor(t, wx, wy);
+        else if (m === Mat.Cement) c = cementColor(t, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);
@@ -371,9 +413,10 @@ export class Renderer {
 
     // Background: an alien sky, fading into deep cave dark by world depth.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = skyGradient(ctx, offY, z);
+    ctx.fillStyle = skyGradient(ctx, offY, z, game.biome);
     ctx.fillRect(0, 0, W, H);
-    // Clouds, blue ranges and mesas in parallax over the sky.
+    // Clouds, blue ranges and mesas (the deadland: its monuments) in parallax over the sky.
+    this.backdrop.setBiome(game.biome);
     this.backdrop.draw(ctx, W, H, (W / 2 - offX) / z, (H / 2 - offY) / z, z, now);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -1124,6 +1167,7 @@ export class Renderer {
     ctx.fillStyle = skyGradient(ctx, offY, z);
     ctx.fillRect(0, 0, W, H);
     const now = performance.now();
+    this.backdrop.setBiome(0);
     this.backdrop.draw(ctx, W, H, 2048 + now / 60, camY, z, now);
   }
 

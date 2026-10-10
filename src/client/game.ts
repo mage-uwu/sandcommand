@@ -1334,9 +1334,29 @@ export class Game implements FrameHandler {
     const oy = Math.floor(ci / CHUNKS_X) << CHUNK_SHIFT;
     for (let x = ox; x < ox + CHUNK; x++) {
       if (this.skyline[x] <= oy) continue;
-      const y = this.terrain.surfaceY(x, oy);
-      if (y < oy + CHUNK && y < this.skyline[x]) this.skyline[x] = y;
+      const y = this.groundFrom(x, oy);
+      if (y < oy + CHUNK + 64 && y < this.skyline[x]) this.skyline[x] = y;
     }
+  }
+
+  /**
+   * The ground's top in column x, from `from` down: the first solid cell,
+   * except that a monument's cement standing over open air (a caltrop's arm,
+   * a slab's overhang) doesn't count, so the air under it shows the sky, not
+   * a cave's dark.
+   */
+  private groundFrom(x: number, from: number): number {
+    const t = this.terrain;
+    let y = t.surfaceY(x, from);
+    for (let k = 0; k < 4 && y < WORLD_H - 12 && t.get(x, y) === Mat.Cement; k++) {
+      // A monument is pure cement down to the air under it; the crust's
+      // cement pavement has char and glass beneath, so it stays ground.
+      let yy = y;
+      while (yy < WORLD_H - 12 && yy - y < 360 && t.get(x, yy) === Mat.Cement) yy++;
+      if (yy - y >= 360 || yy >= WORLD_H - 12 || t.isSolid(x, yy)) break;
+      y = t.surfaceY(x, yy);
+    }
+    return y;
   }
 
   projSpawn(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void {

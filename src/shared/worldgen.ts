@@ -3,11 +3,12 @@ import { MAT_LOOSE, Mat, isSoil } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { Backdrop, type Complex, markBox, placeStructures } from './structures.ts';
-import { fortifyComplexes, fortifyGround, lastWorks } from './fortifications.ts';
+import { clearWorks, fortifyComplexes, fortifyGround, lastWorks } from './fortifications.ts';
 import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 import { placeRareEarth } from './rare-earth.ts';
+import { type Monument, crustCell, crustDepth, placeMonuments, placeRuins } from './deadland.ts';
 import { type Crater, type Flora, type GemCavern, type GeyserSite, placeCraters, placeFlora, placeGemCaverns, placeGeysers, relineCraters } from './frosting.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
@@ -25,20 +26,24 @@ export let lastSiege: SiegeMap | null = null;
  * Regicide's; never the labyrinth (it's underground already).
  */
 export function cavesOf(seed: number, kind: number): boolean {
-  if (kind === MapKind.Dungeon) return false;
+  if (kind === MapKind.Dungeon || biomeOf(seed, kind) === Biome.Deadland) return false; // (the crust is solid debris)
   return hash2(seed & 0xffff, seed >>> 16, 0xca7e) % 100 < 40;
 }
 
 /**
- * Biomes: the lie of the land, picked per map from its seed.
+ * Biomes of TABAR, picked per map from its seed. Four are **marslike** (the
+ * base of everything: rust soil over basalt, and the deep of every map):
  * - Dunes: rolling desert, a thick sand crust (the original).
  * - Canyons: a high, flat rock plateau split by deep ravines, layered walls,
  *   sandy riverbeds, natural rock bridges over some of them.
  * - Highlands: steep ridged mountains, rock near the surface, snow on the peaks.
  * - Meadows: gentle green hills, thin sand, grass nearly everywhere.
+ * And the **deadland** (deadland.ts): marslike deep down, but under a thick
+ * crust of the Progenitors' ruin (cement, char, trinitite glass, gravel,
+ * ash), their colossal monuments standing over it.
  */
-export const Biome = { Dunes: 0, Canyons: 1, Highlands: 2, Meadows: 3 } as const;
-export const BIOME_NAMES = ['Dunes', 'Canyons', 'Highlands', 'Meadows'] as const;
+export const Biome = { Dunes: 0, Canyons: 1, Highlands: 2, Meadows: 3, Deadland: 4 } as const;
+export const BIOME_NAMES = ['Marslike dunes', 'Marslike canyons', 'Marslike highlands', 'Marslike meadows', 'Deadland'] as const;
 /** The biome of the most recently generated map. */
 export let lastBiome: number = Biome.Dunes;
 /** The most recently generated map's frosting (frosting.ts): craters, gem caverns, geysers, and where the flora grows. */
@@ -46,12 +51,19 @@ export let lastCraters: Crater[] = [];
 export let lastGemCaverns: GemCavern[] = [];
 export let lastGeysers: GeyserSite[] = [];
 export let lastFlora: Flora[] = [];
+/** The deadland's monuments on the most recent map (none elsewhere). */
+export let lastMonuments: Monument[] = [];
 
 /** Which biome a map gets: any for an ordinary map; fortresses want gentle ground; the labyrinth is under a desert. */
 export function biomeOf(seed: number, kind: number): number {
   const r = (hash2(seed & 0xffff, seed >>> 16, 0x6b10) >>> 0) / 4294967296;
   if (kind === MapKind.Dungeon) return Biome.Dunes;
+  // About one map in four (one in five of Regicide's) is deadland, by a roll of its own so the
+  // marslike maps keep their seeds; Siege's megafortress wants marslike ground.
+  const dead = (hash2(seed & 0xffff, seed >>> 16, 0xdead) >>> 0) / 4294967296;
+  if (kind === MapKind.Fortress && dead < 0.2) return Biome.Deadland;
   if (kind === MapKind.Fortress || kind === MapKind.Siege) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
+  if (dead < 0.25) return Biome.Deadland;
   return Math.min(3, Math.floor(r * 4));
 }
 
@@ -201,7 +213,7 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
     top[x] = y;
   }
   const patch = new Fbm(110, seed ^ 0x6a55, 3);
-  const cover = [0.66, 0.6, 0.52, 0.3][biome]; // grass where the patch noise is above this
+  const cover = [0.66, 0.6, 0.52, 0.3, 1][biome] ?? 1; // grass where the patch noise is above this (none in the deadland)
   const snowline = WORLD_H * 0.3;
   for (let x = 6; x < WORLD_W - 6; x++) {
     const y = top[x];
@@ -277,7 +289,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
       h = WORLD_H * 0.38 + Math.sin(x * 0.003 + p1) * 55 + Math.sin(x * 0.009 + p2) * 22 + (fbm(x, 0, 120, seed ^ 0x51, 3) - 0.5) * 30;
     } else {
       // An Extraction desert sits high (the labyrinth under it is deep) and flatter.
-      const amp = dungeon ? 0.25 : 1;
+      const amp = dungeon ? 0.25 : biome === Biome.Deadland ? 0.7 : 1;
       h =
         (dungeon ? DUNGEON_SURFACE : WORLD_H * 0.36) +
         (Math.sin(x * 0.0041 + p1) * 70 + Math.sin(x * 0.011 + p2) * 28 + Math.sin(x * 0.031 + p3) * 7 + (fbm(x, 0, 96, seed ^ 0x51, 3) - 0.5) * 60) * amp;
@@ -302,6 +314,12 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   const gold = new Fbm(14, seed ^ 0xb7, 2);
   const rock = new Fbm(48, seed ^ 0xa1, 3);
   const lenses = new Fbm(40, seed ^ 0x5a, 3);
+  // The deadland's ruin crust: how deep it lies, and its ash and grit.
+  const dead = biome === Biome.Deadland;
+  const crust = new Int32Array(WORLD_W);
+  if (dead) for (let x = 0; x < WORLD_W; x++) crust[x] = crustDepth(x, seed, (xx) => fbm(xx, 0, 260, seed ^ 0xdead, 3));
+  const ashN = new Fbm(30, seed ^ 0xa54, 2);
+  const gritN = new Fbm(18, seed ^ 0x6e17, 2);
   // The soil's varieties: ochre pockets near the surface, oxblood clay
   // deeper and in bands, dark regolith in patches and the deep.
   const soil = new Fbm(70, seed ^ 0x3d, 2);
@@ -316,7 +334,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
         // most cells cost one or two noise lookups:
         // caves (widening with depth) > gold veins > rock > buried sand
         // lenses (loose pockets that cave in when undercut) > sand / dirt.
-        if (depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
+        if (dead && depth < crust[x]) v = crustCell(x, y, depth, crust[x], seed, ashN.at(x, y), gritN.at(x, y));
+        else if (depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
         else if (depth > 50 && gold.at(x, y) > 0.8 - Math.min(depth, 500) / 6000) v = Mat.Gold;
         else if (depth > (rockBias ? 2 : 6) && rock.at(x, y) > 0.66 - rockBias) v = Mat.Rock;
         else if (biome === Biome.Canyons && surf > canyonFloor && depth < 6) v = Mat.Sand; // a sandy riverbed
@@ -353,6 +372,11 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     fortifyComplexes(m, lastComplexes, seed);
     if (backdrop) for (const c of lastComplexes) if (c.strongroom) markBox(backdrop, c.strongroom.x0, c.strongroom.y0, c.strongroom.x1, c.strongroom.y1, Backdrop.Steel);
     lastDungeon = null;
+  } else if (dead) {
+    // The deadland: no bunkers at all. The Progenitors' ruins instead (Regicide's
+    // fortresses among them), and the caltrops are the fortifications.
+    lastComplexes = placeRuins(m, seed, mapKind === MapKind.Fortress, backdrop);
+    lastDungeon = null;
   } else {
     const extraTowers = biome === Biome.Highlands ? 5 : biome === Biome.Canyons ? 2 : 0;
     lastComplexes = placeStructures(m, heights, seed, mapKind === MapKind.Fortress, backdrop, extraTowers);
@@ -362,9 +386,11 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     lastDungeon = null;
   }
   // Cave maps: the highway under it all, its citadels, and the shafts down to it from every bunker.
+  // (Not under the deadland: its citadels would be bunkers.)
   lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
-  // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks).
-  if (!dungeon) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
+  // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks); none round the ruins.
+  if (!dungeon && !dead) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
+  else clearWorks();
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   // The frosting: impact craters, gem caverns and geyser vents (not over the
   // labyrinth), clear of every bunker and the siege works.
@@ -372,9 +398,12 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   if (lastSiege) spans.push({ x0: lastSiege.lz[0], x1: lastSiege.lz[1] });
   // (And the works dug in round the bunkers: trenches, teeth, sandbags, iron blocks.)
   if (!dungeon) for (const list of [lastWorks.trenches, lastWorks.teeth, lastWorks.sandbags, lastWorks.cubes]) for (const w of list) spans.push({ x0: w.x0, x1: w.x1 });
-  lastCraters = dungeon ? [] : placeCraters(m, seed, spans);
+  // The deadland's monuments, clear of the bunkers (and the frosting clear of them).
+  lastMonuments = dead ? placeMonuments(m, seed, spans) : [];
+  const ground = [...spans, ...lastMonuments.map((o) => ({ x0: o.x - 80, x1: o.x + 80 }))];
+  lastCraters = dungeon ? [] : placeCraters(m, seed, ground, dead);
   lastGemCaverns = dungeon ? [] : placeGemCaverns(m, seed, spans);
-  lastGeysers = dungeon ? [] : placeGeysers(m, seed, spans, lastCraters);
+  lastGeysers = dungeon ? [] : placeGeysers(m, seed, ground, lastCraters);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);
   // Rare earth crystals, deep in the natural ground.
@@ -382,7 +411,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   frost(m, biome, seed);
   relineCraters(m, lastCraters);
   // (The flora last: it grows on the ground as it ends up, frosting and all.)
-  lastFlora = placeFlora(m, seed, biome, lastGeysers, spans);
+  lastFlora = placeFlora(m, seed, biome, lastGeysers, ground);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the
   // moment anything touched it, so give it a cohesive dirt crust instead.

@@ -13,7 +13,7 @@ import { deliverAll } from './helpers.ts';
 
 describe('rare earth', () => {
   it('is a full material: named, coloured, and stays itself when knocked loose', () => {
-    expect(Mat.RareEarth).toBe(MAT_COUNT - 1);
+    expect(Mat.RareEarth).toBeLessThan(MAT_COUNT);
     expect(MAT_NAME[Mat.RareEarth]).toBe('rare earth');
     expect(MAT_COLOR.length).toBe(MAT_COUNT);
     expect(rubbleOf(Mat.RareEarth)).toBe(Mat.RareEarth);

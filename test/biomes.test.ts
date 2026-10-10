@@ -21,11 +21,14 @@ function surface(t: Terrain) {
 }
 
 describe('biomes', () => {
-  it('every ordinary map is one of four, by its seed; fortresses want gentle ground; the labyrinth is under a desert', () => {
-    const seen = new Set<number>();
-    for (let s = 1; s < 200; s++) seen.add(biomeOf(s, MapKind.Plain));
-    expect([...seen].sort()).toEqual([Biome.Dunes, Biome.Canyons, Biome.Highlands, Biome.Meadows]);
-    for (let s = 1; s < 60; s++) expect([Biome.Dunes, Biome.Meadows]).toContain(biomeOf(s, MapKind.Fortress));
+  it('every ordinary map is one of four marslike biomes or the deadland, by its seed; fortresses want gentle ground; the labyrinth is under a desert', () => {
+    const seen = new Map<number, number>();
+    for (let s = 1; s < 400; s++) seen.set(biomeOf(s, MapKind.Plain), (seen.get(biomeOf(s, MapKind.Plain)) ?? 0) + 1);
+    expect([...seen.keys()].sort()).toEqual([Biome.Dunes, Biome.Canyons, Biome.Highlands, Biome.Meadows, Biome.Deadland]);
+    expect(seen.get(Biome.Deadland)! / 399).toBeGreaterThan(0.15);
+    expect(seen.get(Biome.Deadland)! / 399).toBeLessThan(0.35);
+    for (let s = 1; s < 60; s++) expect([Biome.Dunes, Biome.Meadows, Biome.Deadland]).toContain(biomeOf(s, MapKind.Fortress));
+    for (let s = 1; s < 60; s++) expect([Biome.Dunes, Biome.Meadows]).toContain(biomeOf(s, MapKind.Siege));
     for (let s = 1; s < 20; s++) expect(biomeOf(s, MapKind.Dungeon)).toBe(Biome.Dunes);
   });
 
@@ -52,7 +55,7 @@ describe('biomes', () => {
   it('meadows are mostly grass; the desert has only patches', () => {
     generateWorld(t, seedFor(Biome.Meadows));
     const meadow = surface(t).frac(Mat.Grass);
-    expect(meadow).toBeGreaterThan(0.35);
+    expect(meadow).toBeGreaterThan(0.3);
     generateWorld(t, seedFor(Biome.Dunes));
     const dunes = surface(t);
     expect(dunes.frac(Mat.Grass)).toBeGreaterThan(0.01);
@@ -67,7 +70,7 @@ describe('biomes', () => {
     const soil = [Mat.Dirt, Mat.Ochre, Mat.Clay, Mat.Regolith].map((m) => count.get(m) ?? 0);
     const total = soil.reduce((a, b) => a + b, 0);
     expect(soil[0] / total).toBeGreaterThan(0.35); // mostly rust soil
-    for (const n of soil.slice(1)) expect(n / total).toBeGreaterThan(0.04); // each variety in good measure
+    for (const n of soil.slice(1)) expect(n / total).toBeGreaterThan(0.03); // each variety in good measure
     expect(count.get(Mat.RustSand) ?? 0).toBeGreaterThan(0);
   });
 

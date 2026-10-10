@@ -70,6 +70,7 @@ export function placeDecor(t: Terrain, complexes: readonly Complex[], seed: numb
   const rng = new Rng(seed ^ 0xdec0);
   const out: Decor[] = [];
   for (const c of complexes) {
+    if (c.ruin) continue; // (the Progenitors' ruins: bare stone, nothing modern)
     const len = c.heights.length;
     const room = (x0: number, x1: number, top: number, floor: number, label: string) => furnish(t, rng, out, x0, x1, top, floor, label, c.fortress?.team);
     if (c.tower) {

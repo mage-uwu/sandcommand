@@ -5,7 +5,7 @@ import { ClassId } from '../src/shared/body.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { GameMode, Phase, Team } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { MapKind, generateWorld, lastComplexes } from '../src/shared/worldgen.ts';
+import { Biome, MapKind, biomeOf, generateWorld, lastComplexes } from '../src/shared/worldgen.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 
@@ -22,8 +22,10 @@ const regicide = (seed: number, n: number) => {
 };
 
 describe('Regicide', () => {
-  it('maps always get two big fortresses, red west and green east, each with a steel vault', () => {
-    for (const seed of [1, 2, 3, 4, 5]) {
+  it('marslike maps always get two big fortresses, red west and green east, each with a steel vault', () => {
+    const seeds = Array.from({ length: 12 }, (_, i) => i + 1).filter((s) => biomeOf(s, MapKind.Fortress) !== Biome.Deadland).slice(0, 5);
+    expect(seeds.length).toBe(5);
+    for (const seed of seeds) {
       const t = new Terrain();
       generateWorld(t, seed, true);
       const forts = lastComplexes.filter((c) => c.fortress);

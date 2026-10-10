@@ -56,6 +56,11 @@ export interface Works {
 /** What the last fortifyBunkers built in the open (tests and bots). */
 export let lastWorks: Works = { teeth: [], sandbags: [], trenches: [], cubes: [] };
 
+/** A map without works (the labyrinth, the deadland): forget the last map's. */
+export function clearWorks(): void {
+  lastWorks = { teeth: [], sandbags: [], trenches: [], cubes: [] };
+}
+
 /** Pig-iron lining of a strongroom. */
 export const IRON = 4 * SCALE;
 /** A strongroom's height inside: a storey and a half. */

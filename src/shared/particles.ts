@@ -766,6 +766,10 @@ export function dropToSupport(t: Terrain, x: number, y: number, mat: number, dep
 /** Material a destroyed cell turns into when it lands again. */
 export function rubbleOf(mat: number): number {
   if (mat === Mat.Sand || mat === Mat.RustSand || mat === Mat.Gold || mat === Mat.RareEarth || mat === Mat.Metal) return mat;
+  // Deadland: gravel and ash fall as themselves; shattered glass as gravel, char as ash.
+  if (mat === Mat.Gravel || mat === Mat.Ash) return mat;
+  if (mat === Mat.Glass) return Mat.Gravel;
+  if (mat === Mat.Char) return Mat.Ash;
   return Mat.Rubble;
 }
 

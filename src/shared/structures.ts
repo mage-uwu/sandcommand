@@ -55,6 +55,8 @@ export interface Complex {
   strongroom?: Box;
   /** Siege: the team whose outpost this is (its doors are theirs). */
   owner?: number;
+  /** The deadland's Progenitor ruins (deadland.ts): a portal, a tunnel and chambers, not modules. */
+  ruin?: boolean;
 }
 
 export interface Box {

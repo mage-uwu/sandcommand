@@ -34,7 +34,8 @@ describe('bunker complexes', () => {
       let built = 0;
       for (const c of lastComplexes) if (!c.tower) built += c.x1 - c.x0;
       const cover = built / (WORLD_W - 192);
-      if (lastBiome === Biome.Dunes || lastBiome === Biome.Meadows) {
+      if (lastBiome === Biome.Deadland) expect(lastComplexes.every((c) => c.ruin)).toBe(true); // ruins, never bunkers
+      else if (lastBiome === Biome.Dunes || lastBiome === Biome.Meadows) {
         seen.push(cover);
         expect(cover).toBeGreaterThanOrEqual(0.08);
         expect(cover).toBeLessThanOrEqual(0.6);
@@ -107,7 +108,7 @@ describe('bunker complexes', () => {
     for (let seed = 100; seed < 112; seed++) {
       generateWorld(t, seed);
       for (const c of lastComplexes) {
-        if (c.tower) continue;
+        if (c.tower || c.ruin) continue;
         styles.add(c.style!);
         for (const h of c.halls ?? []) {
           halls++;
