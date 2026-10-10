@@ -70,7 +70,7 @@ export const hitH = (t: Kinded) => (isSpider(t) ? SPIDER_BELLY : designH(t));
 export const TANK_HP = 75 * ACTOR_MAX_HP;
 /** Hits below this penetration energy only scratch the armour. */
 export const TANK_INTEGRITY = 120;
-export const MAX_TANKS = 12;
+export const MAX_TANKS = 16; // (a rider's seat byte holds the slot in four bits)
 export const TANK_MAX_FUEL = 100;
 const RUN = 80;
 const GROUND_ACCEL = 640;

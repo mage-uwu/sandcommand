@@ -1,3 +1,4 @@
+import { GameMode } from '../shared/protocol.ts';
 import { DurableObject } from 'cloudflare:workers';
 import { Reader, Writer } from '../shared/codec.ts';
 import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
@@ -60,7 +61,8 @@ export class GameRoom extends DurableObject<Env> {
     (server as unknown as { binaryType: string }).binaryType = 'arraybuffer';
 
     // Last Man Standing, with bots in every slot no human has.
-    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS });
+    // The siege room plays nothing but Siege; any other, the usual rotation.
+    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : undefined });
     const world = this.world;
     const player = world.addPlayer(name, {
       send(data) {

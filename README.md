@@ -341,8 +341,8 @@ and the last team with a clone standing wins. The countdown banner says
 which mode is coming.
 
 **The rotation** (`DEFAULT_ROTATION` in `src/server/world.ts`; `rotation` in
-the `World` options): Regicide → PvP → Last Team Standing, twice over, then
-an Extraction, and round again. Last Man Standing (one life each, every
+the `World` options): Regicide → PvP → Last Team Standing → Siege, then
+Regicide → PvP → Last Team Standing → Extraction, and round again. Last Man Standing (one life each, every
 clone for itself) is out of the rotation, though a room can still be given
 it.
 
@@ -502,6 +502,72 @@ A team mode, and a favourite of the rotation (see above).
 - **Bots.** About half the bots assault: they go straight for the enemy king
   and dig through whatever is in the way. The rest fight whoever is
   nearest. A bot king holds his vault and shoots whatever comes into view.
+
+## Siege
+
+Red holds a fortress for ten minutes and green tries to take it. Two
+teams play, and the map is built for the mode (`MapKind.Siege`,
+`src/shared/siege.ts`). It's in the rotation. **`?room=siege`** joins a
+second match that plays nothing but Siege.
+
+**The map.** The fortress stands at one end of the map (which end comes
+from the seed).
+- **The fortress.** It is twelve modules long, up to four storeys high,
+  with three basements. The king's vault is at the bottom of its deepest
+  basement.
+- **Doors and slabs.** It has steel doors at its gates, and inside it at
+  every third ground-floor doorway, so it can be held room by room. Slabs
+  are poured on its walls.
+- **Outposts.** Three fortified outposts and two sniper towers belong to
+  the defenders. They are strung out toward the attackers' end, and their
+  doors are red's.
+- **Works.** On the side facing the attackers, the fortress and every
+  outpost have works in depth: trench lines, row after row of dragon's
+  teeth, and iron blocks.
+- **Level ground.** Their sites are levelled before the terrain is laid,
+  easing back into the land around them.
+
+**The landing zone.** It is a 400-cell strip near the far end, about
+1800 cells from the fortress's walls, shown as a green band on the
+minimap. Every attacker comes down there by drop rocket, so every attacker
+has the whole gap to close.
+
+**Defenders (red).**
+- **The king.** He is a crowned heavy in the vault, as in Regicide.
+- **Soldiers.** They start at their posts in the fortress and the outposts.
+- **Respawns.** A dead soldier is back in 10 s, landing at the fortress.
+  Their respawns are unlimited.
+
+**Attackers (green).**
+- **Lives.** The team shares **300 lives**. Every death spends one, and a
+  dead attacker is back in 6 s while any lives are left. With none left,
+  the fallen stay down.
+
+**Armour.** Both sides start with armour in place, so the mode is brutal
+from the first second.
+- **Defenders.** Three empty tanks and four watchdogs, each watchdog a
+  soldier's. They stand in front of the gate and among the outposts.
+- **Attackers.** Three tanks and four watchdogs, waiting in the landing
+  zone.
+
+`MAX_TANKS` is 16 to make room for both sides' armour and some radio calls.
+
+**Winning.**
+- **Green wins** the moment the king dies.
+- **Red wins** if he is still alive after ten minutes, or once the
+  attackers are out of lives with no clone still fighting.
+- **Abdication.** A king who leaves hands the crown to a living defender.
+
+**Bots.**
+- **Attackers.** About half assault the king directly. The rest fight their
+  way in.
+- **Defenders.** They hold their ground: most stay in the fortress and the
+  ground in front of it, and the bolder ones go out as far as the last
+  outpost.
+- **The king.** He holds his vault.
+
+In a headless 32-bot siege the attackers reached the walls and spent about
+155 lives, the armour was wrecked inside two minutes, and the fortress held.
 
 ## Extraction
 

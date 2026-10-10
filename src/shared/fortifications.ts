@@ -72,7 +72,7 @@ export const STEP_D = 9;
 /** Thickness of a reinforcing slab. */
 const BUTTRESS = 6 * SCALE;
 
-const teamOf = (c: Complex) => (c.fortress ? c.fortress.team : (c.x0 + c.x1) / 2 < WORLD_W / 2 ? 0 : 1);
+const teamOf = (c: Complex) => c.owner ?? (c.fortress ? c.fortress.team : (c.x0 + c.x1) / 2 < WORLD_W / 2 ? 0 : 1);
 
 /**
  * The bunkers' own works (doors, slabs, strongrooms), before their back walls
@@ -84,7 +84,7 @@ export function fortifyComplexes(m: Uint8Array, complexes: Complex[], seed: numb
     if (c.tower) continue;
     const len = c.heights.length;
     const team = teamOf(c);
-    const fort = !!c.fortress || c.style === Style.Fortified;
+    const fort = !!c.fortress || c.style === Style.Fortified || c.owner !== undefined;
     const faced = fort ? 2 * SCALE : 0; // (steel facing already on the outer walls)
     c.doors = [];
     for (const west of [true, false]) {
@@ -107,7 +107,17 @@ export function fortifyComplexes(m: Uint8Array, complexes: Complex[], seed: numb
         c.doors.push(d);
       }
     }
-    if (!c.fortress && len >= 2 && rng.next() < 0.4) strongroom(m, c, team, rng);
+    // A great fortress (Siege's) has doors inside too: every third ground-floor doorway, so it can be held room by room.
+    if (c.fortress && len >= 10) {
+      for (let b = 3; b < len; b += 3) {
+        const bx = c.x0 + b * MOD_W;
+        if (m[(c.floor - 2) * WORLD_W + bx + (WALL >> 1)] !== Mat.Air || m[(c.floor - DOOR_H + 1) * WORLD_W + bx + (WALL >> 1)] !== Mat.Air) continue;
+        const d = { x0: bx, y0: c.floor - DOOR_H, x1: bx + WALL, y1: c.floor, team };
+        fill(m, d.x0, d.y0, d.x1, d.y1, Mat.Door);
+        c.doors.push(d);
+      }
+    }
+    if (!c.fortress && c.owner === undefined && len >= 2 && rng.next() < 0.4) strongroom(m, c, team, rng);
   }
 }
 
@@ -175,9 +185,11 @@ function surface(m: Uint8Array): Int32Array {
  * The works in the open ground around the bunkers (after the sniper towers):
  * sandbags outside the doors and on the roofs, and beyond them trenches,
  * dragon's teeth and iron blocks, each only where the ground is natural and
- * level enough.
+ * level enough. On a siege map (`siegeSide`: the fortress's end) the
+ * defenders' fortress and outposts get them in depth on the side the
+ * attackers come from: trench lines, rows of teeth, one after another.
  */
-export function fortifyGround(m: Uint8Array, complexes: Complex[], seed: number): Works {
+export function fortifyGround(m: Uint8Array, complexes: Complex[], seed: number, siegeSide?: number): Works {
   const rng = new Rng(seed ^ 0x7e3c4);
   const works: Works = { teeth: [], sandbags: [], trenches: [], cubes: [] };
   const top = surface(m);
@@ -225,8 +237,9 @@ export function fortifyGround(m: Uint8Array, complexes: Complex[], seed: number)
       }
       // Further out: a trench, a row of dragon's teeth, an iron block.
       let at = end + dir * (70 + rng.int(40));
-      for (const kind of [0, 1, 2]) {
-        if (rng.next() > (c.fortress ? 0.95 : 0.6)) continue;
+      const front = siegeSide !== undefined && (c.fortress || c.owner !== undefined) && dir === (siegeSide === 0 ? 1 : -1);
+      for (const kind of front ? [0, 1, 0, 1, 2, 1] : [0, 1, 2]) {
+        if (rng.next() > (front ? 1 : c.fortress ? 0.95 : 0.6)) continue;
         const n = 3 + rng.int(3); // teeth in the row
         const s = 16 + rng.int(4) * 2; // an iron block's size
         const len = kind === 0 ? 44 + rng.int(32) : kind === 1 ? n * TOOTH_W + (n - 1) * TOOTH_GAP : s;

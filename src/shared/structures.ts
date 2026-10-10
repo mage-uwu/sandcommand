@@ -53,6 +53,8 @@ export interface Complex {
   doors?: { x0: number; y0: number; x1: number; y1: number; team: number }[];
   /** The pig-iron strongroom under it, if it has one (also among its vaults). */
   strongroom?: Box;
+  /** Siege: the team whose outpost this is (its doors are theirs). */
+  owner?: number;
 }
 
 export interface Box {
@@ -187,7 +189,7 @@ export function markBox(bd: Uint8Array, x0: number, y0: number, x1: number, y1: 
  * both sides of every storey, holes up through each floor (alternating
  * sides), and an open roof behind battlements, where a sniper rifle waits.
  */
-function tower(m: Uint8Array, heights: Int32Array, cx: number, rng: Rng, rugged = false): Complex | null {
+export function tower(m: Uint8Array, heights: Int32Array, cx: number, rng: Rng, rugged = false): Complex | null {
   const x0 = cx - TOWER_W / 2;
   const x1 = x0 + TOWER_W;
   const hs: number[] = [];
@@ -265,7 +267,7 @@ export function fill(m: Uint8Array, x0: number, y0: number, x1: number, y1: numb
 }
 
 /** A fixed layout for a fortress (instead of a random one). */
-interface FortPlan {
+export interface FortPlan {
   storeys: number[];
   basements: number[];
   vault: number; // module of the king's vault (it has the deepest basement)

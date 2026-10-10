@@ -2580,7 +2580,15 @@ export class Renderer {
     }
     // Kings stand out: a gold square around their dot (radar blips included).
     const rs0 = game.roundState;
-    if (rs0 && rs0.mode === GameMode.Regicide) {
+    // Siege: the attackers' landing zone, a green band along the bottom.
+    if (rs0 && rs0.mode === GameMode.Siege && game.siege) {
+      const [l0, l1] = game.siege.lz;
+      ctx.fillStyle = 'rgba(80,220,110,0.22)';
+      ctx.fillRect(mx + l0 * k, my, (l1 - l0) * k, WORLD_H * k);
+      ctx.fillStyle = 'rgba(120,255,150,0.8)';
+      ctx.fillRect(mx + l0 * k, my + WORLD_H * k - 2 * s, (l1 - l0) * k, 2 * s);
+    }
+    if (rs0 && (rs0.mode === GameMode.Regicide || rs0.mode === GameMode.Siege)) {
       ctx.strokeStyle = '#ffd34a';
       ctx.lineWidth = Math.max(1, s);
       for (const bl of game.radar) if (game.isKing(bl.id)) ctx.strokeRect(mx + bl.x * k - 3 * s, my + bl.y * k - 3 * s, 6 * s, 6 * s);
@@ -2763,14 +2771,17 @@ export class Renderer {
     const regicide = rs.mode === GameMode.Regicide;
     const extraction = rs.mode === GameMode.Extraction;
     const pvp = rs.mode === GameMode.Pvp;
-    const teams = rs.mode === GameMode.Lts || regicide || extraction;
+    const siege = rs.mode === GameMode.Siege;
+    const teams = rs.mode === GameMode.Lts || regicide || extraction || siege;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
+    if (rs.phase === Phase.Waiting) big(siege ? 'SIEGE' : extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
         // (The mode is the headline; the map's biome goes with the hints.)
-        (extraction
+        (siege
+          ? 'siege · red holds the fortress and its king for 10 minutes · green has 300 lives to kill him'
+          : extraction
           ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
           : regicide
           ? 'regicide · kill their king · guard yours'
@@ -2792,6 +2803,11 @@ export class Renderer {
       const mine = rs.pvp ? ` · you: ${rs.pvp.kills} kills, ${rs.pvp.deaths} deaths` : '';
       if (rs.winner === 255) big('DRAW', `nobody out-killed the rest${mine} · next wave in ${secs}`);
       else big(won ? 'YOU WIN!' : `${who} WINS`, `most kills: ${rs.pvp?.leaderKills ?? '?'}${mine} · next wave in ${secs}`, won ? '#80ff80' : '#ffd34a');
+    } else if (rs.phase === Phase.Victory && siege) {
+      const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
+      if (rs.winner === Team.Red) big('THE FORTRESS HOLDS', `${mine ? 'you kept' : 'red kept'} the king alive · wave ${rs.wave} · next wave in ${secs}`, teamCss(Team.Red));
+      else if (rs.winner === Team.Green) big('THE FORTRESS FALLS', `${mine ? 'you killed' : 'green killed'} the king · next wave in ${secs}`, teamCss(Team.Green));
+      else big('STALEMATE', `wave ${rs.wave} · next wave in ${secs}`);
     } else if (rs.phase === Phase.Victory && regicide) {
       const loser = rs.winner === Team.Red ? Team.Green : Team.Red;
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
@@ -2840,6 +2856,14 @@ export class Renderer {
           const lead = st.leader === 255 ? 'nobody yet' : `${leading ? 'YOU' : name(st.leader).replace(/^BOT /, '')} ${st.leaderKills}`;
           parts.push({ t: `LEAD ${lead}`, c: leading ? '#80ff80' : '#ffd34a' }, gap, { t: `YOU ${st.kills}K ${st.deaths}D`, c: '#e8ecef' });
         }
+      } else if (siege) {
+        modeName = 'SIEGE';
+        const id = rs.kings[Team.Red];
+        const who = id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '?').replace(/^BOT /, '');
+        const lives = rs.lives ?? 0;
+        parts.push({ t: `♛ ${who}${game.myTeam === Team.Red && id !== game.myId ? ' (yours)' : ''}`, c: teamCss(Team.Red) }, { t: '  v  ', c: '#999' }, { t: `GREEN ${lives} LIVES`, c: lives <= 30 ? '#ff8070' : teamCss(Team.Green) });
+        extra = { t: game.myTeam === Team.Red ? 'DEFEND · keep the king alive until the clock runs out' : game.myTeam === Team.Green ? 'ATTACK · cross the gap, break in, kill the king' : 'SIEGE', c: game.myTeam === Team.Green ? teamCss(Team.Green) : teamCss(Team.Red) };
+        if (game.alive && game.isKing(game.myId) && secs > 10 * 60 - 5) big('YOU ARE KING', 'hold the vault · ten minutes · if you fall, the fortress falls', teamCss(Team.Red));
       } else if (regicide) {
         modeName = 'REGICIDE';
         const king = (t: number) => {
@@ -2860,7 +2884,7 @@ export class Renderer {
         // (How we died leads: who, with what; or what happened.)
         const cause = game.deathCause ? `${game.deathCause} · ` : '';
         if (rs.out) big('FRAGGED', `${cause}out for this wave · ${watching}`, '#ff4d3d');
-        else if ((regicide || extraction || pvp) && rs.inWave) {
+        else if ((regicide || extraction || pvp || siege) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           big('FRAGGED', back > 0 ? `${cause}redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · ${watching}` : `${cause}drop rocket inbound · ${watching}`, '#ff4d3d');
         }

@@ -4,6 +4,7 @@ import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { Backdrop, type Complex, markBox, placeStructures } from './structures.ts';
 import { fortifyComplexes, fortifyGround } from './fortifications.ts';
+import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 
@@ -13,6 +14,8 @@ export let lastComplexes: Complex[] = [];
 export let lastDungeon: Dungeon | null = null;
 /** The cave network of the most recently generated map, if it is a cave map. */
 export let lastCaves: CaveNet | null = null;
+/** The last siege map's layout (its fortress's end, outposts, landing zone, vehicle spots), or null. */
+export let lastSiege: SiegeMap | null = null;
 
 /**
  * Is this a cave map (caves.ts: a tunnel highway under the bunkers, with
@@ -41,7 +44,7 @@ export let lastBiome: number = Biome.Dunes;
 export function biomeOf(seed: number, kind: number): number {
   const r = (hash2(seed & 0xffff, seed >>> 16, 0x6b10) >>> 0) / 4294967296;
   if (kind === MapKind.Dungeon) return Biome.Dunes;
-  if (kind === MapKind.Fortress) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
+  if (kind === MapKind.Fortress || kind === MapKind.Siege) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
   return Math.min(3, Math.floor(r * 4));
 }
 
@@ -50,7 +53,28 @@ export const MapKind = {
   Plain: 0,
   Fortress: 1,
   Dungeon: 2,
+  /** Siege: one massive fortress and its outposts at one end, the attackers' landing zone at the other (siege.ts). */
+  Siege: 3,
 } as const;
+
+/** Level each span to its median height (by `k`), easing back into the land over 160 cells either side. */
+function levelSites(heights: Int32Array, sites: { x0: number; x1: number; k: number }[]): void {
+  const EASE = 160;
+  for (const st of sites) {
+    const hs: number[] = [];
+    for (let x = Math.max(0, st.x0); x < Math.min(WORLD_W, st.x1); x += 4) hs.push(heights[x]);
+    if (!hs.length) continue;
+    hs.sort((a, b) => a - b);
+    // (Deep enough under the sky for a four-storey keep.)
+    const level = Math.max(260, hs[hs.length >> 1]);
+    for (let x = Math.max(0, st.x0 - EASE); x < Math.min(WORLD_W, st.x1 + EASE); x++) {
+      const d = x < st.x0 ? st.x0 - x : x >= st.x1 ? x - st.x1 + 1 : 0;
+      const u = 1 - d / EASE;
+      const w = st.k * u * u * (3 - 2 * u);
+      heights[x] = Math.round(heights[x] * (1 - w) + level * w);
+    }
+  }
+}
 
 function smooth(t: number): number {
   return t * t * (3 - 2 * t);
@@ -253,6 +277,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     }
     heights[x] = Math.max(80, Math.min(WORLD_H - 70, Math.floor(h)));
   }
+  // Siege: level the fortress's site (and its outposts', towers' and the landing zone), easing into the land around.
+  if (mapKind === MapKind.Siege) levelSites(heights, siegeSites(seed));
 
   // The sand crust: thick dunes in the desert, a dusting on the meadows, none
   // up the mountains or on the plateau (one value per column).
@@ -309,9 +335,17 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   }
   // Bunker complexes on a modular grid across part of the surface.
   backdrop?.fill(0);
+  lastSiege = null;
   if (dungeon) {
     lastComplexes = [];
     lastDungeon = generateDungeon(m, heights, seed, backdrop);
+  } else if (mapKind === MapKind.Siege) {
+    const sg = placeSiege(m, heights, seed, backdrop);
+    lastComplexes = sg.complexes;
+    lastSiege = sg.map;
+    fortifyComplexes(m, lastComplexes, seed);
+    if (backdrop) for (const c of lastComplexes) if (c.strongroom) markBox(backdrop, c.strongroom.x0, c.strongroom.y0, c.strongroom.x1, c.strongroom.y1, Backdrop.Steel);
+    lastDungeon = null;
   } else {
     const extraTowers = biome === Biome.Highlands ? 5 : biome === Biome.Canyons ? 2 : 0;
     lastComplexes = placeStructures(m, heights, seed, mapKind === MapKind.Fortress, backdrop, extraTowers);
@@ -323,7 +357,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // Cave maps: the highway under it all, its citadels, and the shafts down to it from every bunker.
   lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
   // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks).
-  if (!dungeon) fortifyGround(m, lastComplexes, seed);
+  if (!dungeon) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);

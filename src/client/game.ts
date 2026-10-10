@@ -14,7 +14,8 @@ import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
+import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastSiege } from '../shared/worldgen.ts';
+import type { SiegeMap } from '../shared/siege.ts';
 import { type Relic, placeRelics } from './relics.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
@@ -267,6 +268,8 @@ export class Game implements FrameHandler {
   caves = false;
   /** Traces of whoever was here first (relics.ts): rare, cosmetic. */
   relics: Relic[] = [];
+  /** Siege: the map's layout (the fortress's end, the landing zone), or null. */
+  siege: SiegeMap | null = null;
   /** The bunkers' fittings this wave (purely for looks). */
   decor: Decor[] = [];
   /** The bunkers' steel doors this wave (their cells, and whose). */
@@ -1021,7 +1024,7 @@ export class Game implements FrameHandler {
   /** Is this player a king right now (Regicide)? */
   isKing(id: number): boolean {
     const rs = this.roundState;
-    return !!rs && rs.mode === GameMode.Regicide && (rs.phase === Phase.Live || rs.phase === Phase.Victory) && (rs.kings[0] === id || rs.kings[1] === id) && id !== 255;
+    return !!rs && (rs.mode === GameMode.Regicide || rs.mode === GameMode.Siege) && (rs.phase === Phase.Live || rs.phase === Phase.Victory) && (rs.kings[0] === id || rs.kings[1] === id) && id !== 255;
   }
 
   /** Our team this wave, Team.None if we have none. */
@@ -1042,6 +1045,7 @@ export class Game implements FrameHandler {
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
+    this.siege = lastSiege;
     this.dungeon = lastDungeon;
     this.trapSpent = new Uint8Array(32);
     this.particles.n = 0;

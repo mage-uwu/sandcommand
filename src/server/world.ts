@@ -52,6 +52,7 @@ import {
   tankW,
   tankH,
   isDog,
+  TankKind,
   isPet,
   isSpider,
   surfCapacity,
@@ -211,7 +212,8 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastSiege } from '../shared/worldgen.ts';
+import { ATTACKERS, DEFENDERS, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
 import type { CaveNet } from '../shared/caves.ts';
 import type { Fortress } from '../shared/structures.ts';
 import { ClassId } from '../shared/body.ts';
@@ -446,6 +448,9 @@ export class World {
   /** Regicide: each team's fortress (by team), and each team's king (player id, 255 none). */
   fortresses: Fortress[] = [];
   readonly kings = [255, 255];
+  /** Siege: the map's layout (fortress end, landing zone, vehicle spots), and the attackers' lives left. */
+  siege: SiegeMap | null = null;
+  siegeLives = 0;
   /** FFA: fill the room with bots up to this many clones (humans count first). */
   readonly botFill: number;
   /** Seed of the current map (each wave gets a new one). */
@@ -490,7 +495,7 @@ export class World {
   private mapKindFor(n: number): number {
     if (this.mode !== 'ffa') return MapKind.Plain;
     const mode = this.modeOfWave(n);
-    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : MapKind.Plain;
+    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : mode === GameMode.Siege ? MapKind.Siege : MapKind.Plain;
   }
 
   /** Generate the map for `mapSeed` (fortresses or a labyrinth, by kind) and note what's in it. */
@@ -501,6 +506,7 @@ export class World {
     for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
     this.dungeon = lastDungeon;
     this.caves = lastCaves;
+    this.siege = lastSiege;
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
     this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, hp: DOOR_HP, broken: false })));
     this.trapSpent.fill(0);
@@ -643,6 +649,10 @@ export class World {
           this.stepRegicide(timeUp);
           break;
         }
+        if (this.modeOfWave(this.wave) === GameMode.Siege) {
+          this.stepSiege(timeUp);
+          break;
+        }
         if (this.modeOfWave(this.wave) === GameMode.Extraction) {
           this.stepExtraction(timeUp);
           break;
@@ -729,6 +739,28 @@ export class World {
   }
 
   /**
+   * Siege: the defenders' king falls, the attackers win; the attackers run
+   * out of lives (and of clones still fighting) or the ten minutes run out
+   * with the king standing, the defenders do. A king who leaves hands the
+   * crown on, as in Regicide.
+   */
+  private stepSiege(timeUp: boolean): void {
+    const k = this.kings[DEFENDERS];
+    if (k === 255 || !this.players[k]) {
+      const heir = this.players.find((p) => p && p.team === DEFENDERS && p.alive);
+      this.kings[DEFENDERS] = heir ? heir.id : 255;
+      if (heir) this.crown(heir);
+    }
+    let winner = -1;
+    if (!this.kingAlive(DEFENDERS)) winner = ATTACKERS;
+    else if (timeUp || (this.siegeLives <= 0 && this.remaining(ATTACKERS) === 0)) winner = DEFENDERS;
+    if (winner < 0) return;
+    this.winner = winner;
+    for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /**
    * PvP: when the five minutes are up, whoever has the most kills this wave
    * wins (fewer deaths breaks a tie; still level, nobody does).
    */
@@ -755,6 +787,16 @@ export class World {
   /** A Regicide wave is being fought right now. */
   get regicideLive(): boolean {
     return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Regicide;
+  }
+
+  /** A Siege wave is being fought right now. */
+  get siegeLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Siege;
+  }
+
+  /** A wave with a king to kill (Regicide's two, Siege's one) is being fought right now. */
+  get kingLive(): boolean {
+    return this.regicideLive || this.siegeLive;
   }
 
   /** Put the crown on a king's head (in place of a helmet). */
@@ -1061,7 +1103,7 @@ export class World {
   }
 
   get respawnLive(): boolean {
-    return this.regicideLive || this.extractionLive || this.pvpLive;
+    return this.regicideLive || this.extractionLive || this.pvpLive || this.siegeLive;
   }
 
   /** Is this clone a king (this wave)? */
@@ -1097,6 +1139,64 @@ export class World {
       }
     }
     this.teamsRev++;
+  }
+
+  /**
+   * Siege opening: the defenders' king (a heavy) in the vault and every
+   * defender at a post in the fortress or its outposts, their tanks and
+   * watchdogs drawn up in front; the attackers' armour waiting at the landing
+   * zone, the attackers themselves on their way down to it. 300 lives.
+   */
+  private startSiege(): void {
+    this.siegeLives = SIEGE_LIVES;
+    const fort = this.fortresses[DEFENDERS];
+    const side = this.players.filter((p): p is Player => !!p && p.team === DEFENDERS);
+    const king = side.length ? side[this.rng.int(side.length)] : null;
+    this.kings[DEFENDERS] = king ? king.id : 255;
+    this.kings[ATTACKERS] = 255;
+    for (const p of side) {
+      if (!fort) continue; // (no fortress, can't happen: they drop in)
+      p.pendingSpawn = false;
+      const spot = p === king ? fort.king : this.freeSpot(fort);
+      this.placeClone(p, spot.x - ACTOR_W / 2 + (p === king ? 0 : this.rng.range(-3, 3)), spot.y - ACTOR_H, 0, 0);
+      if (p === king) {
+        resetBody(p.parts, ClassId.Heavy);
+        p.body.cls = p.parts.cls;
+        this.crown(p);
+      }
+    }
+    const sg = this.siege;
+    if (sg) {
+      for (const x of sg.defTanks) this.placeVehicle(x, -1);
+      for (const x of sg.atkTanks) this.placeVehicle(x, -1);
+      for (const x of sg.defDogs) this.placeVehicle(x, DEFENDERS);
+      for (const x of sg.atkDogs) this.placeVehicle(x, ATTACKERS);
+    }
+    this.teamsRev++;
+  }
+
+  /**
+   * A vehicle standing on the ground at x at the start of a wave: an empty
+   * tank (`team` -1, anyone's to climb into), or a watchdog for a soldier of
+   * `team` who hasn't one yet.
+   */
+  private placeVehicle(x: number, team: number): void {
+    const slot = this.tanks.indexOf(null);
+    if (slot < 0) return;
+    let owner = 255;
+    if (team >= 0) {
+      const free = this.players.filter((p): p is Player => !!p && p.team === team && !this.isKing(p) && !this.tanks.some((t) => t !== null && isDog(t) && t.owner === p.id));
+      if (!free.length) return;
+      owner = free[this.rng.int(free.length)].id;
+    }
+    const s = team >= 0 ? WATCHDOG_SCALE : 1;
+    const w = Math.round(TANK_W * s);
+    const h = tankH({ kind: team >= 0 ? TankKind.Watchdog : TankKind.Tank, s });
+    x = Math.max(60, Math.min(WORLD_W - 60 - w, Math.round(x)));
+    let top = WORLD_H;
+    for (let gx = x; gx < x + w; gx += 2) top = Math.min(top, this.terrain.surfaceY(gx));
+    this.tanks[slot] = newTank(x, top - h - 2, s, owner);
+    this.dogMem.delete(slot);
   }
 
   /** A fortress spawn spot with room for a clone. */
@@ -1158,15 +1258,16 @@ export class World {
     }
     // One or two tanks come down by parachute for whoever gets to them first
     // (Extraction's tanks wait in the labyrinth instead).
-    if (this.tankDrops && mode !== GameMode.Extraction) this.dropTanks(1 + this.rng.int(2));
+    if (this.tankDrops && mode !== GameMode.Extraction && mode !== GameMode.Siege) this.dropTanks(1 + this.rng.int(2));
     if (mode === GameMode.Regicide) this.startRegicide();
+    if (mode === GameMode.Siege) this.startSiege();
     if (mode === GameMode.Extraction) this.startExtraction();
     // The bunkers' own weapons, lying where they were left (all wave long).
     for (const l of this.mapLoot) {
       this.spawnItem(l.weapon, WEAPONS[l.weapon].clip, l.x, l.y, 0, 0);
       this.items[this.items.length - 1].age = -30 * 60 * 15;
     }
-    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : WAVE_TICKS);
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : mode === GameMode.Siege ? SIEGE_TICKS : WAVE_TICKS);
   }
 
   /**
@@ -1564,10 +1665,19 @@ export class World {
     victim.respawn = RESPAWN_TICKS;
     this.leaveTank(victim, false);
     // Regicide: soldiers come back by drop rocket after a while; the king never does.
-    // PvP: everyone comes back, quickly.
-    if (((this.regicideLive && !this.isKing(victim)) || this.extractionLive || this.pvpLive) && victim.inWave) {
+    // PvP: everyone comes back, quickly. Siege: defenders come back; attackers
+    // while their side has lives to spend (each death spends one).
+    let back = (this.regicideLive && !this.isKing(victim)) || this.extractionLive || this.pvpLive;
+    if (this.siegeLive && !this.isKing(victim)) {
+      if (victim.team !== ATTACKERS) back = true;
+      else if (victim.inWave && this.siegeLives > 0) {
+        this.siegeLives--;
+        back = true;
+      }
+    }
+    if (back && victim.inWave) {
       victim.pendingSpawn = true;
-      victim.respawn = this.pvpLive ? PVP_RESPAWN_TICKS : REGICIDE_RESPAWN_TICKS;
+      victim.respawn = this.pvpLive ? PVP_RESPAWN_TICKS : this.siegeLive && victim.team === ATTACKERS ? SIEGE_RESPAWN_TICKS : REGICIDE_RESPAWN_TICKS;
     }
     if (victim.inWave) victim.waveDeaths++;
     // Everything it carried spills where it fell, for anyone to take.
@@ -2314,9 +2424,14 @@ export class World {
     // Teams come down on opposite sides of the map: red the left, green the right.
     let lo = 48 + CRAFT_W / 2;
     let span = WORLD_W - 96 - CRAFT_W;
-    const fort = this.regicideLive && p.team !== Team.None ? this.fortresses[p.team] : undefined;
+    const fort = (this.regicideLive && p.team !== Team.None) || (this.siegeLive && p.team === DEFENDERS) ? this.fortresses[p.team] : undefined;
+    const lz = this.siegeLive && p.team === ATTACKERS ? this.siege?.lz : undefined;
     const well = this.extractionLive && this.dungeon && p.team < 4 ? this.dungeon.entrances[p.team] : undefined;
-    if (well) {
+    if (lz) {
+      // Siege: the attackers all come down in their landing zone, far from the fortress.
+      lo = lz[0] + CRAFT_W / 2;
+      span = Math.max(1, lz[1] - lz[0] - CRAFT_W);
+    } else if (well) {
       // Extraction: each team comes down around its own well.
       lo = Math.max(48 + CRAFT_W / 2, well.x - 170);
       span = 340;
@@ -4304,6 +4419,7 @@ export class World {
         w.u8(this.kings[1]);
         w.u8(this.remaining(Team.Blue));
         w.u8(this.remaining(Team.Gold));
+        if (this.waveMode === GameMode.Siege) w.u16(this.siegeLives);
         if (this.waveMode === GameMode.Pvp) {
           // PvP: who leads (and on how many kills), and our own kills and deaths this wave.
           let lead: Player | null = null;
@@ -4673,10 +4789,12 @@ const PVP_TICKS = 30 * 60 * 5;
 const PVP_RESPAWN_TICKS = 30 * 5;
 /**
  * Which modes the waves cycle through: Regicide, PvP and team waves (Last
- * Team Standing) by turns, with Extraction now and then. Last Man Standing
+ * Team Standing) by turns, with a Siege and an Extraction now and then. Last Man Standing
  * stays out of the rotation (a room can still be given it).
  */
-const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction];
+const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction];
+/** Siege attackers come back faster than anyone (their lives are what's counted). */
+const SIEGE_RESPAWN_TICKS = 30 * 6;
 /** Extraction waves run twelve minutes. */
 const EXTRACTION_TICKS = 30 * 60 * 12;
 /** How long the extraction rocket takes to come once the idol surfaces. */

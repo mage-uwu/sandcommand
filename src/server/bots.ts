@@ -1,3 +1,4 @@
+import { DEFENDERS } from '../shared/siege.ts';
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
 import { ClassId, DROID_MASK, stumps } from '../shared/body.ts';
 import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
@@ -249,8 +250,8 @@ export class BotBrain {
           this.target = o.id;
         }
       }
-      // Regicide assault: the enemy king, wherever he hides (unless someone is right here).
-      const king = world.regicideLive && this.assault && p.team !== Team.None ? world.players[world.kings[1 - p.team]] : null;
+      // Regicide (and Siege) assault: the enemy king, wherever he hides (unless someone is right here).
+      const king = world.kingLive && this.assault && p.team !== Team.None ? world.players[world.kings[1 - p.team]] : null;
       if (king && king.alive && best > 90 * 90) this.target = king.id;
       tgt = this.target >= 0 ? world.players[this.target] : null;
       if (tgt && tgt.id !== prevTarget) this.holdFire = Math.max(this.holdFire, t + this.react);
@@ -339,16 +340,25 @@ export class BotBrain {
     const radioSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Radio);
     const airCover = world.ships.some((sh) => sh && !sh.leaving && (sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)));
     const calling =
-      !nav && !world.extractionLive && !(world.regicideLive && world.isKing(p)) && radioSlot >= 0 && p.gold >= CALL_COST && p.callCd === 0 && !airCover && world.ships.includes(null) && (!tgt || near2 > 110);
+      !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && radioSlot >= 0 && p.gold >= CALL_COST && p.callCd === 0 && !airCover && world.ships.includes(null) && (!tgt || near2 > 110);
     if (calling && p.weapon === WeaponId.Radio) world.call(p.id, CallKind.Dropship);
     // (Not in the endgame: with only a few enemies left, it's time to finish them.)
     let foesLeft = 0;
     if (this.prospector) for (const o of world.players) if (o && o.alive && o !== p && (p.team === Team.None || o.team !== p.team)) foesLeft++;
-    const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.regicideLive && world.isKing(p)) && p.gold < CALL_COST && gunSlot >= 0 ? this.findGold(world, p) : null;
+    const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && p.gold < CALL_COST && gunSlot >= 0 ? this.findGold(world, p) : null;
     if (goldAt) goalX = goldAt.x;
     // A cave map, and the target somewhere else in the caves (or up top): the way there.
     const cave = !nav && !goldAt && !calling && tgt && !this.seeTarget ? this.caveNav(world, p, tgt) : null;
     if (cave) goalX = cave.goalX;
+    // Siege defenders hold their ground: the fortress and the ground in front
+    // of it, the bolder ones out as far as the last outpost.
+    const sg = world.siegeLive && p.team === DEFENDERS ? world.siege : null;
+    if (sg && !nav) {
+      const west = sg.side === 0;
+      const front = sg.outposts.length ? (west ? Math.max(...sg.outposts.map((o) => o[1])) : Math.min(...sg.outposts.map((o) => o[0]))) : west ? sg.fort[1] : sg.fort[0];
+      const reach = this.assault ? front + (west ? 120 : -120) : west ? sg.fort[1] + 220 : sg.fort[0] - 220;
+      goalX = west ? Math.max(sg.fort[0], Math.min(reach, goalX)) : Math.min(sg.fort[1], Math.max(reach, goalX));
+    }
 
     // Moving and getting nowhere: stuck against a wall.
     const moved = Math.abs(p.body.x - this.lastX);
@@ -536,7 +546,7 @@ export class BotBrain {
     } else this.trigger = false;
 
     // A king holds his vault: he turns and fights, but never leaves it.
-    if (world.regicideLive && world.isKing(p)) {
+    if (world.kingLive && world.isKing(p)) {
       buttons &= ~(BTN_LEFT | BTN_RIGHT | BTN_UP);
       if (weapon === WeaponId.Digger) buttons &= ~BTN_FIRE;
       if (want === digSlot && gunSlot >= 0) want = gunSlot;

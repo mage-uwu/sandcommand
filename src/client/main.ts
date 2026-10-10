@@ -141,8 +141,8 @@ async function join(): Promise<void> {
   const name = nameInput.value.trim().slice(0, 16);
   storageSet('sc.name', name);
   playBtn.disabled = true;
-  // There's one match, and everyone joins it.
-  const room = 'main';
+  // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one).
+  const room = new URLSearchParams(location.search).get('room') === 'siege' ? 'siege' : 'main';
   statusEl.textContent = 'Connecting…';
   const g = new Game();
   g.sfx = sfx;
