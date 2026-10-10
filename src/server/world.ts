@@ -233,7 +233,7 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege } from '../shared/worldgen.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { ATTACKERS, DEFENDERS, SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
 import type { CaveNet } from '../shared/caves.ts';
@@ -490,6 +490,8 @@ export class World {
   floraDead = new Uint8Array(0);
   readonly floraFuse = new Map<number, { t: number; by: number }>();
   floraRev = 0;
+  /** The map's biome (worldgen Biome: bots path-find on the deadland). */
+  biome = 0;
   private floraCols: number[][] = [];
   /** The geysers' own dice (so they never shift the rest of the world's). */
   private geyserRng = new Rng(1);
@@ -576,6 +578,7 @@ export class World {
   private makeMap(kind: number): void {
     this.mapKind = kind;
     generateWorld(this.terrain, this.mapSeed, kind);
+    this.biome = lastBiome;
     this.fortresses = [];
     for (const c of lastComplexes) if (c.fortress) this.fortresses[c.fortress.team] = c.fortress;
     this.dungeon = lastDungeon;

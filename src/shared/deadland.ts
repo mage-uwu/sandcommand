@@ -573,8 +573,10 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
  * ruins, small and ancient. A stepped portal of glyph stone on the surface,
  * a cobble tunnel slanting down through the crust from it, and one to three
  * chambers below (the deeper, the older), their walls of cobble banded with
- * glyphs, broken through here and there, rubble heaped on their floors.
- * Cobble and glyph stone never yield: the old builders built to last.
+ * glyphs, broken through here and there, rubble heaped on their floors,
+ * and a stair climbing out the far side.
+ * Their masonry (ruin stone and glyph blocks) yields as grudgingly as the
+ * caltrops' cement: the old builders built to last.
  *
  * On a Regicide map the two fortresses are ruins too, deeper ones, the
  * king's chamber at the bottom; the caltrops round them are their walls.
@@ -594,13 +596,13 @@ export function placeRuins(m: Uint8Array, seed: number, fortresses: boolean, bac
       for (let x = x0 - 4; x < x1 + 4; x++) {
         const inner = x >= x0 && x < x1 && y >= top && y < floor;
         if (inner) set(x, y, Mat.Air);
-        else if (m[at(x, y)] !== Mat.Air) set(x, y, (y === top + 6 || y === top - 2) && (x + y) % 5 !== 0 ? Mat.Glyph : Mat.Cobble);
+        else if (m[at(x, y)] !== Mat.Air) set(x, y, (y === top + 6 || y === top - 2) && (x + y) % 5 !== 0 ? Mat.RuinGlyph : Mat.RuinStone);
       }
     }
     // Breaches: the wall gone in places, the crust showing through (char, not stone).
     for (let k = rng.int(3); k > 0; k--) {
       const bx = x0 + rng.int(Math.max(1, x1 - x0));
-      for (let y = top - 4; y < top; y++) for (let x = bx - 3; x < bx + 3; x++) if (m[at(x, y)] === Mat.Cobble || m[at(x, y)] === Mat.Glyph) set(x, y, Mat.Char);
+      for (let y = top - 4; y < top; y++) for (let x = bx - 3; x < bx + 3; x++) if (m[at(x, y)] === Mat.RuinStone || m[at(x, y)] === Mat.RuinGlyph) set(x, y, Mat.Char);
     }
     // Rubble heaped against a wall.
     const rx = rng.next() < 0.5 ? x0 : x1 - 10;
@@ -616,7 +618,7 @@ export function placeRuins(m: Uint8Array, seed: number, fortresses: boolean, bac
       for (let y = fl - 25; y <= fl + 2; y++) {
         const inner = y >= fl - 20 && y < fl;
         if (inner) set(cx, y, Mat.Air);
-        else if (m[at(cx, y)] !== Mat.Air) set(cx, y, Mat.Cobble); // (lined where it runs through the ground; open where it runs out under the sky)
+        else if (m[at(cx, y)] !== Mat.Air) set(cx, y, Mat.RuinStone); // (lined where it runs through the ground; open where it runs out under the sky)
       }
       box(cx, Math.max(fl - 20, top), cx + 1, fl, 4);
     }
@@ -635,7 +637,7 @@ export function placeRuins(m: Uint8Array, seed: number, fortresses: boolean, bac
       for (let y = fl - 33; y <= fl + 2; y++) {
         const inner = y >= fl - 28 && y < fl; // (headroom for a clone on a steep stair)
         if (inner) set(cx, y, Mat.Air);
-        else if (m[at(cx, y)] !== Mat.Air) set(cx, y, Mat.Cobble);
+        else if (m[at(cx, y)] !== Mat.Air) set(cx, y, Mat.RuinStone);
       }
       box(cx, Math.max(fl - 28, g), cx + 1, fl, 4); // (the wall behind only under the ground, not up in the sky)
     }
@@ -645,10 +647,10 @@ export function placeRuins(m: Uint8Array, seed: number, fortresses: boolean, bac
   };
   /** The portal over a tunnel's mouth: two glyph pillars, a lintel, stepped capstones. */
   const portal = (x: number, g: number) => {
-    for (const side of [-1, 1]) for (let y = g - 26; y < g + 2; y++) for (let k = 0; k < 4; k++) set(x + side * (8 + k), y, Mat.Glyph);
+    for (const side of [-1, 1]) for (let y = g - 26; y < g + 2; y++) for (let k = 0; k < 4; k++) set(x + side * (8 + k), y, Mat.RuinGlyph);
     for (let step = 0; step < 3; step++) {
       const half = 12 + 3 - step * 3;
-      for (let y = g - 26 - (step + 1) * 3; y < g - 26 - step * 3; y++) for (let xx = x - half; xx <= x + half; xx++) set(xx, y, Mat.Glyph);
+      for (let y = g - 26 - (step + 1) * 3; y < g - 26 - step * 3; y++) for (let xx = x - half; xx <= x + half; xx++) set(xx, y, Mat.RuinGlyph);
     }
     for (let y = g - 22; y < g + 2; y++) for (let xx = x - 7; xx <= x + 7; xx++) set(xx, y, Mat.Air);
   };

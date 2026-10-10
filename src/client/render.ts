@@ -306,6 +306,7 @@ export class Renderer {
         const wx = ox + x;
         let c: number;
         if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph || m === Mat.Iron || m === Mat.Sandbag || m === Mat.Door) c = structColor(t, m, wx, wy);
+        else if (m === Mat.RuinStone || m === Mat.RuinGlyph) c = structColor(t, m === Mat.RuinStone ? Mat.Cobble : Mat.Glyph, wx, wy); // (the labyrinth's masonry, but breakable)
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else if (m === Mat.Dripstone) c = dripColor(t, wx, wy);
         else if (m === Mat.RareEarth) c = crystalColor(t, wx, wy);

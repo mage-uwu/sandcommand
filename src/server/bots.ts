@@ -13,6 +13,8 @@ import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
 import { cellCentreX, cellOfFeet, inShaftUnder, mazeDistances, nextHop } from './maze.ts';
 import { type Ramp, caveLevel, onPassage } from '../shared/caves.ts';
+import { Biome } from '../shared/worldgen.ts';
+import { type NavPath, findPath, undiggable } from './nav.ts';
 
 /** Names for bots (shown with a BOT tag). */
 const NAMES = [
@@ -108,6 +110,11 @@ export class BotBrain {
   private strafeUntil = 0;
   private stuck = 0;
   /** On foot: the nearest it has come to where it's going, and when; and a detour when that stalls. */
+  /** Deadland map sense: the path it's following (nav.ts), how far along, and when and toward where it was planned. */
+  private path: NavPath | null = null;
+  private pathAt = 0;
+  private pathIdx = 0;
+  private pathTo = { x: 0, y: 0 };
   private walkBest = Infinity;
   private walkAt = 0;
   private detourUntil = 0;
@@ -436,6 +443,12 @@ export class BotBrain {
     // A cave map, and the target somewhere else in the caves (or up top): the way there.
     const cave = !nav && !goldAt && !calling && tgt && !this.seeTarget ? this.caveNav(world, p, tgt) : null;
     if (cave) goalX = cave.goalX;
+    // The deadland: a field of monuments it can't dig through. A target out
+    // of sight (or a long way off) is reached by a planned path, round and
+    // over the cement, digging only through what yields.
+    const route = !nav && !goldAt && !calling && !cave && tgt && world.biome === Biome.Deadland && (!this.seeTarget || Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) > 160) ? this.pathNav(world, p, tgt.cx, tgt.body.y + ACTOR_H) : null;
+    if (route) goalX = route.goalX;
+    else this.path = null;
     // Siege defenders hold their ground: the fortress and the ground in front
     // of it, the bolder ones out as far as the last outpost.
     const sg = world.siegeLive && p.team === DEFENDERS ? world.siege : null;
@@ -496,7 +509,10 @@ export class BotBrain {
       this.goldScanAt = -1e9;
       this.goldGainAt = t;
     }
-    const digging = !world.extractionLive && digSlot >= 0 && (mining || (!this.seeTarget && (this.stuck > 75 || this.blind > 60)));
+    // (Never at what won't yield: the caltrops' cement, the ruins' masonry, pig iron. It goes round those.)
+    const toward = this.blind > 60 && tgt ? { x: tgt.cx, y: tgt.cy } : { x: p.cx + (Math.sign(goalX - p.cx) || 1) * 24, y: p.cy };
+    const hardWay = hardBetween(world, sx, sy, toward.x, toward.y);
+    const digging = !world.extractionLive && digSlot >= 0 && (mining || !!route?.dig || (!this.seeTarget && !hardWay && (this.stuck > 75 || this.blind > 60)));
     if (digging) want = digSlot;
     if (calling) want = radioSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
@@ -518,6 +534,7 @@ export class BotBrain {
     const onTask = nav && !(tgt && this.seeTarget && dist < 100 && !nav.urgent);
     if (onTask) dir = Math.abs(dx) < 2.5 || nav.fall ? 0 : Math.sign(dx);
     else if (cave) dir = Math.abs(dx) < 2.5 ? 0 : Math.sign(dx);
+    else if (route) dir = Math.abs(dx) < 2.5 ? 0 : Math.sign(dx);
     else if (goldAt) dir = Math.abs(gdx) < 3 || (mining && Math.abs(gdx) < 6) ? 0 : Math.sign(gdx);
     else if (calling) dir = 0;
     else if (gunSlot < 0 || !tgt) dir = Math.sign(dx);
@@ -534,7 +551,7 @@ export class BotBrain {
     // Walking toward it and getting no nearer for seconds (wedged under an
     // overhang, a caltrop's arm, a face too tall to jet): back off and jet
     // up for a moment, then come at it again from higher up.
-    const closing = !onTask && !cave && !goldAt && !calling && !mining && dir !== 0 && dir === Math.sign(dx) && Math.abs(dx) > 60;
+    const closing = !onTask && !cave && !route && !goldAt && !calling && !mining && dir !== 0 && dir === Math.sign(dx) && Math.abs(dx) > 60;
     if (!closing && t >= this.detourUntil) {
       this.walkBest = Infinity;
       this.walkAt = t;
@@ -559,6 +576,8 @@ export class BotBrain {
       if (nav.up) buttons |= BTN_UP;
     } else if (cave) {
       if (cave.up) buttons |= BTN_UP;
+    } else if (route) {
+      if (route.up && b.fuel > 4) buttons |= BTN_UP;
     } else if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
     if (b.vy > 260 && b.fuel > 5) buttons |= BTN_UP;
 
@@ -592,7 +611,11 @@ export class BotBrain {
       // otherwise through the obstacle in the way.
       let tx = (tgt ? tgt.cx : goalX) - p.cx;
       let ty = (tgt ? tgt.cy : p.cy) - p.cy;
-      if (this.blind <= 60) {
+      if (route?.dig) {
+        // On its path: through the soft ground the path runs into.
+        tx = route.digX - p.cx;
+        ty = route.digY - p.cy;
+      } else if (this.blind <= 60) {
         // Blocked on the way somewhere: straight through whatever is ahead.
         tx = Math.sign(tx) || 1;
         ty = 0;
@@ -786,6 +809,45 @@ export class BotBrain {
    * runs low); down by the nearest passage, or by dropping down a shaft it's
    * standing over. Halfway along a passage or up a shaft, it carries on.
    */
+  /**
+   * Follow a planned path (nav.ts) toward (tx, ty): replanned every second
+   * and a half or so, or when the target has moved off. The way on is a few waypoints
+   * ahead; up there means the jetpack; soft ground on it means the digger.
+   */
+  private pathNav(world: World, p: Player, tx: number, ty: number): { goalX: number; up: boolean; dig: boolean; digX: number; digY: number } | null {
+    const t = world.tick;
+    const feet = p.body.y + ACTOR_H;
+    if (!this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2) {
+      this.path = findPath(world.terrain, p.cx, feet, tx, ty);
+      this.pathAt = t + (this.phase % 15); // (staggered: the bots don't all plan on one tick)
+      this.pathIdx = 0;
+      this.pathTo = { x: tx, y: ty };
+    }
+    const pts = this.path.pts;
+    if (pts.length < 2) return null;
+    // Along it as far as it has come: the nearest waypoint over the next few.
+    let bestD = Infinity;
+    for (let k = this.pathIdx; k < Math.min(pts.length, this.pathIdx + 8); k++) {
+      const d = Math.abs(pts[k].x - p.cx) + Math.abs(pts[k].y - feet) * 0.7;
+      if (d <= bestD) {
+        bestD = d;
+        this.pathIdx = k;
+      }
+    }
+    // The jetpack, in bursts: let it refill when it runs dry.
+    if (this.resting && p.body.fuel > 60) this.resting = false;
+    if (!this.resting && p.body.fuel < 6) this.resting = true;
+    const next = pts[Math.min(pts.length - 1, this.pathIdx + 1)];
+    const ahead = pts[Math.min(pts.length - 1, this.pathIdx + 3)];
+    return {
+      goalX: ahead.x,
+      up: !this.resting && Math.min(next.y, ahead.y) < feet - 4,
+      dig: next.dig || ahead.dig,
+      digX: next.dig ? next.x : ahead.x,
+      digY: (next.dig ? next.y : ahead.y) - 7,
+    };
+  }
+
   private caveNav(world: World, p: Player, tgt: Player): { goalX: number; up: boolean } | null {
     const net = world.caves;
     if (!net) return null;
@@ -926,6 +988,17 @@ function clearLine(world: World, x0: number, y0: number, x1: number, y1: number,
 }
 
 /** The solid cell nearest a clone's body (biased toward `dir`), excluding the floor under it. */
+/** Is there material on the way from (x0, y0) toward (x1, y1) (the first 24 cells) that a digger won't get through? */
+function hardBetween(world: World, x0: number, y0: number, x1: number, y1: number): boolean {
+  const d = Math.hypot(x1 - x0, y1 - y0) || 1;
+  const n = Math.min(24, Math.ceil(d));
+  for (let k = 2; k <= n; k += 2) {
+    const m = world.terrain.get(Math.round(x0 + ((x1 - x0) / d) * k), Math.round(y0 + ((y1 - y0) / d) * k));
+    if (m !== Mat.Air && undiggable(m)) return true;
+  }
+  return false;
+}
+
 function nearestBlock(world: World, p: Player, dir: number): { x: number; y: number } | null {
   const t = world.terrain;
   const bx = Math.floor(p.body.x);

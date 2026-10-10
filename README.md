@@ -1357,10 +1357,16 @@ A hostile brutalist architect's wet dream, left to rot for eons
   - A cobble tunnel slanting down through the crust.
   - One to three cobble chambers, banded with glyphs, breached here and there, with rubble on their floors.
   - A stair climbing out the far side to daylight again.
-  - Cobble and glyph stone never yield.
+  - Their masonry (`Mat.RuinStone`, `Mat.RuinGlyph`, drawn like the labyrinth's cobble and glyph stone) yields as grudgingly as the caltrops' cement: hard and adamant. The labyrinth's own stone still never yields.
 - **Regicide on the Deadland.** The two fortresses are deep ruins, red's in the west and green's in the east. Each has three chambers, with the king's chamber at the bottom and spawns down its length. The caltrops round them are their walls.
 - **Sky and backdrop.** The sky is an ashen, sallow gradient. The parallax layers hold grey mountains and two ranks of thorn silhouettes: caltrops, spikes and slabs over rubble (`Backdrop.setBiome`).
-- **Bots.** If a bot walks toward its goal but gets no nearer for five seconds (wedged under a caltrop's arm, say), it backs off and jets up, then comes at the goal again from higher up.
+- **Bots plan their way** (`src/server/nav.ts`). On the Deadland a bot heading for a target it can't see (or one far off) follows a path planned over a coarse grid (8 cells a node, A*, replanned every second and a half):
+  - **Costs.** Open air is cheap. Climbing costs a little more, and so does every node of air under it, since a jetpack runs dry. So the way over a wall is up something that bears the bot's weight: a slope, an arm's back, a footing pile.
+  - **Digging.** Soft ground costs a dig, and the bot takes out the digger only where the path runs into it.
+  - **Walls.** What a digger can't realistically get through (cement, ruin masonry, pig iron, the labyrinth's stone) is a wall, and the path goes round or over it.
+  - **Jetpack.** The bot jets in bursts, letting it refill when it runs dry.
+  - **Everywhere else.** On every map, a bot never picks the digger to bore into material that won't yield (`undiggable`).
+  - **Stuck.** If a bot walks toward its goal but gets no nearer for five seconds (wedged under a caltrop's arm, say), it backs off and jets up, then comes at the goal again from higher up.
 
 **Cave maps** (`src/shared/caves.ts`). About two marslike maps in five (ordinary
 or Regicide, never the labyrinth or the Deadland; `cavesOf` by the seed) are cave maps:

@@ -49,7 +49,7 @@ describe('the deadland', () => {
       cols++;
       if ([1, 4, 8].some((d) => isDeadGround(t.get(x, y0 + d)))) deadTop++;
       let y = y0;
-      while (y < y0 + 400 && (isDeadGround(t.get(x, y)) || t.get(x, y) === Mat.Air || t.get(x, y) === Mat.Concrete || t.get(x, y) === Mat.Cobble || t.get(x, y) === Mat.Glyph)) y++;
+      while (y < y0 + 400 && (isDeadGround(t.get(x, y)) || t.get(x, y) === Mat.Air || t.get(x, y) === Mat.Concrete || t.get(x, y) === Mat.RuinStone || t.get(x, y) === Mat.RuinGlyph)) y++;
       depths.push(y - y0);
     }
     expect(cols).toBeGreaterThan(5);
@@ -170,7 +170,7 @@ describe('the deadland', () => {
       expect(c.x1 - c.x0).toBeLessThan(560); // a passage, not a bunker block
     }
     let glyph = 0;
-    for (const c of complexes) for (let x = c.x0; x < c.x1; x++) for (let y = c.floor - 60; y < c.floor + 220; y++) if (t.get(x, y) === Mat.Glyph) glyph++;
+    for (const c of complexes) for (let x = c.x0; x < c.x1; x++) for (let y = c.floor - 60; y < c.floor + 220; y++) if (t.get(x, y) === Mat.RuinGlyph) glyph++;
     expect(glyph).toBeGreaterThan(100);
     let concrete = 0;
     for (let i = 0; i < t.mat.length; i += 5) if (t.mat[i] === Mat.Concrete || t.mat[i] === Mat.Metal) concrete++;

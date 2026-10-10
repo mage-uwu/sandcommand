@@ -99,9 +99,17 @@ export const Mat = {
    * exotic gems, the code just kept the old name.)
    */
   GemCrystal: 30,
+  /**
+   * Deadland: the Progenitors' ruin masonry, cobbles and glyph-carved
+   * blocks (drawn like the labyrinth's Cobble and Glyph). Unlike the
+   * labyrinth's stone it does yield, as grudgingly as the caltrops' cement:
+   * hard and adamant.
+   */
+  RuinStone: 31,
+  RuinGlyph: 32,
 } as const;
 
-export const MAT_COUNT = 31;
+export const MAT_COUNT = 33;
 
 /** What a cell of rare earth banks, in GEMMs, when dug (a cell of GEMM deposit banks one). */
 export const RARE_EARTH_VALUE = 10;
@@ -111,22 +119,22 @@ export const GEM_CRYSTAL_VALUE = 3;
 export const digValue = (removed: Int32Array) => removed[Mat.Gold] + removed[Mat.GemCrystal] * GEM_CRYSTAL_VALUE + removed[Mat.RareEarth] * RARE_EARTH_VALUE;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, true, true, true, false, false];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, true, true, true, false, false, true, true];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false, false, false, false, false];
 
 /** Natural ground (soil, sand, rock): what frosting settles on and bots dig through. */
 /** Tough materials: a carve's core takes only the inner half of its radius of them (a quarter of the area). */
 export const MAT_TOUGH: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Iron);
-/** Adamant materials: a carve's core takes only the inner quarter of its radius of them (a sixteenth of the area; a digger shaves a cell at a time). */
-export const MAT_ADAMANT: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Cement);
+/** Adamant materials: a carve's core takes only the inner quarter of its radius of them (a sixteenth of the area; a digger shaves a cell at a time). The caltrops' cement and the deadland ruins' masonry. */
+export const MAT_ADAMANT: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Cement || m === Mat.RuinStone || m === Mat.RuinGlyph);
 
 /** The deadland's crust (not soil: nothing grows in it). */
 export const isDeadGround = (m: number) => m === Mat.Glass || m === Mat.Gravel || m === Mat.Ash || m === Mat.Char || m === Mat.Cement || m === Mat.OldConcrete || m === Mat.Rust || m === Mat.Pour;
@@ -166,6 +174,8 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [112, 62, 38], // rusted steel
   [126, 124, 116], // pour
   [96, 236, 214], // GEMM crystal
+  [98, 94, 90], // ruin stone
+  [188, 152, 100], // ruin glyph
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gemm', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth', 'trinitite', 'gravel', 'ash', 'char', 'cement', 'old concrete', 'rusted steel', 'pour', 'gemm crystal'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gemm', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth', 'trinitite', 'gravel', 'ash', 'char', 'cement', 'old concrete', 'rusted steel', 'pour', 'gemm crystal', 'ruin stone', 'ruin glyph'];
