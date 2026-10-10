@@ -203,6 +203,26 @@ function rotundaColor(t: Terrain, x: number, y: number, d: { x: number; y: numbe
 }
 
 /** The shaft's lining: great weathered ashlar blocks, dark, their joints darker. */
+/**
+ * Where a pass runs through a petrified trunk's foot: the roots there, set
+ * back behind the play (a back wall): the same pale stone, shaded round across
+ * each root, but dimmed and cooled, so you see it's behind you.
+ */
+function rootsBackColor(backdrop: Uint8Array, x: number, y: number): number {
+  const is = (xx: number, yy: number) => xx >= 0 && xx < WORLD_W && yy >= 0 && yy < WORLD_H && backdrop[yy * WORLD_W + xx] === VBack.Roots;
+  let l = 0;
+  while (l < 20 && is(x - l - 1, y)) l++;
+  let r = 0;
+  while (r < 20 && is(x + r + 1, y)) r++;
+  const u = (l + 0.5) / (l + r + 1);
+  let k = l + r < 9 ? 0.8 - u * 0.12 : 0.5 + 0.7 * Math.sin(Math.PI * Math.min(1, u * 1.2)) * (1.2 - u * 0.75);
+  if (!is(x, y - 1)) k *= 1.06;
+  if (!is(x, y + 1)) k *= 0.7;
+  if (!is(x - 1, y) || !is(x + 1, y)) k *= 0.8; // (a dark outline round each root, against the cave behind)
+  k *= 0.52;
+  return gemRgb(112 * k, 132 * k, 152 * k);
+}
+
 function ashlarColor(t: Terrain, x: number, y: number): number {
   const course = Math.floor(y / 12);
   const bx = (((x + (course & 1) * 13) % 26) + 26) % 26;
@@ -418,6 +438,7 @@ export class Renderer {
           let c: number;
           if (bd === VBack.Rotunda && game.valley) c = rotundaColor(t, ox + x, wy, game.valley.dome);
           else if (bd === VBack.Ashlar) c = ashlarColor(t, ox + x, wy);
+          else if (bd === VBack.Roots) c = rootsBackColor(backdrop, ox + x, wy);
           else if (bd) c = backWallColor(t, bd, ox + x, wy);
           else if (wy > skyline[ox + x] + 3) c = caveShade(t, ox + x, wy);
           else c = grassBlade(t, ox + x, wy);

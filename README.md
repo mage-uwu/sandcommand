@@ -1390,7 +1390,10 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
     the roof, and down as buttress roots arching over the floor and into
     it, every root tapering and forking, its tip buried in the rock. The
     vaults are honeycombed, meeting their neighbours' in pointed arches.
-    Stumps (some snapped off at a slant) and a fallen
+    Under each trunk a low arch runs through the roots at its foot, set
+    back (drawn darker, as a back wall), so you can walk through under the
+    tree without cutting it; the trunk above and the rest of its roots are
+    solid. Stumps (some snapped off at a slant) and a fallen
     log or two lie on the floor. The trunks' roots trail down through the
     rock into the cistern below and hang in its water, as if they draw the
     poison out of the world.

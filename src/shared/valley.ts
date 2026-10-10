@@ -1,4 +1,4 @@
-import { WORLD_H, WORLD_W } from './constants.ts';
+import { ACTOR_H, WORLD_H, WORLD_W } from './constants.ts';
 import { arm, poly } from './deadland.ts';
 import { type Flora, FloraKind } from './frosting.ts';
 import { Mat, isDeadGround, isSoil } from './materials.ts';
@@ -27,8 +27,8 @@ import type { WaterBody } from './water.ts';
  * Seeded and deterministic like the rest of worldgen.
  */
 
-/** The valley's own back walls (after structures.ts Backdrop and the labyrinth's 3 and 4): the dome's rotunda, the shaft's ashlar. */
-export const VBack = { Rotunda: 5, Ashlar: 6 } as const;
+/** The valley's own back walls (after structures.ts Backdrop and the labyrinth's 3 and 4): the dome's rotunda, the shaft's ashlar, the forest's roots where a pass runs through them. */
+export const VBack = { Rotunda: 5, Ashlar: 6, Roots: 7 } as const;
 
 export type RoomKind = 'maw' | 'sargasso' | 'basin' | 'forest' | 'cistern' | 'gems' | 'nest';
 
@@ -464,6 +464,7 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     for (let dy = -ir; dy <= ir; dy++) for (let dx = -ir; dx <= ir; dx++) if (dx * dx + dy * dy <= rr * rr + 0.5) set(Math.round(x) + dx, Math.round(y) + dy, Mat.Petrified);
   };
   const trunks = 6 + rng.int(3);
+  const feet: { tx: number; fy: number; half: number }[] = [];
   const span = forest.rx * 1.7;
   const gap = span / trunks;
   for (let k = 0; k < trunks; k++) {
@@ -560,6 +561,7 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
         root(xAt(yd), yd, side, 1, 0.9 + rng.next() * 0.4, 1.2, 14 + rng.int(14));
       }
     }
+    feet.push({ tx, fy, half: w + foot + 3 });
     // Roots: down from its foot through the rock, into the cistern, trailing in the water.
     if (Math.abs(tx - cistern.x) < cistern.rx * 0.8) {
       for (let r = 0; r < 2 + rng.int(3); r++) {
@@ -570,6 +572,24 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
           rx += rng.range(-0.6, 0.6) + Math.sin(y * 0.2 + r) * 0.3;
           for (let x = Math.round(rx) - thick; x <= Math.round(rx) + thick; x++) set(x, y, Mat.Petrified);
         }
+      }
+    }
+  }
+  // A pass through each one's foot (once they're all grown: the roots cross): the root flare
+  // there set back (a back wall drawn as the roots), so you can walk through under the trunk
+  // without cutting it. An arch over clone height across the middle of the flare, closing
+  // down toward its edges.
+  for (const { tx, fy, half } of feet) {
+    for (let x = Math.round(tx - half); x <= Math.round(tx + half); x++) {
+      // (The ground under the roots here.)
+      let g = fy - 20;
+      while (g < fy + 12 && (m[at(x, g)] === Mat.Air || m[at(x, g)] === Mat.Petrified)) g++;
+      const d = Math.abs(x - tx) / half;
+      const clear = Math.round((ACTOR_H + 4 + 7 * (1 - d * d)) * Math.min(1, (1 - d) * 3)); // (an arch)
+      for (let y = g - clear; y < g; y++) {
+        if (m[at(x, y)] !== Mat.Petrified) continue;
+        set(x, y, Mat.Air);
+        wall(x, y, VBack.Roots);
       }
     }
   }

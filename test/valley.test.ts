@@ -88,6 +88,23 @@ describe('the Valley of Souls', () => {
     let wetRoots = 0;
     for (let y = cis.y - cis.ry; y <= cis.y + cis.ry; y++) for (let x = cis.x - cis.rx; x <= cis.x + cis.rx; x++) if (t.get(x, y) === Mat.Petrified && (t.wet(x - 1, y) || t.wet(x + 1, y))) wetRoots++;
     expect(wetRoots).toBeGreaterThan(5);
+    // A pass under every trunk, through the roots at its foot (set back: a back wall), so a clone walks through.
+    const trunks: number[] = [];
+    for (let x = forest.x - forest.rx; x <= forest.x + forest.rx; x++) {
+      if (t.get(x, forest.y) !== Mat.Petrified) continue;
+      let e = x;
+      while (t.get(e + 1, forest.y) === Mat.Petrified) e++;
+      if (e - x >= 7) trunks.push((x + e) >> 1);
+      x = e;
+    }
+    expect(trunks.length).toBeGreaterThanOrEqual(5);
+    for (const tx of trunks) {
+      let y = forest.y;
+      while (t.get(tx, y) === Mat.Petrified) y++;
+      let g = y;
+      while (g < y + 200 && t.get(tx, g) === Mat.Air) g++;
+      expect(g - y).toBeGreaterThanOrEqual(ACTOR_H + 2);
+    }
     // No blister coral anywhere in the calm.
     const c = v.calm;
     expect(flora.some((f) => f.kind === FloraKind.Blister && f.x > c.x0 && f.x < c.x1 && f.y > c.y0)).toBe(false);
