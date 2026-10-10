@@ -82,6 +82,8 @@ export const R_BEAM = 33;
 export const R_SPOTTED = 34;
 /** Every landmine on the map (sent when one is laid, arms, moves or goes off): where, whose, armed. */
 export const R_MINES = 35;
+/** A repair kit's health wave set off: where, whose side, and who. */
+export const R_HEAL = 36;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -99,7 +101,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 35;
+export const PROTOCOL_VERSION = 36;
 
 /** Last Man Standing round phases. */
 export const Phase = {

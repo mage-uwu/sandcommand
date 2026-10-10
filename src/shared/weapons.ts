@@ -126,7 +126,7 @@ export const PROJ_DIG = -1;
 export const PROJ_BUILD = -2;
 /** WeaponDef.proj for the radio, which calls in support (a dropship or a tank) instead of shooting. */
 export const PROJ_RADIO = -3;
-/** WeaponDef.proj for the repair kit, which sprays nanobots that heal (and regrow limbs) instead of shooting. */
+/** WeaponDef.proj for the repair kit: one use, it sends out a health wave (World.healWave) instead of shooting. */
 export const PROJ_REPAIR = -4;
 /** WeaponDef.proj for the golden idol (Extraction): carried, never fired. */
 export const PROJ_IDOL = -5;
@@ -140,9 +140,16 @@ export const LASER_MIN = 3;
 export const laserWidth = (power: number) => 0.6 + 3.4 * power;
 export const laserWound = (power: number) => 24 + 156 * power;
 export const laserEnergy = (power: number) => 420 + 2600 * power;
-/** How far the repair kit's nanobot spray reaches (cells), and how much it mends per tick of spraying. */
-export const REPAIR_REACH = 30;
-export const REPAIR_HP = 1.5;
+/**
+ * The repair kit's health wave: a ring of nanobots that spreads out to
+ * HEAL_R cells over HEAL_SPREAD ticks, and every clone of the user's side it
+ * passes (the user alone, without teams) mends for MEND_TICKS: REPAIR_HP hit
+ * points and REPAIR_WOUND off every wound a tick, and lost limbs regrow.
+ */
+export const HEAL_R = 72;
+export const HEAL_SPREAD = 16;
+export const MEND_TICKS = 120;
+export const REPAIR_HP = 1.25;
 export const REPAIR_WOUND = 0.6;
 /** Ticks of spraying a healthy-enough clone to regrow one missing limb. */
 export const REGROW_TICKS = 40;
@@ -228,7 +235,7 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Materializer', proj: PROJ_BUILD, muzzle: 9, rpm: 100, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
   { name: 'Radio', proj: PROJ_RADIO, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
   // Sprays every tick; a canister lasts 4 s of spraying and takes 5 s to brew more nanobots.
-  { name: 'Repair Kit', proj: PROJ_REPAIR, muzzle: 11, rpm: 1800, auto: true, speed: 0, spread: 0, clip: 120, reload: 150, scope: 40 },
+  { name: 'Repair Kit', proj: PROJ_REPAIR, muzzle: 4, rpm: 60, auto: false, speed: 0, spread: 0, clip: 1, reload: 0, scope: 40 },
   { name: 'Golden Idol', proj: PROJ_IDOL, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 0, reload: 0, scope: 60 },
   { name: 'Shotgun', proj: ProjKind.Pellet, muzzle: 14, rpm: 75, auto: false, speed: 900, spread: 0.13, clip: 6, reload: 100, scope: 80, kick: 50, climb: 0.09, lockCone: 0.08, pellets: 9 },
   { name: 'GL', proj: ProjKind.Bomblet, muzzle: 13, rpm: 150, auto: false, speed: 340, spread: 0.03, clip: 6, reload: 105, scope: 110, kick: 16, climb: 0.04 },

@@ -203,16 +203,19 @@ const GUNS: GunDef[] = [
     py: 4,
   },
   {
-    // Repair kit: a white nanobot canister with a red cross, its emitter glowing cyan
+    // Repair kit: a one-shot med case carried by its handle, a red cross on
+    // white, the nanobot charge glowing cyan through its vents
     grid: [
-      '...KKKKK....',
-      'KAAKLLLLKKK.',
-      'KAAKLrLLKVVK',
-      '.KKKrrrLKKK.',
-      '...KLrLLK...',
-      '...KKKKK....',
+      '...KKKK...',
+      '..KAKKAK..',
+      'KKKKKKKKKK',
+      'KLLLrrLLLK',
+      'KLLrrrrLVK',
+      'KLLLrrLLVK',
+      'KAAAAAAAAK',
+      'KKKKKKKKKK',
     ],
-    px: 1,
+    px: 4,
     py: 1,
   },
   {

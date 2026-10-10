@@ -404,7 +404,7 @@ export class BotBrain {
     if (digging) want = digSlot;
     if (calling) want = radioSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
-    // Hurt or maimed, with nobody shooting back right now: patch up with the nanobots.
+    // Hurt or maimed, with nobody shooting back right now: set off the repair kit (once: it's spent).
     const kitSlot = p.inv.findIndex((it) => it.weapon === WeaponId.RepairKit);
     const healing = kitSlot >= 0 && !digging && (p.hp < 55 || stumps(p.parts.mask, p.parts.cls) > 0 || (p.parts.cls === ClassId.Droid && p.parts.mask !== DROID_MASK)) && (!tgt || !this.seeTarget || dist > 200);
     if (healing && !calling) want = kitSlot;

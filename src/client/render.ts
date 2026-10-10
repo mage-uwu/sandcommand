@@ -6,7 +6,7 @@ import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES } from '../shared/worldgen.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
-import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, REPAIR_REACH, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
@@ -21,6 +21,9 @@ import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TAN
 import { ParticleLayer } from './particle-layer.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
+import { drawBackwall } from './backwall.ts';
+import { drawDecor } from './decor-art.ts';
+import type { Terrain } from '../shared/terrain.ts';
 import { RACK_MOUTHS, RACK_PIVOT, TarantulaArt } from './tarantula-sprites.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, WALK_CYCLE } from './sprites.ts';
@@ -71,7 +74,32 @@ function bloodied(c: number, stain: number): number {
   return (255 << 24) | (nb << 16) | (ng << 8) | nr;
 }
 
+/**
+ * Over the rock face in a dug-out space: soft shadow where it meets the
+ * ground, deepest under an overhang (as if the cave were lit from its
+ * mouth). Black at that much alpha, else transparent.
+ */
+function caveShade(t: Terrain, x: number, y: number): number {
+  const R = 7;
+  let a = 0;
+  for (const [dx, dy, w] of SHADE_DIRS) {
+    let d = 1;
+    while (d <= R && t.get(x + dx * d, y + dy * d) === Mat.Air) d++;
+    if (d <= R) a = Math.max(a, (1 - (d - 1) / R) * w);
+  }
+  if (a <= 0.02) return 0;
+  return ((Math.round(a * 255) & 255) << 24) | 0x060408;
+}
+const SHADE_DIRS: readonly [number, number, number][] = [
+  [0, -1, 0.62],
+  [-1, 0, 0.42],
+  [1, 0, 0.42],
+  [0, 1, 0.3],
+];
+
 export class Renderer {
+  /** Scratch: the underground rects behind the terrain this frame (x, y, w, h). */
+  private readonly backRects: number[] = [];
   readonly ctx: CanvasRenderingContext2D;
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
   private chunkImage = new ImageData(CHUNK, CHUNK);
@@ -148,6 +176,7 @@ export class Renderer {
     const px = this.chunkPixels;
     const stain = game.stain;
     const backdrop = game.backdrop;
+    const skyline = game.skyline;
     for (let y = 0; y < CHUNK; y++) {
       const wy = oy + y;
       const row = wy * WORLD_W + ox;
@@ -156,7 +185,9 @@ export class Renderer {
         if (m === Mat.Air) {
           // Inside a bunker: its back wall instead of the open backdrop.
           const bd = backdrop[row + x];
-          px[y * CHUNK + x] = bd ? backWallColor(t, bd, ox + x, wy) : grassBlade(t, ox + x, wy);
+          if (bd) px[y * CHUNK + x] = backWallColor(t, bd, ox + x, wy);
+          else if (wy > skyline[ox + x] + 3) px[y * CHUNK + x] = caveShade(t, ox + x, wy);
+          else px[y * CHUNK + x] = grassBlade(t, ox + x, wy);
           continue;
         }
         const wx = ox + x;
@@ -309,19 +340,21 @@ export class Renderer {
     ctx.setTransform(z, 0, 0, z, offX, offY);
     ctx.imageSmoothingEnabled = false;
 
-    // Cave backdrop: below each column's skyline, dug-out space shows dark rock.
+    // Cave backdrop: below each column's skyline, dug-out space shows the rock face behind the ground.
     const bx0 = Math.max(0, Math.floor(camX - halfW));
     const bx1 = Math.min(WORLD_W - 1, Math.ceil(camX + halfW));
     const bottom = Math.min(WORLD_H, camY + halfH + 1);
-    ctx.fillStyle = '#2c1914';
+    const rects = this.backRects;
+    rects.length = 0;
     let runStart = bx0;
     for (let x = bx0 + 1; x <= bx1 + 1; x++) {
       if (x > bx1 || game.skyline[x] !== game.skyline[runStart]) {
         const top = game.skyline[runStart] + 3;
-        if (top < bottom) ctx.fillRect(runStart, top, x - runStart, bottom - top);
+        if (top < bottom) rects.push(runStart, top, x - runStart, bottom - top);
         runStart = x;
       }
     }
+    drawBackwall(ctx, rects, WORLD_H);
 
     // Now and then, on a cave's back wall: a trace of whoever was here first.
     if (game.relics.length) drawRelics(ctx, game.relics, camX - halfW, camY - halfH, camX + halfW, camY + halfH);
@@ -343,20 +376,21 @@ export class Renderer {
       }
     }
 
+    // The bunkers' fittings: lamps, pipes, signs and the like, on their back walls.
+    if (game.decor.length) drawDecor(ctx, game.terrain, game.decor, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);
+
     // Bunker doors: a lamp over each, green if it opens for us, red if not
-    // (amber, blinking, while it moves); gone once the door's blown.
+    // (amber, blinking, while it moves); gone once the door's blown out.
     for (const d of game.doors) {
       if (d.x1 < camX - halfW - 8 || d.x0 > camX + halfW + 8 || d.y1 < camY - halfH || d.y0 > camY + halfH + 8) continue;
       const t = game.terrain;
       const cx = (d.x0 + d.x1) >> 1;
       let shut = 0;
       for (let y = d.y0; y < d.y1; y++) if (t.get(cx, y) === Mat.Door) shut++;
-      const top = t.get(cx, d.y0) === Mat.Door;
-      if (!top && shut > 0) continue; // (blown)
+      if (t.get(cx, d.y0 - 1) === Mat.Air) continue; // (blown out: the blast takes the housing over it)
       const ours = game.myTeam === Team.None || game.myTeam === d.team;
       const moving = shut > 0 && shut < d.y1 - d.y0;
       const ly = d.y0 - 4;
-      if (t.get(cx, ly) === Mat.Air) continue; // (no wall left to hang it on)
       ctx.fillStyle = '#1a1a1e';
       ctx.fillRect(cx - 2, ly - 1, 4, 3);
       ctx.fillStyle = moving ? ((now / 140) % 2 < 1 ? '#ffb020' : '#5a3a08') : ours ? '#50ff70' : '#ff3a30';
@@ -623,6 +657,65 @@ export class Renderer {
         ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
         ctx.fillStyle = (now / 120) % 2 < 1 ? '#ff4040' : '#401010';
         ctx.fillRect(x - 0.5, y - 2.5, 1, 1);
+      }
+    }
+
+    // Health waves: a ring of nanobots racing out from whoever used the kit,
+    // then every clone it caught (its side's) mending in a drift of green crosses.
+    for (let i = game.healWaves.length - 1; i >= 0; i--) {
+      const hw = game.healWaves[i];
+      const age = (now - hw.at) / 1000;
+      const spread = HEAL_SPREAD / 30;
+      if (age > MEND_TICKS / 30) {
+        game.healWaves.splice(i, 1);
+        continue;
+      }
+      if (age < spread * 1.6) {
+        const u = Math.min(1, age / spread);
+        const r = 4 + (HEAL_R - 4) * (1 - (1 - u) * (1 - u));
+        const a = age < spread ? 1 : 1 - (age - spread) / (spread * 0.6);
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = `rgba(90,240,190,${0.18 * a})`;
+        ctx.beginPath();
+        ctx.arc(hw.x, hw.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = `rgba(210,255,236,${0.85 * a})`;
+        ctx.beginPath();
+        ctx.arc(hw.x, hw.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        // Crosses riding the front.
+        for (let k = 0; k < 14; k++) {
+          const th = (k / 14) * Math.PI * 2 + age * 1.5;
+          const px = Math.round(hw.x + Math.cos(th) * r);
+          const py = Math.round(hw.y + Math.sin(th) * r);
+          ctx.fillStyle = k % 2 ? `rgba(120,255,170,${a})` : `rgba(240,255,250,${a})`;
+          ctx.fillRect(px - 1, py, 3, 1);
+          ctx.fillRect(px, py - 1, 1, 3);
+        }
+        if (age < 0.12) {
+          ctx.fillStyle = `rgba(200,255,230,${0.5 * (1 - age / 0.12)})`;
+          ctx.beginPath();
+          ctx.arc(hw.x, hw.y, 14, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // The mending: everyone caught, by this client's reckoning (its side, inside the ring).
+      const left = 1 - age / (MEND_TICKS / 30);
+      const mending: { x: number; y: number; id: number }[] = views.map((v) => ({ x: v.x + 4, y: v.y + 7, id: v.id }));
+      if (game.alive) mending.push({ x: game.body.x + 4, y: game.body.y + 7, id: game.myId });
+      for (const m of mending) {
+        const t = game.teamOf[m.id] ?? 255;
+        if (m.id !== hw.owner && (hw.team === 255 || t !== hw.team)) continue;
+        if (Math.hypot(m.x - hw.x, m.y - hw.y) > HEAL_R + 40) continue;
+        for (let k = 0; k < 3; k++) {
+          const ph = (now / 900 + k / 3 + m.id * 0.17) % 1;
+          const px = Math.round(m.x + Math.sin(ph * 9 + k * 2 + m.id) * 5);
+          const py = Math.round(m.y + 4 - ph * 16);
+          ctx.fillStyle = `rgba(110,255,160,${(1 - ph) * left})`;
+          ctx.fillRect(px - 1, py, 3, 1);
+          ctx.fillRect(px, py - 1, 1, 3);
+        }
       }
     }
 
@@ -1399,6 +1492,17 @@ export class Renderer {
       ctx.drawImage(g.c, sx - g.r, sy - g.r);
       return;
     }
+    if (weapon === WeaponId.RepairKit) {
+      // The med case: carried by its handle at the side (it's no gun), its charge pulsing through the vents.
+      const gk = this.sprites.gun(weapon, left ? Math.PI : 0);
+      const kx = sx + face * 2;
+      const ky = sy + 4;
+      const pulse = 0.5 + 0.5 * Math.sin(now / 160);
+      ctx.fillStyle = `rgba(90,240,200,${0.12 + 0.18 * pulse})`;
+      ctx.fillRect(kx - 6, ky - 2, 12, 11);
+      ctx.drawImage(gk.c, kx - gk.r, ky - gk.r);
+      return;
+    }
     if (weapon === WeaponId.Idol) {
       // The idol is held up, upright, shining.
       this.drawIdolGlow(ctx, sx + face * 4, sy - 2, now);
@@ -1416,19 +1520,7 @@ export class Renderer {
       const m = (WEAPONS[weapon]?.muzzle ?? 8) + 1;
       const mx = Math.round(sx + Math.cos(aim) * m);
       const my = Math.round(sy + Math.sin(aim) * m);
-      if (weapon === WeaponId.RepairKit) {
-        // Nanobots: a shimmering cyan-green swarm streaming out along the aim.
-        const cos = Math.cos(aim);
-        const sin = Math.sin(aim);
-        for (let k = 0; k < 14; k++) {
-          const ph = ((now / 260 + k * 0.137) % 1) * (REPAIR_REACH - m);
-          const wob = Math.sin(now / 70 + k * 2.1) * (1 + ph * 0.12);
-          const px = Math.round(mx + cos * ph - sin * wob);
-          const py = Math.round(my + sin * ph + cos * wob);
-          ctx.fillStyle = k % 3 === 0 ? '#e8fff6' : k % 3 === 1 ? '#5af0c8' : '#58e0ff';
-          ctx.fillRect(px, py, 1, 1);
-        }
-      } else if (weapon === WeaponId.Digger) {
+      if (weapon === WeaponId.Digger) {
         ctx.fillStyle = 'rgba(255,230,120,0.45)';
         ctx.fillRect(mx - 2, my - 2, 5, 5);
         ctx.fillStyle = 'rgba(255,250,210,0.8)';
@@ -2361,7 +2453,7 @@ export class Renderer {
       ctx.fillStyle = sel ? 'rgba(255,210,80,0.85)' : 'rgba(0,0,0,0.5)';
       ctx.fillRect(x + 2 * s, H - 34 * s, slotW - 4 * s, 24 * s);
       ctx.fillStyle = sel ? '#000' : '#ddd';
-      ctx.fillText(d ? (d.clip > 0 ? `${d.name} ${it.ammo}` : d.name) : '?', x + 10 * s, H - 18 * s);
+      ctx.fillText(d ? (d.clip > 1 ? `${d.name} ${it.ammo}` : d.name) : '?', x + 10 * s, H - 18 * s);
     }
     if (game.alive && !touch && !game.drive) {
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
@@ -2371,7 +2463,14 @@ export class Renderer {
     }
     // Magazine and reload for the weapon in hand.
     const def = WEAPONS[game.weapon];
-    if (game.alive && def && def.clip > 0) {
+    if (game.alive && def && def.clip > 0 && game.weapon === WeaponId.RepairKit) {
+      // One use: a prompt instead of a magazine count.
+      const ax = sx0 + total + 8 * s;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(ax, H - 34 * s, 120 * s, 24 * s);
+      ctx.fillStyle = '#7dffc0';
+      ctx.fillText(input.touch ? 'FIRE: HEAL WAVE' : 'CLICK: HEAL WAVE', ax + 10 * s, H - 18 * s);
+    } else if (game.alive && def && def.clip > 0) {
       const ax = sx0 + total + 8 * s;
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(ax, H - 34 * s, 120 * s, 24 * s);

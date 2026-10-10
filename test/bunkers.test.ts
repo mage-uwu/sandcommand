@@ -6,10 +6,11 @@ import { invByte } from '../src/shared/items.ts';
 import { MAT_TOUGH, Mat } from '../src/shared/materials.ts';
 import { Team, quantizeAim } from '../src/shared/protocol.ts';
 import { DOOR_H, SLAB, WALL } from '../src/shared/structures.ts';
-import { TANK_H, TANK_STEP_UP, TANK_W, newTank } from '../src/shared/tank.ts';
+import { TANK_H, TANK_HP, TANK_STEP_UP, TANK_W, newTank } from '../src/shared/tank.ts';
 import { Terrain } from '../src/shared/terrain.ts';
+import { ProjKind } from '../src/shared/weapons.ts';
 import { MapKind, generateWorld, lastComplexes } from '../src/shared/worldgen.ts';
-import { type Player, World } from '../src/server/world.ts';
+import { DOOR_HP, type Player, World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
 const FLOOR = 400;
@@ -205,7 +206,7 @@ describe('bunker doors', () => {
     const dx = 1000;
     for (let y = FLOOR - 120; y < FLOOR; y++) for (let x = dx; x < dx + WALL; x++) world.terrain.set(x, y, y >= FLOOR - DOOR_H ? Mat.Door : Mat.Concrete);
     world.terrainReplaced();
-    world.doors = [{ x0: dx, y0: FLOOR - DOOR_H, x1: dx + WALL, y1: FLOOR, team: Team.Red, open: 0, broken: false }];
+    world.doors = [{ x0: dx, y0: FLOOR - DOOR_H, x1: dx + WALL, y1: FLOOR, team: Team.Red, open: 0, hp: DOOR_HP, broken: false }];
     ps.forEach((p, i) => {
       p.team = teams[i];
       p.body.x = 600;
@@ -247,7 +248,7 @@ describe('bunker doors', () => {
     expect(b.door.open).toBe(DOOR_H);
   });
 
-  it('won\'t shut on a clone standing in the doorway; blown open, it stays open', () => {
+  it('won\'t shut on a clone standing in the doorway', () => {
     const { world, ps, door } = doorYard([Team.Red, Team.Green]);
     walkTo(world, ps[0], door.x0 - 14);
     expect(door.open).toBe(DOOR_H);
@@ -255,13 +256,33 @@ describe('bunker doors', () => {
     ps[0].body.x = 200;
     walkTo(world, ps[1], door.x0 - 1);
     expect(door.open).toBe(DOOR_H);
-    // Away from it: it shuts. Then a blast takes a bite out of it.
+    // Away from it: it shuts.
     walkTo(world, ps[1], 300);
     expect(door.open).toBe(0);
-    world.carve(door.x0 + 3, door.y0 + 10, 6, 6, 0);
-    world.step();
+  });
+
+  it('near a tank\'s strength: rounds scratch it, blasts dent it, enough of them blow it out', () => {
+    const { world, ps, door } = doorYard([Team.Green]);
+    const enemy = ps[0];
+    // A rifle round: barely a scratch.
+    world.projectiles.spawn(95001, ProjKind.Bullet, enemy.id, door.x0 - 40, door.y0 + 12, 900, 0);
+    for (let k = 0; k < 6; k++) world.step();
+    expect(door.hp).toBeLessThan(DOOR_HP);
+    expect(DOOR_HP - door.hp).toBeLessThan(DOOR_HP / 100);
+    // Bazooka rockets into it: its steel never carves, it just takes the damage...
+    let rockets = 0;
+    while (!door.broken && rockets < 40) {
+      world.projectiles.spawn(95100 + rockets, ProjKind.Rocket, enemy.id, door.x0 - 30, door.y0 + 17, 600, 0);
+      for (let k = 0; k < 8; k++) world.step();
+      rockets++;
+      if (!door.broken) expect(shut(world, door.x0)).toBe(true);
+    }
+    // ...until it's had enough: blown out, the doorway open for good.
+    expect(DOOR_HP).toBeGreaterThan(TANK_HP / 2);
+    expect(rockets).toBeGreaterThan(5);
     expect(door.broken).toBe(true);
-    walkTo(world, ps[0], door.x0 - 14);
-    expect(world.terrain.get(door.x0 + 3, door.y1 - 2)).toBe(Mat.Door); // (no longer works)
+    for (let y = door.y0; y < door.y1; y++) for (let x = door.x0; x < door.x1; x++) expect(world.terrain.get(x, y)).not.toBe(Mat.Door);
+    walkTo(world, enemy, door.x0 - 14);
+    expect(world.terrain.get(door.x0 + 3, door.y1 - 2)).not.toBe(Mat.Door); // (it no longer shuts)
   });
 });

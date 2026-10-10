@@ -163,6 +163,7 @@ import {
   R_ROUND,
   R_TRAPS,
   R_BEAM,
+  R_HEAL,
   R_SPOTTED,
   R_MINES,
   R_WAVE,
@@ -207,7 +208,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, REPAIR_HP, REPAIR_REACH, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon } from '../shared/worldgen.ts';
@@ -283,6 +284,9 @@ export class Player {
   seat = 0;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
+  /** Ticks of mending left from a health wave it was caught in, and the last wave that caught it. */
+  mend = 0;
+  mendWave = -1;
   /** Muzzle climb from recent shots (radians), settling back each tick. */
   climb = 0;
   /** Laser charge (ticks held), and how far the Gatling's barrels have spun up. */
@@ -399,8 +403,8 @@ export class World {
   private readonly broadcast = new Writer(1024);
   private readonly actorRecords = new Writer(64 * 16);
   private readonly pendingPixels = new Map<number, number[]>();
-  /** The bunkers' steel doors: where, whose, how many rows are open, and whether it's been blown (then it stays as it is). */
-  doors: { x0: number; y0: number; x1: number; y1: number; team: number; open: number; broken: boolean }[] = [];
+  /** The bunkers' steel doors: where, whose, how many rows are open, its hit points, and whether it's been blown out. */
+  doors: { x0: number; y0: number; x1: number; y1: number; team: number; open: number; hp: number; broken: boolean }[] = [];
   private readonly removedScratch: number[] = [];
   private readonly detachedScratch: number[] = [];
   private readonly chunkCache = new Map<number, { version: number; bytes: Uint8Array }>();
@@ -498,7 +502,7 @@ export class World {
     this.dungeon = lastDungeon;
     this.caves = lastCaves;
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
-    this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, broken: false })));
+    this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, hp: DOOR_HP, broken: false })));
     this.trapSpent.fill(0);
     this.trapCd.fill(0);
     this.trapsRev++;
@@ -1308,6 +1312,11 @@ export class World {
   carve(x: number, y: number, r: number, core: number, debrisMax: number, owner = NO_OWNER): number {
     x = Math.max(0, Math.min(WORLD_W - 1, Math.round(x)));
     y = Math.max(0, Math.min(WORLD_H - 1, Math.round(y)));
+    // A door in the bite takes the damage instead (its steel never carves): cutters and lasers wear it down.
+    if (core > 0) {
+      const d = this.doorAt(x, y, core);
+      if (d) this.damageDoor(d, core * core, owner);
+    }
     const removed = this.removedScratch;
     const detached = this.detachedScratch;
     const n = applyCarve(this.terrain, x, y, r, core, removed, detached);
@@ -1653,6 +1662,14 @@ export class World {
       v.body.vy += rvy * knock;
       this.applyStrike(v, res, owner, kind, x, y);
     }
+    if (actor < 0) {
+      // Into a door: as into a tank's hull (a round that can't punch through barely scratches it; a shaped charge takes a share of the whole).
+      const d = this.doorAt(Math.floor(x + pr.vx[i] * 0.004), Math.floor(y + pr.vy[i] * 0.004), 2);
+      if (d) {
+        const energy = def.mass * def.sharp * Math.hypot(pr.vx[i], pr.vy[i]);
+        this.damageDoor(d, (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? TANK_HP * def.antiArmor : 0), owner);
+      }
+    }
     const seed = this.rng.nextU32();
     if (detonate) {
       if (def.carveR > 0 && (actor < 0 || !def.ballistic)) {
@@ -1667,6 +1684,7 @@ export class World {
         explosionFragments(this.grains, x, y, kind, owner, new Rng(seed));
         this.splashCrafts(x, y, def.splashR, def.splashDamage, owner);
         this.splashTanks(x, y, def.splashR, def.splashDamage, owner);
+        this.splashDoors(x, y, def.splashR, def.splashDamage, owner);
         this.splashShips(x, y, def.splashR, def.splashDamage, owner);
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
@@ -1753,8 +1771,13 @@ export class World {
       spun = p.spin >= def.spinUp;
     }
     p.cooldown -= 1;
-    // The repair kit works off either hand (so it can regrow a lost gun arm).
+    // The repair kit works off either hand (so it can regrow a lost gun arm), on a fresh press.
     const want = spun && def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && def.proj !== PROJ_IDOL && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
+    if (want && def.proj === PROJ_REPAIR) {
+      this.healWave(p);
+      p.firing = true;
+      return;
+    }
     if (want && p.cooldown <= 0 && (def.proj !== PROJ_MINE || this.layMine(p))) {
       if (def.proj !== PROJ_MINE) this.fire(p, def);
       p.firing = true;
@@ -2023,10 +2046,8 @@ export class World {
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
     const ox = sh.x;
     const oy = sh.y;
-    if (def.proj === PROJ_REPAIR) {
-      this.repair(p, ox, oy, cos, sin);
-      return;
-    }
+    void ox;
+    void oy;
     if (def.proj === PROJ_DIG) {
       // Digger: vacuum terrain in front of the clone, banking any gold. It
       // bites at the first solid cell along the aim (so a wall you're
@@ -2165,24 +2186,59 @@ export class World {
   private beamSeq = 0;
 
   /**
-   * One tick of the repair kit's nanobot spray: on the teammate it's aimed
-   * at (in reach, in sight), else on the clone holding it. It closes wounds
-   * and restores health, and once the clone is patched up enough it regrows
-   * a missing limb (arms first, then legs, then the jetpack) every
-   * REGROW_TICKS of spraying.
+   * The repair kit, used: it's spent (gone from the hand), and a health wave
+   * spreads out from the clone that used it (stepWaves).
    */
-  private repair(p: Player, ox: number, oy: number, cos: number, sin: number): void {
-    let reach = REPAIR_REACH;
-    for (let r = 1; r < REPAIR_REACH; r++) {
-      if (this.terrain.isSolid(Math.floor(ox + cos * r), Math.floor(oy + sin * r))) {
-        reach = r;
-        break;
+  private healWave(p: Player): void {
+    const id = (this.waveSeq = (this.waveSeq + 1) & 0xffff);
+    this.waves.push({ id, x: p.cx, y: p.cy, team: p.team, owner: p.id, age: 0 });
+    p.inv.splice(p.slot, 1);
+    p.slot = Math.max(0, Math.min(p.slot, p.inv.length - 1));
+    this.invChanged(p);
+    const w = this.tmp.reset();
+    w.u8(R_HEAL);
+    w.u16(id);
+    w.u16(clampU16(p.cx));
+    w.u16(clampU16(p.cy + Y_BIAS));
+    w.u8(p.team);
+    w.u8(p.id);
+    this.hits.push({ bytes: w.finish(), id: 0, x: p.cx, y: p.cy });
+  }
+
+  /** Health waves spreading (catching the user's side as they pass), and everyone they caught mending. */
+  private stepWaves(): void {
+    for (let i = this.waves.length - 1; i >= 0; i--) {
+      const wv = this.waves[i];
+      wv.age++;
+      const r = (HEAL_R * Math.min(wv.age, HEAL_SPREAD)) / HEAL_SPREAD;
+      for (const o of this.players) {
+        if (!o || !o.alive || o.mendWave === wv.id) continue;
+        if (o.id !== wv.owner && (wv.team === Team.None || o.team !== wv.team)) continue;
+        if (Math.hypot(o.cx - wv.x, o.cy - wv.y) > r) continue;
+        o.mendWave = wv.id;
+        o.mend = MEND_TICKS;
       }
+      if (wv.age >= HEAL_SPREAD) this.waves.splice(i, 1);
     }
-    let t = p;
-    const hit = this.segmentActor(ox, oy, ox + cos * reach, oy + sin * reach, p.id, this.repairQ);
-    const o = hit >= 0 && hit < MAX_PLAYERS ? this.players[hit] : null;
-    if (o && o.alive && p.team !== Team.None && o.team === p.team) t = o;
+    for (const p of this.players) {
+      if (!p || p.mend <= 0) continue;
+      if (!p.alive) {
+        p.mend = 0;
+        continue;
+      }
+      p.mend--;
+      this.mendTick(p);
+    }
+  }
+  private readonly waves: { id: number; x: number; y: number; team: number; owner: number; age: number }[] = [];
+  private waveSeq = 0;
+
+  /**
+   * One tick of mending: it closes wounds and restores health, and once the
+   * clone is patched up enough it regrows a missing limb (arms first, then
+   * legs, then the jetpack) every REGROW_TICKS.
+   */
+  private mendTick(t: Player): void {
     t.hp = Math.min(ACTOR_MAX_HP, t.hp + REPAIR_HP);
     const parts = t.parts;
     for (let part = 0; part < PART_COUNT; part++) if (has(parts.mask, part)) parts.wounds[part] = Math.max(0, parts.wounds[part] - REPAIR_WOUND);
@@ -2199,7 +2255,6 @@ export class World {
     t.body.legs = t.mob.legs;
     t.body.jet = t.mob.jet;
   }
-  private readonly repairQ = { t: 0 };
   private readonly scopeQ = { t: 0 };
 
   /** Launch a projectile and tell the clients that will see it. */
@@ -2240,6 +2295,7 @@ export class World {
     p.hp = ACTOR_MAX_HP;
     p.alive = true;
     p.regrow = 0;
+    p.mend = 0;
     p.cooldown = 10;
     p.reloadLeft = 0;
     // A fresh, random kit (always a primary, a digger and a materializer).
@@ -2661,9 +2717,11 @@ export class World {
   }
 
   /**
-   * The bunkers' steel doors slide up (from the bottom, two rows a tick) while one of their own side is near, and back down once none is
-   * and nothing stands in the doorway. A door that's been blown or dug into
-   * stops working and stays as it is.
+   * The bunkers' steel doors slide up (from the bottom, two rows a tick)
+   * while one of their own side is near, and back down once none is and
+   * nothing stands in the doorway. Door steel never carves: a door takes
+   * damage instead (damageDoor) and blows out once it's had a tank's worth,
+   * near enough.
    */
   private stepDoors(): void {
     const RATE = 2;
@@ -2671,13 +2729,6 @@ export class World {
     for (const d of this.doors) {
       if (d.broken) continue;
       const h = d.y1 - d.y0;
-      // Still whole? (Every cell above the opening is door.)
-      let whole = true;
-      for (let y = d.y0; y < d.y1 - d.open && whole; y++) for (let x = d.x0; x < d.x1; x++) if (this.terrain.mat[y * WORLD_W + x] !== Mat.Door) whole = false;
-      if (!whole) {
-        d.broken = true;
-        continue;
-      }
       const cx = (d.x0 + d.x1) / 2;
       let wanted = false;
       let blocked = false;
@@ -2707,6 +2758,39 @@ export class World {
           d.open--;
         }
       }
+    }
+  }
+
+  /** The door whose cells (padded by `pad`) hold (x, y), or null. */
+  private doorAt(x: number, y: number, pad: number): (typeof this.doors)[number] | null {
+    for (const d of this.doors) if (!d.broken && x >= d.x0 - pad && x < d.x1 + pad && y >= d.y0 - pad && y < d.y1 + pad) return d;
+    return null;
+  }
+
+  /** Harm a door; out of hit points, it blows out. */
+  private damageDoor(d: (typeof this.doors)[number], dmg: number, by: number): void {
+    if (d.broken || dmg <= 0) return;
+    d.hp -= dmg;
+    if (d.hp > 0) return;
+    // Blown out: what's left of its steel turns to scrap and goes in two
+    // blasts (logged after the pixels, so replicas see the same order),
+    // taking a bite of the wall above it.
+    d.broken = true;
+    for (let y = d.y0; y < d.y1; y++) for (let x = d.x0; x < d.x1; x++) if (this.terrain.mat[y * WORLD_W + x] === Mat.Door) this.deposit(x, y, Mat.Metal);
+    this.flushPixels();
+    const cx = (d.x0 + d.x1) >> 1;
+    this.carve(cx, d.y0 + 9, 13, 13, 40, by);
+    this.carve(cx, d.y1 - 9, 12, 12, 30, by);
+  }
+
+  /** A blast's overpressure on the doors near it (as on a tank's hull). */
+  private splashDoors(x: number, y: number, r: number, dmg: number, by: number): void {
+    for (const d of this.doors) {
+      if (d.broken) continue;
+      const nx = Math.max(d.x0, Math.min(x, d.x1));
+      const ny = Math.max(d.y0, Math.min(y, d.y1));
+      const dist = Math.hypot(nx - x, ny - y);
+      if (dist < r) this.damageDoor(d, dmg * 1.5 * (1 - dist / r), by);
     }
   }
 
@@ -4005,6 +4089,7 @@ export class World {
     this.stepTanks();
     this.seatRiders();
     this.stepDoors();
+    this.stepWaves();
     this.stepShips();
     this.shipCollisions();
     this.bodyCollisions();
@@ -4648,6 +4733,8 @@ const CALL_COOLDOWN = 30 * 30;
 const BOARD_REACH = 10;
 /** How close (cells, box to box) a clone must be to a friendly vehicle to climb up and ride it. */
 const SURF_REACH = 14;
+/** A bunker door's hit points: most of a tank's hull. */
+export const DOOR_HP = TANK_HP * 0.6;
 /** A laid landmine: where it sits (on the ground cell at x, y), who laid it and their side, and ticks until it's armed. */
 interface Mine {
   id: number;

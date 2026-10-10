@@ -46,7 +46,11 @@ export const Mat = {
   Iron: 18,
   /** Sandbags: piled cover outside the bunkers and along trench parapets. Soft; holds its shape. */
   Sandbag: 19,
-  /** A bunker's sliding steel door (World.doors opens and shuts it). Hard. */
+  /**
+   * A bunker's sliding steel door (World.doors opens and shuts it). Never
+   * carved: it has hit points instead, near a tank's, and blows out whole
+   * when they're gone.
+   */
   Door: 20,
 } as const;
 
@@ -55,7 +59,7 @@ export const MAT_COUNT = 21;
 /** Hard materials only yield to the inner core of an explosion. */
 export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they

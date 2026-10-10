@@ -1,3 +1,4 @@
+import { type Decor, placeDecor } from './decor.ts';
 import { BTN_FIRE, type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
@@ -266,6 +267,8 @@ export class Game implements FrameHandler {
   caves = false;
   /** Traces of whoever was here first (relics.ts): rare, cosmetic. */
   relics: Relic[] = [];
+  /** The bunkers' fittings this wave (purely for looks). */
+  decor: Decor[] = [];
   /** The bunkers' steel doors this wave (their cells, and whose). */
   doors: { x0: number; y0: number; x1: number; y1: number; team: number }[] = [];
 
@@ -316,6 +319,18 @@ export class Game implements FrameHandler {
     const me = this.body;
     const d = Math.min(Math.hypot(me.x - x0, me.y - y0), Math.hypot(me.x - x1, me.y - y1));
     this.shake = Math.max(this.shake, (owner === this.myId ? 1 + power * 9 : 0) + Math.max(0, 1 - d / 300) * power * 6);
+  }
+
+  /** Health waves spreading (a repair kit used): where, whose side, who used it, when. */
+  readonly healWaves: { x: number; y: number; team: number; owner: number; at: number }[] = [];
+  private healSeen: number[] = [];
+
+  heal(seq: number, x: number, y: number, team: number, owner: number): void {
+    if (this.healSeen.includes(seq)) return;
+    this.healSeen.push(seq);
+    if (this.healSeen.length > 16) this.healSeen.shift();
+    this.healWaves.push({ x, y, team, owner, at: performance.now() });
+    if (this.healWaves.length > 8) this.healWaves.shift();
   }
 
   /** Recent shots by clone id (when, how hard), for the gun kicking back in their hands. */
@@ -1026,6 +1041,7 @@ export class Game implements FrameHandler {
     this.deathCause = '';
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
+    this.decor = placeDecor(this.terrain, lastComplexes, seed);
     this.dungeon = lastDungeon;
     this.trapSpent = new Uint8Array(32);
     this.particles.n = 0;

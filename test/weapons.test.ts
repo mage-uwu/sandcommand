@@ -5,7 +5,7 @@ import { TICK_RATE, WORLD_W } from '../src/shared/constants.ts';
 import { Part } from '../src/shared/body.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
-import { PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, fireInterval, weaponOfProj } from '../src/shared/weapons.ts';
+import { PROJ, PROJ_REPAIR, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, fireInterval, weaponOfProj } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { deliverAll } from './helpers.ts';
@@ -49,7 +49,7 @@ describe('weapon table', () => {
       expect(w.rpm).toBeGreaterThan(0);
       expect(w.scope).toBeGreaterThan(0);
       expect(w.clip).toBeGreaterThanOrEqual(0);
-      if (w.clip > 0) expect(w.reload).toBeGreaterThan(0);
+      if (w.clip > 0 && w.proj !== PROJ_REPAIR) expect(w.reload).toBeGreaterThan(0); // (the repair kit is used once and gone)
       if (w.proj >= 0) expect(PROJ[w.proj]).toBeTruthy();
     }
     expect(weaponOfProj(WEAPONS[WeaponId.Sniper].proj)?.name).toBe('Sniper');

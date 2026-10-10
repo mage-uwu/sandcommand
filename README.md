@@ -896,9 +896,13 @@ exactly as before.
     doorway.
   - **No teams, no lock.** In Last Man Standing and PvP it opens for
     anyone.
-  - **Breaching.** Door steel is hard, so only an explosion core or a
-    digger gets through. A door that's been blown or dug into stops
-    working and stays as it is.
+  - **Breaching.** Door steel never carves. Instead a door has hit points:
+    60% of a tank's hull. It takes damage the way a hull does. A round that
+    can't punch armour barely scratches it. A shaped charge takes a share of
+    the whole door. Blasts dent it with their overpressure, and diggers and
+    lasers wear it down.
+  - **Blown out.** Once its hit points are gone, the door blows out with a
+    bite of the wall above it, and the doorway stays open for good.
   - **Lamp.** A lamp over each door shows green if it opens for you and red
     if it doesn't. It blinks amber while the door moves.
 - **Reinforcing slabs.** A 12-cell concrete slab is poured against the
@@ -922,6 +926,19 @@ exactly as before.
   18 cells wide and 24 tall. Their sides are 18 cells sheer, more than a
   tank's tracks can climb even off a bounce. Between them is room for a
   clone to land.
+- **Fittings** (`src/client/decor.ts`, client side, purely for looks).
+  Rooms get fittings on the back wall or hanging from the ceiling, never on
+  the floor, so nothing looks like cover that isn't:
+  - caged lamps casting pools of light, some flickering;
+  - pipe runs with valves, and sagging cables;
+  - vents, fuse boxes with winking telltales, and gauges;
+  - faded posters and rifle racks;
+  - stencilled level markers (L2, B1) over hazard stripes, and VAULT in the
+    strongrooms;
+  - a fortress's team banners.
+
+  A lamp goes out when the ceiling it hangs from is shot away. Anything
+  buried or filled in disappears.
 - **Sandbags** (`Mat.Sandbag`). Piles 12 cells tall stand outside the doors
   and on some roofs. That hides a crouching clone (10) but not a standing
   one (14).
@@ -1047,6 +1064,17 @@ slopes), or frost on the high Highlands. Bunkers never get it. The lichen
 (`Mat.Grass`) is a teal crust tipped pale aqua and violet, with fronds
 poking into the air above it and the odd glowing violet spore-head. Frost
 (`Mat.Snow`) is drawn with a bright crust, lilac shadows and glints.
+
+**The rock face behind the ground** (`src/client/backwall.ts`) shows wherever
+a cave, tunnel or crater opens below the surface. It is a seamless tile,
+one pixel per cell, drawn in world space.
+- **Rock.** Fractured blocks of rock, each lit from the top left, with dark
+  fissures between them.
+- **Colour.** Rust soil fades into darker basalt in soft patches, with faint
+  strata and the odd mineral glint.
+- **Depth.** It sinks into deeper dark the further down it is.
+- **Shadow.** Soft shadow falls where it meets the ground, deepest under
+  overhangs.
 
 ## Architecture
 
@@ -1399,7 +1427,7 @@ exists everywhere.
 | Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
 | Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
 | Radio | calls support (see below) | 6 | – | click | ∞ | – | 60 |
-| Repair Kit | nanobots (see below) | 11 | every tick | auto | 120 | 5 s | 40 |
+| Repair Kit | health wave (see below) | 4 | once | click | 1 (used up) | – | 40 |
 | Shotgun | 9 pellets, 900 | 14 | 75 rpm | semi | 6 | 3.3 s | 80 |
 | GL | bomblet, 340 | 13 | 150 rpm | semi | 6 | 3.5 s | 110 |
 | Gatling | heavy round, 960 | 17 | 1100 rpm (after spin-up) | auto | 100 | 5 s | 120 |
@@ -1503,14 +1531,22 @@ its speed, so its energy and knockback are what they were at 1500 cells/s.
 It leaves a tracer streak from muzzle to impact that hangs in the air for a
 moment.
 
-The **repair kit** sprays a stream of nanobots (`World.repair`). Aimed at
-a teammate in reach (30 cells, in sight), it works on them; otherwise it
-works on you. Every tick it restores 1.5 health and closes wounds on every
-part. Once the clone is above 60% health, it regrows a missing limb every
-1.3 s of spraying: gun arm first, then the off arm, legs, and jetpack. It
-works off either hand, so a clone can grow back its own gun arm. A
-canister lasts 4 s of spraying, then brews more for 5 s. Bots patch
-themselves up when they're hurt or maimed and nobody's shooting at them.
+The **repair kit** is a single-use med case. The clone carries it by its
+handle rather than aiming it like a gun. One click sets it off
+(`World.healWave`), and the kit is used up and gone from the inventory.
+
+- **The wave.** A ring of nanobots races out to 72 cells in about half a
+  second.
+- **Who it reaches.** It catches you and every teammate it passes. Without
+  teams, it catches only you.
+- **Mending.** Everyone it catches mends for 4 s. Every tick they get back
+  1.25 health, and wounds close on every part.
+- **Lost limbs.** Once a clone is above 60% health, a missing limb regrows
+  every 1.3 s: gun arm first, then the off arm, legs, and jetpack.
+- **Looks.** Clients draw the ring and green crosses drifting off everyone
+  mending (`R_HEAL`).
+- **Bots.** A bot uses its kit when it's hurt or maimed and nobody is
+  shooting at it.
 
 How each field works:
 

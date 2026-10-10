@@ -29,6 +29,7 @@ import {
   R_TEAMS,
   R_TRAPS,
   R_BEAM,
+  R_HEAL,
   R_SPOTTED,
   R_MINES,
   GameMode,
@@ -266,6 +267,8 @@ export interface FrameHandler {
   round(s: RoundState): void;
   /** A laser beam fired (seq: to drop the copy sent for its other end). */
   beam(seq: number, x0: number, y0: number, x1: number, y1: number, power: number, owner: number): void;
+  /** A repair kit's health wave set off (seq: to drop a repeat). */
+  heal(seq: number, x: number, y: number, team: number, owner: number): void;
   /** Extraction: which traps have gone off (bit per trap id). */
   traps(spent: Uint8Array): void;
   /** Every landmine laid (the whole list, when it changes). */
@@ -463,6 +466,14 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const y1 = r.u16() - Y_BIAS;
         const power = r.u8() / 255;
         h.beam(seq, x0, y0, x1, y1, power, r.u8());
+        break;
+      }
+      case R_HEAL: {
+        const seq = r.u16();
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        const team = r.u8();
+        h.heal(seq, x, y, team, r.u8());
         break;
       }
       case R_MINES: {
@@ -754,6 +765,7 @@ export const nullHandler: FrameHandler = {
   traps() {},
   mines() {},
   beam() {},
+  heal() {},
   teams() {},
   wave() {},
   items() {},
