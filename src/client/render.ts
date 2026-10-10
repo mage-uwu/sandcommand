@@ -21,7 +21,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor, cementColor } from './texture.ts';
+import { backWallColor, dripColor, structColor, frostColor, grassBlade, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
 import { drawDecor } from './decor-art.ts';
@@ -270,6 +270,9 @@ export class Renderer {
         else if (m === Mat.RareEarth) c = crystalColor(t, wx, wy);
         else if (m === Mat.Glass) c = glassColor(t, wx, wy);
         else if (m === Mat.Cement) c = cementColor(t, wx, wy);
+        else if (m === Mat.OldConcrete) c = oldConcreteColor(t, wx, wy);
+        else if (m === Mat.Rust) c = rustColor(t, wx, wy);
+        else if (m === Mat.Pour) c = pourColor(t, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);

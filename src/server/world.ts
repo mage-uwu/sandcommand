@@ -535,6 +535,12 @@ export class World {
     for (let ci = 0; ci < CHUNK_COUNT; ci++) this.chunkVersion[ci]++;
     for (const p of this.players) p?.known.fill(-1);
     this.mapRecord = null;
+    // Geysers whose vent the new ground buried (or left hanging in the air) are gone with it.
+    const vent = (g: { x: number; y: number }) => this.terrain.get(g.x, g.y) === Mat.Air && this.terrain.get(g.x, g.y + 1) === Mat.Rock;
+    if (!this.geysers.every(vent)) {
+      this.geysers = this.geysers.filter(vent);
+      this.geysersRev++;
+    }
   }
 
   /** The kind of map wave `n` is fought on. */

@@ -58,7 +58,7 @@ export function crustCell(x: number, y: number, d: number, depth: number, seed: 
     const dy = y - cy;
     const lx = dx * Math.cos(a) + dy * Math.sin(a);
     const ly = -dx * Math.sin(a) + dy * Math.cos(a);
-    if (Math.abs(lx) <= hw && Math.abs(ly) <= hh) return Mat.Cement;
+    if (Math.abs(lx) <= hw && Math.abs(ly) <= hh) return pick < 0.12 ? Mat.OldConcrete : Mat.Cement; // (some of it the city's, not the Progenitors')
   } else if (pick > 0.93) {
     // A dragon's tooth, toppled every which way: a triangle.
     const cx = gx * 26 - 7 + 13;
@@ -83,6 +83,34 @@ export function crustCell(x: number, y: number, d: number, depth: number, seed: 
     const ly = -dx * Math.sin(a) + dy * Math.cos(a);
     if (Math.abs(lx) < 3.5 && Math.abs(ly) < 0.9) return Mat.Glass;
   }
+  // The city's steel: rusted beams lying every which way, and loose rebar, bent.
+  const bx = Math.floor(x / 40);
+  const by = Math.floor(y / 22);
+  if (u01(bx, by, seed ^ 0xbea7) < 0.1) {
+    const cx = bx * 40 + 20 + (u01(bx, by, seed ^ 9) - 0.5) * 16;
+    const cy = by * 22 + 11 + (u01(bx, by, seed ^ 10) - 0.5) * 8;
+    const a = (u01(bx, by, seed ^ 11) - 0.5) * 2.4;
+    const half = 7 + u01(bx, by, seed ^ 12) * 10;
+    const dx = x - cx;
+    const dy = y - cy;
+    const lx = dx * Math.cos(a) + dy * Math.sin(a);
+    const ly = -dx * Math.sin(a) + dy * Math.cos(a);
+    // An I-beam: two flanges and the web between them.
+    if (Math.abs(lx) <= half && (Math.abs(ly) >= 1.5 && Math.abs(ly) <= 2.5 || (Math.abs(ly) < 1.5 && Math.abs(lx) < half - 1))) return Mat.Rust;
+  }
+  const rx = Math.floor(x / 17);
+  const ry = Math.floor(y / 13);
+  if (u01(rx, ry, seed ^ 0x5eba) < 0.08) {
+    const cx = rx * 17 + 8;
+    const cy = ry * 13 + 6;
+    const a = u01(rx, ry, seed ^ 13) * Math.PI;
+    const bend = (u01(rx, ry, seed ^ 14) - 0.5) * 0.08;
+    const dx = x - cx;
+    const dy = y - cy;
+    const lx = dx * Math.cos(a) + dy * Math.sin(a);
+    const ly = -dx * Math.sin(a) + dy * Math.cos(a) - bend * lx * lx;
+    if (Math.abs(lx) < 7 && Math.abs(ly) < 0.6) return Mat.Rust;
+  }
   // Strata: now and then a slab layer, broken by gaps (the old floors).
   if ((d + Math.floor(grit * 3)) % 37 === 0 && u01(Math.floor(x / 30), Math.floor(d / 37), seed ^ 8) < 0.6) return Mat.Cement;
   // Lenses: ash and gravel pockets (loose: they pour when undercut), commoner near the top.
@@ -94,10 +122,117 @@ export function crustCell(x: number, y: number, d: number, depth: number, seed: 
   return Mat.Char;
 }
 
+export interface Buried {
+  /** Centre, size and tilt (radians) of the building's shell. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tilt: number;
+  /** Its top storeys stand out of the ground, broken off. */
+  exposed: boolean;
+}
+
+/** One storey of a buried building, slab to slab (cells). */
+const STOREY = 26;
+
+/**
+ * The city under the crust: the deadland was civilised once, long before the
+ * fires. Concrete buildings of one to four storeys lie buried in it, settled
+ * askew, gutted, their top floors sheared away; window holes in their walls,
+ * floor slabs with rusted rebar hanging off the broken ends, some framed in
+ * steel. Most rooms are packed solid with ash and char; now and then one is
+ * still hollow. A few stand high enough that their broken top storeys break
+ * the surface, wall stubs and empty windows against the sky.
+ */
+export function placeBuried(m: Uint8Array, seed: number, heights: Int32Array, crust: Int32Array, backdrop?: Uint8Array): Buried[] {
+  const rng = new Rng(seed ^ 0xb0e1d);
+  const out: Buried[] = [];
+  const want = 12 + rng.int(6);
+  for (let tries = 0; tries < 300 && out.length < want; tries++) {
+    const x = 150 + rng.int(WORLD_W - 300);
+    const w = 60 + rng.int(110);
+    const storeys = 1 + rng.int(4);
+    const h = storeys * STOREY + 5;
+    const g = heights[x];
+    const exposed = rng.next() < 0.3;
+    // Exposed: its top 8-30 cells over the ground. Buried: anywhere in the crust, older ones down into the deep.
+    const top = exposed ? g - 18 - rng.int(36) : g + 8 + rng.int(Math.max(1, crust[x] + 20 - h));
+    const cy = top + h / 2;
+    if (cy + h / 2 > WORLD_H - 60) continue;
+    if (out.some((o) => Math.abs(o.x - x) < (o.w + w) / 2 + 24 && Math.abs(o.y - cy) < (o.h + h) / 2 + 12)) continue;
+    const tilt = (rng.next() - 0.5) * (exposed ? 0.12 : 0.4);
+    const steel = rng.next() < 0.35; // a steel frame: its inner columns are beams
+    const collapse = rng.next(); // how much of its far end has fallen in
+    const side = rng.next() < 0.5;
+    const b: Buried = { x, y: Math.round(cy), w, h, tilt, exposed };
+    out.push(b);
+    const c = Math.cos(tilt);
+    const sn = Math.sin(tilt);
+    const R = Math.ceil(Math.hypot(w, h) / 2) + 2;
+    const s0 = seed ^ (x * 131 + top);
+    /** Ruin: the far end fallen in, stepping down; chunks gone; exposed tops sheared off jagged. */
+    const broken = (ix: number, iy: number, above: boolean) => {
+      if (ix < 0 || ix >= w) return true;
+      const u = side ? ix / w : 1 - ix / w;
+      if (u > 1 - collapse * 0.5 && iy < (u - (1 - collapse * 0.5)) * 2 * h) return true;
+      if (u01(Math.floor(ix / 7), Math.floor(iy / 7), s0) > 0.86) return true;
+      return above && iy < 2 + u01(Math.floor(ix / 4), 0, s0 ^ 1) * 10 + (g - top) * 0.2;
+    };
+    for (let yy = Math.floor(cy - R); yy <= cy + R; yy++) {
+      for (let xx = x - R; xx <= x + R; xx++) {
+        if (!inside(xx, yy) || m[at(xx, yy)] === Mat.Bedrock) continue;
+        const dx = xx - x;
+        const dy = yy - cy;
+        const lx = dx * c + dy * sn + w / 2;
+        const ly = -dx * sn + dy * c + h / 2;
+        if (lx < 0 || lx >= w || ly < 0 || ly >= h) continue;
+        const ix = Math.floor(lx);
+        const iy = Math.floor(ly);
+        const above = yy < heights[xx];
+        const sy = iy % STOREY;
+        const outer = ix < 6 || ix >= w - 6;
+        const column = !outer && ix % 40 >= 36;
+        const slab = sy < 5 || iy >= h - 5;
+        const windowHole = outer && sy >= 10 && sy < 19;
+        const gone = broken(ix, iy, above);
+        let v = -1;
+        if (!gone && slab) v = Mat.OldConcrete;
+        else if (!gone && outer && !windowHole) v = Mat.OldConcrete;
+        else if (!gone && column) v = steel ? Mat.Rust : Mat.OldConcrete;
+        else if (!gone && !above && !slab && !outer && !column) {
+          // A room: packed with the crust's fill, or now and then still hollow.
+          const room = Math.floor(iy / STOREY) * 7 + Math.floor(ix / 40);
+          if (u01(room, 0, s0 ^ 2) < 0.35) {
+            v = Mat.Air;
+            if (backdrop) backdrop[at(xx, yy)] = 1;
+          } else {
+            // Silted up over the ages: level bands of char, ash and gravel.
+            const band = u01(Math.floor(yy / 3), 0, s0 ^ 3);
+            v = band < 0.5 ? Mat.Char : band < 0.8 ? Mat.Ash : Mat.Gravel;
+          }
+        } else if (gone && !slab && !above) {
+          // Rebar off a slab's broken end, drooping into the gap.
+          const base = iy - sy + 2;
+          for (let k = 2; k < 11 && v < 0; k++) {
+            if (iy !== base + Math.floor((k * k) / 24)) continue;
+            if (!broken(ix - k, base, false) || !broken(ix + k, base, false)) v = Mat.Rust;
+          }
+        }
+        if (v >= 0) m[at(xx, yy)] = v;
+      }
+    }
+  }
+  return out;
+}
+
 export interface Monument {
   kind: 'caltrop' | 'slab' | 'thorns' | 'teeth';
   x: number;
   y: number;
+  /** A caltrop: where its legs come down, and how thick its arms are. */
+  feet?: number[];
+  w?: number;
 }
 
 /** Fill a convex polygon (world cells) with `mat`, inside the map. */
@@ -155,6 +290,59 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
   const rng = new Rng(seed ^ 0xde4d1a);
   const out: Monument[] = [];
   const clear = (x0: number, x1: number) => spans.every((c) => x1 + 24 < c.x0 || x0 - 24 > c.x1);
+  // The ground as it lay before any monument came down on it.
+  const top0 = new Int32Array(WORLD_W);
+  for (let x = 4; x < WORLD_W - 4; x++) top0[x] = topOf(m, x);
+  const taken = (col: number) => spans.some((c) => col > c.x0 - 10 && col < c.x1 + 10);
+  /** Pour into column `col` from `y0` down to `y1`: over the dust (air above the old ground) and through the crust, never into a ruin. */
+  const pourCol = (col: number, y0: number, y1: number) => {
+    if (col < 5 || col >= WORLD_W - 5 || taken(col)) return;
+    for (let y = Math.max(1, y0); y < Math.min(WORLD_H - 14, y1); y++) {
+      const i = at(col, y);
+      const v = m[i];
+      if (v === Mat.Air ? y < top0[col] : v === Mat.Ash || v === Mat.Gravel || v === Mat.Char || v === Mat.Glass || v === Mat.OldConcrete || v === Mat.Rust) m[i] = Mat.Pour;
+    }
+  };
+  /**
+   * A footing where a monument meets the ground at cx (`half` wide either
+   * side): a block of softer pour sunk deep round it and heaped up against
+   * it, and an apron of the same spread thin over the dust round about, as
+   * if whatever happened here was sealed under it.
+   */
+  const footing = (cx: number, half: number) => {
+    cx = Math.round(cx);
+    if (cx < 8 || cx >= WORLD_W - 8) return;
+    const g0 = top0[cx];
+    half = Math.round(half) + 6 + rng.int(8);
+    // A great pile: as high as the leg is wide, its flanks easing out over the dust.
+    const H = Math.min(48, 12 + Math.round(half * 0.7) + rng.int(10));
+    const flank = Math.round(H * 1.8);
+    const depth = 18 + rng.int(16);
+    const reach = [-1, 1].map(() => half + flank + 24 + rng.int(60));
+    for (let side = 0; side < 2; side++) {
+      const dir = side === 0 ? -1 : 1;
+      for (let d = side; d <= reach[side]; d++) {
+        const col = cx + dir * d;
+        if (col < 5 || col >= WORLD_W - 5) break;
+        const g = top0[col];
+        if (d > reach[side] - 8 && u01(col, 0, seed ^ 0x9002) < 0.5) continue; // a ragged edge
+        const lump = Math.round((u01(col >> 2, 0, seed ^ 0x9003) - 0.5) * 3);
+        // The apron: thin over the dust, thinning out.
+        const out = Math.max(0, (d - half - flank) / Math.max(1, reach[side] - half - flank));
+        let top = g - Math.max(1, Math.round(2 + 4 * (1 - out)));
+        let bottom = g;
+        if (d <= half) {
+          top = Math.min(top, g0 - H + lump);
+          bottom = g0 + depth;
+        } else if (d <= half + flank) {
+          const k = (d - half) / flank;
+          top = Math.min(top, Math.round(g0 - H * Math.pow(1 - k, 1.4)) + lump);
+          bottom = Math.max(g, Math.round(g0 + depth * (1 - k)));
+        }
+        pourCol(col, top, bottom);
+      }
+    }
+  };
   // The caltrops are the deadland: a field of them across the whole map, of every size.
   const want = 30;
   // Each piece's reach either side (they crowd, but never pile into one another).
@@ -175,14 +363,54 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
       // splayed under it (an arch to pass beneath); the rest lie any way,
       // the hub set so the lowest tip is driven into the ground.
       const w = Math.max(8, Math.round(len * (0.17 + rng.next() * 0.05)));
-      const rot = len >= 200 ? -Math.PI / 2 + (rng.next() - 0.5) * 0.25 : rng.next() * Math.PI * 2;
-      const dirs = [0, 1, 2].map((k) => rot + (k * Math.PI * 2) / 3);
-      const lowest = Math.max(...dirs.map((a) => Math.sin(a)));
-      const highest = Math.min(...dirs.map((a) => Math.sin(a)));
-      // (Never out of the top of the sky.)
-      const L = Math.min(len, Math.floor((g - 24) / Math.max(0.1, lowest - highest)));
-      if (L < 40) continue;
-      const hubY = g - lowest * L + 10 + rng.int(8);
+      // Balanced so it looks wrong but would stand: on two legs or more with
+      // the hub (its centre of mass: the arms are alike) between their feet,
+      // however hard it leans; or poised on one leg straight down, the hub
+      // right over the point. Anything that would topple is turned again.
+      let rot = 0;
+      let dirs: number[] = [];
+      let L = 0;
+      let hubY = 0;
+      let ok = false;
+      let legs: number[] = [];
+      for (let k = 0; k < 16 && !ok; k++) {
+        const mode = rng.next();
+        rot = len >= 200 ? -Math.PI / 2 + (rng.next() - 0.5) * 0.5 : mode < 0.35 ? Math.PI / 2 + (rng.next() - 0.5) * 0.3 : rng.next() * Math.PI * 2;
+        dirs = [0, 1, 2].map((q) => rot + (q * Math.PI * 2) / 3);
+        const lowest = Math.max(...dirs.map((a) => Math.sin(a)));
+        const highest = Math.min(...dirs.map((a) => Math.sin(a)));
+        // (Never out of the top of the sky.)
+        L = Math.min(len, Math.floor((g - 24) / Math.max(0.1, lowest - highest)));
+        if (L < 40) continue;
+        // Every leg driven into the ground where it comes down (not just level with the hub's foot).
+        hubY = g - lowest * L + 10 + rng.int(8);
+        const feet: number[] = [];
+        for (const a of dirs) {
+          const sa = Math.sin(a);
+          if (sa < 0.15) continue;
+          const tx = Math.max(5, Math.min(WORLD_W - 6, Math.round(x + Math.cos(a) * L * 0.92)));
+          hubY = Math.max(hubY, top0[tx] + 8 - sa * L * 0.92);
+          feet.push(tx);
+        }
+        if (feet.length >= 2) ok = Math.min(...feet) + w * 0.3 <= x && x <= Math.max(...feet) - w * 0.3;
+        else if (feet.length === 1) ok = Math.abs(feet[0] - x) <= w * 0.4;
+        legs = feet;
+      }
+      if (!ok) continue;
+      // A footing wherever an arm goes into the ground (poured round it once it stands).
+      const feet: [number, number][] = [];
+      for (const a of dirs) {
+        const sa = Math.sin(a);
+        if (sa < 0.15) continue;
+        for (let k = 0; k <= L; k += 2) {
+          const px = Math.round(x + Math.cos(a) * k);
+          if (px < 5 || px >= WORLD_W - 5) break;
+          if (hubY + sa * k >= top0[px]) {
+            feet.push([px, Math.min(w * 1.6, w / (2 * sa))]);
+            break;
+          }
+        }
+      }
       for (const a of dirs) arm(m, x, hubY, a, L, w);
       const hc = Math.cos(rot);
       const hs = Math.sin(rot);
@@ -197,7 +425,8 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
         ],
         Mat.Cement,
       );
-      out.push({ kind: 'caltrop', x, y: Math.round(hubY) });
+      for (const [fx, fw] of feet) footing(fx, fw);
+      out.push({ kind: 'caltrop', x, y: Math.round(hubY), feet: legs, w });
       reach.push(L * 0.8);
     } else if (r < 0.9) {
       // A slab, tilted and half sunk.
@@ -217,10 +446,11 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
         ].map(([px, py]) => [px, py] as [number, number]),
         Mat.Cement,
       );
+      footing(x, hw * c * 0.9);
       out.push({ kind: 'slab', x, y: Math.round(cy) });
       reach.push(hw);
     } else if (r < 0.97) {
-      // Thorns: a cluster of tall, leaning spikes.
+      // Thorns: a cluster of tall, leaning spikes, in one footing.
       const n = 3 + rng.int(5);
       for (let k = 0; k < n; k++) {
         const sx = x + (k - n / 2) * (10 + rng.int(8));
@@ -239,6 +469,7 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
           Mat.Cement,
         );
       }
+      footing(x, n * 7);
       out.push({ kind: 'thorns', x, y: g });
       reach.push(40);
     } else {
@@ -259,6 +490,19 @@ export function placeMonuments(m: Uint8Array, seed: number, spans: readonly { x0
       const base = h * 0.7;
       const P = (px: number, py: number): [number, number] => [ix + px * c - py * s, tg + 3 + px * s + py * c];
       poly(m, [P(-base, 0), P(base, 0), P(0, -h)], Mat.Cement);
+    }
+  }
+  // And here and there, a seal on its own: a broad cap of pour over the dust, nothing standing on it.
+  for (let k = 2 + rng.int(4), tries = 0; k > 0 && tries < 40; tries++) {
+    const x = 120 + rng.int(WORLD_W - 240);
+    const r = 50 + rng.int(80);
+    if (!clear(x - r, x + r) || out.some((o, i) => Math.abs(o.x - x) < reach[i] * 0.5 + r)) continue;
+    k--;
+    const th = 4 + rng.int(5);
+    for (let col = x - r; col <= x + r; col++) {
+      const u = 1 - Math.abs(col - x) / r;
+      if (u < 0.08 && u01(col, 1, seed ^ 0x5ea1) < 0.5) continue;
+      pourCol(col, top0[col] - Math.max(1, Math.round(th * Math.sqrt(u))), top0[col] + Math.round(th * u));
     }
   }
   return out;

@@ -1347,12 +1347,14 @@ export class Game implements FrameHandler {
    */
   private groundFrom(x: number, from: number): number {
     const t = this.terrain;
+    // (A caltrop's cement, or a ruined building's walls and steel standing out of the ground.)
+    const built = (m: number) => m === Mat.Cement || m === Mat.OldConcrete || m === Mat.Rust;
     let y = t.surfaceY(x, from);
-    for (let k = 0; k < 4 && y < WORLD_H - 12 && t.get(x, y) === Mat.Cement; k++) {
+    for (let k = 0; k < 4 && y < WORLD_H - 12 && built(t.get(x, y)); k++) {
       // A monument is pure cement down to the air under it; the crust's
       // cement pavement has char and glass beneath, so it stays ground.
       let yy = y;
-      while (yy < WORLD_H - 12 && yy - y < 360 && t.get(x, yy) === Mat.Cement) yy++;
+      while (yy < WORLD_H - 12 && yy - y < 360 && built(t.get(x, yy))) yy++;
       if (yy - y >= 360 || yy >= WORLD_H - 12 || t.isSolid(x, yy)) break;
       y = t.surfaceY(x, yy);
     }

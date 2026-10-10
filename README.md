@@ -1299,7 +1299,9 @@ A hostile brutalist architect's wet dream, left to rot for eons
   - **Gravel**: loose, with light and dark pebbles.
   - **Ash**: loose drifts of soot-black and bone-white ash, flecked with each other.
   - **Char**: burnt fill, with the odd long-cold cinder. It crumbles to ash.
-  - **Cement**: the Progenitors' cement, hard and tough like the bunkers' concrete (small arms barely mark it).
+  - **Cement**: the Progenitors' cement, the monuments' stuff. It is hard and *adamant*: a blast core bites it only within a quarter of its radius (a sixteenth of the area), and a digger shaves it a cell at a time (`MAT_ADAMANT`).
+  - **Pour**: rough poured concrete, soft enough to dig. It forms the monuments' footings and the seals over the dust.
+  - **Old concrete** and **rusted steel**: what is left of the city that stood here before the fires.
 - **The crust.** Some 45–155 cells deep (20–200 ft), over the marslike ground:
   - On top: a skin of ash, glass, cement pavement and gravel.
   - Below: char, with toppled cement blocks, broken dragon's teeth, glass slivers, cement strata, and lenses of ash and gravel.
@@ -1309,6 +1311,17 @@ A hostile brutalist architect's wet dream, left to rot for eons
   - **Other pieces.** Tilted slabs, groves of spikes, and dragon's teeth strewn round every piece.
   - **The look.** Each piece reads as one single pour, a sterile monolith. It has a slow cloud of tone and faint weather streaks, but no courses or joints. A hard dark outline runs wherever it ends, with a lit lip on the top and left and a shaded one below and right, so it reads as made, not grown.
   - **The sky.** Under and between the arms, the sky shows, not a cave's dark. The client's skyline skips pure-cement runs with air beneath them (`groundFrom` in `src/client/game.ts`).
+- **Footings and seals.** Wherever a monument meets the ground (each caltrop leg, slab and spike cluster), it stands in a great pile of pour:
+  - The pile is sunk deep through the crust and heaped as high as the leg is wide, its flanks easing out into a thin apron over the ash and dust round about.
+  - A few broad caps of pour lie over the dust with nothing standing on them. Something bad happened here, and it was sealed off.
+  - Pour has the same hard outline as the cement.
+  - Caltrop legs are driven into the ground where they come down, not just level with the hub's foot.
+- **Balanced wrong, but standing.** Every caltrop is placed so it would stand, however it looks. Either its hub (the centre of mass, since the arms are alike) lies between the feet of two or more legs, however hard it leans, or it is poised on one leg straight down with the hub right over the point and two arms in the air. A placement that would topple is turned again or dropped.
+- **It was civilised once.** The crust is an archaeological pile that has passed through eons:
+  - **Buildings.** 12–17 buildings of old concrete lie buried in it: one to four storeys, settled askew, their far ends fallen in and their top floors sheared away. They have window holes and floor slabs with rusted rebar drooping off the broken ends, and some are steel-framed.
+  - **Rooms.** Most are silted up with level bands of char, ash and gravel. About a third are still hollow.
+  - **Breaking the surface.** About a third stand high enough that their broken top storeys break the surface.
+  - **Rubble.** Rusted I-beams, bent rebar and fragments of old concrete are strewn all through the crust (`placeBuried`, `crustCell`).
 - **Ruins, not bunkers.** No player bunkers are built on the Deadland. The massive caltrops are the fortification. Instead there are 4–7 small Progenitor ruins, each a passage:
   - A stepped glyph-stone portal on the surface.
   - A cobble tunnel slanting down through the crust.

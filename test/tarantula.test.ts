@@ -96,10 +96,10 @@ describe('the tarantula', () => {
     expect(tankPartAt(spider, 4, 9)).toBe(TankPart.Armor);
     expect(tankPartAt({ ...spider, parts: 1 }, 4, 11)).toBe(TankPart.Hull);
     // A round flying just over the ground, under it, goes straight through between its legs.
-    // (From the far side: its owner is at its heel on this one.)
     const { world, a, b } = yard(402);
     const { slot } = callSpider(world, a);
     const t = world.tanks[slot]!;
+    a.body.x = t.x - 200; // (its owner out of the line of fire, wherever it landed)
     const before = () => [t.hp, ...t.partHp].join();
     const whole = before();
     world.projectiles.spawn(77001, ProjKind.Bullet, b.id, t.x + tankW(t) + 30, FLOOR - 3, -900, 0);

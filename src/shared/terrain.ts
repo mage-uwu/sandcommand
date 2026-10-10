@@ -10,7 +10,7 @@ import {
   WORLD_W,
   WORDS_PER_ROW,
 } from './constants.ts';
-import { MAT_COUNT, MAT_FIXED, MAT_HARD, MAT_LOOSE, MAT_TOUGH, Mat } from './materials.ts';
+import { MAT_ADAMANT, MAT_COUNT, MAT_FIXED, MAT_HARD, MAT_LOOSE, MAT_TOUGH, Mat } from './materials.ts';
 
 /**
  * Destructible terrain.
@@ -120,7 +120,8 @@ export class Terrain {
 
   /**
    * Carve a disc. Soft cells within `r` are removed, hard (non-fixed) cells
-   * only within `coreR`, and tough ones (pig iron) only within half of it. Integer-only geometry so client and server agree
+   * only within `coreR`, tough ones (pig iron) only within half of it, and
+   * adamant ones (the Progenitors' cement) only within a quarter. Integer-only geometry so client and server agree
    * bit-for-bit. Returns number of removed cells; per-material counts are in
    * `removedByMat`. `onRemoved` is called for each removed cell (optional).
    */
@@ -138,6 +139,8 @@ export class Terrain {
     const c2 = coreR * coreR;
     const toughR = coreR >> 1;
     const t2 = toughR * toughR;
+    const adamantR = coreR >> 2;
+    const a2 = adamantR * adamantR;
     const yA = Math.max(0, cy - r);
     const yB = Math.min(WORLD_H - 1, cy + r);
     const solid = this.solid;
@@ -167,6 +170,14 @@ export class Terrain {
         ta = Math.max(0, cx - ts);
         tb = Math.min(WORLD_W - 1, cx + ts);
       }
+      // Adamant span (may be empty).
+      let aa = 1;
+      let ab = 0;
+      if (dy2 <= a2) {
+        const as = Math.floor(Math.sqrt(a2 - dy2));
+        aa = Math.max(0, cx - as);
+        ab = Math.min(WORLD_W - 1, cx + as);
+      }
       const row = y * WORDS_PER_ROW;
       const w0 = xa >>> 5;
       const w1 = xb >>> 5;
@@ -179,12 +190,14 @@ export class Terrain {
         let removed = mask & sw & ~hard[i];
         if (ca <= cb) {
           let core = spanMask(ca - base, cb - base) & sw & ~fixed[i] & hard[i];
-          // Tough cells outside the tough span hold.
-          let outer = core & ~(ta <= tb ? spanMask(ta - base, tb - base) : 0);
+          // Tough cells outside the tough span hold, adamant ones outside the adamant span.
+          const tough = ta <= tb ? spanMask(ta - base, tb - base) : 0;
+          let outer = core & ~(aa <= ab ? spanMask(aa - base, ab - base) : 0);
           while (outer !== 0) {
             const b = 31 - Math.clz32(outer & -outer);
             outer &= outer - 1;
-            if (MAT_TOUGH[mat[y * WORLD_W + base + b]]) core &= ~(1 << b);
+            const cm = mat[y * WORLD_W + base + b];
+            if (MAT_ADAMANT[cm] || (MAT_TOUGH[cm] && !(tough & (1 << b)))) core &= ~(1 << b);
           }
           removed |= core;
         }

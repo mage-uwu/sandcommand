@@ -8,7 +8,7 @@ import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 import { placeRareEarth } from './rare-earth.ts';
-import { type Monument, crustCell, crustDepth, placeMonuments, placeRuins } from './deadland.ts';
+import { type Buried, type Monument, crustCell, crustDepth, placeBuried, placeMonuments, placeRuins } from './deadland.ts';
 import { type Crater, type Flora, type GemCavern, type GeyserSite, placeCraters, placeFlora, placeGemCaverns, placeGeysers, relineCraters } from './frosting.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
@@ -51,6 +51,8 @@ export let lastCraters: Crater[] = [];
 export let lastGemCaverns: GemCavern[] = [];
 export let lastGeysers: GeyserSite[] = [];
 export let lastFlora: Flora[] = [];
+/** The deadland's buried buildings on the most recent map (none elsewhere). */
+export let lastBuried: Buried[] = [];
 /** The deadland's monuments on the most recent map (none elsewhere). */
 export let lastMonuments: Monument[] = [];
 
@@ -362,6 +364,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // Bunker complexes on a modular grid across part of the surface.
   backdrop?.fill(0);
   lastSiege = null;
+  lastBuried = [];
   if (dungeon) {
     lastComplexes = [];
     lastDungeon = generateDungeon(m, heights, seed, backdrop);
@@ -375,6 +378,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   } else if (dead) {
     // The deadland: no bunkers at all. The Progenitors' ruins instead (Regicide's
     // fortresses among them), and the caltrops are the fortifications.
+    // Under it all, the city that stood here before the fires.
+    lastBuried = placeBuried(m, seed, heights, crust, backdrop);
     lastComplexes = placeRuins(m, seed, mapKind === MapKind.Fortress, backdrop);
     lastDungeon = null;
   } else {

@@ -72,13 +72,28 @@ export const Mat = {
   /**
    * Deadland: the Progenitors' ancient cement, weathered and cracked: their
    * colossal caltrops and slabs, and the strata of their ruin. Hard and
-   * tough, like pig iron: bullets don't chip it, and a blast or a digger
-   * bites only a quarter as much of it as of concrete (Terrain.carve).
+   * adamant, tougher than pig iron: bullets don't chip it, a blast bites only
+   * a sixteenth as much of it as of concrete, and a digger shaves it a cell
+   * at a time (Terrain.carve).
    */
   Cement: 26,
+  /**
+   * Deadland: the concrete of a city that stood before the fires, buried in
+   * the crust for eons: stained, cracked and crumbling. Hard like concrete,
+   * but it falls to gravel.
+   */
+  OldConcrete: 27,
+  /** Deadland: that city's steel, rusted through: beams, rebar and plate in the crust. Hard. */
+  Rust: 28,
+  /**
+   * Deadland: rough poured concrete, softer than the monuments' cement:
+   * their footings, sunk deep and heaped round where they meet the ground,
+   * and the aprons and caps of it poured over the dust, sealing it in.
+   */
+  Pour: 29,
 } as const;
 
-export const MAT_COUNT = 27;
+export const MAT_COUNT = 30;
 
 /** What a cell of rare earth banks, in gold, when dug (a cell of gold banks one). */
 export const RARE_EARTH_VALUE = 10;
@@ -86,23 +101,25 @@ export const RARE_EARTH_VALUE = 10;
 export const digValue = (removed: Int32Array) => removed[Mat.Gold] + removed[Mat.RareEarth] * RARE_EARTH_VALUE;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, true];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, true, true, true, false];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, true, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false, false];
 
 /** Natural ground (soil, sand, rock): what frosting settles on and bots dig through. */
 /** Tough materials: a carve's core takes only the inner half of its radius of them (a quarter of the area). */
-export const MAT_TOUGH: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Iron || m === Mat.Cement);
+export const MAT_TOUGH: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Iron);
+/** Adamant materials: a carve's core takes only the inner quarter of its radius of them (a sixteenth of the area; a digger shaves a cell at a time). */
+export const MAT_ADAMANT: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Cement);
 
 /** The deadland's crust (not soil: nothing grows in it). */
-export const isDeadGround = (m: number) => m === Mat.Glass || m === Mat.Gravel || m === Mat.Ash || m === Mat.Char || m === Mat.Cement;
+export const isDeadGround = (m: number) => m === Mat.Glass || m === Mat.Gravel || m === Mat.Ash || m === Mat.Char || m === Mat.Cement || m === Mat.OldConcrete || m === Mat.Rust || m === Mat.Pour;
 
 export const isSoil = (m: number) => m === Mat.Dirt || m === Mat.Sand || m === Mat.RustSand || m === Mat.Regolith || m === Mat.Clay || m === Mat.Ochre;
 
@@ -135,6 +152,9 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [104, 100, 98], // ash (soot black and bone white; see soilColor)
   [66, 58, 54], // char
   [148, 144, 134], // ancient cement
+  [168, 156, 134], // old concrete, stained
+  [112, 62, 38], // rusted steel
+  [126, 124, 116], // pour
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth', 'trinitite', 'gravel', 'ash', 'char', 'cement'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth', 'trinitite', 'gravel', 'ash', 'char', 'cement', 'old concrete', 'rusted steel', 'pour'];

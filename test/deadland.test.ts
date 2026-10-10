@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { ACTOR_H, ACTOR_W, WORLD_W } from '../src/shared/constants.ts';
 import { rubbleOf } from '../src/shared/particles.ts';
-import { MAT_COLOR, MAT_HARD, MAT_LOOSE, MAT_NAME, MAT_TOUGH, Mat, isDeadGround } from '../src/shared/materials.ts';
+import { MAT_ADAMANT, MAT_COLOR, MAT_HARD, MAT_LOOSE, MAT_NAME, Mat, isDeadGround } from '../src/shared/materials.ts';
 import { GameMode, Phase, Team } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { Biome, MapKind, biomeOf, generateWorld, lastBiome, lastComplexes, lastFlora, lastMonuments } from '../src/shared/worldgen.ts';
+import { Biome, MapKind, biomeOf, generateWorld, lastBiome, lastBuried, lastComplexes, lastFlora, lastMonuments } from '../src/shared/worldgen.ts';
 import { World } from '../src/server/world.ts';
 
 /** The first seed (from `from`) whose map of `kind` is deadland. */
@@ -23,7 +23,7 @@ describe('the deadland', () => {
     expect(isDeadGround(Mat.Dirt)).toBe(false);
     expect(MAT_COLOR[Mat.Glass][1]).toBeGreaterThan(MAT_COLOR[Mat.Glass][0] + 40); // green glass
     // Cement is hard and tough (the monuments shrug off small arms); gravel and ash pour.
-    expect(MAT_HARD[Mat.Cement] && MAT_TOUGH[Mat.Cement]).toBe(true);
+    expect(MAT_HARD[Mat.Cement] && MAT_ADAMANT[Mat.Cement]).toBe(true);
     expect(MAT_LOOSE[Mat.Gravel] && MAT_LOOSE[Mat.Ash]).toBe(true);
     // Knocked loose, glass breaks to gravel and char crumbles to ash.
     expect(rubbleOf(Mat.Glass)).toBe(Mat.Gravel);
@@ -36,6 +36,7 @@ describe('the deadland', () => {
   const monuments = [...lastMonuments];
   const complexes = [...lastComplexes];
   const flora = [...lastFlora];
+  const buried = [...lastBuried];
 
   it('a crust of debris over the marslike deep, tens of feet to a couple of hundred', () => {
     expect(lastBiome).toBe(Biome.Deadland);
@@ -64,6 +65,69 @@ describe('the deadland', () => {
     expect([...deep.keys()].some((m) => !isDeadGround(m))).toBe(true);
   });
 
+  it('it was civilised once: buried concrete buildings, steel rubble, and a few ruins breaking the surface', () => {
+    expect(buried.length).toBeGreaterThanOrEqual(8);
+    expect(buried.some((b) => b.exposed)).toBe(true);
+    expect(buried.some((b) => !b.exposed)).toBe(true);
+    for (const f of buried) {
+      const b = { ...f, x: Math.round(f.x), y: Math.round(f.y), w: Math.round(f.w), h: Math.round(f.h) };
+      // Each one's shell is old concrete: count it in its box.
+      let shell = 0;
+      for (let y = b.y - (b.h >> 1); y < b.y + (b.h >> 1); y++) for (let x = b.x - (b.w >> 1); x < b.x + (b.w >> 1); x++) if (t.get(x, y) === Mat.OldConcrete) shell++;
+      expect(shell).toBeGreaterThan(b.w * 4);
+    }
+    // The exposed ones' broken tops stand out of the ground: their concrete is what's on top
+    // (unless a monument has come down on it).
+    const exposed = buried.filter((b) => b.exposed);
+    const showing = exposed.filter((b) => {
+      let top = 0;
+      for (let x = Math.round(b.x - b.w / 2); x < b.x + b.w / 2; x++) if (t.get(x, t.surfaceY(x)) === Mat.OldConcrete) top++;
+      return top > b.w / 4;
+    });
+    expect(showing.length).toBeGreaterThanOrEqual(Math.ceil(exposed.length / 2));
+    // Rusted steel all through the crust: beams, rebar, steel frames.
+    let rust = 0;
+    for (let i = 0; i < t.mat.length; i += 3) if (t.mat[i] === Mat.Rust) rust++;
+    expect(rust).toBeGreaterThan(500);
+    expect(MAT_HARD[Mat.OldConcrete] && MAT_HARD[Mat.Rust]).toBe(true);
+    expect(rubbleOf(Mat.OldConcrete)).toBe(Mat.Gravel);
+  });
+
+  it('every monument is anchored in a footing of softer pour, and pour seals the dust here and there', () => {
+    let pour = 0;
+    for (let i = 0; i < t.mat.length; i++) if (t.mat[i] === Mat.Pour) pour++;
+    expect(pour).toBeGreaterThan(4000);
+    expect(MAT_HARD[Mat.Pour]).toBe(false); // softer than the cement it holds
+    // Pour beside the foot of most caltrops.
+    const caltrops = monuments.filter((o) => o.kind === 'caltrop');
+    const anchored = caltrops.filter((c) => {
+      for (let x = c.x - 260; x <= c.x + 260; x += 2) for (let y = c.y; y < c.y + 360; y++) if (t.get(x, y) === Mat.Pour) return true;
+      return false;
+    });
+    expect(anchored.length).toBeGreaterThanOrEqual(caltrops.length * 0.7);
+    // Some of it lies over the dust: pour, with ash, gravel or char straight under it.
+    let over = 0;
+    for (let x = 8; x < WORLD_W - 8; x++) {
+      const y = t.surfaceY(x);
+      if (t.get(x, y) !== Mat.Pour) continue;
+      let yy = y;
+      while (t.get(x, yy) === Mat.Pour) yy++;
+      if ([Mat.Ash, Mat.Gravel, Mat.Char, Mat.Glass].includes(t.get(x, yy) as never)) over++;
+    }
+    expect(over).toBeGreaterThan(100);
+  });
+
+  it('the monuments\' cement all but shrugs off a digger: one cell at a time, where concrete gives up a hole', () => {
+    const dig = (m: number) => {
+      const tt = new Terrain();
+      for (let y = 500; y < 540; y++) for (let x = 500; x < 540; x++) tt.set(x, y, m);
+      return tt.carve(520, 520, 5, 2);
+    };
+    expect(dig(Mat.Cement)).toBeLessThanOrEqual(1);
+    expect(dig(Mat.Concrete)).toBeGreaterThan(8);
+    expect(dig(Mat.Pour)).toBeGreaterThan(40); // soft
+  });
+
   it('nothing grows on it: no grass, no flora on the crust', () => {
     let grass = 0;
     for (let x = 8; x < WORLD_W - 8; x += 3) if (t.get(x, t.surfaceY(x)) === Mat.Grass) grass++;
@@ -84,6 +148,15 @@ describe('the deadland', () => {
       if (ground - top > ACTOR_H * 8) colossal++;
     }
     expect(colossal).toBeGreaterThan(0);
+    // Balanced wrong, but they'd stand: the hub (the centre of mass) between two feet or more, or right over a single one.
+    for (const c of caltrops) {
+      const feet = c.feet!;
+      expect(feet.length).toBeGreaterThan(0);
+      if (feet.length >= 2) {
+        expect(c.x).toBeGreaterThanOrEqual(Math.min(...feet));
+        expect(c.x).toBeLessThanOrEqual(Math.max(...feet));
+      } else expect(Math.abs(feet[0] - c.x)).toBeLessThanOrEqual(c.w! * 0.4);
+    }
     // Solid cement: every caltrop's hub is a block of it.
     for (const c of caltrops) expect(t.get(c.x, c.y)).toBe(Mat.Cement);
   });
@@ -130,7 +203,7 @@ describe('the deadland', () => {
     }
   });
 
-  it('a deadland Regicide wave plays: kings crowned in their ruins, bots fighting it out', () => {
+  it('a deadland Regicide wave plays: kings crowned in their ruins, bots out across the thorns', () => {
     let world: World | null = null;
     for (let s = 1; s < 60 && !world; s++) {
       const w = new World(s, { mode: 'ffa', bots: 8, rotation: [GameMode.Regicide], tanks: false });
@@ -147,10 +220,12 @@ describe('the deadland', () => {
       const f = w.fortresses[team];
       expect(Math.abs(king.cx - f.king.x)).toBeLessThan(120);
     }
-    for (let k = 0; k < 30 * 120 && w.phase === Phase.Live; k++) w.step();
-
-    let kills = 0;
-    for (const p of w.players) if (p) kills += p.kills;
-    expect(kills + (w.phase === Phase.Victory ? 1 : 0)).toBeGreaterThan(0);
+    // Out of their ruins and across the landscape of thorns: each side's bots reach the other half of the map.
+    const crossed = [false, false];
+    for (let k = 0; k < 30 * 120 && w.phase === Phase.Live && !(crossed[0] && crossed[1]); k++) {
+      w.step();
+      for (const p of w.players) if (p && p.bot && p.alive && (p.team === Team.Red ? p.cx > WORLD_W / 2 : p.cx < WORLD_W / 2)) crossed[p.team] = true;
+    }
+    expect(w.phase === Phase.Victory || (crossed[0] && crossed[1])).toBe(true);
   }, 120_000);
 });

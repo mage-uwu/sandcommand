@@ -770,6 +770,7 @@ export function rubbleOf(mat: number): number {
   if (mat === Mat.Gravel || mat === Mat.Ash) return mat;
   if (mat === Mat.Glass) return Mat.Gravel;
   if (mat === Mat.Char) return Mat.Ash;
+  if (mat === Mat.OldConcrete || mat === Mat.Pour) return Mat.Gravel; // (crumbles)
   return Mat.Rubble;
 }
 

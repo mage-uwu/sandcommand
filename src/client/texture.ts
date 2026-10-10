@@ -363,6 +363,94 @@ export function cementColor(t: Terrain, x: number, y: number): number {
   return abgr(162 * k, 160 * k, 154 * k);
 }
 
+/**
+ * Old concrete: what is left of a city buried before the fires. Cast panels
+ * (the seams still show, so it reads as built), but eons in the crust have
+ * stained it, cracked it, spalled it down to dark aggregate, and bled rust
+ * down its face from the steel inside. Dark where the crust presses on it.
+ */
+export function oldConcreteColor(t: Terrain, x: number, y: number): number {
+  const edge = (dx: number, dy: number) => {
+    const m = matAt(t, x + dx, y + dy);
+    return m !== Mat.OldConcrete && m !== Mat.Rust;
+  };
+  let k = 0.88 + 0.16 * noise(x, y, 18, 101) + 0.06 * h(x, y, 102);
+  const px = ((x % 24) + 24) % 24;
+  const py = ((y % 12) + 12) % 12;
+  if (px === 0 || py === 0) k *= 0.78; // a panel seam
+  // Cracks: thin dark lines where two noise fields cross.
+  if (Math.abs(noise(x, y, 11, 103) - 0.5) < 0.018) k *= 0.55;
+  // Water stains: dark streaks down from the seams.
+  if (h(x >> 1, Math.floor(y / 12), 104) > 0.8) k *= 0.86 + 0.08 * (py / 12);
+  let r = 176 * k;
+  let g = 164 * k;
+  let b = 140 * k;
+  // Spalled: the face gone, the dark aggregate showing, pocked.
+  if (noise(x, y, 26, 105) > 0.72) {
+    const a = h(x, y, 106) < 0.3 ? 0.6 : 0.78;
+    r = 120 * a + 20;
+    g = 112 * a + 18;
+    b = 100 * a + 16;
+  }
+  // Rust bleeding from the rebar inside.
+  const bleed = Math.max(0, noise(x * 0.5, y * 0.15, 20, 107) - 0.7) * 2.6;
+  if (bleed > 0) {
+    r += bleed * 50;
+    g += bleed * 4;
+    b -= bleed * 26;
+  }
+  if (edge(0, -1) || edge(-1, 0) || edge(0, 1) || edge(1, 0)) {
+    r *= 0.45;
+    g *= 0.45;
+    b *= 0.45;
+  } else if (edge(0, -2) || edge(-2, 0)) {
+    r *= 1.1;
+    g *= 1.1;
+    b *= 1.1;
+  }
+  return abgr(r, g, b);
+}
+
+/** Rusted steel: flaking orange over brown-black, pitted, darker at its edges. */
+export function rustColor(t: Terrain, x: number, y: number): number {
+  const n = noise(x, y, 4, 111);
+  let k = 0.8 + 0.3 * n;
+  if (h(x, y, 112) < 0.08) k *= 0.6; // a pit
+  const flake = h(x, y, 113) > 0.9 || noise(x, y, 9, 114) > 0.74;
+  let r = flake ? 176 : 104;
+  let g = flake ? 86 : 56;
+  let b = flake ? 38 : 34;
+  const solid = (dx: number, dy: number) => matAt(t, x + dx, y + dy) === Mat.Rust;
+  if (!solid(0, -1) || !solid(-1, 0)) k *= 1.12;
+  else if (!solid(0, 1) || !solid(1, 0)) k *= 0.7;
+  r *= k;
+  g *= k;
+  b *= k;
+  return abgr(r, g, b);
+}
+
+/**
+ * Pour: the rough concrete of the footings and seals, poured in a hurry.
+ * Lumpy, gritty, wavy lift lines where each pour slumped over the last,
+ * pits and air holes, a lit skin inside the same hard outline as the
+ * monuments wherever it ends.
+ */
+export function pourColor(t: Terrain, x: number, y: number): number {
+  // The same hard outline as the monuments wherever it ends.
+  const edge = (dx: number, dy: number) => matAt(t, x + dx, y + dy) !== Mat.Pour;
+  if (edge(0, -1) || edge(-1, 0) || edge(0, 1) || edge(1, 0) || edge(-1, -1) || edge(1, -1) || edge(-1, 1) || edge(1, 1)) return abgr(40, 39, 38);
+  if (edge(0, -2) || edge(-2, 0) || edge(0, 2) || edge(2, 0)) return abgr(70, 69, 66);
+  let k = 0.86 + 0.18 * noise(x, y, 7, 121) + 0.1 * h(x, y, 122);
+  // Lift lines: wavy, as each pour slumped and set.
+  const lift = (y + Math.floor(noise(x, 0, 30, 123) * 6)) % 7;
+  if (lift === 0) k *= 0.84;
+  if (h(x, y, 124) < 0.03) k *= 0.62; // an air hole
+  const air = (dx: number, dy: number) => matAt(t, x + dx, y + dy) === Mat.Air;
+  if (air(0, -3) || air(-3, 0) || air(0, -4)) k *= 1.14; // the lit skin
+  else if (air(0, 3) || air(3, 0)) k *= 0.82;
+  return abgr(128 * k, 125 * k, 116 * k);
+}
+
 /** Pig iron: great cast blocks, dark and mottled, casting seams, a bloom of rust here and there. */
 function pigIron(t: Terrain, x: number, y: number): number {
   const px = ((x % 24) + 24) % 24;
