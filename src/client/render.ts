@@ -14,6 +14,7 @@ import { bannerLines, layoutSub } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Link } from './net.ts';
 import type { Coach } from './tutorial.ts';
+import { drawFlora, drawGeysers } from './flora-art.ts';
 import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
@@ -148,6 +149,8 @@ export class Renderer {
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
   camX = WORLD_W / 2;
+  /** Debug only (?debug, window.sc): pin the view to a world point. */
+  lookAt: { x: number; y: number } | null = null;
   camY = WORLD_H / 3;
   private fps = 60;
   private lastFrame = performance.now();
@@ -343,6 +346,11 @@ export class Renderer {
         }
       }
     }
+    // (Debug only, ?debug: the view pinned to a spot on the map.)
+    if (this.lookAt) {
+      this.camX = this.lookAt.x;
+      this.camY = this.lookAt.y;
+    }
     // Snapped by the aim assist (unscoped): the same laser and lock the scope shows.
     this.assistSight = false;
     if (!this.scoped && !flying && !dogged && game.alive && !game.drive && game.lockAim !== null && game.aimMark) {
@@ -407,6 +415,9 @@ export class Renderer {
         }
       }
     }
+
+    // The alien flora, on the ground and in the caves.
+    if (game.flora.length) drawFlora(ctx, game.terrain, game.flora, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);
 
     // The bunkers' fittings: lamps, pipes, signs and the like, on their back walls.
     if (game.decor.length) drawDecor(ctx, game.terrain, game.decor, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);
@@ -520,6 +531,9 @@ export class Renderer {
     const ly = Math.floor(camY - halfH) - 1;
     this.particleLayer.render(game.particles, this.sprites, alpha, lx, ly, Math.ceil(halfW * 2) + 3, Math.ceil(halfH * 2) + 3);
     ctx.drawImage(this.particleLayer.canvas, lx, ly);
+
+    // Geysers: their glowing mouths.
+    if (game.geyserList.length) drawGeysers(ctx, game.geyserList, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);
 
     // Weapons lying on the ground (spinning while they fly), and a prompt
     // over the one we'd pick up.

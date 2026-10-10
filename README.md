@@ -491,6 +491,69 @@ lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then gold, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
+## Frosting: craters, gem caverns, geysers and flora
+
+Each map is grown with some extra frosting after its bunkers and caves.
+Worldgen does it, seeded, so every client grows the same
+(`src/shared/frosting.ts`).
+
+**Craters.**
+- Seven to twelve old impact bowls, pressed into flat open ground. None on
+  the mountains, where there's no flat ground.
+- Each has a raised rim of thrown-up rust soil. Its floor is lined with
+  pale drift sand, dark scorched regolith or rust dust, never turf: the
+  grass and snow go on the rims.
+- They're kept clear of bunkers, towers and the siege works.
+
+**Gem caverns.**
+- Two to four geodes, hollowed out of the rock at least 140 cells under the
+  surface.
+- A rock shell surrounds the hollow. A dozen or so big rare earth prisms,
+  up to 15 cells long, point in from the walls, floor and roof.
+- Each cavern holds 250+ cells of rare earth: thousands of gold for
+  whoever digs down to one.
+
+**Geysers.**
+- *The vents.* Black-smoker vents: a squat mound of dark regolith with a
+  rock chimney and a sulphur-crusted mouth. Four to six stand on the
+  surface and three to five on big cave floors, each ringed by a thicket
+  of tube worms.
+- *Smoke.* They're neutral: a lazy wisp of steam rises off each one. It's
+  ordinary pixel smoke particles, the guns' kind.
+- *Setting one off.* Shots and blasts near the mouth wear the vent down
+  (`World.hitGeysers`). Out of hit points, it rumbles for a moment
+  (thick, fast smoke and sparks) and blows. Left alone, one also goes off
+  by itself now and then, with a 1.5 s rumble of warning first.
+- *The blast.* A blast at the mouth, then a fountain of rock chunks, hot
+  shrapnel and embers. The server spawns the burst and clients mirror it
+  from the blow record's seed (`geyserBurst`, `R_GEYSER_BLOW`).
+- *The deadly smoke.* After the blast it hangs over the vent for four
+  seconds. It's drawn as yellow-green smoke particles filling the space
+  where it chokes anyone not sealed in a tank. Kills go to whoever shot
+  the vent (kill feed: *Geyser*).
+- *Afterwards.* It can't blow again for 40 seconds. Dig its chimney out
+  and it's choked for good.
+- *Network.* The geysers' state (rumbling, venting, choked) reaches clients
+  in `R_GEYSERS`.
+
+**Flora** (client-drawn, `src/client/flora-art.ts`). Placed by worldgen and
+drawn only while the ground it grows from stands, so digging or blasting it
+out takes the plant with it.
+- **Centipede plants:** segmented, curling stalks with a pair of barbed
+  legs on every segment and a glowing bud. They sway. Dense on the meadows,
+  sparse in the dunes, none on snow.
+- **Coral:** gritty pixel-art sprites, each grown from its seed in one of
+  seven real-coral forms: staghorn, lattice sea fan, grooved brain dome,
+  frilled table plates, pipe organ, knobbly finger, swaying whip.
+  - Shaded per pixel: a dark outline, lit upper-left edges, darker at the
+    root, and grit (pores and specks).
+  - Tips glow in the caves.
+  - Six reef palettes.
+- **Tube worms:** white tubes with pulsing crimson plumes, round every
+  geyser.
+- **Hanging coral:** strands from cave roofs, beaded with light.
+- **Puffballs:** clumps of swollen, spotted caps.
+
 ## Scenery
 
 The battlefield is an alien world, a Mars of sorts. The sky runs from a
@@ -1671,6 +1734,16 @@ Every weapon is one row of `WEAPONS` in `src/shared/weapons.ts`, and that
 row drives everything: the server's trigger, magazine and projectile spawn,
 the client's sprite, muzzle flash, HUD and camera. Add a row and the weapon
 exists everywhere.
+
+**Muzzle effects come out of the barrel, as drawn.** A clone's muzzle
+flash, gun smoke, sniper wake, laser beam and digger dust all start at its
+gun's muzzle as each client draws it: the drawn clone's shoulder plus the
+weapon's `muzzle` length along the shot (`Game.drawnMuzzle`). They never
+start at the clone's middle.
+- Other clones are drawn a little in the past, so this is not quite where
+  the server fired from.
+- Vehicles' guns fire from their own muzzles, where the server spawned the
+  round.
 
 | Weapon | Fires | Muzzle | Rate | Mode | Clip | Reload | Scope |
 | --- | --- | --- | --- | --- | --- | --- | --- |

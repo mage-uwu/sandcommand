@@ -137,6 +137,7 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_GEYSER = 245; // geyser blasts and their smoke
 export const W_ROCKFALL = 246; // falling stalactites
 export const W_RAM = 247; // clones (and dropships) slamming into each other
 export const W_LASER = 248; // laser beams

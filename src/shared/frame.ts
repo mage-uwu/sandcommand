@@ -32,6 +32,8 @@ import {
   R_HEAL,
   R_SPOTTED,
   R_MINES,
+  R_GEYSERS,
+  R_GEYSER_BLOW,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -128,6 +130,13 @@ export interface CraftState {
 }
 
 /** A landmine on the ground (the cell it sits on), whose it is, and whether it's armed yet. */
+/** A geyser as clients hear of it (R_GEYSERS): its mouth, and GF_* flags. */
+export interface GeyserState {
+  x: number;
+  y: number;
+  flags: number;
+}
+
 export interface MineState {
   x: number;
   y: number;
@@ -279,6 +288,10 @@ export interface FrameHandler {
   traps(spent: Uint8Array): void;
   /** Every landmine laid (the whole list, when it changes). */
   mines(list: MineState[]): void;
+  /** The map's geysers and their state (R_GEYSERS). */
+  geysers(list: GeyserState[]): void;
+  /** Geyser `i` blows (R_GEYSER_BLOW): mirror its burst from `seed`. */
+  geyserBlow(i: number, seed: number): void;
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
@@ -482,6 +495,18 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const y = r.u16() - Y_BIAS;
         const team = r.u8();
         h.heal(seq, x, y, team, r.u8());
+        break;
+      }
+      case R_GEYSERS: {
+        const n = r.u8();
+        const list: GeyserState[] = [];
+        for (let i = 0; i < n; i++) list.push({ x: r.u16(), y: r.u16() - Y_BIAS, flags: r.u8() });
+        h.geysers(list);
+        break;
+      }
+      case R_GEYSER_BLOW: {
+        const i = r.u8();
+        h.geyserBlow(i, r.u32());
         break;
       }
       case R_MINES: {
@@ -776,6 +801,8 @@ export const nullHandler: FrameHandler = {
   round() {},
   traps() {},
   mines() {},
+  geysers() {},
+  geyserBlow() {},
   beam() {},
   heal() {},
   teams() {},

@@ -159,7 +159,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -179,6 +179,12 @@ import {
   R_HEAL,
   R_SPOTTED,
   R_MINES,
+  R_GEYSERS,
+  R_GEYSER_BLOW,
+  GF_CAVE,
+  GF_RUMBLE,
+  GF_TOXIC,
+  GF_DEAD,
   R_WAVE,
   R_TEAMS,
   R_TANKS,
@@ -226,7 +232,8 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastSiege } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastGeysers, lastSiege } from '../shared/worldgen.ts';
+import { GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { ATTACKERS, DEFENDERS, SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
 import type { CaveNet } from '../shared/caves.ts';
 import type { Fortress } from '../shared/structures.ts';
@@ -317,6 +324,8 @@ export class Player {
   trapsSeen = -1;
   /** The mines revision this client last got. */
   minesSeen = -1;
+  /** The geysers' state as this client last heard it (World.geysersRev). */
+  geysersSeen = -1;
   spikeCd = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
@@ -460,6 +469,16 @@ export class World {
   /** Landmines laid by clones (see layMine), and a revision bumped whenever the list changes. */
   readonly mines: Mine[] = [];
   minesRev = 0;
+  /**
+   * The map's geysers (frosting.ts): each vent's mouth, its hit points, the
+   * ticks until it can blow again, its fuse while rumbling, the ticks its
+   * deadly smoke has left, and who set it off (255: nobody, it went on its own).
+   * (`calm`: ticks before it may go off on its own at the start of a map, so they don't all go together.)
+   */
+  geysers: { x: number; y: number; cave: boolean; hp: number; cd: number; calm: number; fuse: number; toxic: number; by: number; dead: boolean }[] = [];
+  geysersRev = 0;
+  /** The geysers' own dice (so they never shift the rest of the world's). */
+  private geyserRng = new Rng(1);
   private nextMineId = 1;
   private trapCd = new Uint16Array(256);
   /** Extraction: the extraction rocket. */
@@ -536,6 +555,10 @@ export class World {
     this.siege = lastSiege;
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
     this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, hp: DOOR_HP, broken: false })));
+    // (Staggered, so they don't all go off on their own together early on.)
+    this.geyserRng = new Rng(this.mapSeed ^ 0x6e75e5);
+    this.geysers = lastGeysers.map((g) => ({ ...g, hp: GEYSER_HP, cd: 0, calm: 30 * 30 + this.geyserRng.int(30 * 90), fuse: 0, toxic: 0, by: 255, dead: false }));
+    this.geysersRev++;
     this.trapSpent.fill(0);
     this.trapCd.fill(0);
     this.trapsRev++;
@@ -1298,6 +1321,89 @@ export class World {
     this.dogMem.delete(slot);
   }
 
+  /** Shots and blasts near a geyser's mouth wear its vent down; out of hit points, it blows (after a moment's rumble). */
+  private hitGeysers(x: number, y: number, r: number, owner: number): void {
+    for (const g of this.geysers) {
+      if (g.dead || g.fuse > 0 || g.cd > 0) continue;
+      const dx = x - g.x;
+      const dy = y - g.y;
+      if (dx * dx + dy * dy > (r + 7) * (r + 7)) continue;
+      g.hp -= 10 + r * 4;
+      if (owner !== NO_OWNER) g.by = owner;
+      if (g.hp <= 0) {
+        g.fuse = GEYSER_FUSE_SHOT;
+        this.geysersRev++;
+      }
+    }
+  }
+
+  /**
+   * The geysers, each tick: a quiet one may start rumbling on its own; a
+   * rumbling one blows when its fuse runs out; a blown one hangs its deadly
+   * smoke over the vent for a few seconds. One whose vent has been dug away
+   * is choked for good.
+   */
+  private stepGeysers(): void {
+    for (let i = 0; i < this.geysers.length; i++) {
+      const g = this.geysers[i];
+      if (g.dead) continue;
+      if (!this.terrain.isSolid(g.x, g.y + 1) && !this.terrain.isSolid(g.x, g.y + 2)) {
+        g.dead = true;
+        g.fuse = g.toxic = 0;
+        this.geysersRev++;
+        continue;
+      }
+      if (g.toxic > 0) {
+        g.toxic--;
+        if (g.toxic % 5 === 0) {
+          // The cloud: everyone in it choking (sealed in a tank, they're safe).
+          const c = geyserCloud(g.x, g.y, GEYSER_TOXIC_TICKS - g.toxic);
+          for (const p of this.players) {
+            if (!p || !p.alive || p.tank >= 0) continue;
+            const dx = (p.cx - c.x) / GEYSER_CLOUD_R;
+            const dy = (p.cy - c.y) / (GEYSER_CLOUD_R * 1.3);
+            if (dx * dx + dy * dy <= 1) this.damage(p, GEYSER_TOXIC * 5, g.by, W_GEYSER);
+          }
+        }
+        if (g.toxic === 0) this.geysersRev++;
+      }
+      if (g.cd > 0) g.cd--;
+      if (g.calm > 0) g.calm--;
+      if (g.fuse > 0) {
+        if (--g.fuse === 0) this.blowGeyser(i);
+      } else if (g.cd === 0 && g.calm === 0 && this.geyserRng.next() < GEYSER_CHANCE) {
+        g.fuse = GEYSER_FUSE;
+        g.by = 255;
+        this.geysersRev++;
+      }
+    }
+  }
+
+  /** A geyser blows: a fountain of rock and shrapnel, a blast at the mouth, then its deadly smoke. */
+  blowGeyser(i: number): void {
+    const g = this.geysers[i];
+    const seed = this.geyserRng.nextU32();
+    const by = g.by;
+    g.fuse = 0;
+    g.hp = GEYSER_HP;
+    g.cd = GEYSER_COOLDOWN;
+    g.toxic = GEYSER_TOXIC_TICKS;
+    this.geysersRev++;
+    this.broadcast.u8(R_GEYSER_BLOW);
+    this.broadcast.u8(i);
+    this.broadcast.u32(seed);
+    const owner = by === 255 ? NO_OWNER : by;
+    geyserBurst(this.grains, g.x, g.y, owner, new Rng(seed));
+    this.grains.blast(g.x, g.y - 4, GEYSER_BLAST_R * 1.4, BLAST_IMPULSE);
+    this.splashTanks(g.x, g.y - 4, GEYSER_BLAST_R, GEYSER_BLAST * 3, owner);
+    this.splashCrafts(g.x, g.y - 4, GEYSER_BLAST_R, GEYSER_BLAST, owner);
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0) continue;
+      const d = Math.hypot(p.cx - g.x, p.cy - (g.y - 6));
+      if (d < GEYSER_BLAST_R) this.damage(p, GEYSER_BLAST * (1 - d / GEYSER_BLAST_R), by, W_GEYSER);
+    }
+  }
+
   /** A fortress spawn spot with room for a clone. */
   private freeSpot(fort: Fortress): { x: number; y: number } {
     for (let n = 0; n < 12; n++) {
@@ -1514,6 +1620,8 @@ export class World {
   carve(x: number, y: number, r: number, core: number, debrisMax: number, owner = NO_OWNER): number {
     x = Math.max(0, Math.min(WORLD_W - 1, Math.round(x)));
     y = Math.max(0, Math.min(WORLD_H - 1, Math.round(y)));
+    // A geyser's vent in (or right by) the bite takes a knock: enough of them and it blows.
+    if (this.geysers.length) this.hitGeysers(x, y, r, owner);
     // A door in the bite takes the damage instead (its steel never carves): cutters and lasers wear it down.
     if (core > 0) {
       const d = this.doorAt(x, y, core);
@@ -4438,6 +4546,7 @@ export class World {
     this.stepCrafts();
     this.stepTanks();
     this.stepDoors();
+    this.stepGeysers();
     this.stepWaves();
     this.stepShips();
     this.shipCollisions();
@@ -4627,6 +4736,16 @@ export class World {
         for (let ci = 0; ci < CHUNK_COUNT; ci++) if (this.chunkVersion[ci] === this.pristine[ci]) p.known[ci] = this.chunkVersion[ci];
       }
       p.needsMap = false;
+      if (p.geysersSeen !== this.geysersRev) {
+        p.geysersSeen = this.geysersRev;
+        w.u8(R_GEYSERS);
+        w.u8(this.geysers.length);
+        for (const g of this.geysers) {
+          w.u16(clampU16(g.x));
+          w.u16(clampU16(g.y + Y_BIAS));
+          w.u8((g.cave ? GF_CAVE : 0) | (g.fuse > 0 ? GF_RUMBLE : 0) | (g.toxic > 0 ? GF_TOXIC : 0) | (g.dead ? GF_DEAD : 0));
+        }
+      }
       if (p.minesSeen !== this.minesRev) {
         p.minesSeen = this.minesRev;
         w.u8(R_MINES);

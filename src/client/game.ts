@@ -1,20 +1,21 @@
 import { type Decor, placeDecor } from './decor.ts';
-import { BTN_FIRE, type Body, copyBody, newBody, stepBody } from '../shared/actor.ts';
+import { BTN_FIRE, type Body, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, applyFrameRecords } from '../shared/frame.ts';
+import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, applyFrameRecords } from '../shared/frame.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
-import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
+import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
+import { type Flora, GEYSER_CLOUD_R, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastSiege } from '../shared/worldgen.ts';
+import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastSiege , lastFlora } from '../shared/worldgen.ts';
 import type { SiegeMap } from '../shared/siege.ts';
 import { type Relic, placeRelics } from './relics.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
@@ -286,6 +287,8 @@ export class Game implements FrameHandler {
   siege: SiegeMap | null = null;
   /** The bunkers' fittings this wave (purely for looks). */
   decor: Decor[] = [];
+  /** Where the alien flora grows on this map (frosting.ts; drawn by flora-art.ts while its ground stands). */
+  flora: Flora[] = [];
   /** The bunkers' steel doors this wave (their cells, and whose). */
   doors: { x0: number; y0: number; x1: number; y1: number; team: number }[] = [];
 
@@ -328,6 +331,14 @@ export class Game implements FrameHandler {
     if (this.beamSeen.includes(seq)) return;
     this.beamSeen.push(seq);
     if (this.beamSeen.length > 16) this.beamSeen.shift();
+    // A clone's laser leaves its barrel as drawn here (not where the server had it a moment ago).
+    if (owner < 64 && !this.tankPilots.has(owner)) {
+      const m = this.drawnMuzzle(owner, WEAPONS[WeaponId.Laser].muzzle, Math.atan2(y1 - y0, x1 - x0), x0, y0);
+      if (m) {
+        x0 = m.x;
+        y0 = m.y;
+      }
+    }
     this.laserBeams.push({ x0, y0, x1, y1, power, at: performance.now() });
     if (this.laserBeams.length > 12) this.laserBeams.shift();
     laserHit(this.particles, x1, y1, (x1 - x0) / (Math.hypot(x1 - x0, y1 - y0) || 1), (y1 - y0) / (Math.hypot(x1 - x0, y1 - y0) || 1), power);
@@ -427,6 +438,7 @@ export class Game implements FrameHandler {
 
   /** One fixed 30 Hz client tick: predict own clone, advance local kernels. */
   localTick(buttons: number, aimQ: number, send: (seq: number) => void): void {
+    this.geyserSmoke();
     this.seq = (this.seq + 1) & 0xffff;
     send(this.seq);
     copyBody(this.prevBody, this.body);
@@ -959,6 +971,58 @@ export class Game implements FrameHandler {
     this.mineList = list;
   }
 
+  /** The map's geysers (R_GEYSERS), and when each last blew (performance.now ms; its deadly cloud shows for GEYSER_TOXIC_TICKS after). */
+  geyserList: GeyserState[] = [];
+  readonly geyserBlownAt = new Map<number, number>();
+
+  geysers(list: GeyserState[]): void {
+    this.geyserList = list;
+  }
+
+  /**
+   * The geysers' smoke, once a tick, as real smoke particles (the guns'
+   * kind), for the ones near enough to see: a lazy wisp of steam off a quiet
+   * vent; thick, fast smoke and sparks off a rumbling one; and over a blown
+   * one, its deadly cloud: yellow-green smoke filling the very space where
+   * the server's smoke does its harm (GEYSER_CLOUD_R round geyserCloud).
+   */
+  private geyserSmoke(): void {
+    const now = performance.now();
+    const p = this.particles;
+    const r = (a: number, b: number) => a + Math.random() * (b - a);
+    this.geyserList.forEach((g, i) => {
+      if (g.flags & GF_DEAD || Math.abs(g.x - this.body.x) > 700 || Math.abs(g.y - this.body.y) > 450) return;
+      if (g.flags & GF_RUMBLE) {
+        for (let k = 0; k < 3; k++) p.spawn(PK.Smoke, g.x + r(-2, 2), g.y - 1, r(-25, 25), r(-140, -70), r(40, 80));
+        if (Math.random() < 0.5) p.spawn(PK.Spark, g.x + r(-1, 1), g.y - 1, r(-40, 40), r(-180, -90), r(8, 16));
+      } else if (Math.random() < 0.55) {
+        p.spawn(PK.Smoke, g.x + r(-1, 1), g.y - 1, r(-8, 8), r(-45, -20), r(50, 90));
+      }
+      if (g.flags & GF_TOXIC) {
+        const at = this.geyserBlownAt.get(i) ?? now;
+        const age = Math.min(GEYSER_TOXIC_TICKS, ((now - at) / 1000) * TICK_RATE);
+        const c = geyserCloud(g.x, g.y, age);
+        for (let k = 0; k < 7; k++) {
+          const a = Math.random() * Math.PI * 2;
+          const d = Math.sqrt(Math.random());
+          p.spawn(PK.Smoke, c.x + Math.cos(a) * d * GEYSER_CLOUD_R, c.y + Math.sin(a) * d * GEYSER_CLOUD_R * 1.3, r(-12, 12), r(-14, 4), r(25, 45), 0, Math.random() < 0.7 ? 0xa8c838 : 0xd8e060);
+        }
+      }
+    });
+  }
+
+  /** A geyser blows: the same fountain of rock and shrapnel the server threw, a flash, a jolt. */
+  geyserBlow(i: number, seed: number): void {
+    const g = this.geyserList[i];
+    if (!g) return;
+    geyserBurst(this.particles, g.x, g.y, NO_OWNER, new Rng(seed));
+    this.flashes.push({ x: g.x, y: g.y - 8, r: 34, at: performance.now() });
+    this.geyserBlownAt.set(i, performance.now());
+    const d = Math.hypot(this.body.x - g.x, this.body.y - g.y);
+    this.shake = Math.max(this.shake, Math.max(0, 1 - d / 420) * 12);
+    this.sfx?.explode(g.x, g.y, 30);
+  }
+
   /** The dropship we're flying, if we are. */
   pilotedShip(): ShipView | null {
     if (this.pilot < 0) return null;
@@ -973,8 +1037,10 @@ export class Game implements FrameHandler {
       if (!s) this.snaps.set(a.id, (s = []));
       s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts, stance: a.stance, faction: a.faction });
       if (s.length > 12) s.shift();
-      if (a.flags & F_FIRING && a.weapon === WeaponId.Digger) {
-        digDust(this.particles, a.x + ACTOR_W / 2, a.y + 5, 0xa08060, 1);
+      if (a.flags & F_FIRING && a.weapon === WeaponId.Digger && a.id !== this.myId) {
+        // (At the digger's nozzle, as drawn: never the clone's middle.)
+        const m = this.drawnMuzzle(a.id, WEAPONS[WeaponId.Digger].muzzle, a.aim);
+        if (m) digDust(this.particles, m.x, m.y, 0xa08060, 1);
       }
     }
     for (const id of this.snaps.keys()) if (!seen.has(id)) this.snaps.delete(id);
@@ -1197,6 +1263,8 @@ export class Game implements FrameHandler {
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
+    this.flora = lastFlora;
+    this.geyserBlownAt.clear();
     this.siege = lastSiege;
     this.dungeon = lastDungeon;
     this.trapSpent = new Uint8Array(32);
@@ -1275,13 +1343,22 @@ export class Game implements FrameHandler {
     if (this.projectiles.indexOf(id) >= 0) return;
     this.projectiles.spawn(id, kind, owner, x, y, vx, vy);
     const sp = Math.hypot(vx, vy) || 1;
+    // The flash and smoke come out of the barrel as this client draws it (a
+    // clone's gun: its drawn shoulder plus the weapon's muzzle length along
+    // the shot), never the clone's middle, nor where the server had it a
+    // moment ago (other clones are drawn a little in the past). Vehicle guns
+    // fire from their own muzzles, where the server spawned the round.
+    const wd = weaponOfProj(kind);
+    const at = wd && owner < 64 && !this.tankPilots.has(owner) ? this.drawnMuzzle(owner, wd.muzzle, Math.atan2(vy, vx), x, y) : null;
+    const fx = (at ? at.x : x) + (vx / sp) * 2;
+    const fy = (at ? at.y : y) + (vy / sp) * 2;
     if (kind === ProjKind.Slug) {
-      this.slugFrom.set(id, { x, y });
+      this.slugFrom.set(id, { x: at ? at.x : x, y: at ? at.y : y });
       if (this.slugFrom.size > 64) this.slugFrom.delete(this.slugFrom.keys().next().value!);
-      heavyMuzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp);
+      heavyMuzzle(this.particles, fx, fy, vx / sp, vy / sp);
     } else if (kind === ProjKind.Bolt) {
       // (A blaster just flashes.)
-    } else muzzle(this.particles, x + (vx / sp) * 2, y + (vy / sp) * 2, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile || kind === ProjKind.SpiderMissile || kind === ProjKind.AutoShell);
+    } else muzzle(this.particles, fx, fy, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile || kind === ProjKind.SpiderMissile || kind === ProjKind.AutoShell);
     this.sfx?.shot(kind, x, y, owner);
     // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
     const w = weaponOfProj(kind);
@@ -1290,6 +1367,38 @@ export class Game implements FrameHandler {
       if (owner === this.myId) this.shake = Math.max(this.shake, (w.kick ?? 0) / 22);
     }
   }
+
+  /**
+   * The muzzle of clone `id`'s gun as this client draws it (world): the
+   * shoulder of the clone as drawn now (ours predicted, others interpolated),
+   * out along `aim` by the weapon's muzzle length. Null if it isn't drawn,
+   * or (given where the server fired from) if that's nowhere near it: then
+   * it wasn't the clone's own gun (its tarantula's, say, fired in its name).
+   */
+  private drawnMuzzle(id: number, length: number, aim: number, nearX?: number, nearY?: number): { x: number; y: number } | null {
+    const left = Math.cos(aim) < 0;
+    let x: number;
+    let y: number;
+    let stance: number;
+    if (id === this.myId) {
+      if (!this.alive || this.drive || this.pilot >= 0 || this.rc >= 0) return null;
+      const ride = this.ridingAt();
+      x = ride ? ride.x : this.body.x + this.smoothX;
+      y = ride ? ride.y : this.body.y + this.smoothY;
+      stance = this.body.stance;
+    } else {
+      const v = this.remoteViews().find((r) => r.id === id);
+      if (!v) return null;
+      x = v.x;
+      y = v.y;
+      stance = v.stance;
+    }
+    const sh = shoulderAt(x, y, stance, left, this.muzzlePt);
+    const m = { x: sh.x + Math.cos(aim) * length, y: sh.y + Math.sin(aim) * length };
+    if (nearX !== undefined && nearY !== undefined && Math.hypot(m.x - nearX, m.y - nearY) > 40) return null;
+    return m;
+  }
+  private readonly muzzlePt = { x: 0, y: 0 };
 
   /** The velocity of the last projectile to end (which way its strike sprays). */
   private lastVx = 0;
@@ -1359,7 +1468,7 @@ export class Game implements FrameHandler {
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
-    const how = weapon === W_ROCKFALL ? 'Falling Rock' : weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
+    const how = weapon === W_GEYSER ? 'Geyser' : weapon === W_ROCKFALL ? 'Falling Rock' : weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (weapon === W_LASER && killer !== victim) text = `${kn} [Laser] ${vn}`;
@@ -1728,6 +1837,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (weapon === W_TRAP) return 'impaled on the spikes';
   if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';
+  if (weapon === W_GEYSER) return by ? `caught in a geyser's blast [${by} set it off]` : "caught in a geyser's blast";
   if (weapon === W_ROCKFALL) return by ? `crushed by falling rock [${by} brought it down]` : 'crushed by falling rock';
   if (weapon === W_DEBRIS) return by ? `buried in a cave-in [${by}'s doing]` : 'buried in a cave-in';
   if (weapon === W_BURN) return by ? `burned to death [${by}]` : 'burned to death';

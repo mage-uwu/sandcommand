@@ -26,6 +26,8 @@ function setup(links: { send(d: Uint8Array): void }[] = []) {
   const ps = [0, 1, 2, 3, 4].map((i) => world.addPlayer(`p${i}`, links[i] ?? { send() {} })!);
   deliverAll(world, ps);
   ps.forEach((p, i) => (p.team = i < 4 ? Team.Red : Team.Green));
+  // (The empty drop rockets climb away first: one going up through the roof would crush its riders.)
+  for (let k = 0; k < 30 * 30 && world.crafts.some((c) => c !== null); k++) world.step();
   const x = ps[0].body.x;
   const sh = newShip(x - 40, world.terrain.surfaceY(Math.floor(x)) - 110, ps[0].id, Team.Red);
   world.ships[0] = sh;

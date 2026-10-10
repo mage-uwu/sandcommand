@@ -89,6 +89,15 @@ export const R_SPOTTED = 34;
 export const R_MINES = 35;
 /** A repair kit's health wave set off: where, whose side, and who. */
 export const R_HEAL = 36;
+/** The map's geysers and their state: u8 count, then per geyser u16 x, u16 y (+Y_BIAS), u8 flags (GF_*). Sent on join and whenever one changes. */
+export const R_GEYSERS = 37;
+/** A geyser blows: u8 index, u32 seed (clients mirror its burst from it). */
+export const R_GEYSER_BLOW = 38;
+/** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
+export const GF_CAVE = 1;
+export const GF_RUMBLE = 2;
+export const GF_TOXIC = 4;
+export const GF_DEAD = 8;
 
 // Actor flag bits (R_SELF / R_ACTORS)
 export const F_ALIVE = 1;
@@ -106,7 +115,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 44;
+export const PROTOCOL_VERSION = 45;
 
 /** Last Man Standing round phases. */
 export const Phase = {

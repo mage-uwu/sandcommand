@@ -3,11 +3,12 @@ import { MAT_LOOSE, Mat, isSoil } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
 import { Backdrop, type Complex, markBox, placeStructures } from './structures.ts';
-import { fortifyComplexes, fortifyGround } from './fortifications.ts';
+import { fortifyComplexes, fortifyGround, lastWorks } from './fortifications.ts';
 import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 import { placeRareEarth } from './rare-earth.ts';
+import { type Crater, type Flora, type GemCavern, type GeyserSite, placeCraters, placeFlora, placeGemCaverns, placeGeysers, relineCraters } from './frosting.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
 export let lastComplexes: Complex[] = [];
@@ -40,6 +41,11 @@ export const Biome = { Dunes: 0, Canyons: 1, Highlands: 2, Meadows: 3 } as const
 export const BIOME_NAMES = ['Dunes', 'Canyons', 'Highlands', 'Meadows'] as const;
 /** The biome of the most recently generated map. */
 export let lastBiome: number = Biome.Dunes;
+/** The most recently generated map's frosting (frosting.ts): craters, gem caverns, geysers, and where the flora grows. */
+export let lastCraters: Crater[] = [];
+export let lastGemCaverns: GemCavern[] = [];
+export let lastGeysers: GeyserSite[] = [];
+export let lastFlora: Flora[] = [];
 
 /** Which biome a map gets: any for an ordinary map; fortresses want gentle ground; the labyrinth is under a desert. */
 export function biomeOf(seed: number, kind: number): number {
@@ -360,11 +366,23 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks).
   if (!dungeon) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
+  // The frosting: impact craters, gem caverns and geyser vents (not over the
+  // labyrinth), clear of every bunker and the siege works.
+  const spans: { x0: number; x1: number }[] = lastComplexes.map((c) => ({ x0: c.x0, x1: c.x1 }));
+  if (lastSiege) spans.push({ x0: lastSiege.lz[0], x1: lastSiege.lz[1] });
+  // (And the works dug in round the bunkers: trenches, teeth, sandbags, iron blocks.)
+  if (!dungeon) for (const list of [lastWorks.trenches, lastWorks.teeth, lastWorks.sandbags, lastWorks.cubes]) for (const w of list) spans.push({ x0: w.x0, x1: w.x1 });
+  lastCraters = dungeon ? [] : placeCraters(m, seed, spans);
+  lastGemCaverns = dungeon ? [] : placeGemCaverns(m, seed, spans);
+  lastGeysers = dungeon ? [] : placeGeysers(m, seed, spans, lastCraters);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);
   // Rare earth crystals, deep in the natural ground.
   placeRareEarth(m, heights, seed);
   frost(m, biome, seed);
+  relineCraters(m, lastCraters);
+  // (The flora last: it grows on the ground as it ends up, frosting and all.)
+  lastFlora = placeFlora(m, seed, biome, lastGeysers, spans);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the
   // moment anything touched it, so give it a cohesive dirt crust instead.

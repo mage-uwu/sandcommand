@@ -7,7 +7,7 @@ import { rubbleOf } from '../src/shared/particles.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
-import { MapKind, generateWorld } from '../src/shared/worldgen.ts';
+import { MapKind, generateWorld, lastGemCaverns } from '../src/shared/worldgen.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -28,6 +28,10 @@ describe('rare earth', () => {
       const sizes: number[] = [];
       for (let i = 0; i < t.mat.length; i++) {
         if (t.mat[i] !== Mat.RareEarth || seen[i]) continue;
+        // (The gem caverns' big crystals are their own thing: frosting.test.ts.)
+        const cx = i % WORLD_W;
+        const cy = Math.floor(i / WORLD_W);
+        if (lastGemCaverns.some((c) => Math.abs(cx - c.x) < c.rx + 30 && Math.abs(cy - c.y) < c.ry + 30)) continue;
         let n = 0;
         const stack = [i];
         seen[i] = 1;

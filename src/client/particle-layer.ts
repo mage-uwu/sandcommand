@@ -77,9 +77,14 @@ export class ParticleLayer {
       if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
       const t = life[i] / maxLife[i];
       const o = cy * w + cx;
-      if (k === PK.Smoke) {
+      if (k === PK.Smoke && color[i] === 0) {
         const v = 70 + ((i * 37) & 31);
         blendOver(buf, o, v, v - 4, v - 8, Math.round(150 * t));
+      } else if (k === PK.Smoke) {
+        // Tinted smoke (a geyser's deadly cloud): its colour, a little varied.
+        const c = color[i];
+        const d = (i * 37) & 15;
+        blendOver(buf, o, ((c >> 16) & 255) - d, ((c >> 8) & 255) - d, (c & 255) - d, Math.round(160 * t));
       } else {
         const c = color[i];
         blendOver(buf, o, (c >> 16) & 255, (c >> 8) & 255, c & 255, Math.round(220 * t));

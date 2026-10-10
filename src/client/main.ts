@@ -17,6 +17,7 @@ import { InputState } from './input.ts';
 import { type Link, type NetHandlers, Net } from './net.ts';
 import { LocalLink } from './local.ts';
 import { Renderer } from './render.ts';
+import { lastCraters, lastGemCaverns } from '../shared/worldgen.ts';
 import { TouchControls } from './touch.ts';
 import { touchPulses, wheelMayFire } from './stick.ts';
 import { RadioSelector } from './radio.ts';
@@ -191,7 +192,7 @@ async function join(tutorial = false): Promise<void> {
           g.carved(x, y, r, 1, 0, removed, detached);
           return detached.length / 3;
         };
-        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve, mark, targets: () => assistTargets(g) };
+        (window as unknown as { sc: unknown }).sc = { game: g, renderer, input, carve, mark, targets: () => assistTargets(g), frosting: () => ({ craters: lastCraters, caverns: lastGemCaverns }) };
       }
       g.myId = w.id;
       g.room = w.room;
