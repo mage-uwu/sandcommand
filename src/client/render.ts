@@ -3004,7 +3004,12 @@ export class Renderer {
         // (How we died leads: who, with what; or what happened.)
         const cause = game.deathCause ? `${game.deathCause} · ` : '';
         if (rs.out) big('FRAGGED', `${cause}out for this wave · ${watching}`, '#ff4d3d');
-        else if ((regicide || extraction || pvp || siege) && rs.inWave) {
+        else if (rs.inWave && !game.fragged) {
+          // Not on yet (just loaded in, or waiting for our rocket): loading out, not fragged.
+          const back = Math.ceil(game.respawnTicks / TICK_RATE);
+          const side = teams && game.myTeam !== Team.None ? `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · ` : '';
+          big('LOADING OUT', `${side}${back > 1 ? `deploying in ${back}s` : 'drop rocket on its way'}`, teams && game.myTeam !== Team.None ? teamCss(game.myTeam) : '#ffd34a');
+        } else if ((regicide || extraction || pvp || siege) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           big('FRAGGED', back > 0 ? `${cause}redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · ${watching}` : `${cause}drop rocket inbound · ${watching}`, '#ff4d3d');
         }

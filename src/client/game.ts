@@ -678,6 +678,9 @@ export class Game implements FrameHandler {
   private reconcile(s: SelfState): void {
     const wasAlive = this.alive;
     this.alive = (s.flags & F_ALIVE) !== 0;
+    // Fragged means we were alive and now we're not; never on yet (loading in, waiting to deploy) isn't that.
+    if (wasAlive && !this.alive) this.fragged = true;
+    else if (this.alive) this.fragged = false;
     this.hp = s.hp;
     this.respawnTicks = s.respawn;
     this.parts = s.parts;
@@ -1061,6 +1064,7 @@ export class Game implements FrameHandler {
     this.biome = lastBiome;
     this.caves = lastCaves !== null;
     this.deathCause = '';
+    this.fragged = false;
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
@@ -1210,6 +1214,8 @@ export class Game implements FrameHandler {
 
   /** How we died last (the death banner's headline): "killed by Rex [Sniper]", "buried in a cave-in"... */
   deathCause = '';
+  /** Died since we last came down (and not yet back): the banner says FRAGGED, not LOADING OUT. */
+  fragged = false;
 
   /** Our career record, across sessions (kept in this browser). */
   readonly career = loadCareer();
@@ -1233,7 +1239,10 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
-    if (victim === this.myId) this.deathCause = causeOfDeath(kn, killer, victim, weapon, how);
+    if (victim === this.myId) {
+      this.deathCause = causeOfDeath(kn, killer, victim, weapon, how);
+      this.fragged = true; // (even killed on the way down, before we were ever on the ground)
+    }
     const droid = this.isDroid(victim);
     if (droid) text += ' (droid scrapped)';
     else if (!has(k.parts, Part.Head)) text += ' (headshot)';
