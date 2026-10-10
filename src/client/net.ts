@@ -16,8 +16,21 @@ export interface NetHandlers {
   closed(reason: string): void;
 }
 
+/** What the game loop talks to: the server over a WebSocket (Net), or a World run in this page (local.ts, the tutorial). */
+export interface Link {
+  readonly open: boolean;
+  rttMs: number;
+  kbIn: number;
+  input(seq: number, buttons: number, aim: number, inv: number): void;
+  resync(chunks: number[]): void;
+  build(piece: number, gx: number, gy: number): void;
+  call(kind: number): void;
+  chat(text: string): void;
+  close(): void;
+}
+
 /** WebSocket transport + bandwidth/latency accounting. */
-export class Net {
+export class Net implements Link {
   private ws: WebSocket;
   private w = new Writer(64);
   rttMs = 0;

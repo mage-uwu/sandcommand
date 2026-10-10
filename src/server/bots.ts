@@ -4,7 +4,7 @@ import { ClassId, DROID_MASK, stumps } from '../shared/body.ts';
 import { ACTOR_H, GRAVITY } from '../shared/constants.ts';
 import { PICKUP_R, PRIMARIES, invByte } from '../shared/items.ts';
 import { CALL_COST, CallKind, Evac, Phase, Team, quantizeAim } from '../shared/protocol.ts';
-import { MAT_HARD, Mat } from '../shared/materials.ts';
+import { MAT_HARD, Mat, RARE_EARTH_VALUE } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
@@ -84,6 +84,9 @@ const ENDGAME_FOES = 4;
  * staggered: target choice every half second, line of sight every few
  * ticks, steering and aim every tick.
  */
+/** What a cell's worth to a bot digging for gold (rare earth ten times gold). */
+const oreWorth = (m: number) => (m === Mat.Gold ? 1 : m === Mat.RareEarth ? RARE_EARTH_VALUE : 0);
+
 export class BotBrain {
   private readonly rng: Rng;
   /** Aim error (radians) and how often it hesitates: per-bot skill. */
@@ -163,7 +166,7 @@ export class BotBrain {
   private findGold(world: World, p: Player): { x: number; y: number } | null {
     const t = world.tick;
     const g = this.gold;
-    if (g && world.terrain.get(g.x, g.y) === Mat.Gold && t - this.goldScanAt < 150) return g;
+    if (g && oreWorth(world.terrain.get(g.x, g.y)) > 0 && t - this.goldScanAt < 150) return g;
     if (g === null && t - this.goldScanAt < 45) return null;
     this.goldScanAt = t;
     this.gold = null;
@@ -173,12 +176,12 @@ export class BotBrain {
     const y0 = Math.floor(p.cy) - 30;
     for (let y = y0; y < y0 + GOLD_SCAN_H; y += 3) {
       for (let x = x0; x < x0 + GOLD_SCAN_W * 2; x += 3) {
-        if (ter.get(x, y) !== Mat.Gold || this.badGold.some((b) => Math.abs(b.x - x) < 14 && Math.abs(b.y - y) < 14)) continue;
+        if (oreWorth(ter.get(x, y)) === 0 || this.badGold.some((b) => Math.abs(b.x - x) < 14 && Math.abs(b.y - y) < 14)) continue;
         const d = Math.abs(x - p.cx) + Math.max(0, y - p.cy) * 1.3 + Math.max(0, p.cy - y) * 3;
         if (d >= best) continue;
-        // A seam, not a speck: enough gold around it to be worth the dig.
+        // A seam, not a speck: enough gold around it to be worth the dig (a rare earth crystal, small as it is, always is).
         let n = 0;
-        for (let yy = y - 4; yy <= y + 4; yy += 2) for (let xx = x - 4; xx <= x + 4; xx += 2) if (ter.get(xx, yy) === Mat.Gold) n++;
+        for (let yy = y - 4; yy <= y + 4; yy += 2) for (let xx = x - 4; xx <= x + 4; xx += 2) n += oreWorth(ter.get(xx, yy));
         if (n < GOLD_SEAM) continue;
         // Dug for from above: skip it under a bunker (concrete, steel) or
         // stone that never yields; rock in the way only makes it a longer dig.

@@ -158,7 +158,7 @@ import {
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
 import { ActorField, NO_OWNER, PK, Particles, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
-import { Mat } from '../shared/materials.ts';
+import { Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
   F_FACE_LEFT,
@@ -476,6 +476,14 @@ export class World {
   winner = 255;
   /** Pre-encoded R_WAVE record to open every frame of the tick a new wave's map is made. */
   private waveRecord: Uint8Array | null = null;
+
+  /**
+   * Scripted overrides (the tutorial, which runs a World in the browser):
+   * where a clone's drop rocket comes down ([x0, x1)), and the kit it
+   * comes down with. Unset, or returning undefined: the usual.
+   */
+  dropZone?: (p: Player) => [number, number] | undefined;
+  kitFor?: (p: Player) => InvItem[] | undefined;
 
   constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[]; tanks?: boolean } = {}) {
     this.rng = new Rng(seed ^ 0x9e3779b9);
@@ -2087,6 +2095,11 @@ export class World {
     return invByte(p.slot, p.invVersion);
   }
 
+  /** Lay a weapon on the ground at (x, y), full (the tutorial's rifle). */
+  dropItem(weapon: number, x: number, y: number): void {
+    this.spawnItem(weapon, newItem(weapon).ammo, x, y, 0, 0);
+  }
+
   private spawnItem(weapon: number, ammo: number, x: number, y: number, vx: number, vy: number): void {
     // Never inside terrain: back up to the nearest open cell above.
     for (let k = 0; k < 16 && this.terrain.isSolid(Math.floor(x), Math.floor(y)); k++) y -= 1;
@@ -2239,7 +2252,7 @@ export class World {
         }
       }
       this.carve(ox + cos * d, oy + sin * d, DIGGER_R, DIGGER_CORE, 0, p.id);
-      p.gold += this.terrain.removedByMat[Mat.Gold];
+      p.gold += digValue(this.terrain.removedByMat);
       return;
     }
     // Scoped, or locked on by the aim assist: braced, half the spread.
@@ -2483,8 +2496,8 @@ export class World {
     p.mend = 0;
     p.cooldown = 10;
     p.reloadLeft = 0;
-    // A fresh, random kit (always a primary, a digger and a materializer).
-    p.inv = spawnLoadout(this.rng);
+    // A fresh, random kit (always a primary, a digger and a materializer), or a scripted one.
+    p.inv = this.kitFor?.(p) ?? spawnLoadout(this.rng);
     p.slot = 0;
     this.invChanged(p);
     p.delivering = -1;
@@ -2519,6 +2532,12 @@ export class World {
     } else if (p.team !== Team.None) {
       span = Math.floor(span * 0.4);
       if (p.team === Team.Green) lo = WORLD_W - 48 - CRAFT_W / 2 - span;
+    }
+    // (A scripted drop zone, the tutorial's, over all of that.)
+    const zone = this.dropZone?.(p);
+    if (zone) {
+      lo = zone[0];
+      span = Math.max(1, zone[1] - zone[0]);
     }
     const pick = () => lo + this.rng.int(span);
     // Of a handful of candidate spots with sky above and ground below, take

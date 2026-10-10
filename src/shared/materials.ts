@@ -52,21 +52,32 @@ export const Mat = {
    * when they're gone.
    */
   Door: 20,
+  /**
+   * Rare earth: small violet crystals deep in the rock, ten times gold's
+   * worth (RARE_EARTH_VALUE) to whoever digs them out. Soft enough to dig;
+   * holds its shape.
+   */
+  RareEarth: 21,
 } as const;
 
-export const MAT_COUNT = 21;
+export const MAT_COUNT = 22;
+
+/** What a cell of rare earth banks, in gold, when dug (a cell of gold banks one). */
+export const RARE_EARTH_VALUE = 10;
+/** Gold banked for the cells of each material a dig took (World: the digger). */
+export const digValue = (removed: Int32Array) => removed[Mat.Gold] + removed[Mat.RareEarth] * RARE_EARTH_VALUE;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true, false];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, true, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false];
 
 /** Natural ground (soil, sand, rock): what frosting settles on and bots dig through. */
 /** Tough materials: a carve's core takes only the inner half of its radius of them (a quarter of the area). */
@@ -97,6 +108,7 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [92, 88, 96], // pig iron
   [150, 132, 92], // sandbags
   [118, 128, 134], // door steel
+  [196, 84, 255], // rare earth: violet crystal
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door', 'rare earth'];

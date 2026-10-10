@@ -12,7 +12,8 @@ import { type CraftView, type Game, type RemoteView, type ShipView, type TankVie
 import type { RoundState } from '../shared/frame.ts';
 import { bannerLines, layoutSub } from './banner.ts';
 import type { InputState } from './input.ts';
-import type { Net } from './net.ts';
+import type { Link } from './net.ts';
+import type { Coach } from './tutorial.ts';
 import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
@@ -60,6 +61,30 @@ function skyGradient(ctx: CanvasRenderingContext2D, offY: number, z: number): Ca
   g.addColorStop(0.9, '#e0a070');
   g.addColorStop(1, '#ebb784');
   return g;
+}
+
+/**
+ * Rare earth: faceted violet crystal. Lit on its upper-left faces, shadowed
+ * on its lower-right ones, and here and there a white glint, so a crystal
+ * reads as a gem in the rock, not a patch of colour.
+ */
+function crystalColor(t: Terrain, x: number, y: number): number {
+  const other = (dx: number, dy: number) => t.get(x + dx, y + dy) !== Mat.RareEarth;
+  const h = hash2(x, y);
+  let r = 170;
+  let g = 70;
+  let b = 236;
+  if (other(0, -1) || other(-1, 0)) {
+    r = 232;
+    g = 150;
+    b = 255;
+  } else if (other(0, 1) || other(1, 0)) {
+    r = 104;
+    g = 34;
+    b = 168;
+  }
+  if ((h & 15) === 0) r = g = b = 255;
+  return (255 << 24) | (b << 16) | (g << 8) | r;
 }
 
 /** Blend an ABGR terrain pixel toward dried-blood red by stain intensity. */
@@ -199,6 +224,7 @@ export class Renderer {
         if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph || m === Mat.Iron || m === Mat.Sandbag || m === Mat.Door) c = structColor(t, m, wx, wy);
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else if (m === Mat.Dripstone) c = dripColor(t, wx, wy);
+        else if (m === Mat.RareEarth) c = crystalColor(t, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);
@@ -234,7 +260,7 @@ export class Renderer {
   }
   private miniDirty = false;
 
-  draw(game: Game, input: InputState, net: Net, alpha: number): void {
+  draw(game: Game, input: InputState, net: Link, alpha: number): void {
     this.game = game;
     const now = performance.now();
     this.fps = this.fps * 0.95 + (1000 / Math.max(1, now - this.lastFrame)) * 0.05;
@@ -531,6 +557,26 @@ export class Renderer {
       ctx.textAlign = 'center';
       ctx.fillText(label, tx, boardable.y - 14);
       ctx.textAlign = 'left';
+    }
+
+    // The tutorial: a bobbing arrow over what it wants you to look at.
+    const ct = game.coach?.target;
+    if (ct) {
+      const bob = Math.sin(now / 180) * 3;
+      const ay = ct.y - 10 + bob;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();
+      ctx.moveTo(ct.x - 5, ay - 1);
+      ctx.lineTo(ct.x + 5, ay - 1);
+      ctx.lineTo(ct.x, ay + 7);
+      ctx.fill();
+      ctx.fillStyle = '#ffe14a';
+      ctx.beginPath();
+      ctx.moveTo(ct.x - 4, ay);
+      ctx.lineTo(ct.x + 4, ay);
+      ctx.lineTo(ct.x, ay + 5);
+      ctx.fill();
+      ctx.fillRect(ct.x - 1, ay - 6, 2, 6);
     }
 
     // Materializer beams (anyone's), fading out.
@@ -987,6 +1033,53 @@ export class Renderer {
     }
 
     this.drawHud(game, input, net, views, dpr, W, H);
+    if (game.coach) this.drawCoach(game.coach, dpr, W);
+  }
+
+  /**
+   * The tutorial's prompt: a terminal-green card at the top of the screen
+   * with the step, what to do, and (for a few seconds) what just happened.
+   */
+  private drawCoach(c: Coach, dpr: number, W: number): void {
+    const ctx = this.ctx;
+    const s = dpr * Math.min(1, innerHeight / 560, innerWidth / 1000);
+    const MONO = 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+    const bw = Math.min(W - 24 * s, 560 * s);
+    const pad = 10 * s;
+    const fs = Math.max(10, Math.round(13 * s));
+    ctx.font = `${fs}px ${MONO}`;
+    const words = c.body.split(' ');
+    const lines: string[] = [];
+    let line = '';
+    for (const w of words) {
+      const t = line ? `${line} ${w}` : w;
+      if (ctx.measureText(t).width > bw - pad * 2 && line) {
+        lines.push(line);
+        line = w;
+      } else line = t;
+    }
+    if (line) lines.push(line);
+    const lh = fs * 1.35;
+    const head = fs * 1.6;
+    const bh = pad * 2 + head + lines.length * lh + (c.note ? lh * 1.2 : 0);
+    const x = (W - bw) / 2;
+    const y = 12 * s;
+    ctx.fillStyle = 'rgba(6,14,10,0.82)';
+    ctx.fillRect(x, y, bw, bh);
+    ctx.strokeStyle = c.done ? '#ffe14a' : '#5dff9a';
+    ctx.lineWidth = Math.max(1, s);
+    ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = c.done ? '#ffe14a' : '#5dff9a';
+    ctx.font = `bold ${fs}px ${MONO}`;
+    ctx.fillText(c.done ? `> ${c.title.toUpperCase()}` : `> TUTORIAL ${c.n}/${c.of} · ${c.title.toUpperCase()}`, x + pad, y + pad + fs);
+    ctx.font = `${fs}px ${MONO}`;
+    ctx.fillStyle = '#e6f5ea';
+    lines.forEach((l, i) => ctx.fillText(l, x + pad, y + pad + head + (i + 0.8) * lh));
+    if (c.note) {
+      ctx.fillStyle = '#ffd34a';
+      ctx.fillText(c.note, x + pad, y + pad + head + (lines.length + 1) * lh);
+    }
   }
 
   /** Backdrop behind the join screen. */
@@ -2532,7 +2625,7 @@ export class Renderer {
     }
   }
 
-  private drawHud(game: Game, input: InputState, net: Net, views: RemoteView[], dpr: number, W: number, H: number): void {
+  private drawHud(game: Game, input: InputState, net: Link, views: RemoteView[], dpr: number, W: number, H: number): void {
     const ctx = this.ctx;
     // HUD scale: device pixels per CSS pixel, shrunk on small (phone) screens.
     const s = dpr * Math.min(1, innerHeight / 560, innerWidth / 1000);

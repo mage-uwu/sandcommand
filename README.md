@@ -25,6 +25,47 @@ through what you carry, **3 (F)** pick up the weapon at your feet, **4 (G)**
 drop the one in hand, **Tab** scoreboard, **Enter** chat, **M** mute all sound, **N** sound effects, **V** aim assist, **I** info panel. With the Materializer out, the wheel or a click
 on the menu picks a fortification and a click builds it. Dig gold with the Digger.
 
+**Rare earth** (`Mat.RareEarth`, `src/shared/rare-earth.ts`). Small violet
+crystals, deep in the natural ground, worth **ten times their weight in
+gold**: every cell dug out with the Digger banks 10 gold, against gold's 1
+(`digValue`).
+- Each map grows about 56. Each crystal is a 3×3 core with two to four stubby
+  shards splaying out of it, and likelier the deeper you go.
+- They only grow in soil and rock, never in a bunker, ruin or cave.
+- They're drawn as faceted gems: lit upper-left faces, shadowed lower-right,
+  the odd white glint.
+- Knocked loose, they stay rare earth. Bots that go prospecting weigh them at
+  their worth.
+
+**Tutorial** (the menu's **Tutorial** button; `src/client/tutorial.ts`,
+`src/client/local.ts`). A single-player lesson that runs entirely in the
+browser. It's the server's own `World`, stepped at 30 Hz in the page and
+linked to the client the way the socket would be, so nothing goes over the
+network.
+- **The arena.** A stretch of the map is flattened into open rolling ground,
+  from the map's west wall to a ramp at the far end.
+- **The steps.** Nine of them, each done when you've actually done it:
+  1. run
+  2. jetpack
+  3. pick up the rifle lying ahead
+  4. shoot it
+  5. dig the gold pocket under the ground
+  6. dig the rare earth crystals beside it
+  7. call in a tank by radio
+  8. climb in
+  9. wipe out a mob of four beginner bots that drop in ahead (they don't
+     respawn)
+- **The coach.** A card at the top gives the step, and a bobbing arrow points
+  at what to look for. Command tops your gold up to a tank's price once
+  you've dug the crystals.
+- **PC or mobile.** The prompts are written for the controls you're using:
+  keyboard and mouse, or the touch sticks and buttons. That's detected from a
+  coarse pointer, or the first touch, and switches live.
+- **Leaving.** **✕ Leave tutorial** quits at any time. At the end it returns
+  to the menu by itself.
+- **Hooks.** The `World` needed only two hooks for it, `dropZone` and
+  `kitFor`.
+
 **Keyboard-only aim** (no mouse needed), like the phone's fire pad: the
 **arrow keys** pick an aim direction from your clone (any of eight, with
 diagonals), and the aim assist snaps it at once onto the enemy nearest that

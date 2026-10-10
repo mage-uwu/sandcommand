@@ -24,6 +24,7 @@ import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shar
 import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff } from './effects.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
+import type { Coach } from './tutorial.ts';
 
 const TICK_MS = 1000 / TICK_RATE;
 /** Remote actors are rendered this many ticks in the past for smooth interpolation. */
@@ -224,6 +225,8 @@ export class Game implements FrameHandler {
   readonly players = new Map<number, PlayerInfo>();
   readonly feed: FeedItem[] = [];
   readonly chatLog: FeedItem[] = [];
+  /** The tutorial's prompt for this moment (main.ts sets it), or null outside the tutorial. */
+  coach: Coach | null = null;
   readonly flashes: Flash[] = [];
   radar: { id: number; x: number; y: number }[] = [];
 

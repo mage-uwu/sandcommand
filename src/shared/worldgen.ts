@@ -7,6 +7,7 @@ import { fortifyComplexes, fortifyGround } from './fortifications.ts';
 import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
+import { placeRareEarth } from './rare-earth.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
 export let lastComplexes: Complex[] = [];
@@ -361,6 +362,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);
+  // Rare earth crystals, deep in the natural ground.
+  placeRareEarth(m, heights, seed);
   frost(m, biome, seed);
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the

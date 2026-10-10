@@ -14,7 +14,8 @@ import { BuildResult, mirrorOrient, pieceCode, pieceOf, rotateOrient, snapPiece 
 import { MENU_MIRROR, MENU_ROTATE } from './render.ts';
 import { Game } from './game.ts';
 import { InputState } from './input.ts';
-import { Net } from './net.ts';
+import { type Link, type NetHandlers, Net } from './net.ts';
+import { LocalLink } from './local.ts';
 import { Renderer } from './render.ts';
 import { TouchControls } from './touch.ts';
 import { touchPulses, wheelMayFire } from './stick.ts';
@@ -32,6 +33,8 @@ const playBtn = $<HTMLButtonElement>('play');
 const statusEl = $<HTMLDivElement>('status');
 const roomsEl = $<HTMLDivElement>('rooms');
 const chatInput = $<HTMLInputElement>('chat');
+const tutorialBtn = $<HTMLButtonElement>('tutorial');
+const exitTutorialBtn = $<HTMLButtonElement>('exitTutorial');
 
 const input = new InputState(canvas);
 const renderer = new Renderer(canvas);
@@ -42,7 +45,7 @@ const touch = new TouchControls(canvas, input, {
   pointMode: () => !game || !game.alive || game.building || game.calling,
 });
 let game: Game | null = null;
-let net: Net | null = null;
+let net: Link | null = null;
 
 function storageGet(key: string): string | null {
   try {
@@ -132,7 +135,10 @@ addEventListener('keydown', (e) => {
   game?.feed.push({ text: on ? 'sound effects on (N)' : 'sound effects off (N)', color: '#b8a0ff', at: performance.now() });
 });
 
-async function join(): Promise<void> {
+/** Touch controls in play (or a touch-first device before the first touch): the tutorial words its prompts for them. */
+const touchFirst = () => touch.enabled || matchMedia('(pointer: coarse)').matches;
+
+async function join(tutorial = false): Promise<void> {
   startMusic();
   if (touch.enabled) {
     // Phones: play fullscreen and sideways where the browser allows it.
@@ -142,6 +148,7 @@ async function join(): Promise<void> {
   const name = nameInput.value.trim().slice(0, 16);
   storageSet('sc.name', name);
   playBtn.disabled = true;
+  tutorialBtn.disabled = true;
   // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one).
   const room = new URLSearchParams(location.search).get('room') === 'siege' ? 'siege' : 'main';
   statusEl.textContent = 'Connecting…';
@@ -150,7 +157,7 @@ async function join(): Promise<void> {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${proto}//${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}`;
   net?.close();
-  net = new Net(url, {
+  const handlers: NetHandlers = {
     welcome(w) {
       if (w.version !== PROTOCOL_VERSION) {
         // The server was redeployed under this tab: this client can't read its
@@ -188,6 +195,8 @@ async function join(): Promise<void> {
       game = g;
       overlay.classList.add('hidden');
       touch.setVisible(true);
+      exitTutorialBtn.classList.toggle('hidden', !tutorial);
+      if (tutorial) return;
       const q = new URLSearchParams(location.search);
       q.set('room', w.room);
       history.replaceState(null, '', `?${q}`);
@@ -215,18 +224,33 @@ async function join(): Promise<void> {
       else showOverlay(`Could not join: ${reason}`);
       game = null;
     },
-  });
+  };
+  // The tutorial runs its match right here in the page; everything else is the server's.
+  net = tutorial ? new LocalLink(name || 'Recruit', handlers) : new Net(url, handlers);
 }
+
+/** Out of the tutorial, back to the menu. */
+function leaveTutorial(msg: string): void {
+  net?.close();
+  net = null;
+  game = null;
+  exitTutorialBtn.classList.add('hidden');
+  showOverlay(msg);
+}
+tutorialBtn.addEventListener('click', () => join(true));
+exitTutorialBtn.addEventListener('click', () => leaveTutorial('Tutorial left. Deploy when you\'re ready.'));
+let tutorialDoneAt = 0;
 
 function showOverlay(msg: string): void {
   overlay.classList.remove('hidden');
   touch.setVisible(false);
   statusEl.textContent = msg;
   playBtn.disabled = false;
+  tutorialBtn.disabled = false;
   refreshRooms();
 }
 
-playBtn.addEventListener('click', join);
+playBtn.addEventListener('click', () => join());
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') join();
 });
@@ -550,7 +574,17 @@ function frame(now: number): void {
       const inv = g.invByte();
       g.localTick(buttons, quantizeAim(aim), (seq) => n.input(seq, buttons, quantizeAim(aim), inv));
     }
-    renderer.draw(g, input, net, acc / TICK_MS);
+    if (net instanceof LocalLink) {
+      // The tutorial: its prompt for this moment, in the words of the controls in use; and, once it's over, back to the menu.
+      const c = net.tutorial.coach(touchFirst());
+      g.coach = c;
+      if (c.done && !tutorialDoneAt) tutorialDoneAt = now;
+      if (tutorialDoneAt && now - tutorialDoneAt > 7000) {
+        tutorialDoneAt = 0;
+        leaveTutorial('Tutorial complete! You\'re ready: Deploy.');
+      }
+    }
+    if (net) renderer.draw(g, input, net, acc / TICK_MS);
   } else {
     acc = 0;
     renderer.drawIdle();

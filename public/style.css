@@ -86,3 +86,9 @@ body.touch .help:not(.touch-help) { display: none; }
   body.touch #overlay .panel::after { content: 'Tip: turn your phone sideways to play.'; display: block; margin-top: 12px; color: var(--accent); font-size: 12px; }
 }
 @media (max-width: 480px) { .boot { font-size: 9px; letter-spacing: 0.16em; } }
+/* Deploy and the tutorial, side by side. */
+.buttons { display: flex; gap: 10px; }
+.buttons button { flex: 1; }
+.buttons button.secondary { flex: 0 0 34%; color: var(--accent); background: transparent; border: 1px solid var(--accent); }
+/* Out of the tutorial, from anywhere in it. */
+#exitTutorial { position: fixed; top: 84px; right: 10px; z-index: 30; width: auto; margin: 0; padding: 6px 12px; font-size: 12px; color: var(--ink, #e8dcc8); background: rgba(10, 10, 14, 0.6); border: 1px solid rgba(255, 255, 255, 0.25); }
