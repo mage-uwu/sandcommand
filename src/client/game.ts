@@ -10,7 +10,7 @@ import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
-import { F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, Phase, Team, classOfFlags } from '../shared/protocol.ts';
+import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
@@ -76,6 +76,14 @@ export interface RemoteView {
 export interface CraftView extends CraftState {}
 export interface TankView extends TankState {}
 export interface ShipView extends ShipState {}
+/** A line of the radio's menu: a call (and its price), or the remote (free). */
+export interface RadioEntry {
+  kind: number;
+  name: string;
+  blurb: string;
+  cost: number;
+  free?: boolean;
+}
 
 /** Dropship scrap: grey-blue gunmetal. */
 const SHIP_SCRAP = 0x6e7a86;
@@ -895,6 +903,49 @@ export class Game implements FrameHandler {
   /** Our own watchdog, if we have one out. */
   myDog(): TankView | null {
     return this.tankViews().find((v) => isDog(v) && v.owner === this.myId) ?? null;
+  }
+
+  /**
+   * The radio's menu, in order: what we can call in (a watchdog or a
+   * tarantula only while we haven't one out), then the remote when we've
+   * a drone to take over. Shared by the menu drawn and the selector that
+   * scrolls it.
+   */
+  radioEntries(): RadioEntry[] {
+    const out: RadioEntry[] = [
+      { kind: CallKind.Dropship, name: 'DROPSHIP', blurb: 'air support · 2 turrets · 8 bombs · 3 ride its roof', cost: CALL_COST },
+      { kind: CallKind.Tank, name: 'TANK', blurb: 'parachuted onto your position', cost: CALL_COST },
+      { kind: CallKind.Mole, name: 'MOLE', blurb: 'small tank · plasma flamer digs · frill shields 3 riders', cost: MOLE_COST },
+    ];
+    if (!this.myDog()) out.push({ kind: CallKind.Watchdog, name: 'WATCHDOG', blurb: 'small robot tank · guards you · drive it (P)', cost: WATCHDOG_COST });
+    if (!this.mySpider()) out.push({ kind: CallKind.Tarantula, name: 'TARANTULA', blurb: 'ultraheavy spider · missiles + laser · guards you', cost: TARANTULA_COST });
+    const drones = this.remotes();
+    if (drones.length) {
+      const next = drones[this.remoteIndex() + 1];
+      out.push({ kind: CallKind.Pilot, name: next ? `REMOTE: ${next.name}` : 'REMOTE: BACK TO YOU', blurb: `${drones.length} drone${drones.length > 1 ? 's' : ''} · P steps through them`, cost: 0, free: true });
+    }
+    return out;
+  }
+
+  /** The radio's highlighted entry (radioEntries index): scrolled by aim, wheel or hover; fire calls it. */
+  radioSel = 0;
+
+  /**
+   * Our drones the remote can take over, in the server's order (World.remotesOf):
+   * our dropships, then our watchdogs, then our tarantulas, each by slot.
+   */
+  remotes(): { ship: boolean; slot: number; name: string }[] {
+    const out: { ship: boolean; slot: number; name: string }[] = [];
+    for (const v of [...this.shipViews()].sort((a, b) => a.slot - b.slot)) if (v.owner === this.myId && !v.leaving) out.push({ ship: true, slot: v.slot, name: 'DROPSHIP' });
+    const pets = [...this.tankViews()].sort((a, b) => a.slot - b.slot).filter((v) => isPet(v) && v.owner === this.myId && !v.chute);
+    for (const v of pets) if (isDog(v)) out.push({ ship: false, slot: v.slot, name: 'WATCHDOG' });
+    for (const v of pets) if (isSpider(v)) out.push({ ship: false, slot: v.slot, name: 'TARANTULA' });
+    return out;
+  }
+
+  /** Which of remotes() we're driving now, or -1 (ourselves). */
+  remoteIndex(): number {
+    return this.remotes().findIndex((r) => (r.ship ? r.slot === this.pilot : r.slot === this.rc));
   }
 
   /** Our own tarantula, if we have one out. */

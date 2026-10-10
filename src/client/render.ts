@@ -1750,27 +1750,50 @@ export class Renderer {
   }
   private readonly callRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
 
+  /**
+   * Our drones, when we've any: a strip along the bottom-right listing the
+   * clone and each drone in the order P steps through them, the one we're
+   * driving lit, and the key (or button) to step on.
+   */
+  private drawRemotes(game: Game, input: InputState, s: number, W: number, H: number): void {
+    const list = game.remotes();
+    if (!list.length || !game.alive) return;
+    const ctx = this.ctx;
+    const at = game.remoteIndex();
+    const names = ['YOU', ...list.map((r) => r.name)];
+    ctx.font = `bold ${Math.round(11 * s)}px ui-monospace, monospace`;
+    const pad = 8 * s;
+    const gap = 6 * s;
+    const lead = input.touch ? 'DRONE ▸' : 'P ▸';
+    const widths = names.map((n) => ctx.measureText(n).width + pad * 2);
+    const total = ctx.measureText(lead).width + gap + widths.reduce((a, b) => a + b + gap, 0);
+    let x = W - total - 14 * s;
+    const y = H - (input.touch ? 190 : 96) * s;
+    const h = 20 * s;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(x - 6 * s, y - 4 * s, total + 12 * s, h + 8 * s);
+    ctx.fillStyle = '#9fe870';
+    ctx.textAlign = 'left';
+    ctx.fillText(lead, x, y + h * 0.7);
+    x += ctx.measureText(lead).width + gap;
+    names.forEach((n, i) => {
+      const on = i - 1 === at;
+      ctx.fillStyle = on ? 'rgba(160,232,112,0.85)' : 'rgba(255,255,255,0.08)';
+      ctx.fillRect(x, y, widths[i], h);
+      ctx.fillStyle = on ? '#0c1408' : '#d8e0e8';
+      ctx.fillText(n, x + pad, y + h * 0.7);
+      x += widths[i] + gap;
+    });
+  }
+
   /** The radio's menu: call in a dropship or a tank, for gold. */
   private drawCallMenu(game: Game, input: InputState, s: number, H: number): void {
     const ctx = this.ctx;
     const rowH = 46 * s;
-    const w = 236 * s;
+    const w = 340 * s;
     const x0 = 14 * s;
-    const entries: { kind: number; name: string; blurb: string; free?: boolean; cost?: number }[] = [
-      { kind: CallKind.Dropship, name: 'DROPSHIP', blurb: 'air support · 2 turrets · 8 bombs' },
-      { kind: CallKind.Tank, name: 'TANK', blurb: 'parachuted onto your position' },
-      { kind: CallKind.Mole, name: 'MOLE', blurb: 'small tank · plasma flamer digs · frill shields 3 riders', cost: MOLE_COST },
-    ];
-    // A watchdog, if we haven't one out already.
-    const dog = game.myDog();
-    if (!dog) entries.push({ kind: CallKind.Watchdog, name: 'WATCHDOG', blurb: 'small robot tank · guards you · drive it (P)', cost: WATCHDOG_COST });
-    // A tarantula, likewise.
-    const spider = game.mySpider();
-    if (!spider) entries.push({ kind: CallKind.Tarantula, name: 'TARANTULA', blurb: 'ultraheavy spider · missiles + laser · guards you', cost: TARANTULA_COST });
-    // Our dropship's (or watchdog's, or tarantula's) up: the remote to drive it ourselves.
-    const pet = dog && !dog.chute ? dog : spider && !spider.chute ? spider : null;
-    if (game.shipViews().some((v) => v.owner === game.myId && !v.leaving)) entries.push({ kind: CallKind.Pilot, name: 'PILOT DROPSHIP', blurb: 'fly it yourself (P) · your clone stands by', free: true });
-    else if (pet) entries.push({ kind: CallKind.Pilot, name: pet === dog ? 'DRIVE WATCHDOG' : 'DRIVE TARANTULA', blurb: 'drive it yourself (P) · your clone stands by', free: true });
+    const entries = game.radioEntries();
+    const sel = Math.max(0, Math.min(entries.length - 1, game.radioSel));
     const y0 = Math.max(250 * s, H / 2 - (entries.length * rowH) / 2);
     this.callRects.length = 0;
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
@@ -1778,16 +1801,26 @@ export class Renderer {
     ctx.textAlign = 'left';
     ctx.font = `bold ${Math.round(12 * s)}px ui-monospace, monospace`;
     ctx.fillStyle = '#9fe870';
-    ctx.fillText(`RADIO  (${input.touch ? 'tap' : 'click'} to call in)`, x0, y0 - 8 * s);
+    ctx.fillText(input.touch ? 'RADIO  aim to choose · fire or tap to call' : 'RADIO  aim or wheel to choose · click to call', x0, y0 - 8 * s);
     entries.forEach((e, i) => {
-      const cost = e.cost ?? CALL_COST;
+      const cost = e.cost;
       const afford = e.free || game.gold >= cost;
       const y = y0 + i * rowH;
-      ctx.fillStyle = afford ? 'rgba(160,232,112,0.14)' : 'rgba(255,255,255,0.05)';
+      const on = i === sel;
+      ctx.fillStyle = on ? (afford ? 'rgba(160,232,112,0.34)' : 'rgba(255,112,96,0.18)') : afford ? 'rgba(160,232,112,0.14)' : 'rgba(255,255,255,0.05)';
       ctx.fillRect(x0, y + 2 * s, w, rowH - 4 * s);
-      ctx.strokeStyle = afford ? '#9fe870' : '#555';
-      ctx.lineWidth = s;
+      ctx.strokeStyle = on ? '#fff' : afford ? '#9fe870' : '#555';
+      ctx.lineWidth = on ? 2 * s : s;
       ctx.strokeRect(x0, y + 2 * s, w, rowH - 4 * s);
+      if (on) {
+        // The selector: a pointer at the row's left edge.
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(x0 - 3 * s, y + rowH / 2 - 6 * s);
+        ctx.lineTo(x0 + 5 * s, y + rowH / 2);
+        ctx.lineTo(x0 - 3 * s, y + rowH / 2 + 6 * s);
+        ctx.fill();
+      }
       ctx.font = `bold ${Math.round(14 * s)}px ui-monospace, monospace`;
       ctx.fillStyle = '#fff';
       ctx.fillText(e.name, x0 + 8 * s, y + 20 * s);
@@ -2669,6 +2702,7 @@ export class Renderer {
     else this.menuRects.length = 0;
     if (game.calling) this.drawCallMenu(game, input, s, H);
     else this.callRects.length = 0;
+    this.drawRemotes(game, input, s, W, H);
     if (game.alive) this.drawPaperDoll(game, s);
 
     // Inventory: what we carry, the one in hand highlighted.

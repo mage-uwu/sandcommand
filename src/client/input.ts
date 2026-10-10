@@ -16,6 +16,9 @@ export class InputState {
   private drops = 0;
   /** Set each tick by the game loop: with the materializer out, the wheel picks pieces. */
   building = false;
+  /** Set each tick by the game loop: with the radio out, the wheel scrolls its menu. */
+  calling = false;
+  private radioSteps = 0;
   /** Selected materializer piece (index into PIECES), and how it's turned and mirrored (build.ts orientation: R turns it, X mirrors it). */
   piece = 0;
   orient = 0;
@@ -125,6 +128,7 @@ export class InputState {
         const d = Math.sign(e.deltaY);
         // With the materializer out, the wheel picks what to build.
         if (this.building) this.piece = (this.piece + d + PIECES.length) % PIECES.length;
+        else if (this.calling) this.radioSteps += d;
         else this.cyclePresses += d;
         e.preventDefault();
       },
@@ -161,6 +165,12 @@ export class InputState {
     this.clicks++;
     this.tapFire = 2;
     this.pointAssist = true;
+  }
+  /** Wheel notches since the last call, while the radio was out. */
+  takeRadioSteps(): number {
+    const n = this.radioSteps;
+    this.radioSteps = 0;
+    return n;
   }
   cycleBy(d: number): void {
     this.cyclePresses += d;

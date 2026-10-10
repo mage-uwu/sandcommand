@@ -19,7 +19,8 @@ export const C_CALL = 0x07;
 /** What a radio can call in. */
 /** What a radio can call in; `Pilot` takes (or hands back) remote control of our own dropship. */
 /** Watchdog: a small unmanned tank that guards its caller (who can also drive it from afar). Pilot: the remote (our dropship, then our watchdog, then back). */
-export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2, Watchdog: 3, Tarantula: 4, Mole: 5 } as const;
+/** Pilot: the remote, on to the next of our drones (or back to the clone); PilotBack the other way. */
+export const CallKind = { Dropship: 0, Tank: 1, Pilot: 2, Watchdog: 3, Tarantula: 4, Mole: 5, PilotBack: 6 } as const;
 /** Gold a radio call costs. */
 export const CALL_COST = 1500;
 /** A watchdog's price (two-thirds of a tank's). */

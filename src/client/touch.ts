@@ -8,6 +8,8 @@ export interface TouchHooks {
   overUi(x: number, y: number): boolean;
   /** Should taps on the right act on the spot touched (building, the radio menu up, spectating) rather than fire? */
   pointMode(): boolean;
+  /** The DRONE button: on to the next of our drones (P). */
+  remote(): void;
 }
 
 /** Below this distance (CSS px) from the fire pad's centre, a touch keeps the last direction. */
@@ -90,7 +92,7 @@ export class TouchControls {
       el('div', 'stick-base', el('div', 'stick-knob')),
       el('div', 'fire-pad', el('i', 'tick n'), el('i', 'tick e'), el('i', 'tick s'), el('i', 'tick w'), el('div', 'fire-knob')),
       el('div', 'tbtns', btn('prev', '◀', 'ITEM'), btn('next', '▶', 'ITEM'), btn('scope', '◎', 'ZOOM'), btn('pick', '▲', 'PICK')),
-      el('div', 'ttop', btn('scores', 'SCORE'), btn('chat', 'CHAT'), btn('auto', 'AUTO')),
+      el('div', 'ttop', btn('scores', 'SCORE'), btn('chat', 'CHAT'), btn('remote', 'DRONE'), btn('auto', 'AUTO')),
     );
     document.body.appendChild(root);
     this.root = root;
@@ -333,6 +335,9 @@ export class TouchControls {
         case 'scores':
           this.input.scoreboard = !this.input.scoreboard;
           b.classList.toggle('on', this.input.scoreboard);
+          break;
+        case 'remote':
+          this.hooks.remote();
           break;
         case 'chat':
           this.hooks.chat();

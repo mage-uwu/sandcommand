@@ -782,6 +782,29 @@ comes up: click **Dropship** or **Tank** to call it in for **1500 gold**,
 a **Mole** for **1100**, a **Watchdog** for **1000**, or a **Tarantula** for **3000**. The radio then needs 30 seconds to recharge
 (`World.call`, `C_CALL`).
 
+**Choosing on the radio** (`src/client/radio.ts`). One line of the menu is
+highlighted, and firing calls whatever is highlighted. Three things move the
+highlight, and the latest wins:
+- **The aim.** Straight up picks the top line, straight down the bottom
+  one. That works with the mouse, the arrow keys or the touch fire pad,
+  which stays an aim stick while the radio is out.
+- **The wheel.** One line per notch.
+- **Pointing.** Hovering a line, or tapping it.
+
+Only a real swing of the aim moves the highlight, so a line picked with the
+wheel holds until you swing. Firing means a click, right Shift, a tap, or
+pushing the fire pad past halfway.
+
+**Remote control with a fleet** (`World.remotesOf`, `togglePilot`). **P**
+steps through every drone you have, then back to your clone: each dropship,
+each watchdog, each tarantula, in that order. **Shift+P** goes the other way.
+- Whatever you step off goes back to its own brain, and one that's gone
+  drops out of the list.
+- Touch has a **DRONE** button that does the same.
+- A strip at the bottom right lists **YOU** and each drone, the one you're
+  driving lit.
+- The radio's last line is the remote, naming the drone it hands you next.
+
 - **Watchdog** (`src/server/watchdog.ts`). A small unmanned robot tank,
   parachuted in beside you. It's two-thirds the size of a tank and
   two-thirds as tough, and it carries the same vulcan and cannon. A

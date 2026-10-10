@@ -19,6 +19,7 @@ import { LocalLink } from './local.ts';
 import { Renderer } from './render.ts';
 import { TouchControls } from './touch.ts';
 import { touchPulses, wheelMayFire } from './stick.ts';
+import { RadioSelector } from './radio.ts';
 import { registerServiceWorker, setupInstall, takeRejoin, watchForUpdates } from './pwa.ts';
 
 const snapAt = { x: 0, y: 0 };
@@ -41,8 +42,10 @@ const renderer = new Renderer(canvas);
 const touch = new TouchControls(canvas, input, {
   chat: () => input.onChatKey?.(),
   overUi: (x, y) => (!!game?.building && renderer.menuHit(x, y) >= 0) || (!!game?.calling && renderer.callMenuHit(x, y) >= 0),
-  // Building, the radio menu up, or out of the wave: taps on the right act on the spot touched.
-  pointMode: () => !game || !game.alive || game.building || game.calling,
+  // Building, or out of the wave: taps on the right act on the spot touched.
+  // (With the radio out the fire pad stays a stick: it scrolls the menu, and fires to call.)
+  pointMode: () => !game || !game.alive || game.building,
+  remote: () => cycleRemote(false),
 });
 let game: Game | null = null;
 let net: Link | null = null;
@@ -370,16 +373,25 @@ addEventListener('keydown', (e) => {
   storageSet('sc.assist', mouseAssist ? 'on' : 'off');
   game?.feed.push({ text: mouseAssist ? 'aim assist on (V)' : 'aim assist off (V)', color: '#b8a0ff', at: performance.now() });
 });
-// P: take remote control of our dropship (or hand it back to the autopilot).
-addEventListener('keydown', (e) => {
-  if (e.code !== 'KeyP' || input.typing || e.repeat || !game || !net) return;
-  if (game.pilot < 0 && game.rc < 0 && !game.shipViews().some((v) => v.owner === game!.myId && !v.leaving) && !game.myDog()) {
-    game.feed.push({ text: 'no dropship or watchdog of yours to drive (call one in by radio)', color: '#b8a0ff', at: performance.now() });
+/**
+ * The remote: on through our drones (dropships, then watchdogs and
+ * tarantulas) and back to the clone; `back` the other way round.
+ */
+function cycleRemote(back: boolean): void {
+  if (!game || !net) return;
+  if (game.pilot < 0 && game.rc < 0 && !game.remotes().length) {
+    game.feed.push({ text: 'no drone of yours to drive (call a dropship, watchdog or tarantula in by radio)', color: '#b8a0ff', at: performance.now() });
     return;
   }
-  net.call(CallKind.Pilot);
+  net.call(back ? CallKind.PilotBack : CallKind.Pilot);
+}
+// P: the next drone (Shift+P the one before), or back to the clone.
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyP' || input.typing || e.repeat) return;
+  cycleRemote(e.shiftKey);
 });
 let pulse = 0;
+const radio = new RadioSelector();
 /** Where the assist snapped this tick (for the target marker). */
 const mark: { x: number; y: number; vx: number; vy: number; g?: number; on: boolean } = { x: 0, y: 0, vx: 0, vy: 0, on: false };
 const shoulderPt = { x: 0, y: 0 };
@@ -516,6 +528,8 @@ function frame(now: number): void {
       // charge (a tap is otherwise two ticks of trigger, too short to charge).
       if (input.tapFire === 2 && g.weapon === WeaponId.Laser) input.tapFire = LASER_MIN + 2;
       let buttons = input.buttons();
+      // (The trigger as pressed, before anything below holds it back: the radio's selector calls on it.)
+      const trigger = (buttons & BTN_FIRE) !== 0;
       // Lock first: a thumb coming down on the fire pad locks on before a
       // round goes (a target not already locked waits a moment for the lock
       // to settle and the scope to get there; one already locked, by auto
@@ -548,17 +562,22 @@ function frame(now: number): void {
       if (input.takePickup()) g.pickUp();
       if (input.takeDrop()) g.drop();
       input.building = g.building;
+      input.calling = g.calling;
       input.driving = !!g.drive;
       const n = net;
       // Materializer: a click on the menu picks a piece; a click in the world
       // asks the server to build it there (it checks the same rules the
       // preview shows).
       const click = input.takeClick();
-      // Radio in hand: a click on its menu calls in a dropship or a tank.
-      if (click && g.calling) {
-        const kind = renderer.callMenuHit(input.mouseX, input.mouseY);
-        if (kind >= 0) n.call(kind);
-      }
+      // Radio in hand: the selector (aim, wheel or hover) picks a line of
+      // its menu; the trigger (a click, a tap, the fire pad) calls it.
+      if (g.calling) {
+        const entries = g.radioEntries();
+        const hoverKind = renderer.callMenuHit(input.mouseX, input.mouseY);
+        const r = radio.update(g.radioSel, entries.length, raw, entries.findIndex((e) => e.kind === hoverKind), input.takeRadioSteps(), trigger);
+        g.radioSel = r.sel;
+        if (r.call) n.call(entries[r.sel].kind);
+      } else radio.reset();
       if (click && g.building && !flying) {
         const hit = renderer.menuHit(input.mouseX, input.mouseY);
         if (hit >= 0) input.piece = hit;

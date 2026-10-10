@@ -3522,7 +3522,7 @@ export class World {
    * each radio then needs a while to recharge.
    */
   call(id: number, kind: number): boolean {
-    if (kind === CallKind.Pilot) return this.togglePilot(id);
+    if (kind === CallKind.Pilot || kind === CallKind.PilotBack) return this.togglePilot(id, kind === CallKind.PilotBack);
     const p = this.players[id];
     const cost = callCost(kind);
     if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < cost) return false;
@@ -3598,39 +3598,56 @@ export class World {
    * or hand it back to the autopilot. The clone stays where it stood, alive
    * and inert (and as shootable as ever) while we fly.
    */
-  togglePilot(id: number): boolean {
+  /**
+   * Everything of ours the remote can take over, in the order P steps
+   * through it: our dropships, then our watchdogs, then our tarantulas
+   * (each by slot). Ones still on their way down, or heading home, aren't.
+   */
+  remotesOf(id: number): { ship: boolean; slot: number }[] {
+    const out: { ship: boolean; slot: number }[] = [];
+    this.ships.forEach((sh, slot) => {
+      if (sh && sh.owner === id && !sh.leaving && (sh.pilot === 255 || sh.pilot === id)) out.push({ ship: true, slot });
+    });
+    for (const which of [isDog, isSpider]) {
+      this.tanks.forEach((t, slot) => {
+        if (t && which(t) && t.owner === id && !t.chute && (t.pilot === 255 || t.pilot === id)) out.push({ ship: false, slot });
+      });
+    }
+    return out;
+  }
+
+  /**
+   * The remote: from the clone to our first drone, on to the next, and from
+   * the last back to the clone (`back`: the other way round). Whatever we
+   * leave goes back to its own head.
+   */
+  togglePilot(id: number, back = false): boolean {
     const p = this.players[id];
     if (!p) return false;
-    // The remote cycles: our dropship, then our watchdog, then our tarantula, then back to the clone.
-    const pets: number[] = [];
-    for (const which of [isDog, isSpider]) {
-      const k = this.tanks.findIndex((t) => t !== null && which(t) && t.owner === id && !t.chute && (t.pilot === 255 || t.pilot === id));
-      if (k >= 0) pets.push(k);
-    }
-    const dog = pets.find((k) => this.tanks[k]!.pilot === 255) ?? -1;
-    if (p.rc >= 0) {
-      const next = pets[pets.indexOf(p.rc) + 1];
-      this.endRemote(p);
-      if (next !== undefined && p.alive) this.startRemote(p, next);
+    const list = this.remotesOf(id);
+    const cur = p.pilot >= 0 ? list.findIndex((r) => r.ship && r.slot === p.pilot) : p.rc >= 0 ? list.findIndex((r) => !r.ship && r.slot === p.rc) : -1;
+    // (Driving something no longer on the list, gone or not ours: back to the clone.)
+    if (cur < 0 && (p.pilot >= 0 || p.rc >= 0)) {
+      if (p.pilot >= 0) this.endPilot(p);
+      if (p.rc >= 0) this.endRemote(p);
       return true;
     }
-    if (p.pilot >= 0) {
-      this.endPilot(p);
-      if (dog >= 0 && p.alive) this.startRemote(p, dog);
-      return true;
-    }
-    if (!p.alive || p.tank >= 0) return false;
-    const slot = this.ships.findIndex((sh) => sh !== null && sh.owner === id && !sh.leaving && sh.pilot === 255);
-    if (slot < 0) {
-      if (dog < 0) return false;
-      this.startRemote(p, dog);
-      return true;
-    }
-    const sh = this.ships[slot]!;
-    p.pilot = slot;
-    sh.pilot = id;
-    sh.holdX = sh.x + SHIP_W / 2;
-    sh.holdY = sh.y;
+    if (cur < 0 && (!p.alive || p.tank >= 0 || !list.length)) return false;
+    // Positions: -1 the clone, 0.. the drones; stepping wraps through the clone.
+    const n = list.length;
+    const at = p.pilot >= 0 || p.rc >= 0 ? cur : -1;
+    const next = back ? (at < 0 ? n - 1 : at - 1) : at + 1 >= n ? -1 : at + 1;
+    if (p.pilot >= 0) this.endPilot(p);
+    if (p.rc >= 0) this.endRemote(p);
+    if (next < 0 || !p.alive || p.tank >= 0) return true;
+    const r = list[next];
+    if (r.ship) {
+      const sh = this.ships[r.slot]!;
+      p.pilot = r.slot;
+      sh.pilot = id;
+      sh.holdX = sh.x + SHIP_W / 2;
+      sh.holdY = sh.y;
+    } else this.startRemote(p, r.slot);
     return true;
   }
 
