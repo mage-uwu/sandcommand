@@ -35,6 +35,7 @@ import {
   R_GEYSERS,
   R_GEYSER_BLOW,
   R_FLORA,
+  R_WATER,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -295,6 +296,8 @@ export interface FrameHandler {
   geyserBlow(i: number, seed: number): void;
   /** The flora's state (R_FLORA): which plants are gone (one byte per plant), and the blister corals swelling to burst. */
   floraState(dead: Uint8Array, swelling: number[]): void;
+  /** Standing water (R_WATER): each body's seed, level and volume. */
+  water(bodies: { x: number; y: number; level: number; volume: number }[]): void;
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
@@ -522,6 +525,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const swelling: number[] = [];
         for (let k = r.u16(); k > 0; k--) swelling.push(r.u16());
         h.floraState(dead, swelling);
+        break;
+      }
+      case R_WATER: {
+        const n = r.u8();
+        const bodies: { x: number; y: number; level: number; volume: number }[] = [];
+        for (let i = 0; i < n; i++) bodies.push({ x: r.u16(), y: r.u16() - Y_BIAS, level: r.u16() - Y_BIAS, volume: r.u16() });
+        h.water(bodies);
         break;
       }
       case R_MINES: {
@@ -819,6 +829,7 @@ export const nullHandler: FrameHandler = {
   geysers() {},
   geyserBlow() {},
   floraState() {},
+  water() {},
   beam() {},
   heal() {},
   teams() {},

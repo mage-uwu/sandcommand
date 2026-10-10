@@ -23,7 +23,7 @@ import { type ClientLink, type Player, World } from '../server/world.ts';
  * the touch sticks and buttons (`coach(touch)`). No DOM here: tests drive it.
  */
 
-export const TUTORIAL_SEED = 0x7e57;
+export const TUTORIAL_SEED = 0x7e58; // (a marslike dunes map: the arena is staged on ordinary ground)
 
 export const enum TStep {
   Move,

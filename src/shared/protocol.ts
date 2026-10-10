@@ -100,6 +100,12 @@ export const R_GEYSER_BLOW = 38;
  * index. Sent on join and whenever a plant dies or starts to swell.
  */
 export const R_FLORA = 39;
+/**
+ * Standing water (water.ts): u8 count, then per body u16 seed x, u16 seed y
+ * (+Y_BIAS), u16 level (+Y_BIAS), u16 volume. Clients paint the same region
+ * from it. Sent on join and whenever a level changes.
+ */
+export const R_WATER = 40;
 /** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
 export const GF_CAVE = 1;
 export const GF_RUMBLE = 2;
@@ -122,7 +128,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 51;
+export const PROTOCOL_VERSION = 52;
 
 /** Last Man Standing round phases. */
 export const Phase = {

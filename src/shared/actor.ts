@@ -151,6 +151,11 @@ function collides(t: Terrain, x: number, y: number, h = ACTOR_H): boolean {
  * results are identical. Returns the downward impact speed if the body landed
  * this tick (for fall damage), else 0.
  */
+/** In water: what fraction of gravity it floats off, the push of a swimming stroke (cells/s²), and the velocity kept per tick (drag). */
+export const WATER_LIFT = 0.92;
+export const WATER_SWIM = 420;
+export const WATER_DRAG = 0.9;
+
 export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): number {
   // Stance: down crouches; held on the ground it goes prone. Standing back
   // up (or just rising a level) needs the headroom for it.
@@ -216,6 +221,16 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
   }
 
   b.vy += GRAVITY * dt;
+  // In water (water.ts): it floats, swims (up held strokes upward, no fuel
+  // needed; the pack refills), and everything is slow.
+  if (t.water && t.wet(Math.floor(b.x + 4), Math.floor(b.y + h * 0.55))) {
+    b.vy -= GRAVITY * WATER_LIFT * dt;
+    if (buttons & BTN_UP) b.vy -= WATER_SWIM * dt;
+    const drag = Math.pow(WATER_DRAG, dt * 30);
+    b.vx *= drag;
+    b.vy *= drag;
+    b.fuel = Math.min(ACTOR_MAX_FUEL, b.fuel + ACTOR_FUEL_REGEN * dt);
+  }
   if (b.vy > ACTOR_MAX_FALL) b.vy = ACTOR_MAX_FALL;
   const maxRise = base.climb ? Math.max(ACTOR_MAX_RISE, ACTOR_JUMP_SPEED * DROID_JUMP) : ACTOR_MAX_RISE; // (a droid's spring outruns a jetpack)
   if (b.vy < -maxRise) b.vy = -maxRise;

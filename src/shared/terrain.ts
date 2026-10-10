@@ -41,6 +41,19 @@ export class Terrain {
   readonly fieldDirty = new Uint8Array(TILES_X * TILES_Y);
   /** Scratch: cells removed by the last carve, by material. */
   readonly removedByMat = new Int32Array(MAT_COUNT);
+  /**
+   * Standing water (water.ts): 1 where an air cell is under water. An
+   * overlay, not a material: water is never solid. Null until a map has any.
+   */
+  water: Uint8Array | null = null;
+  /** The box the water mask's set cells lie in (null with none). */
+  waterBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
+
+  /** Is the (air) cell at (x, y) under water? */
+  wet(x: number, y: number): boolean {
+    if (!this.water || x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return false;
+    return this.water[y * WORLD_W + x] !== 0;
+  }
 
   get(x: number, y: number): number {
     if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return Mat.Bedrock;

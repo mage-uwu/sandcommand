@@ -15,7 +15,9 @@ import { Rng } from '../shared/rng.ts';
 import { type Flora, FloraKind, floraBox, GEYSER_CLOUD_R, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { Terrain } from '../shared/terrain.ts';
-import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastSiege , lastFlora } from '../shared/worldgen.ts';
+import { generateWorld, lastBiome, lastCaves, lastComplexes, lastDungeon, lastSiege , lastFlora, lastValley } from '../shared/worldgen.ts';
+import { type Valley } from '../shared/valley.ts';
+import { WATER_TICKS, paintWater } from '../shared/water.ts';
 import type { SiegeMap } from '../shared/siege.ts';
 import { type Relic, placeRelics } from './relics.ts';
 import type { Dungeon } from '../shared/dungeon.ts';
@@ -157,6 +159,8 @@ export interface Sfx {
   engines(level: number, pan: number): void;
   jets(level: number, pan: number): void;
   charge(level: number): void;
+  /** The Valley of Souls' calm, 0..1. */
+  calm(level: number): void;
 }
 
 const CAREER_KEY = 'sc.career';
@@ -292,6 +296,8 @@ export class Game implements FrameHandler {
   flora: Flora[] = [];
   /** Which of them are gone, and the blister corals swelling to burst (R_FLORA). */
   floraDead: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+  /** The Valley of Souls, on its maps (its dome, rooms and calm), else null. */
+  valley: Valley | null = null;
   floraSwell = new Set<number>();
   /** The bunkers' steel doors this wave (their cells, and whose). */
   doors: { x0: number; y0: number; x1: number; y1: number; team: number }[] = [];
@@ -584,6 +590,8 @@ export class Game implements FrameHandler {
     this.lastSelfCraft = null;
     this.lastSelfTank = null;
     applyFrameRecords(r, this.terrain, this);
+    // (Repainted on the server's schedule, from the ground as it is now: debris settling in it, a cave-in.)
+    if (this.waterBodies.length && tick % WATER_TICKS === 0) paintWater(this.terrain, this.waterBodies);
     if (this.tanksSeenTick !== tick) {
       this.tankSnaps.clear();
       this.tankPilots.clear();
@@ -1039,6 +1047,19 @@ export class Game implements FrameHandler {
     this.floraSwell = new Set(swelling);
   }
 
+  /** Standing water: the server's levels; the same region painted into our terrain (the predictor swims in it too). */
+  water(bodies: { x: number; y: number; level: number; volume: number }[]): void {
+    this.waterBodies = bodies;
+    paintWater(this.terrain, bodies);
+  }
+  private waterBodies: { x: number; y: number; level: number; volume: number }[] = [];
+
+  /** Down in the valley's caves, where it's calm (the sound changes there). */
+  inCalm(): boolean {
+    const c = this.valley?.calm;
+    return !!c && this.alive && this.body.x > c.x0 && this.body.x < c.x1 && this.body.y > c.y0;
+  }
+
   /** A geyser blows: the same fountain of rock and shrapnel the server threw, a flash, a jolt. */
   geyserBlow(i: number, seed: number): void {
     const g = this.geyserList[i];
@@ -1292,6 +1313,7 @@ export class Game implements FrameHandler {
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
     this.flora = lastFlora;
+    this.valley = lastValley;
     this.floraDead = new Uint8Array(lastFlora.length);
     this.floraSwell = new Set();
     this.geyserBlownAt.clear();
@@ -1320,6 +1342,7 @@ export class Game implements FrameHandler {
     const ear = this.ear();
     sfx.listen(ear.x, ear.y);
     sfx.charge(this.laserCharge / LASER_MAX);
+    sfx.calm(this.inCalm() ? 1 : 0);
     const eng = { l: 0, p: 0 };
     const jet = { l: 0, p: 0 };
     const add = (acc: { l: number; p: number }, x: number, y: number, amount: number) => {

@@ -521,7 +521,7 @@ export function droidHit(p: Particles, x: number, y: number, amount: number): vo
  */
 export function floraGibs(p: Particles, kind: number, x: number, y0: number, y1: number, colors: readonly number[], hanging: boolean): void {
   const n = 5 + Math.floor(Math.random() * 5);
-  // By kind (frosting.ts FloraKind): centipede, coral, tubes, hanging, puffs, blister.
+  // By kind (frosting.ts FloraKind): centipede, coral, tubes, hanging, puffs, blister, sargasso weed.
   const pieces = [
     [GIB_STALK, GIB_STALK, GIB_FROND, GIB_BUD],
     [GIB_FROND, GIB_FROND, GIB_STALK, GIB_BUD],
@@ -529,6 +529,7 @@ export function floraGibs(p: Particles, kind: number, x: number, y0: number, y1:
     [GIB_STALK, GIB_FROND, GIB_BUD],
     [GIB_CAP, GIB_CAP, GIB_STALK],
     [GIB_SAC, GIB_SAC, GIB_STALK, GIB_BUD],
+    [GIB_FROND, GIB_STALK, GIB_FROND, GIB_SAC],
   ][kind] ?? [GIB_STALK];
   for (let k = 0; k < n; k++) {
     const piece = pieces[k % pieces.length];

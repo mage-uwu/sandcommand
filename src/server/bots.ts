@@ -114,6 +114,14 @@ export class BotBrain {
   private pathAt = 0;
   private pathIdx = 0;
   private pathTo = { x: 0, y: 0 };
+  /** Following a path but getting nowhere: where it was and since when, and a spell off the path to work itself loose. */
+  private routeX = 0;
+  private routeY = 0;
+  private routeAt = 0;
+  private offRouteUntil = 0;
+  /** Where its path last got stuck (planned round next time), and how often in a row. */
+  private avoid: { x: number; y: number; r: number } | undefined;
+  private stalls = 0;
   private walkBest = Infinity;
   private walkAt = 0;
   private detourUntil = 0;
@@ -831,10 +839,30 @@ export class BotBrain {
   private pathNav(world: World, p: Player, tx: number, ty: number): { goalX: number; up: boolean; dig: boolean; digX: number; digY: number } | null {
     const t = world.tick;
     const feet = p.body.y + ACTOR_H;
+    // Stuck on its path (wedged in a notch the plan didn't see): off it a moment (the stuck-detour takes over), then plan afresh.
+    if (t < this.offRouteUntil) return null;
+    if (Math.abs(p.cx - this.routeX) > 6 || Math.abs(p.cy - this.routeY) > 6) {
+      if (this.avoid && Math.hypot(p.cx - this.avoid.x, p.cy - this.avoid.y) > 60) this.stalls = 0; // (well clear of it: unstuck)
+      this.routeX = p.cx;
+      this.routeY = p.cy;
+      this.routeAt = t;
+    } else if (t - this.routeAt > 90) {
+      // Stuck: plan again round this spot; stuck again, off the path a moment first.
+      const pts = this.path?.pts;
+      const nxt = pts ? pts[Math.min(pts.length - 1, this.pathIdx + 1)] : null;
+      this.avoid = { x: nxt ? nxt.x : p.cx, y: nxt ? nxt.y - 7 : p.cy, r: 20 };
+      this.path = null;
+      this.routeAt = t;
+      if (++this.stalls >= 2) {
+        this.stalls = 0;
+        this.offRouteUntil = t + 60;
+        return null;
+      }
+    }
     const stale = !this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2;
     // (The planning is shared out: a few searches a tick across all the bots; the rest keep to their old paths a moment longer.)
-    if (stale && navBudget(world)) {
-      this.path = findPath(world.terrain, p.cx, feet, tx, ty);
+    if (stale && (navBudget(world) || !this.path)) {
+      this.path = findPath(world.terrain, p.cx, feet, tx, ty, undefined, this.avoid);
       this.pathAt = t + (this.phase % 15); // (staggered: the bots don't all plan on one tick)
       this.pathIdx = 0;
       this.pathTo = { x: tx, y: ty };

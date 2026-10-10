@@ -35,6 +35,7 @@ describe('bunker complexes', () => {
       for (const c of lastComplexes) if (!c.tower) built += c.x1 - c.x0;
       const cover = built / (WORLD_W - 192);
       if (lastBiome === Biome.Deadland) expect(lastComplexes.every((c) => c.ruin)).toBe(true); // ruins, never bunkers
+      else if (lastBiome === Biome.Valley) expect(lastComplexes.length).toBe(0); // the canyon and its dome: no bunkers
       else if (lastBiome === Biome.Dunes || lastBiome === Biome.Meadows) {
         seen.push(cover);
         expect(cover).toBeGreaterThanOrEqual(0.08);

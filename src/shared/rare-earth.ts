@@ -65,19 +65,20 @@ export function placeRareEarth(m: Uint8Array, heights: Int32Array, seed: number)
 /**
  * One GEMM crystal cluster at (cx, cy): two to four chunky prisms, each a
  * few cells wide with a pointed tip, splaying out of one root (mostly
- * upward, as crystals grow in a pocket). Returns the cells it took.
+ * toward `up`, as crystals grow in a pocket), `scale` times the usual size;
+ * `intoAir`: out into a cavern's open air too. Returns the cells it took.
  */
-export function growGem(m: Uint8Array, cx: number, cy: number, rng: Rng): number {
+export function growGem(m: Uint8Array, cx: number, cy: number, rng: Rng, scale = 1, up = -Math.PI / 2, intoAir = false): number {
   let n = 0;
   const prisms = 2 + rng.int(3);
-  const base = -Math.PI / 2 + rng.range(-0.6, 0.6);
+  const base = up + rng.range(-0.6, 0.6);
   for (let k = 0; k < prisms; k++) {
     const a = base + (k - (prisms - 1) / 2) * rng.range(0.35, 0.7);
-    const len = 6 + rng.int(8);
-    const half = 1.5 + rng.next() * 1.2;
+    const len = (6 + rng.int(8)) * scale;
+    const half = (1.5 + rng.next() * 1.2) * scale;
     const c = Math.cos(a);
     const s = Math.sin(a);
-    const R = len + 3;
+    const R = Math.ceil(len + 3);
     for (let y = cy - R; y <= cy + R; y++) {
       for (let x = cx - R; x <= cx + R; x++) {
         if (x < 4 || y < 0 || x >= WORLD_W - 4 || y >= WORLD_H - 12) continue;
@@ -87,11 +88,12 @@ export function growGem(m: Uint8Array, cx: number, cy: number, rng: Rng): number
         const across = Math.abs(-dx * s + dy * c);
         if (along < -1 || along > len) continue;
         // Its tip: the last few cells taper to a point.
-        const tip = len - 3;
-        const w = along > tip ? half * (1 - (along - tip) / 3) : half;
+        const taper = 3 * Math.max(1, scale * 0.8);
+        const tip = len - taper;
+        const w = along > tip ? half * (1 - (along - tip) / taper) : half;
         if (across > w) continue;
         const i = y * WORLD_W + x;
-        if (!natural(m[i])) continue;
+        if (!(natural(m[i]) || (intoAir && m[i] === Mat.Air))) continue;
         m[i] = Mat.GemCrystal;
         n++;
       }

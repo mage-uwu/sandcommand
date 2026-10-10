@@ -182,6 +182,7 @@ import {
   R_GEYSERS,
   R_GEYSER_BLOW,
   R_FLORA,
+  R_WATER,
   GF_CAVE,
   GF_RUMBLE,
   GF_TOXIC,
@@ -233,7 +234,8 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege, lastWater } from '../shared/worldgen.ts';
+import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { ATTACKERS, DEFENDERS, SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
 import type { CaveNet } from '../shared/caves.ts';
@@ -329,6 +331,8 @@ export class Player {
   geysersSeen = -1;
   /** The flora's state as this client last heard it (World.floraRev). */
   floraSeen = -1;
+  /** The water as this client last heard it (World.waterRev). */
+  waterSeen = -1;
   spikeCd = 0;
   /** Last team table this client was sent (World.teamsRev). */
   teamsSeen = -1;
@@ -490,6 +494,9 @@ export class World {
   floraDead = new Uint8Array(0);
   readonly floraFuse = new Map<number, { t: number; by: number }>();
   floraRev = 0;
+  /** Standing water (water.ts): the bodies, levels kept solved as the ground changes (every WATER_TICKS). */
+  water: WaterBody[] = [];
+  waterRev = 0;
   /** Bots' path planning this tick (nav.ts navBudget): which tick, and how many searches so far. */
   navTick = -1;
   navUsed = 0;
@@ -591,6 +598,8 @@ export class World {
     this.geysers = lastGeysers.map((g) => ({ ...g, hp: GEYSER_HP, cd: 0, calm: 30 * 30 + this.geyserRng.int(30 * 90), fuse: 0, toxic: 0, by: 255, dead: false }));
     this.geysersRev++;
     this.flora = lastFlora;
+    this.water = lastWater.map((b) => ({ ...b }));
+    this.waterRev++;
     this.floraDead = new Uint8Array(lastFlora.length);
     this.floraFuse.clear();
     this.floraCols = Array.from({ length: (WORLD_W >> 6) + 1 }, () => []);
@@ -1356,6 +1365,20 @@ export class World {
     for (let gx = x; gx < x + w; gx += 2) top = Math.min(top, this.terrain.surfaceY(gx));
     this.tanks[slot] = newTarantula(x, top - h - 2, owner);
     this.dogMem.delete(slot);
+  }
+
+  /** Re-solve each body's level on the ground as it is now and repaint (clients repaint on the same tick); tell everyone if a level moved. */
+  private settleWater(): void {
+    let moved = false;
+    for (const b of this.water) {
+      const lv = solveLevel(this.terrain, b);
+      if (lv !== b.level) {
+        b.level = lv;
+        moved = true;
+      }
+    }
+    paintWater(this.terrain, this.water);
+    if (moved) this.waterRev++;
   }
 
   /** Visit the living plants whose boxes overlap a rectangle. */
@@ -4690,6 +4713,7 @@ export class World {
     this.stepDoors();
     this.stepGeysers();
     this.stepFlora();
+    if (this.water.length && this.tick % WATER_TICKS === 0) this.settleWater();
     this.stepWaves();
     this.stepShips();
     this.shipCollisions();
@@ -4901,6 +4925,17 @@ export class World {
         }
         w.u16(this.floraFuse.size);
         for (const i of this.floraFuse.keys()) w.u16(i);
+      }
+      if (p.waterSeen !== this.waterRev) {
+        p.waterSeen = this.waterRev;
+        w.u8(R_WATER);
+        w.u8(this.water.length);
+        for (const b of this.water) {
+          w.u16(clampU16(b.x));
+          w.u16(clampU16(b.y + Y_BIAS));
+          w.u16(clampU16(b.level + Y_BIAS));
+          w.u16(clampU16(b.volume));
+        }
       }
       if (p.minesSeen !== this.minesRev) {
         p.minesSeen = this.minesRev;

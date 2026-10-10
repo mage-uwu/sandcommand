@@ -21,10 +21,12 @@ function surface(t: Terrain) {
 }
 
 describe('biomes', () => {
-  it('every ordinary map is one of four marslike biomes or the deadland, by its seed; fortresses want gentle ground; the labyrinth is under a desert', () => {
+  it('every ordinary map is one of four marslike biomes, the deadland or the Valley of Souls, by its seed; fortresses want gentle ground; the labyrinth is under a desert', () => {
     const seen = new Map<number, number>();
     for (let s = 1; s < 400; s++) seen.set(biomeOf(s, MapKind.Plain), (seen.get(biomeOf(s, MapKind.Plain)) ?? 0) + 1);
-    expect([...seen.keys()].sort()).toEqual([Biome.Dunes, Biome.Canyons, Biome.Highlands, Biome.Meadows, Biome.Deadland]);
+    expect([...seen.keys()].sort()).toEqual([Biome.Dunes, Biome.Canyons, Biome.Highlands, Biome.Meadows, Biome.Deadland, Biome.Valley]);
+    expect(seen.get(Biome.Valley)! / 399).toBeGreaterThan(0.05);
+    expect(seen.get(Biome.Valley)! / 399).toBeLessThan(0.2);
     expect(seen.get(Biome.Deadland)! / 399).toBeGreaterThan(0.15);
     expect(seen.get(Biome.Deadland)! / 399).toBeLessThan(0.35);
     for (let s = 1; s < 60; s++) expect([Biome.Dunes, Biome.Meadows, Biome.Deadland]).toContain(biomeOf(s, MapKind.Fortress));

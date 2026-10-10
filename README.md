@@ -1199,6 +1199,10 @@ first where they apply.
   adds about 1 ms a tick.
 - **Air threats first.** With an enemy dropship overhead and no line on
   it, a bot drops its route and pops up on its jetpack for a shot.
+- **Stuck on a path.** If a bot following a path stops moving for three
+  seconds, it plans again with the spot it was stuck on marked costly, so
+  the new path goes another way. Stuck again, it leaves the path for two
+  seconds to work itself loose first.
 - **Unstuck.** If a bot walks toward its goal but gets no nearer for five
   seconds (wedged under an overhang, say), it backs off and jets up, then
   comes at the goal again from higher up.
@@ -1337,12 +1341,64 @@ included. The fifth is the **Deadland**.
 | **Marslike highlands** | Ridged mountains up to 330 cells above the valleys, rockier underground, and capped with snow above the snowline. Many sniper towers. |
 | **Marslike meadows** | Gentle hills under a thin crust of rust dust, with tufts of lichen a little less rare than elsewhere. |
 | **Deadland** | A crust of Progenitor debris over the marslike deep, and a landscape of thorns: cement caltrops on a menacing scale. No bunkers; ancient ruins instead. See below. |
+| **Valley of Souls** | A grand canyon over a vast cave system, sealed by a cement dome: the warning at its peak, guarding a calm paradise. See below. |
 
 About one ordinary map in four is Deadland, rolled separately from the seed
 so the marslike maps keep their biomes. Regicide maps are Deadland one time
 in five and otherwise Dunes or Meadows, so the forts have room to stand.
 Siege maps are only Dunes or Meadows, since the megafortress wants marslike
-ground. Extraction's labyrinth is always Dunes.
+ground. Extraction's labyrinth is always Dunes. About one ordinary map in
+seven is the Valley of Souls, again by a roll of its own.
+
+### The Valley of Souls
+
+The Deadland's semiotic warning reaches its peak here, and the horror is
+what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
+- **The canyon.** A grand canyon across the middle of the map: terraced
+  walls banded with rock, rims capped in grey rock, a mesa or two standing
+  in it, and a shallow pool on its sandy floor. No bunkers.
+- **The dome.** At the heart of the floor, a massive cement dome seals the
+  shaft down into the caves. It has a masonry band and keystone and squat
+  pylons at its foot, and is ringed by standing caltrops, with a field of
+  teeth across the floor. Inside, it's an enclosed chamber with a back
+  wall. The ground round it is soft enough to dig through, so the way in is
+  under or round, not through.
+- **The Maw.** Under the dome, the warning goes on: a chamber whose walls
+  are lined with cement teeth pointing in, like jaws, with blocks half sunk
+  in them. Next to no life.
+- **Then, deeper: calm.** Passages wind on to quiet rooms teeming with life:
+  - **Sargasso rooms**: thick with slow-swaying sargasso weed (a new plant:
+    ribbons with gas bladders) and coral.
+  - **The basin** and **the cistern**: still, clear water.
+  - **The forest**: three or four great petrified trunks (`Mat.Petrified`),
+    branchless, floor to roof, flaring into buttresses. Their roots trail
+    down through the rock into the cistern below and hang in its water, as
+    if they draw the poison out of the world.
+  - **Gem caverns** of giant GEMM crystals jutting from floor and roof.
+  - **The nest** at the bottom: a long, low hall spectacularly rich in
+    GEMMs (deposits all through its walls, giant crystals, rare earth) and
+    coral. It is empty, for now.
+- **The calm.** No blister coral grows down there, and no geysers vent.
+  Once you're down in the caves, the music falls almost silent and a low,
+  breathing pad comes up instead, with water dripping somewhere near
+  (`Sfx.calm`, `Music.setCalm`).
+
+**Water** (`src/shared/water.ts`). A body of standing water is a volume let
+in at a seed point. Its level isn't simulated: it's the highest at which the
+open air connected to the seed, below that level, holds no more than the
+volume (a flood from the seed, capped, binary-searched on the level).
+- **It moves when the ground does.** Dig into a cistern's side below the
+  waterline and the same volume spreads into the new space, the level
+  dropping. Fill it in and it rises.
+- **Kept in step.** The server re-solves the levels every 15 ticks and
+  sends them (`R_WATER`). Both sides repaint the region on that schedule,
+  from the same ground, into a mask over the terrain
+  (`Terrain.water`). Water is never a material, and never solid.
+- **Physics.** A clone in water floats (gravity mostly cancelled) and drags
+  through it. Holding up swims upward without fuel, and the jetpack refills.
+  The client's predictor swims in the same water.
+- **Drawn** as a clear, deepening blue-green over whatever is behind it,
+  with a bright line at its surface.
 
 ### The Deadland
 

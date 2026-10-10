@@ -8,8 +8,10 @@ import { type SiegeMap, placeSiege, siegeSites } from './siege.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 import { placeGemCrystals, placeRareEarth } from './rare-earth.ts';
+import { type Valley, carveValley, valleyFlora, valleyHeights, valleyWaters } from './valley.ts';
+import { type WaterBody, paintWater, solveLevel } from './water.ts';
 import { type Buried, type Monument, crustCell, crustDepth, placeBuried, placeMonuments, placeRuins } from './deadland.ts';
-import { type Crater, type Flora, type GemCavern, type GeyserSite, placeCraters, placeFlora, placeGemCaverns, placeGeysers, relineCraters } from './frosting.ts';
+import { type Crater, type Flora, FloraKind, type GemCavern, type GeyserSite, placeCraters, placeFlora, placeGemCaverns, placeGeysers, relineCraters } from './frosting.ts';
 
 /** The bunker complexes of the most recently generated map (tests, spawning). */
 export let lastComplexes: Complex[] = [];
@@ -26,7 +28,7 @@ export let lastSiege: SiegeMap | null = null;
  * Regicide's; never the labyrinth (it's underground already).
  */
 export function cavesOf(seed: number, kind: number): boolean {
-  if (kind === MapKind.Dungeon || biomeOf(seed, kind) === Biome.Deadland) return false; // (the crust is solid debris)
+  if (kind === MapKind.Dungeon || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
   return hash2(seed & 0xffff, seed >>> 16, 0xca7e) % 100 < 40;
 }
 
@@ -42,8 +44,8 @@ export function cavesOf(seed: number, kind: number): boolean {
  * crust of the Progenitors' ruin (cement, char, trinitite glass, gravel,
  * ash), their colossal monuments standing over it.
  */
-export const Biome = { Dunes: 0, Canyons: 1, Highlands: 2, Meadows: 3, Deadland: 4 } as const;
-export const BIOME_NAMES = ['Marslike dunes', 'Marslike canyons', 'Marslike highlands', 'Marslike meadows', 'Deadland'] as const;
+export const Biome = { Dunes: 0, Canyons: 1, Highlands: 2, Meadows: 3, Deadland: 4, Valley: 5 } as const;
+export const BIOME_NAMES = ['Marslike dunes', 'Marslike canyons', 'Marslike highlands', 'Marslike meadows', 'Deadland', 'Valley of Souls'] as const;
 /** The biome of the most recently generated map. */
 export let lastBiome: number = Biome.Dunes;
 /** The most recently generated map's frosting (frosting.ts): craters, gem caverns, geysers, and where the flora grows. */
@@ -51,6 +53,10 @@ export let lastCraters: Crater[] = [];
 export let lastGemCaverns: GemCavern[] = [];
 export let lastGeysers: GeyserSite[] = [];
 export let lastFlora: Flora[] = [];
+/** The Valley of Souls on the most recent map (null elsewhere): its canyon, dome, rooms and calm. */
+export let lastValley: Valley | null = null;
+/** Standing water on the most recent map (water.ts): the bodies, their levels solved. */
+export let lastWater: WaterBody[] = [];
 /** The deadland's buried buildings on the most recent map (none elsewhere). */
 export let lastBuried: Buried[] = [];
 /** The deadland's monuments on the most recent map (none elsewhere). */
@@ -66,6 +72,8 @@ export function biomeOf(seed: number, kind: number): number {
   if (kind === MapKind.Fortress && dead < 0.2) return Biome.Deadland;
   if (kind === MapKind.Fortress || kind === MapKind.Siege) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
   if (dead < 0.25) return Biome.Deadland;
+  // About one ordinary map in seven is the Valley of Souls (its own roll, too).
+  if ((hash2(seed & 0xffff, seed >>> 16, 0x5011) >>> 0) / 4294967296 < 0.14) return Biome.Valley;
   return Math.min(3, Math.floor(r * 4));
 }
 
@@ -217,7 +225,7 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
   const patch = new Fbm(110, seed ^ 0x6a55, 3);
   // The surface is barren: lichen only in the odd tuft, a few cells across,
   // a little commoner on the meadows (none in the deadland).
-  const tufts = [0.025, 0.02, 0.03, 0.06, 0][biome] ?? 0;
+  const tufts = [0.025, 0.02, 0.03, 0.06, 0, 0.012][biome] ?? 0;
   const snowline = WORLD_H * 0.3;
   for (let x = 6; x < WORLD_W - 6; x++) {
     const y = top[x];
@@ -304,6 +312,9 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   }
   // Siege: level the fortress's site (and its outposts', towers' and the landing zone), easing into the land around.
   if (mapKind === MapKind.Siege) levelSites(heights, siegeSites(seed));
+  // The Valley of Souls: the canyon cut into the land.
+  const valley = biome === Biome.Valley ? valleyHeights(heights, seed) : null;
+  lastValley = valley;
 
   // The sand crust: thick dunes in the desert, a dusting on the meadows, none
   // up the mountains or on the plateau (one value per column).
@@ -341,11 +352,12 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
         // caves (widening with depth) > gold veins > rock > buried sand
         // lenses (loose pockets that cave in when undercut) > sand / dirt.
         if (dead && depth < crust[x]) v = crustCell(x, y, depth, crust[x], seed, ashN.at(x, y), gritN.at(x, y));
-        else if (depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
+        else if (!valley && depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
         else if (depth > 50 && gold.at(x, y) > 0.8 - Math.min(depth, 500) / 6000) v = Mat.Gold;
         else if (depth > (rockBias ? 2 : 6) && rock.at(x, y) > 0.66 - rockBias) v = Mat.Rock;
         else if (biome === Biome.Canyons && surf > canyonFloor && depth < 6) v = Mat.Sand; // a sandy riverbed
-        else if (biome === Biome.Canyons && ((y + Math.floor(rock.at(x, 0) * 8)) / 13 | 0) % 3 === 0) v = Mat.Rock; // layered walls
+        else if (valley && surf > valley.floor - 30 && depth < 5) v = Mat.Sand; // the valley floor's sand
+        else if ((biome === Biome.Canyons || (valley && (Math.abs(x - valley.x0) < 170 || Math.abs(x - valley.x1) < 170))) && ((y + Math.floor(rock.at(x, 0) * 8)) / 13 | 0) % 3 === 0) v = Mat.Rock; // layered walls
         else if (depth > 25 && lenses.at(x, y) > 0.7) v = Mat.Sand;
         else if (depth < dune[x]) v = Mat.RustSand; // the dunes: rust dust
         else v = soilAt(soil.at(x, y), depth, y);
@@ -379,6 +391,11 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     fortifyComplexes(m, lastComplexes, seed);
     if (backdrop) for (const c of lastComplexes) if (c.strongroom) markBox(backdrop, c.strongroom.x0, c.strongroom.y0, c.strongroom.x1, c.strongroom.y1, Backdrop.Steel);
     lastDungeon = null;
+  } else if (valley) {
+    // The Valley of Souls: no bunkers. The dome, the warning, and the caves under it.
+    carveValley(m, valley, seed, backdrop);
+    lastComplexes = [];
+    lastDungeon = null;
   } else if (dead) {
     // The deadland: no bunkers at all. The Progenitors' ruins instead (Regicide's
     // fortresses among them), and the caltrops are the fortifications.
@@ -398,7 +415,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // (Not under the deadland: its citadels would be bunkers.)
   lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
   // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks); none round the ruins.
-  if (!dungeon && !dead) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
+  if (!dungeon && !dead && !valley) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
   else clearWorks();
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   // The frosting: impact craters, gem caverns and geyser vents (not over the
@@ -410,9 +427,14 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // The deadland's monuments, clear of the bunkers (and the frosting clear of them).
   lastMonuments = dead ? placeMonuments(m, seed, spans) : [];
   const ground = [...spans, ...lastMonuments.map((o) => ({ x0: o.x - 80, x1: o.x + 80 }))];
+  // (The valley: its dome and pool clear of craters; its caves clear of other caverns and geysers. It is calm down there.)
+  if (valley) ground.push({ x0: valley.dome.x - 280, x1: valley.dome.x + 280 }, { x0: valley.pool.x - valley.pool.w - 20, x1: valley.pool.x + valley.pool.w + 20 });
+  // (Nor in a cave citadel, natural ones included: the highway through it stays clear for a tarantula.)
+  const citadelFloors = lastCaves ? lastCaves.caverns.map((c) => ({ x0: c.x - c.hw, x1: c.x + c.hw })) : [];
+  const deep = [...spans, ...citadelFloors, ...(valley ? [{ x0: valley.calm.x0 - 60, x1: valley.calm.x1 + 60 }] : [])];
   lastCraters = dungeon ? [] : placeCraters(m, seed, ground, dead);
-  lastGemCaverns = dungeon ? [] : placeGemCaverns(m, seed, spans);
-  lastGeysers = dungeon ? [] : placeGeysers(m, seed, ground, lastCraters);
+  lastGemCaverns = dungeon ? [] : placeGemCaverns(m, seed, deep);
+  lastGeysers = dungeon ? [] : placeGeysers(m, seed, [...(valley ? [...ground, ...deep] : ground), ...citadelFloors], lastCraters);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);
   // Rare earth crystals, deep in the natural ground.
@@ -423,9 +445,18 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   relineCraters(m, lastCraters);
   // (The flora last: it grows on the ground as it ends up, frosting and all.)
   lastFlora = placeFlora(m, seed, biome, lastGeysers, ground);
+  if (valley) {
+    // The valley's caves are calm: no blister coral there; its own life instead.
+    const c = valley.calm;
+    lastFlora = [...lastFlora.filter((f) => !(f.kind === FloraKind.Blister && f.x > c.x0 && f.x < c.x1 && f.y > c.y0)), ...valleyFlora(m, valley, seed)];
+  }
   t.rebuildAllPlanes();
   // Start stable: loose material generated over a cave would collapse the
   // moment anything touched it, so give it a cohesive dirt crust instead.
   // Bottom-up, so each crust cell supports the column above it.
   t.detachUnsupported(0, 0, WORLD_W - 1, WORLD_H - 1, (x, y) => t.set(x, y, Mat.Dirt));
+  // Standing water, on the ground as it ends up: each body's level, and the mask painted.
+  lastWater = valley ? valleyWaters(m, valley) : [];
+  for (const b of lastWater) b.level = solveLevel(t, b);
+  paintWater(t, lastWater);
 }

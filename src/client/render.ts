@@ -97,6 +97,38 @@ function crystalColor(t: Terrain, x: number, y: number): number {
   return (255 << 24) | (b << 16) | (g << 8) | r;
 }
 
+/**
+ * Water over whatever's behind it (`under`): a clear, deepening blue-green,
+ * lighter rippled bands near the top, and a bright line at the surface.
+ */
+function waterColor(t: Terrain, x: number, y: number, under: number): number {
+  const ur = under & 255;
+  const ug = (under >> 8) & 255;
+  const ub = (under >> 16) & 255;
+  if (!t.wet(x, y - 1)) return gemRgb(176, 232, 236); // the surface
+  let depth = 1;
+  while (depth < 40 && t.wet(x, y - depth)) depth++;
+  const a = Math.min(0.82, 0.45 + depth * 0.012);
+  const ripple = depth < 6 && ((x + depth * 3) & 7) < 2 ? 18 : 0;
+  return gemRgb(ur * (1 - a) + (34 + ripple) * a, ug * (1 - a) + (118 + ripple) * a, ub * (1 - a) + (150 + ripple) * a);
+}
+
+/**
+ * Petrified wood: dark teal-grey, its grain running along the trunk in fine
+ * wavering lines, ridged bark, and mineral glints where the wood turned to stone.
+ */
+function petrifiedColor(t: Terrain, x: number, y: number): number {
+  const h = hash2(x, y);
+  const grain = Math.sin(x * 1.3 + Math.sin(y * 0.07) * 2.2);
+  let k = 0.82 + grain * 0.1 + ((h >>> 5) & 7) / 60;
+  const air = (dx: number, dy: number) => t.get(x + dx, y + dy) === Mat.Air;
+  if (air(-1, 0) || air(0, -1)) k *= 1.25;
+  else if (air(1, 0) || air(0, 1)) k *= 0.6;
+  else if (air(-2, 0)) k *= 1.1;
+  if ((h & 63) === 0) return gemRgb(150, 220, 214); // a glint of mineral
+  return gemRgb(46 * k, 86 * k, 100 * k);
+}
+
 /** The three GEMM colours: pink, turquoise, emerald. */
 const GEMS: readonly (readonly [number, number, number])[] = [
   [236, 92, 172],
@@ -298,9 +330,13 @@ export class Renderer {
         if (m === Mat.Air) {
           // Inside a bunker: its back wall instead of the open backdrop.
           const bd = backdrop[row + x];
-          if (bd) px[y * CHUNK + x] = backWallColor(t, bd, ox + x, wy);
-          else if (wy > skyline[ox + x] + 3) px[y * CHUNK + x] = caveShade(t, ox + x, wy);
-          else px[y * CHUNK + x] = grassBlade(t, ox + x, wy);
+          let c: number;
+          if (bd) c = backWallColor(t, bd, ox + x, wy);
+          else if (wy > skyline[ox + x] + 3) c = caveShade(t, ox + x, wy);
+          else c = grassBlade(t, ox + x, wy);
+          // Under standing water: tinted deep and clear, a bright line at its surface.
+          if (t.water && t.water[row + x]) c = waterColor(t, ox + x, wy, c);
+          px[y * CHUNK + x] = c;
           continue;
         }
         const wx = ox + x;
@@ -317,6 +353,7 @@ export class Renderer {
         else if (m === Mat.OldConcrete) c = oldConcreteColor(t, wx, wy);
         else if (m === Mat.Rust) c = rustColor(t, wx, wy);
         else if (m === Mat.Pour) c = pourColor(t, wx, wy);
+        else if (m === Mat.Petrified) c = petrifiedColor(t, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);

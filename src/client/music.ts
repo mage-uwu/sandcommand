@@ -407,8 +407,19 @@ export class Music {
 
   toggle(): boolean {
     this.on = !this.on;
+    this.calmNow = false;
     this.master.gain.setTargetAtTime(this.on ? this.volume : 0, this.ctx.currentTime, 0.1);
     return this.on;
+  }
+
+  private calmNow = false;
+  /** Down in the Valley of Souls' caves: the music falls nearly silent (slowly), and comes back as slowly. */
+  setCalm(c: boolean): void {
+    if (c === this.calmNow || !this.on) return;
+    this.calmNow = c;
+    const t = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setTargetAtTime(c ? this.volume * 0.08 : this.volume, t, c ? 2.2 : 1.4);
   }
 
   get enabled(): boolean {

@@ -262,7 +262,7 @@ function put(m: Uint8Array, x: number, y: number, mat: number): void {
 }
 
 /** Fill a convex polygon (world cells) with `mat`, inside the map. */
-function poly(m: Uint8Array, pts: readonly [number, number][], mat: number): void {
+export function poly(m: Uint8Array, pts: readonly [number, number][], mat: number): void {
   let y0 = Infinity;
   let y1 = -Infinity;
   for (const [, y] of pts) {
@@ -286,7 +286,7 @@ function poly(m: Uint8Array, pts: readonly [number, number][], mat: number): voi
 }
 
 /** An arm: from (x, y) along `a`, `len` long, `w` thick at the root and a little less at its flat-cut end. */
-function arm(m: Uint8Array, x: number, y: number, a: number, len: number, w: number): void {
+export function arm(m: Uint8Array, x: number, y: number, a: number, len: number, w: number): void {
   const c = Math.cos(a);
   const s = Math.sin(a);
   const w1 = w * 0.85; // (barely tapering: blunt, brutal)

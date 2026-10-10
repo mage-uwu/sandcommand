@@ -49,6 +49,10 @@ export function drawFlora(ctx: CanvasRenderingContext2D, t: Terrain, list: reado
       blister(ctx, f, now, swelling.has(i));
       continue;
     }
+    if (f.kind === FloraKind.Kelp) {
+      kelp(ctx, f, now);
+      continue;
+    }
     const pal = PALETTES[Math.floor(rnd(f.seed, 0) * PALETTES.length)];
     if (f.kind === FloraKind.Centipede) centipede(ctx, f, pal, now);
     else if (f.kind === FloraKind.Coral) coral(ctx, f, now, inCave(t, f));
@@ -362,6 +366,39 @@ function puffs(ctx: CanvasRenderingContext2D, f: Flora, pal: string[], now: numb
       ctx.globalAlpha = 0.12;
       ctx.fillRect(x - r - 1, cy - r - 1, r * 2 + 3, r * 2 + 3);
       ctx.globalAlpha = 1;
+    }
+  }
+}
+
+/** Sargasso weed: long ribbons swaying slowly, gas bladders strung along them, olive and teal. */
+const KELP = [
+  ['#1d4a2c', '#3c7a3e', '#8fc85a', '#c8e888'],
+  ['#163c40', '#2a6e64', '#62b8a0', '#a8f0d8'],
+  ['#3a3a16', '#6e6a26', '#b4a848', '#e8dc8a'],
+];
+function kelp(ctx: CanvasRenderingContext2D, f: Flora, now: number): void {
+  const pal = KELP[Math.floor(rnd(f.seed, 0) * KELP.length)];
+  const strands = 2 + Math.floor(rnd(f.seed, 1) * 3);
+  for (let s = 0; s < strands; s++) {
+    const len = 14 + Math.floor(rnd(f.seed, 10 + s) * 20);
+    const ph = rnd(f.seed, 20 + s) * 6.28;
+    let x = f.x + (s - strands / 2) * 2;
+    for (let k = 1; k <= len; k++) {
+      const u = k / len;
+      // A slow sway, more toward the tip; the ribbon two cells wide, its edge lit.
+      x += Math.sin(now / 1700 + ph + k * 0.25) * 0.35 * u + (rnd(f.seed, 30 + s) - 0.5) * 0.2;
+      const px = Math.round(x);
+      const py = f.y - k;
+      ctx.fillStyle = k % 5 === 0 ? pal[0] : pal[1];
+      ctx.fillRect(px, py, 2, 1);
+      ctx.fillStyle = pal[2];
+      ctx.fillRect(px + 1, py, 1, 1);
+      // A bladder now and then.
+      if (k % 7 === 3) {
+        ctx.fillStyle = pal[3];
+        ctx.fillRect(px - 1, py, 1, 1);
+        ctx.fillRect(px + 2, py - 1, 1, 1);
+      }
     }
   }
 }

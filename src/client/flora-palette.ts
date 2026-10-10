@@ -31,6 +31,7 @@ const hex = (c: string) => parseInt(c.slice(1), 16);
 /** A plant's colours for its gibs: stem, body, glow. */
 export function floraColors(f: Flora): number[] {
   if (f.kind === FloraKind.Tubes) return [0xd8d0c4, 0x9a9088, 0xe02838];
+  if (f.kind === FloraKind.Kelp) return [0x3c7a3e, 0x62b8a0, 0xc8e888];
   if (f.kind === FloraKind.Coral || f.kind === FloraKind.Blister) {
     const pal = CORAL_PALS[Math.floor(rnd(f.seed, 0) * CORAL_PALS.length)];
     return [hex(pal[1]), hex(pal[3]), f.kind === FloraKind.Blister ? 0xd8f060 : hex(pal[5])];

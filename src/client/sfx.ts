@@ -45,6 +45,10 @@ export class Sfx {
   private engine: Bed | null = null;
   private jet: Bed | null = null;
   private whine: Bed | null = null;
+  private calmLo: Bed | null = null;
+  private calmHi: Bed | null = null;
+  private calmLevel = 0;
+  private nextDrip = 0;
 
   constructor(ctx: BaseAudioContext) {
     this.ctx = ctx;
@@ -333,6 +337,26 @@ export class Sfx {
     const t = this.ctx.currentTime;
     b.gain.gain.setTargetAtTime(level > 0 ? 0.05 + 0.1 * level : 0, t, 0.04);
     b.osc?.frequency.setTargetAtTime(180 + 1500 * level, t, 0.05);
+  }
+
+  /**
+   * The calm of the Valley of Souls' caves (0..1): a low, slow pad (two soft
+   * sine tones a fifth apart, breathing), and water dripping somewhere near.
+   */
+  calm(level: number): void {
+    if (!this.calmLo && level <= 0.01) return;
+    const lo = (this.calmLo ??= this.bed('lowpass', 420, 0.4, 110, 'sine', 0));
+    const hi = (this.calmHi ??= this.bed('lowpass', 900, 0.4, 164.8, 'sine', 0));
+    const t = this.ctx.currentTime;
+    this.calmLevel += (clamp(level, 0, 1) - this.calmLevel) * 0.02;
+    const breath = 0.75 + 0.25 * Math.sin(t * 0.4);
+    lo.gain.gain.setTargetAtTime(0.09 * this.calmLevel * breath, t, 0.3);
+    hi.gain.gain.setTargetAtTime(0.045 * this.calmLevel * (1.6 - breath), t, 0.3);
+    if (this.calmLevel > 0.3 && t > this.nextDrip) {
+      this.nextDrip = t + 0.8 + Math.random() * 2.6;
+      const v = this.voice(this.earX + (Math.random() - 0.5) * 500, this.earY + (Math.random() - 0.5) * 200, 0.35 * this.calmLevel, 0.3);
+      if (v) this.tone(v, 0, 0.18, 'sine', 1500 + Math.random() * 900, 700, 0.5);
+    }
   }
 
   // ------------------------------------------------------------ plumbing

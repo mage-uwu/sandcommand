@@ -34,6 +34,8 @@ const CLIMB_COST = 1.2;
  */
 const HANG_COST = 0.55;
 const HANG_MAX = 14;
+/** The cost of a node near where a bot got stuck on its last plan (findPath's `avoid`). */
+const AVOID_COST = 40;
 
 // Scratch, reused search to search (a stamp marks what's this search's).
 const cls = new Uint8Array(GW * GH);
@@ -130,9 +132,10 @@ export interface NavPath {
  * A path for a clone whose feet are at (sx, sy) to (tx, ty), its body two
  * nodes tall: open where it can, dug through soft ground where that's
  * shorter than the way round, never through rock. `maxExpand` bounds the
- * search (a partial path heads the right way).
+ * search (a partial path heads the right way). `avoid`: somewhere to steer
+ * clear of (where the last plan got stuck).
  */
-export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: number, maxExpand = 2500): NavPath {
+export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: number, maxExpand = 2500, avoid?: { x: number; y: number; r: number }): NavPath {
   stamp = (stamp + 1) & 0xffff;
   if (stamp === 0) {
     clsStamp.fill(0);
@@ -167,7 +170,9 @@ export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: num
         hangStamp[id] = stamp;
       }
     }
-    return (a === SOFT ? DIG_COST : 0) + (b === SOFT ? DIG_COST : 0) + hang * HANG_COST;
+    // (Somewhere it got stuck last time: dear, so the plan goes another way.)
+    const shun = avoid && Math.abs(x * NAV_CELL + 4 - avoid.x) < avoid.r && Math.abs(y * NAV_CELL + 4 - avoid.y) < avoid.r ? AVOID_COST : 0;
+    return (a === SOFT ? DIG_COST : 0) + (b === SOFT ? DIG_COST : 0) + hang * HANG_COST + shun;
   };
   heapN = 0;
   g[s] = 0;

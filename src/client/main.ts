@@ -407,6 +407,8 @@ function frame(now: number): void {
   const g = game;
   // The music goes muffled, as if through a wall, while we aren't out there fighting.
   const muffled = !g || !g.alive;
+  // Down in the Valley of Souls' caves: the music falls away (and the calm comes up, Sfx.calm).
+  if (music) music.setCalm(!!g && g.inCalm());
   if (music && muffled !== musicMuffled) {
     musicMuffled = muffled;
     music.setMuffled(muffled);

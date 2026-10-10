@@ -280,6 +280,11 @@ export const FloraKind = {
    * that scalds anyone close (World: the flora's state).
    */
   Blister: 5,
+  /**
+   * Sargasso weed: long, slow-swaying strands with gas bladders along them,
+   * in the quiet rooms of the Valley of Souls (valley.ts).
+   */
+  Kelp: 6,
 } as const;
 
 export interface Flora {
@@ -298,6 +303,7 @@ export const FLORA_SIZE: readonly (readonly [number, number])[] = [
   [5, 22], // hanging coral
   [7, 10], // puffballs
   [6, 15], // blister coral
+  [6, 34], // sargasso weed
 ];
 
 /** A plant's box (world cells). */

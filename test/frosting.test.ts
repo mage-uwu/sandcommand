@@ -54,7 +54,7 @@ describe('frosting: the ground', () => {
 
   it('flora, all underground: coral, puffballs, centipede plants and blister coral on cave floors, hanging coral, tube worms by every cave vent', () => {
     const kinds = new Set(flora.map((f) => f.kind));
-    for (const k of Object.values(FloraKind)) expect(kinds).toContain(k);
+    for (const k of Object.values(FloraKind)) if (k !== FloraKind.Kelp) expect(kinds).toContain(k); // (sargasso weed: the Valley of Souls' own)
     for (const f of flora) {
       if (f.kind === FloraKind.Hanging) expect(t.get(f.x, f.y + 1)).toBe(Mat.Air);
       else expect(t.get(f.x, f.y - 1)).toBe(Mat.Air);
