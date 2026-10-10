@@ -1357,7 +1357,11 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
 - **The canyon.** A grand canyon across the middle of the map, truly
   deep: the rims stand high (little sky over them) and the floor lies some
   400 cells below, between sheer cliffs broken by a few narrow ledges.
-  The walls are banded with rock and the rims capped in grey rock. A tall
+  The Deadland's ruin lies over this land too, thinner: a crust of ash,
+  gravel, trinitite, char, broken cement and rusted steel. The canyon cut
+  through it, so it shows in the cliffs as a stratum under the rims, over
+  grey caprock, and a skin of it has washed down across the canyon floor.
+  Below that, the walls are banded with rock. A tall
   mesa or two stands in it, and a shallow pool lies on its sandy floor.
   No bunkers.
 - **The dome.** At the heart of the floor, a massive cement dome seals the
@@ -1380,9 +1384,12 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
   - **The forest**: a hall of petrified trunks (`Mat.Petrified`), after
     the petrified forest under the Sea of Corruption. Six to eight slender,
     branchless trunks stand straight and smooth as columns, pale cool
-    blue-grey. Near the roof each fans out into a vault of stone lattice,
-    honeycombed with holes and hung with drips, meeting its neighbours'
-    in pointed arches. Stumps (some snapped off at a slant) and a fallen
+    blue-grey. Each is a bundle of strands grown together, and toward both
+    ends it parts into roots: up through a vault of stone lattice into
+    the roof, and down as buttress roots arching over the floor and into
+    it, every root tapering and forking, its tip buried in the rock. The
+    vaults are honeycombed, meeting their neighbours' in pointed arches.
+    Stumps (some snapped off at a slant) and a fallen
     log or two lie on the floor. The trunks' roots trail down through the
     rock into the cistern below and hang in its water, as if they draw the
     poison out of the world.

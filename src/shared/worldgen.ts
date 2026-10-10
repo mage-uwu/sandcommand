@@ -335,6 +335,20 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   const dead = biome === Biome.Deadland;
   const crust = new Int32Array(WORLD_W);
   if (dead) for (let x = 0; x < WORLD_W; x++) crust[x] = crustDepth(x, seed, (xx) => fbm(xx, 0, 260, seed ^ 0xdead, 3));
+  // The Valley of Souls lies under the same ruin, thinner: a layer over the land
+  // the canyon cut through (showing in its cliffs as a stratum under the rims),
+  // and a skin of it washed down onto the canyon floor (over the Maw).
+  const crustTop = new Int32Array(WORLD_W); // (the row the crust's depth counts from)
+  if (valley) {
+    for (let x = 0; x < WORLD_W; x++) {
+      const n = fbm(x, 0, 200, seed ^ 0xdead, 3);
+      const floor = heights[x] > valley.floor - 30;
+      // (In the walls, from the level of the nearer rim.)
+      const wall = !floor && x > valley.x0 && x < valley.x1;
+      crustTop[x] = wall ? heights[x - valley.x0 < valley.x1 - x ? valley.x0 : valley.x1] : heights[x];
+      crust[x] = Math.round(floor ? 16 + n * 22 : 30 + n * 50);
+    }
+  }
   const ashN = new Fbm(30, seed ^ 0xa54, 2);
   const gritN = new Fbm(18, seed ^ 0x6e17, 2);
   // The soil's varieties: ochre pockets near the surface, oxblood clay
@@ -352,11 +366,11 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
         // caves (widening with depth) > gold veins > rock > buried sand
         // lenses (loose pockets that cave in when undercut) > sand / dirt.
         if (dead && depth < crust[x]) v = crustCell(x, y, depth, crust[x], seed, ashN.at(x, y), gritN.at(x, y));
+        else if (valley && y - crustTop[x] < crust[x]) v = crustCell(x, y, y - crustTop[x], crust[x], seed, ashN.at(x, y), gritN.at(x, y));
         else if (!valley && depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
         else if (depth > 50 && gold.at(x, y) > 0.8 - Math.min(depth, 500) / 6000) v = Mat.Gold;
         else if (depth > (rockBias ? 2 : 6) && rock.at(x, y) > 0.66 - rockBias) v = Mat.Rock;
         else if (biome === Biome.Canyons && surf > canyonFloor && depth < 6) v = Mat.Sand; // a sandy riverbed
-        else if (valley && surf > valley.floor - 30 && depth < 5) v = Mat.Sand; // the valley floor's sand
         else if ((biome === Biome.Canyons || (valley && (Math.abs(x - valley.x0) < 170 || Math.abs(x - valley.x1) < 170))) && ((y + Math.floor(rock.at(x, 0) * 8)) / 13 | 0) % 3 === 0) v = Mat.Rock; // layered walls
         else if (depth > 25 && lenses.at(x, y) > 0.7) v = Mat.Sand;
         else if (depth < dune[x]) v = Mat.RustSand; // the dunes: rust dust

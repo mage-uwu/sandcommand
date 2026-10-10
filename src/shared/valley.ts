@@ -1,7 +1,7 @@
 import { WORLD_H, WORLD_W } from './constants.ts';
 import { arm, poly } from './deadland.ts';
 import { type Flora, FloraKind } from './frosting.ts';
-import { Mat, isSoil } from './materials.ts';
+import { Mat, isDeadGround, isSoil } from './materials.ts';
 import { growCrystal, growGem } from './rare-earth.ts';
 import { Rng, hash2 } from './rng.ts';
 import type { WaterBody } from './water.ts';
@@ -190,9 +190,10 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     while (y < WORLD_H - 12 && m[at(x, y)] === Mat.Air) y++;
     return y;
   };
-  // Grey rock caps on the rims and along the walls' terraces.
+  // Grey caprock on the rims and along the walls' terraces, under the ruin's crust.
   for (let x = 6; x < WORLD_W - 6; x++) {
-    const top = topOf(x);
+    let top = topOf(x);
+    while (top < WORLD_H - 12 && isDeadGround(m[at(x, top)])) top++;
     const onFloor = x > v.x0 + 130 && x < v.x1 - 130 && top > v.floor - 30;
     if (onFloor) continue;
     const cap = 6 + Math.floor(vnoise(x, 1, 30, seed ^ 0xca9) * 10);
@@ -425,6 +426,43 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     for (let x = lx - (len >> 1); x <= lx + (len >> 1); x++) for (let y = fy - 2 * r; y < fy; y++) if (m[at(x, y)] === Mat.Air) set(x, y, Mat.Petrified);
   }
 
+  /**
+   * A fine root, grown from (x, y): `side` the way it spreads (-1 left, 1
+   * right), `v` the way it heads (-1 up, 1 down), `t` its angle off that
+   * vertical (0 straight on, near PI/2 out level). It tapers as it goes,
+   * curls outward, now and then forks; in the rock it runs on a little way,
+   * thinning fast.
+   */
+  const root = (x0: number, y0: number, side: number, v: number, t0: number, thick0: number, len: number) => {
+    const stack = [{ x: x0, y: y0, t: t0, thick: thick0, len }];
+    while (stack.length) {
+      const r = stack.pop()!;
+      let { x, y, t, thick } = r;
+      const fall = r.thick / r.len;
+      for (let step = 0; step < r.len * 2 && thick > 0.45; step++) {
+        // (Looking just past its own last disc.)
+        const ahead = Math.ceil(thick) + 1;
+        const c = m[at(Math.round(x + side * Math.sin(t) * ahead), Math.round(y + v * Math.cos(t) * ahead))];
+        const solid = c !== Mat.Air && c !== Mat.Petrified;
+        thick -= solid ? fall * 3 : fall;
+        t += (solid ? -0.03 : 0.02) + rng.range(-0.1, 0.1);
+        t = Math.max(0.05, Math.min(1.5, t));
+        x += side * Math.sin(t);
+        y += v * Math.cos(t);
+        disc(x, y, thick - 0.5);
+        if (thick > 1.1 && !solid && rng.next() < 0.04) {
+          stack.push({ x, y, t: t + rng.range(-0.6, 0.6), thick: thick * 0.7, len: Math.round(r.len * (0.4 + rng.next() * 0.4)) });
+          thick *= 0.85;
+        }
+      }
+    }
+  };
+  /** A disc of petrified wood (radius `r`; under a half, one cell). */
+  const disc = (x: number, y: number, r: number) => {
+    const rr = Math.max(0, r);
+    const ir = Math.ceil(rr);
+    for (let dy = -ir; dy <= ir; dy++) for (let dx = -ir; dx <= ir; dx++) if (dx * dx + dy * dy <= rr * rr + 0.5) set(Math.round(x) + dx, Math.round(y) + dy, Mat.Petrified);
+  };
   const trunks = 6 + rng.int(3);
   const span = forest.rx * 1.7;
   const gap = span / trunks;
@@ -432,10 +470,12 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
     const tx = Math.round(forest.x - span / 2 + (k + 0.5) * gap + rng.range(-gap * 0.18, gap * 0.18));
     const fy = floorOf(tx, forest.y);
     const cy = roofOf(tx, forest.y);
-    const w = 3 + rng.int(3); // (half its girth: slender)
+    const w = 4 + rng.int(3); // (half its girth: slender)
     const H = fy - cy;
     const fan = 0.42 + rng.next() * 0.16; // (how far down from the roof the vault begins)
-    const reach = gap * (0.55 + rng.next() * 0.15); // (how wide it spreads at the roof)
+    const reach = gap * (0.5 + rng.next() * 0.15); // (how wide it spreads at the roof)
+    const footH = H * (0.16 + rng.next() * 0.08); // (how far up its foot begins to part)
+    const foot = gap * (0.3 + rng.next() * 0.12);
     // (Over the trunk's own roof, the vault fills only the room's open air up to its roof, wherever that is.)
     const ceil = new Map<number, number>();
     const ceilOf = (x: number) => {
@@ -443,36 +483,68 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
       if (c === undefined) ceil.set(x, (c = m[at(x, cy)] === Mat.Air ? roofOf(x, cy) : cy));
       return c;
     };
-    for (let y = cy - 60; y <= fy + 4; y++) {
-      // u: 0 where the vault begins, 1 at the roof (and over it, where the roof is higher off to the side).
+    // The vault behind: a lattice of fine roots grown together, densest against the roof, thinning toward its edge.
+    for (let y = cy - 60; y <= cy + H * fan; y++) {
       const u = Math.min(1, Math.max(0, 1 - (y - cy) / (H * fan)));
-      const core = w + (y > fy - 6 ? (6 - (fy - y)) * 0.5 : 0) + u * u * 3;
-      const out = core + Math.pow(u, 1.8) * reach;
+      const out = w + Math.pow(u, 1.6) * reach * 1.1;
       for (let x = Math.round(tx - out); x <= Math.round(tx + out); x++) {
         const dx = Math.abs(x - tx);
-        if (dx <= core) {
-          if (y >= cy - 6 || m[at(x, y)] === Mat.Air) set(x, y, Mat.Petrified);
-        } else if (m[at(x, y)] === Mat.Air && (y >= cy || y > ceilOf(x))) {
-          // The vault: a rim along its underside, lattice within, thickening up into the roof.
-          const rim = out - dx < 1.5 + u;
-          const strut = lattice(x, y, 15) < 0.8 + u * u * u * 1.8;
-          if (rim || strut) set(x, y, Mat.Petrified);
-        }
+        if (m[at(x, y)] !== Mat.Air || (y < cy && y <= ceilOf(x))) continue;
+        const edge = Math.sqrt(Math.max(0, 1 - dx / out));
+        if (lattice(x, y, 15) < (0.55 + u * u * u * 1.5) * edge) set(x, y, Mat.Petrified);
       }
     }
-    // Drips of stone hanging from the vault's underside.
-    for (let k = 0; k < 3 + rng.int(4); k++) {
-      const dx = Math.round(tx + rng.range(-reach * 0.8, reach * 0.8));
-      if (Math.abs(dx - tx) < w + 3) continue;
-      // (Up from under the vault to the first stone over it: is that the vault?)
-      let y = Math.round(cy + H * fan);
-      if (m[at(dx, y)] !== Mat.Air) continue;
-      while (y > cy - 60 && m[at(dx, y - 1)] === Mat.Air) y--;
-      if (m[at(dx, y - 1)] !== Mat.Petrified) continue;
-      const len = 4 + rng.int(10);
-      for (let i = 0; i < len; i++) {
-        const half = i < len * 0.6 ? 1 : 0;
-        for (let x = dx - half; x <= dx + half; x++) if (m[at(x, y + i)] === Mat.Air) set(x, y + i, Mat.Petrified);
+    // The trunk: a bundle of strands grown together into one smooth column,
+    // parting toward each end into roots, up into the roof and down into the
+    // floor, each tapering as it goes.
+    const n = 5 + rng.int(3);
+    for (let i = 0; i < n; i++) {
+      const o = n === 1 ? 0 : (i / (n - 1)) * 2 - 1 + rng.range(-0.12, 0.12); // (-1..1: its place across the trunk)
+      const r0 = Math.max(1.6, (w * 1.7) / n + 0.6);
+      const spreadUp = reach * (0.75 + rng.next() * 0.5);
+      const spreadDown = foot * (0.7 + rng.next() * 0.6);
+      const wob = rng.range(0, Math.PI * 2);
+      const xAt = (y: number) => {
+        const u = Math.max(0, 1 - (y - cy) / (H * fan));
+        const b = Math.max(0, 1 - (fy - y) / footH);
+        return tx + o * (w - r0 * 0.6) + o * spreadUp * Math.pow(u, 1.6) + o * spreadDown * b * b + Math.sin(y * 0.09 + wob) * (u + b) * 1.5;
+      };
+      const rAt = (y: number) => {
+        const u = Math.max(0, 1 - (y - cy) / (H * fan));
+        const b = Math.max(0, 1 - (fy - y) / footH);
+        return r0 * (1 - 0.5 * u - 0.35 * b);
+      };
+      // Grown from its middle out to each end, and on past it, until it's well into the rock
+      // (wherever the roof or the floor is: lower off to the side than over the trunk).
+      const mid = Math.round((cy + fy) / 2);
+      for (const dir of [-1, 1]) {
+        const end = dir < 0 ? cy : fy;
+        const slope = (xAt(end) - xAt(end - dir * 3)) / 3;
+        let px = xAt(mid);
+        let inRock = 0;
+        let shrink = 0;
+        for (let y = mid + dir; Math.abs(y - mid) < H; y += dir) {
+          const past = dir * (y - end); // (how far past its end, if it is)
+          const x = past > 0 ? xAt(end) + slope * past : xAt(y);
+          // (Looking just past its own last disc.)
+          const c = m[at(Math.round(x), y + dir * (Math.ceil(rAt(Math.max(cy, Math.min(fy, y))) - shrink) + 1))];
+          if (c !== Mat.Air && c !== Mat.Petrified) inRock++;
+          if (inRock) shrink += 0.2;
+          else if (past > 0) shrink += 0.01;
+          const r = rAt(Math.max(cy, Math.min(fy, y))) - shrink;
+          if (inRock > 9 || r < 0.4) break;
+          const steps = Math.max(1, Math.ceil(Math.abs(x - px)));
+          for (let s2 = 1; s2 <= steps; s2++) disc(px + ((x - px) * s2) / steps, y - dir + (dir * s2) / steps, r);
+          px = x;
+        }
+      }
+      // The outer strands put out fine roots of their own, fanning along the roof and the floor.
+      if (Math.abs(o) > 0.5) {
+        const side = Math.sign(o);
+        const yu = Math.round(cy + H * fan * (0.3 + rng.next() * 0.3));
+        root(xAt(yu), yu, side, -1, 0.9 + rng.next() * 0.4, 1.3, 20 + rng.int(20));
+        const yd = Math.round(fy - footH * (0.2 + rng.next() * 0.4));
+        root(xAt(yd), yd, side, 1, 0.9 + rng.next() * 0.4, 1.2, 14 + rng.int(14));
       }
     }
     // Roots: down from its foot through the rock, into the cistern, trailing in the water.

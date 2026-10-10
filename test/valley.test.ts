@@ -3,7 +3,7 @@ import { BTN_UP, newBody, stepBody } from '../src/shared/actor.ts';
 import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, DT, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { FloraKind } from '../src/shared/frosting.ts';
-import { Mat } from '../src/shared/materials.ts';
+import { Mat, isDeadGround } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { Biome, MapKind, biomeOf, generateWorld, lastComplexes, lastFlora, lastValley, lastWater } from '../src/shared/worldgen.ts';
 import { floodWater, paintWater, solveLevel } from '../src/shared/water.ts';
@@ -39,7 +39,7 @@ describe('the Valley of Souls', () => {
     expect(lastComplexes.length).toBe(0);
   });
 
-  it('a grand canyon: rims capped with grey rock, a deep floor, a pool on it', () => {
+  it('a grand canyon under the ruin\'s crust: grey caprock under it on the rims, a deep floor, a pool on it', () => {
     const rimY = Math.min(t.surfaceY(v.x0 - 200), t.surfaceY(v.x1 + 200));
     // (The floor: its median height either side of the dome, caltrops and teeth aside.)
     const ys: number[] = [];
@@ -47,7 +47,16 @@ describe('the Valley of Souls', () => {
     ys.sort((p, q) => p - q);
     const floorY = ys[ys.length >> 1];
     expect(floorY - rimY).toBeGreaterThan(160);
-    expect(t.get(v.x0 - 200, t.surfaceY(v.x0 - 200) + 2)).toBe(Mat.Rock);
+    // The rims: the ruin's crust (ash, gravel, cement, char and rubble) over grey caprock.
+    const rx = v.x0 - 200;
+    let y = t.surfaceY(rx);
+    expect(isDeadGround(t.get(rx, y + 1))).toBe(true);
+    while (isDeadGround(t.get(rx, y))) y++;
+    expect(t.get(rx, y + 2)).toBe(Mat.Rock);
+    // The crust lies on the canyon floor too.
+    let dead = 0;
+    for (let x = v.dome.x - 700; x <= v.dome.x + 700; x += 10) if (isDeadGround(t.get(x, t.surfaceY(x) + 4))) dead++;
+    expect(dead).toBeGreaterThan(100);
     // The pool: water on the floor.
     expect(t.wet(v.pool.x, t.surfaceY(v.pool.x) - 1) || t.wet(v.pool.x, v.pool.y)).toBe(true);
   });
