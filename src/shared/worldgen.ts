@@ -2,7 +2,8 @@ import { WORLD_H, WORLD_W } from './constants.ts';
 import { MAT_LOOSE, Mat, isSoil } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { Terrain } from './terrain.ts';
-import { type Complex, placeStructures } from './structures.ts';
+import { Backdrop, type Complex, markBox, placeStructures } from './structures.ts';
+import { fortifyComplexes, fortifyGround } from './fortifications.ts';
 import { DUNGEON_SURFACE, type Dungeon, generateDungeon } from './dungeon.ts';
 import { type CaveNet, carveCaves, dripCaves } from './caves.ts';
 
@@ -314,10 +315,15 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   } else {
     const extraTowers = biome === Biome.Highlands ? 5 : biome === Biome.Canyons ? 2 : 0;
     lastComplexes = placeStructures(m, heights, seed, mapKind === MapKind.Fortress, backdrop, extraTowers);
+    // Their doors, slabs and strongrooms.
+    fortifyComplexes(m, lastComplexes, seed);
+    if (backdrop) for (const c of lastComplexes) if (c.strongroom) markBox(backdrop, c.strongroom.x0, c.strongroom.y0, c.strongroom.x1, c.strongroom.y1, Backdrop.Steel);
     lastDungeon = null;
   }
   // Cave maps: the highway under it all, its citadels, and the shafts down to it from every bunker.
   lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
+  // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks).
+  if (!dungeon) fortifyGround(m, lastComplexes, seed);
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);

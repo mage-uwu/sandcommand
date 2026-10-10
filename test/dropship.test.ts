@@ -298,7 +298,7 @@ describe('radio and dropship', () => {
 
   it('half a tank tough; turrets, engines, doors and hull all come apart', () => {
     expect(SHIP_HP * 2).toBe(TANK_HP);
-    const { world, a, b } = setup(66);
+    const { world, a, b } = setup(67);
     world.call(a.id, CallKind.Dropship);
     const slot = world.ships.findIndex(Boolean);
     const sh = world.ships[slot]!;

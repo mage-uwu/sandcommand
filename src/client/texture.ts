@@ -39,7 +39,7 @@ function noise(x: number, y: number, scale: number, s: number): number {
   return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
 }
 
-const STRUCT = (m: number) => m === Mat.Concrete || m === Mat.Metal;
+const STRUCT = (m: number) => m === Mat.Concrete || m === Mat.Metal || m === Mat.Iron || m === Mat.Door;
 
 function matAt(t: Terrain, x: number, y: number): number {
   if (x < 0 || x >= WORLD_W || y < 0 || y >= WORLD_H) return Mat.Bedrock;
@@ -325,8 +325,52 @@ export function soilColor(m: number, x: number, y: number, c: number): number {
   return abgr((c & 255) * k, ((c >> 8) & 255) * k, ((c >> 16) & 255) * k);
 }
 
-/** A built solid (concrete, steel, ancient cobble or temple stone) at (x, y). */
+/** Pig iron: great cast blocks, dark and mottled, casting seams, a bloom of rust here and there. */
+function pigIron(t: Terrain, x: number, y: number): number {
+  const px = ((x % 24) + 24) % 24;
+  const py = ((y % 24) + 24) % 24;
+  let k = (0.82 + 0.3 * noise(x, y, 6, 81)) * (0.94 + 0.1 * h(x, y, 82));
+  if (px === 0 || py === 0) k *= 0.6;
+  else if (px === 1 || py === 1) k *= 1.18;
+  if (h(x, y, 83) < 0.03) k *= 0.7; // casting pit
+  k *= bevel(t, x, y) * (1 - grime(t, x, y) * 0.5);
+  const rust = Math.max(0, noise(x, y, 14, 84) - 0.62) * 2.4;
+  return abgr((88 + rust * 70) * k, (84 + rust * 22) * k, (94 - rust * 30) * k);
+}
+
+/** Sandbags: 8x4 bags laid in staggered courses, burlap weave, dark where they meet. */
+function sandbag(t: Terrain, x: number, y: number): number {
+  const course = Math.floor(y / 4);
+  const ox = x + (course & 1) * 4;
+  const px = ((ox % 8) + 8) % 8;
+  const py = ((y % 4) + 4) % 4;
+  let k = 0.9 + 0.12 * h(x, y, 85);
+  if ((x + y) & 1) k *= 0.95; // weave
+  if (px === 0 || py === 3) k *= 0.62; // between bags
+  else if (py === 0) k *= 1.14; // the bag's rounded top
+  else if (px === 7 || px === 1) k *= 0.85;
+  if (matAt(t, x, y - 1) === Mat.Air) k *= 1.12;
+  const tint = (h(Math.floor(ox / 8), course, 86) - 0.5) * 22; // each bag its own shade
+  return abgr(150 * k + tint, 132 * k + tint * 0.8, 92 * k + tint * 0.4);
+}
+
+/** A sliding steel door: heavy horizontal slats with dark seams, a band of studs. */
+function doorSteel(t: Terrain, x: number, y: number): number {
+  const py = ((y % 6) + 6) % 6;
+  let k = 0.9 + 0.08 * h(Math.floor(x / 2), y, 87);
+  if (py === 5) k *= 0.5;
+  else if (py === 0) k *= 1.22;
+  else if (py === 2 && ((x % 4) + 4) % 4 === 1) k *= 1.4; // a stud
+  if (matAt(t, x - 1, y) !== Mat.Door) k *= 1.15;
+  if (matAt(t, x + 1, y) !== Mat.Door) k *= 0.7;
+  return abgr(112 * k, 124 * k, 132 * k);
+}
+
+/** A built solid (concrete, steel, pig iron, sandbags, a door, ancient cobble or temple stone) at (x, y). */
 export function structColor(t: Terrain, m: number, x: number, y: number): number {
+  if (m === Mat.Iron) return pigIron(t, x, y);
+  if (m === Mat.Sandbag) return sandbag(t, x, y);
+  if (m === Mat.Door) return doorSteel(t, x, y);
   if (m === Mat.Cobble) return cobble(t, x, y);
   if (m === Mat.Glyph) return glyphStone(t, x, y);
   return m === Mat.Metal ? steel(t, x, y) : concrete(t, x, y);

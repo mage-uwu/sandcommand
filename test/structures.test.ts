@@ -7,7 +7,7 @@ import { Biome, generateWorld, lastBiome, lastComplexes } from '../src/shared/wo
 import { WeaponId } from '../src/shared/weapons.ts';
 import { bannerLines, layoutSub } from '../src/client/banner.ts';
 
-/** Air cells reachable from (x, y) inside a box (4-connected flood fill). */
+/** Air cells reachable from (x, y) inside a box (4-connected flood fill; through the steel doors, which open for their own side). */
 function flood(t: Terrain, x: number, y: number, x0: number, y0: number, x1: number, y1: number): Uint8Array {
   const w = x1 - x0;
   const seen = new Uint8Array(w * (y1 - y0));
@@ -17,7 +17,7 @@ function flood(t: Terrain, x: number, y: number, x0: number, y0: number, x1: num
     const cx = stack.pop()!;
     if (cx < x0 || cy < y0 || cx >= x1 || cy >= y1) continue;
     const i = (cy - y0) * w + (cx - x0);
-    if (seen[i] || t.isSolid(cx, cy)) continue;
+    if (seen[i] || (t.isSolid(cx, cy) && t.get(cx, cy) !== Mat.Door)) continue;
     seen[i] = 1;
     stack.push(cx + 1, cy, cx - 1, cy, cx, cy + 1, cx, cy - 1);
   }
@@ -41,7 +41,7 @@ describe('bunker complexes', () => {
       } else expect(lastComplexes.filter((c) => c.tower).length).toBeGreaterThanOrEqual(3);
     }
     expect(Math.max(...seen) - Math.min(...seen)).toBeGreaterThan(0.15);
-  });
+  }, 90_000); // (twenty whole maps)
 
   it('sit on the modular grid and are made of concrete and metal', () => {
     generateWorld(t, 7);

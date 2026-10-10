@@ -38,23 +38,36 @@ export const Mat = {
    * and comes down in heavy chunks (particles.ts applyCarve).
    */
   Dripstone: 17,
+  /**
+   * Pig iron: the bunkers' great cast blocks and strongroom linings. Hard,
+   * and tough besides: a blast or a digger bites only a quarter as much of it
+   * as of concrete (Terrain.carve).
+   */
+  Iron: 18,
+  /** Sandbags: piled cover outside the bunkers and along trench parapets. Soft; holds its shape. */
+  Sandbag: 19,
+  /** A bunker's sliding steel door (World.doors opens and shuts it). Hard. */
+  Door: 20,
 } as const;
 
-export const MAT_COUNT = 18;
+export const MAT_COUNT = 21;
 
 /** Hard materials only yield to the inner core of an explosion. */
-export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false];
+export const MAT_HARD: readonly boolean[] = [false, false, false, true, false, true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, true];
 /** Fixed materials never yield. */
-export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false];
+export const MAT_FIXED: readonly boolean[] = [false, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false];
 
 /**
  * Loose materials have no cohesion: with nothing directly beneath them they
  * detach into continuous grains and fall (sand, and the rubble explosions
  * leave behind). Dirt, rock and gold veins hold their shape.
  */
-export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false];
+export const MAT_LOOSE: readonly boolean[] = [false, false, true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, false, false, false, false];
 
 /** Natural ground (soil, sand, rock): what frosting settles on and bots dig through. */
+/** Tough materials: a carve's core takes only the inner half of its radius of them (a quarter of the area). */
+export const MAT_TOUGH: readonly boolean[] = Array.from({ length: MAT_COUNT }, (_, m) => m === Mat.Iron);
+
 export const isSoil = (m: number) => m === Mat.Dirt || m === Mat.Sand || m === Mat.RustSand || m === Mat.Regolith || m === Mat.Clay || m === Mat.Ochre;
 
 /** Base RGB colors; the renderer adds per-cell hashed variation. */
@@ -77,6 +90,9 @@ export const MAT_COLOR: readonly (readonly [number, number, number])[] = [
   [108, 40, 34], // oxblood clay
   [178, 118, 50], // ochre
   [206, 184, 152], // dripstone
+  [92, 88, 96], // pig iron
+  [150, 132, 92], // sandbags
+  [118, 128, 134], // door steel
 ];
 
-export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone'];
+export const MAT_NAME = ['air', 'dirt', 'sand', 'rock', 'gold', 'bedrock', 'rubble', 'metal', 'concrete', 'cobble', 'glyph', 'lichen', 'frost', 'rust sand', 'regolith', 'clay', 'ochre', 'dripstone', 'iron', 'sandbag', 'door'];

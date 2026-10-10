@@ -399,6 +399,8 @@ export class World {
   private readonly broadcast = new Writer(1024);
   private readonly actorRecords = new Writer(64 * 16);
   private readonly pendingPixels = new Map<number, number[]>();
+  /** The bunkers' steel doors: where, whose, how many rows are open, and whether it's been blown (then it stays as it is). */
+  doors: { x0: number; y0: number; x1: number; y1: number; team: number; open: number; broken: boolean }[] = [];
   private readonly removedScratch: number[] = [];
   private readonly detachedScratch: number[] = [];
   private readonly chunkCache = new Map<number, { version: number; bytes: Uint8Array }>();
@@ -496,6 +498,7 @@ export class World {
     this.dungeon = lastDungeon;
     this.caves = lastCaves;
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
+    this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, broken: false })));
     this.trapSpent.fill(0);
     this.trapCd.fill(0);
     this.trapsRev++;
@@ -2652,6 +2655,61 @@ export class World {
     b.jetting = false;
   }
 
+  /** Does a bunker door of `team`'s open for a clone of `who`'s? (Anyone's, in a mode without teams.) */
+  doorOpensFor(team: number, who: number): boolean {
+    return who === Team.None || who === team;
+  }
+
+  /**
+   * The bunkers' steel doors slide up (from the bottom, two rows a tick) while one of their own side is near, and back down once none is
+   * and nothing stands in the doorway. A door that's been blown or dug into
+   * stops working and stays as it is.
+   */
+  private stepDoors(): void {
+    const RATE = 2;
+    const REACH = 22;
+    for (const d of this.doors) {
+      if (d.broken) continue;
+      const h = d.y1 - d.y0;
+      // Still whole? (Every cell above the opening is door.)
+      let whole = true;
+      for (let y = d.y0; y < d.y1 - d.open && whole; y++) for (let x = d.x0; x < d.x1; x++) if (this.terrain.mat[y * WORLD_W + x] !== Mat.Door) whole = false;
+      if (!whole) {
+        d.broken = true;
+        continue;
+      }
+      const cx = (d.x0 + d.x1) / 2;
+      let wanted = false;
+      let blocked = false;
+      for (const p of this.players) {
+        if (!p || !p.alive) continue;
+        const b = p.body;
+        if (b.y > d.y1 + 8 || b.y + ACTOR_H < d.y0 - 8) continue;
+        if (Math.abs(b.x + ACTOR_W / 2 - cx) < REACH && this.doorOpensFor(d.team, p.team)) wanted = true;
+        if (b.x + ACTOR_W > d.x0 - 1 && b.x < d.x1 + 1) blocked = true;
+      }
+      for (const t of this.tanks) {
+        if (t && t.x + tankW(t) > d.x0 - 1 && t.x < d.x1 + 1 && t.y < d.y1 && t.y + tankH(t) > d.y0) blocked = true;
+      }
+      if (wanted && d.open < h) {
+        for (let k = 0; k < RATE && d.open < h; k++, d.open++) {
+          const y = d.y1 - d.open - 1;
+          for (let x = d.x0; x < d.x1; x++) this.deposit(x, y, Mat.Air);
+        }
+      } else if (!wanted && !blocked && d.open > 0) {
+        for (let k = 0; k < RATE && d.open > 0; k++) {
+          const y = d.y1 - d.open;
+          // (Not onto anything that's come to rest in the doorway.)
+          let clear = true;
+          for (let x = d.x0; x < d.x1; x++) if (this.terrain.mat[y * WORLD_W + x] !== Mat.Air) clear = false;
+          if (!clear) break; // (jammed)
+          for (let x = d.x0; x < d.x1; x++) this.deposit(x, y, Mat.Door);
+          d.open--;
+        }
+      }
+    }
+  }
+
   /** Every rider onto its seat, wherever its vehicle went this tick; thrown off if it's gone (or no longer friendly). */
   private seatRiders(): void {
     for (const p of this.players) {
@@ -3946,6 +4004,7 @@ export class World {
     this.stepCrafts();
     this.stepTanks();
     this.seatRiders();
+    this.stepDoors();
     this.stepShips();
     this.shipCollisions();
     this.bodyCollisions();

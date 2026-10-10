@@ -455,7 +455,7 @@ export function carveCaves(m: Uint8Array, heights: Int32Array, seed: number, com
   // Below every bunker's deepest basement (and its foundations' footing).
   const below = new Float64Array(WORLD_W);
   for (const c of complexes) {
-    const deepest = c.floor + SLAB + Math.max(0, ...c.basements) * MOD_H + SLAB + UNDER_BUNKERS;
+    const deepest = Math.max(c.floor + SLAB + Math.max(0, ...c.basements) * MOD_H, c.strongroom?.y1 ?? 0) + SLAB + UNDER_BUNKERS;
     for (let x = Math.max(0, c.x0 - 24); x < Math.min(WORLD_W, c.x1 + 24); x++) below[x] = Math.max(below[x], deepest);
   }
   const top = new Float64Array(WORLD_W);

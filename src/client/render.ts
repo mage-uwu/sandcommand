@@ -161,7 +161,7 @@ export class Renderer {
         }
         const wx = ox + x;
         let c: number;
-        if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph) c = structColor(t, m, wx, wy);
+        if (m === Mat.Concrete || m === Mat.Metal || m === Mat.Cobble || m === Mat.Glyph || m === Mat.Iron || m === Mat.Sandbag || m === Mat.Door) c = structColor(t, m, wx, wy);
         else if (m === Mat.Grass || m === Mat.Snow) c = frostColor(t, m, wx, wy);
         else if (m === Mat.Dripstone) c = dripColor(t, wx, wy);
         else {
@@ -341,6 +341,28 @@ export class Renderer {
           ctx.fillRect(cx * CHUNK, cy * CHUNK, CHUNK, CHUNK);
         }
       }
+    }
+
+    // Bunker doors: a lamp over each, green if it opens for us, red if not
+    // (amber, blinking, while it moves); gone once the door's blown.
+    for (const d of game.doors) {
+      if (d.x1 < camX - halfW - 8 || d.x0 > camX + halfW + 8 || d.y1 < camY - halfH || d.y0 > camY + halfH + 8) continue;
+      const t = game.terrain;
+      const cx = (d.x0 + d.x1) >> 1;
+      let shut = 0;
+      for (let y = d.y0; y < d.y1; y++) if (t.get(cx, y) === Mat.Door) shut++;
+      const top = t.get(cx, d.y0) === Mat.Door;
+      if (!top && shut > 0) continue; // (blown)
+      const ours = game.myTeam === Team.None || game.myTeam === d.team;
+      const moving = shut > 0 && shut < d.y1 - d.y0;
+      const ly = d.y0 - 4;
+      if (t.get(cx, ly) === Mat.Air) continue; // (no wall left to hang it on)
+      ctx.fillStyle = '#1a1a1e';
+      ctx.fillRect(cx - 2, ly - 1, 4, 3);
+      ctx.fillStyle = moving ? ((now / 140) % 2 < 1 ? '#ffb020' : '#5a3a08') : ours ? '#50ff70' : '#ff3a30';
+      ctx.fillRect(cx - 1, ly, 2, 1);
+      ctx.fillStyle = moving ? 'rgba(255,176,32,0.18)' : ours ? 'rgba(80,255,112,0.16)' : 'rgba(255,58,48,0.16)';
+      ctx.fillRect(cx - 3, ly - 2, 6, 5);
     }
 
     // Extraction: the labyrinth's traps, and the extraction rocket.

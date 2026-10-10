@@ -49,6 +49,10 @@ export interface Complex {
   vaults?: Box[];
   /** Weapons waiting in it at the start of a wave (a sniper rifle up a tower, a heavy gun in a hall). */
   loot?: { x: number; y: number; weapon: number }[];
+  /** Its steel doors (fortifications.ts): the cells each fills when shut, and whose it is. */
+  doors?: { x0: number; y0: number; x1: number; y1: number; team: number }[];
+  /** The pig-iron strongroom under it, if it has one (also among its vaults). */
+  strongroom?: Box;
 }
 
 export interface Box {

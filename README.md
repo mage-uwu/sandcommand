@@ -878,6 +878,63 @@ Complexes vary in style and layout:
 - **Map loot.** Guns placed by the generator spawn when the wave starts
   and don't expire.
 
+### Bunker works
+
+`src/shared/fortifications.ts` adds the following after the complexes are
+built. It uses its own random stream, so the complexes themselves come out
+exactly as before.
+
+- **Steel doors.** Outer ground-floor doorways get a 34-cell sliding steel
+  door: every door on a Fortified complex or fortress, and 60% of the rest.
+  Ruins get none.
+  - **Whose door it is.** Each door belongs to a side. A fortress's doors
+    belong to its own team. Any other bunker's belong to the side its
+    soldiers land on: west is red, east is green.
+  - **Opening and closing.** The server (`World.stepDoors`) slides a door
+    up, two rows a tick, while one of its own side is within about 22
+    cells. It slides back down once none is near and nothing stands in the
+    doorway.
+  - **No teams, no lock.** In Last Man Standing and PvP it opens for
+    anyone.
+  - **Breaching.** Door steel is hard, so only an explosion core or a
+    digger gets through. A door that's been blown or dug into stops
+    working and stays as it is.
+  - **Lamp.** A lamp over each door shows green if it opens for you and red
+    if it doesn't. It blinks amber while the door moves.
+- **Reinforcing slabs.** A 12-cell concrete slab is poured against the
+  outer end walls, above the doors. Every Fortified complex and fortress
+  gets one, and 60% of the others. A wall takes far more to breach.
+- **Strongrooms.** 40% of complexes of two or more modules get a great vault
+  under their deepest basement.
+  - **Size and build.** It is a storey and a half high, up to three modules
+    long, cast in pig iron with a steel floor.
+  - **Way in.** A shaft drops into an antechamber, and a steel door leads
+    on into the vault.
+  - **Inside.** Gold is stacked along its floor, and a heavy gun lies there.
+  - **Caves.** The cave highway keeps below it, and no cave shaft goes
+    through it.
+- **Pig iron** (`Mat.Iron`). This material is hard and *tough*: a carve's
+  core takes it only within half its radius, so a blast or a digger bites a
+  quarter as much of it as of concrete. It goes into strongroom linings and
+  great **iron blocks**, 16–22 cells square, sunk into the open ground near
+  the bunkers.
+- **Dragon's teeth.** Rows of 3–5 concrete pyramids stand in the open,
+  18 cells wide and 24 tall. Their sides are 18 cells sheer, more than a
+  tank's tracks can climb even off a bounce. Between them is room for a
+  clone to land.
+- **Sandbags** (`Mat.Sandbag`). Piles 12 cells tall stand outside the doors
+  and on some roofs. That hides a crouching clone (10) but not a standing
+  one (14).
+- **Trenches.** Trenches are dug into level natural ground beyond the
+  bunkers.
+  - **Depth.** They are 17 cells deep, so a standing clone is out of sight.
+  - **Fire step.** It is half that depth, against the front wall. A clone
+    standing on it has its head over the lip, and crouching drops it back
+    out of sight.
+  - **Getting in and out.** A half step leads up to the fire step, and
+    4-cell stairs climb out at the back.
+  - **Parados.** Sandbags are heaped on the back lip.
+
 ## Biomes
 
 Each map's seed picks a biome (`biomeOf` in `src/shared/worldgen.ts`). The
