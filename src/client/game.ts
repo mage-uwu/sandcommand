@@ -755,9 +755,41 @@ export class Game implements FrameHandler {
     return performance.now() / TICK_MS + this.clockOffset - INTERP_TICKS;
   }
 
-  remoteViews(): RemoteView[] {
+  /**
+   * Who rides on top of which vehicle (tank surfing), from the latest word
+   * on the vehicles: player id -> slot | seat << 8.
+   */
+  private ridingNow(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const [slot, s] of this.tankSnaps) for (const r of s[s.length - 1].riders) out.set(r & 255, slot | (r & 0xff00));
+    return out;
+  }
+
+  /**
+   * Where a rider stands (its body's top-left) on its vehicle as that's
+   * drawn this frame. Riders are drawn from the vehicle, not from their own
+   * snapshots: those are interpolated separately (and the vehicle we drive
+   * is predicted, ahead of them), so riders drawn on their own would slide
+   * and stutter about the deck.
+   */
+  private seatOn(views: TankView[], slot: number, seat: number): { x: number; y: number } | null {
+    const t = views.find((v) => v.slot === slot);
+    if (!t) return null;
+    const sp = surfSeat(t, seat, { x: 0, y: 0 });
+    return { x: sp.x - ACTOR_W / 2, y: sp.y - ACTOR_H };
+  }
+
+  /** Our own clone, riding on top of a vehicle: where it stands on the vehicle as drawn (by `alpha`), or null when not riding. */
+  ridingAt(alpha = 1): { x: number; y: number } | null {
+    if (!this.alive || this.surf < 0) return null;
+    return this.seatOn(this.tankViews(alpha), this.surf, this.surfSeatNo);
+  }
+
+  remoteViews(alpha = 1): RemoteView[] {
     const rt = this.renderTick();
     const out: RemoteView[] = [];
+    const riding = this.ridingNow();
+    const views = riding.size ? this.tankViews(alpha) : [];
     for (const [id, s] of this.snaps) {
       if (s.length === 0) continue;
       let a = s[0];
@@ -786,7 +818,14 @@ export class Game implements FrameHandler {
         x = b.x;
         y = b.y;
       }
-      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: Math.abs(b.vx) > 5, parts: b.parts, stance: b.stance, faction: b.faction, vx: b.vx, vy: b.vy });
+      // On top of a vehicle: on its seat, wherever the vehicle is drawn (and standing, not walking).
+      const ride = riding.get(id);
+      const seat = ride !== undefined && b.flags & F_ALIVE ? this.seatOn(views, ride & 255, ride >> 8) : null;
+      if (seat) {
+        x = seat.x;
+        y = seat.y;
+      }
+      out.push({ id, x, y, aim: b.aim, flags: b.flags, hp: b.hp, weapon: b.weapon, moving: !seat && Math.abs(b.vx) > 5, parts: b.parts, stance: b.stance, faction: b.faction, vx: b.vx, vy: b.vy });
     }
     return out;
   }

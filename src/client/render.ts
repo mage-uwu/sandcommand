@@ -250,8 +250,10 @@ export class Renderer {
     const pb = game.prevBody;
     game.smoothX *= 0.85;
     game.smoothY *= 0.85;
-    const selfX = pb.x + (b.x - pb.x) * alpha + game.smoothX;
-    const selfY = pb.y + (b.y - pb.y) * alpha + game.smoothY;
+    // (Riding on top of a vehicle: on our seat on it, as it's drawn this frame.)
+    const riding = game.ridingAt(alpha);
+    const selfX = riding ? riding.x : pb.x + (b.x - pb.x) * alpha + game.smoothX;
+    const selfY = riding ? riding.y : pb.y + (b.y - pb.y) * alpha + game.smoothY;
     const flying = game.alive ? game.pilotedShip() : null;
     const dogged = game.alive ? game.remoteDog() : null;
     this.scoped = game.alive && input.scoping && !game.drive && !flying && !dogged; // in a tank, right mouse is the cannon; flying, it's the bombs
@@ -445,7 +447,7 @@ export class Renderer {
     for (const sh of game.shipViews()) this.drawShip(ctx, sh, game, now);
 
     // Remote clones (not those riding inside a tank).
-    const views = game.remoteViews().filter((v) => !game.tankPilots.has(v.id));
+    const views = game.remoteViews(alpha).filter((v) => !game.tankPilots.has(v.id));
     for (const v of views) {
       if (!(v.flags & F_ALIVE)) continue;
       const info = game.players.get(v.id);
@@ -479,7 +481,7 @@ export class Renderer {
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId);
       if (game.laserCharge > 0) {
         const m = WEAPONS[WeaponId.Laser].muzzle;
         this.drawLaserCharge(ctx, mySh.x + Math.cos(myAim) * m, mySh.y + Math.sin(myAim) * m, game.laserCharge / LASER_MAX, now);

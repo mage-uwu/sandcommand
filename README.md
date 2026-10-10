@@ -876,6 +876,12 @@ a **Mole** for **1100**, a **Watchdog** for **1000**, or a **Tarantula** for **3
   heading for it, they get on, shoot from the deck, and hop off when the
   fight is close, or the ride stops or turns away (`World.mount`,
   `seatRiders`; seats in `surfSeat`, `src/shared/tank.ts`).
+  Each vehicle's record lists its riders and their seats. Every client draws
+  them on those seats on the vehicle as it draws it, never from the riders'
+  own snapshots. The driver's vehicle is predicted ahead of those snapshots,
+  so riders drawn from them would slide and stutter about the deck. The
+  mole's seats sit on its humped hull (the hatch, then the flamethrower's
+  cupola), each with its own deck height.
 - **Dropship** (`src/shared/dropship.ts`). An aerial gunship that hangs
   from four engine pods on struts, like a modern drone. Nobody pilots it.
   The pods are chunky rocket motors, two on an open-truss pylon either

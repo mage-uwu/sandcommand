@@ -136,16 +136,21 @@ const TANK_SEATS = [4, 22, 27];
 const DOG_SEATS = [4, 24];
 const SPIDER_SEATS = [-1.2, 0.6, 2.2, 5.9, 7.6];
 const SPIDER_DECK = 6.6;
-/** A mole's: its back, behind the frill (its deck sits lower than a tank's roof). */
-const MOLE_SEATS = [2, 7.5, 13];
-const MOLE_DECK = 5;
+/**
+ * A mole's: its back, behind the frill, each on the top of what's under it
+ * (x, then the deck's y: the driver's hatch cover, then the flamethrower's
+ * cupola). Its hull is low and humped, not a flat roof, so each seat has its own.
+ */
+const MOLE_SEATS = [5, 10.5, 15];
+const MOLE_DECKS = [1, 2, 2];
 /** How many soldiers can ride on it. */
 export const surfCapacity = (t: Kinded) => (isSpider(t) ? SPIDER_SEATS.length : isDog(t) ? DOG_SEATS.length : isMole(t) ? MOLE_SEATS.length : TANK_SEATS.length);
 const seatPt = { x: 0, y: 0 };
 /** Where rider `i` stands on it (world): its centre x, and its feet. */
 export function surfSeat(t: Posed, i: number, out: { x: number; y: number }): { x: number; y: number } {
   const seats = isSpider(t) ? SPIDER_SEATS : isDog(t) ? DOG_SEATS : isMole(t) ? MOLE_SEATS : TANK_SEATS;
-  const p = tankPoint(t, seats[Math.min(i, seats.length - 1)], isSpider(t) ? SPIDER_DECK : isMole(t) ? MOLE_DECK : 0, seatPt);
+  const k = Math.min(i, seats.length - 1);
+  const p = tankPoint(t, seats[k], isSpider(t) ? SPIDER_DECK : isMole(t) ? MOLE_DECKS[k] : 0, seatPt);
   out.x = p.x;
   out.y = p.y;
   return out;

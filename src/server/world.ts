@@ -4732,6 +4732,10 @@ export class World {
           w.u8(t.pilot);
           w.u8(t.owner);
           w.u8(t.kind);
+          // Its riders (tank surfing), each id | seat << 8: clients draw them on their seats.
+          const riders = this.ridersOf(k);
+          w.u8(riders.length);
+          for (const o of riders) w.u16(o.id | (o.seat << 8));
         }
       }
 

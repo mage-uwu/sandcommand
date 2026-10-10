@@ -159,6 +159,8 @@ export interface TankState {
   remote: boolean;
   /** tank.ts TankKind. */
   kind: number;
+  /** Who rides on top of it (tank surfing): each player id | seat << 8. */
+  riders: number[];
 }
 
 export interface ShipState {
@@ -662,8 +664,10 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             owner: r.u8(),
             remote: (f & 128) !== 0,
             kind: r.u8(),
+            riders: [],
           });
           const v = list[list.length - 1];
+          for (let n = r.u8(); n > 0; n--) v.riders.push(r.u16());
           v.s = v.kind === TankKind.Tarantula ? TARANTULA_SCALE : v.kind === TankKind.Watchdog ? WATCHDOG_SCALE : v.kind === TankKind.Mole ? MOLE_SCALE : 1;
         }
         h.tanks(list);
