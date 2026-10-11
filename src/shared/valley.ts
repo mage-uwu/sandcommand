@@ -606,10 +606,22 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
         if (m[at(x, y)] !== Mat.Petrified) continue;
         set(x, y, Mat.Air);
         if (inside(x, y)) v.passes.push(at(x, y));
-        // (Away from the trunk's heart: right under it, it'd hide the whole pass.)
-        wall(x, y, fronted.has(at(x, y)) && Math.abs(x - tx) > half * 0.3 ? VBack.RootsFront : VBack.Roots);
+        wall(x, y, VBack.Roots);
       }
     }
+    // The front roots, thickened a little through the pass (thick enough to duck behind),
+    // away from the trunk's heart (right under it, they'd hide the whole pass).
+    if (!backdrop) continue;
+    const front: number[] = [];
+    for (let y = fy - 40; y < fy + 14; y++) {
+      for (let x = Math.round(tx - half); x <= Math.round(tx + half); x++) {
+        if (!inside(x, y) || backdrop[at(x, y)] !== VBack.Roots || Math.abs(x - tx) < half * 0.25) continue;
+        let near = false;
+        for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2 && !near; dx++) if (fronted.has(at(x + dx, y + dy))) near = true;
+        if (near) front.push(at(x, y));
+      }
+    }
+    for (const i of front) backdrop[i] = VBack.RootsFront;
   }
   // Gem caverns and the nest: giant crystals off the floors and roofs; the nest's walls laced with GEMM and rare earth.
   const crystals = (r: ValleyRoom, n: number, scale: number) => {
