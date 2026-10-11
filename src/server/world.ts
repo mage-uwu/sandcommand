@@ -329,6 +329,7 @@ import {
   flyStep,
   nestCentre,
   newSeeder,
+  hitScale,
 } from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -2278,8 +2279,9 @@ export class World {
   private splashBeasts(x: number, y: number, r: number, dmg: number, by: number): void {
     for (let k = 0; k < MAX_BEASTS; k++) {
       if (!this.beasts[k]) continue;
-      const { d } = nearestPoint(this.beastPts[k], x, y);
-      if (d < r) this.hurtBeast(k, dmg * (this.beasts[k]!.kind === BeastKind.Millipede ? 1.5 : 1) * (1 - d / r), by);
+      const { d, i } = nearestPoint(this.beastPts[k], x, y);
+      const kind = this.beasts[k]!.kind;
+      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : 1) * hitScale(kind, i) * (1 - d / r), by);
     }
   }
 
@@ -2966,8 +2968,12 @@ export class World {
       // Armoured like a vehicle: a round with the energy to get through does its full harm, a weaker one a fifth; a shaped charge a share of the whole.
       // (An asp has no armour: the round's full harm, always.)
       const energy = def.mass * def.sharp * Math.hypot(pr.vx[i], pr.vy[i]);
-      const armoured = this.beasts[actor - BEAST_ID_BASE]?.kind === BeastKind.Millipede;
-      this.hurtBeast(actor - BEAST_ID_BASE, armoured ? (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0) : def.damage, owner);
+      const bk = actor - BEAST_ID_BASE;
+      const kind = this.beasts[bk]?.kind ?? -1;
+      const armoured = kind === BeastKind.Millipede;
+      // (Where it struck: a millipede's head is its weak spot.)
+      const scale = hitScale(kind, nearestPoint(this.beastPts[bk], x, y).i);
+      this.hurtBeast(bk, (armoured ? (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0) : def.damage) * scale, owner);
     } else if (actor >= SHIP_ID_BASE) {
       const sh = this.ships[actor - SHIP_ID_BASE];
       if (sh) {
@@ -3553,7 +3559,7 @@ export class World {
       if (!pts) continue;
       for (let i = 0; i < pts.length; i += 2) {
         if (segmentCircle(x0, y0, x1 - x0, y1 - y0, pts[i], pts[i + 1], BEAST_BUILD[this.beasts[k]!.kind].r + w) >= 0) {
-          this.hurtBeast(k, wound, by);
+          this.hurtBeast(k, wound * hitScale(this.beasts[k]!.kind, i >> 1), by);
           break;
         }
       }

@@ -35,6 +35,14 @@ export const MILLI_R = 3.6;
  * harm, anything weaker a fifth of it; blasts hurt it by distance.
  */
 export const MILLI_HP = 2400;
+/**
+ * Its head is its weak spot: half as tough as the plated segments behind
+ * it, so whatever hits it there (a round, a beam, the nearest point of a
+ * blast) does this many times the harm.
+ */
+export const MILLI_HEAD_WEAK = 2;
+/** How much of a hit on body point `i` of a creature of `kind` counts (a millipede's head takes double). */
+export const hitScale = (kind: number, i: number) => (kind === BeastKind.Millipede && i === 0 ? MILLI_HEAD_WEAK : 1);
 /** Crawl speeds (cells/s): wandering, hunting, and the lunge when it spots prey (very fast). */
 export const MILLI_CRAWL = 26;
 export const MILLI_HUNT = 70;

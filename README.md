@@ -639,6 +639,10 @@ terrain cell to a pixel).
   harm, and anything weaker a fifth. That's dozens of sniper slugs, so
   explosions (1.5 times their blast, by distance), lasers and shaped
   charges are the better bet.
+- **Its head is its weak spot.** The head is half as tough as the plated
+  segments, so anything that hits it there (a round, a beam, the nearest
+  point of a blast) does double. About 15 sniper slugs to the head kill it,
+  against 30 to the body.
 - **It gibs.** Killed, every segment flies off whole, in its own
   camouflage, tumbling and bouncing until it comes to rest and fades, in a
   spray of blood and gem shards.

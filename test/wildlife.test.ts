@@ -4,7 +4,7 @@ import { ACTOR_H, ACTOR_W, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/const
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { BEAST_BUILD, CORAL_LIMBS, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { BEAST_BUILD, CORAL_LIMBS, MILLI_HEAD_WEAK, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -265,27 +265,41 @@ describe('millipedes in the world', () => {
     expect(a.venom).toBe(0);
   });
 
-  it('armoured: it takes dozens of slugs to kill', () => {
+  /** Sniper slugs straight down onto one of its segments, until it's dead: how many it took. */
+  const slugsToKill = (seg: number) => {
     const { world, a } = cave();
+    // (Nobody for it to see or chase: it holds still under the guns, the better to aim.)
+    for (let y = 380; y <= 440; y++) for (let x = 1000; x < 1010; x++) world.terrain.set(x, y, Mat.Rock);
+    world.terrainReplaced();
     const b = put(world, 1180, 440, -1);
     b.spitCd = 1e9;
     let shots = 0;
     for (let k = 0; k < 400 && world.beasts[0]; k++) {
-      b.coilCd = 1e9; // (no coiling the shooter)
+      b.coilCd = 1e9;
       const pts = world.beastPts[0];
-      const sx = a.cx;
-      const sy = a.cy - 4;
-      const ang = Math.atan2(pts[11] - sy, pts[10] - sx);
-      (world as unknown as { spawnProj(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void }).spawnProj(90000 + k, ProjKind.Slug, a.id, sx, sy, Math.cos(ang) * 6000, Math.sin(ang) * 6000);
+      (world as unknown as { spawnProj(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void }).spawnProj(90000 + k, ProjKind.Slug, 255, pts[seg * 2], pts[seg * 2 + 1] - 12, 0, 6000);
       shots++;
       world.step();
       a.venom = 0;
       a.hp = 100;
     }
-    // Armoured like a spider mech: it takes dozens of sniper slugs.
     expect(world.beasts[0]).toBe(null);
+    return shots;
+  };
+
+  it('armoured: it takes dozens of slugs to kill', () => {
+    // Armoured like a spider mech: it takes dozens of sniper slugs to the body.
+    const shots = slugsToKill(5);
     expect(shots).toBeGreaterThan(20);
     expect(shots).toBeLessThan(45);
+  });
+
+  it('its head is its weak spot: half as tough, so slugs to the head kill it in about half as many', () => {
+    const head = slugsToKill(0);
+    const body = slugsToKill(5);
+    expect(MILLI_HEAD_WEAK).toBe(2);
+    expect(head).toBeLessThan(body * 0.65);
+    expect(head).toBeGreaterThan(body * 0.35);
   });
 
   it('clients see it crawl, see who is poisoned, and see it die', () => {
