@@ -754,15 +754,24 @@ eyespot) beating fast. They come from a **coral nest**.
   on a stalk. It is banded in pinks, pocked with dark cells, and glows at
   its mouth. Three grow on a cave map and one on any other, deep down and
   at least 300 cells apart.
-- **Broods of three, only on danger.** A nest sends nothing out while all
-  is quiet. When it senses danger (a clone in sight within 230 cells, or
-  something hurting it), out come three seeders. It sends another brood
-  once that one is gone, no sooner than 10 seconds after the last, for as
-  long as the danger lasts. **It has to be destroyed**: 420 hit points.
-- **Low cost to the server.** Seeders with nobody to chase for 6 seconds
-  fly home and back into the nest, leaving the world entirely. A nest
-  that's idle only looks around twice a second. A brood whose nest is
-  destroyed drifts about and dies off within 40 seconds.
+- **Broods of three on danger.** When a nest senses danger (a clone in
+  sight within 230 cells, or something hurting it), out come three
+  seeders. It sends another brood once that one is gone, no sooner than
+  10 seconds after the last, for as long as the danger lasts. **It has to
+  be destroyed**: 420 hit points.
+- **Foragers.** A quiet nest sends two out to forage every 45 seconds or
+  so, while there are fewer than 10 seeders about.
+  - **Ranging.** Every seeder forages first when it comes out of a nest:
+    for about 50 seconds (`SEEDER_FORAGE`), to and fro. Ranging up, it
+    heads for the highest open air it can see, up shafts and out to skim
+    the surface. Ranging back, it returns toward the nest.
+  - **Legs.** Each leg is up to about 140 cells, to a point it has a
+    clear line to (`forageLeg`).
+  - **Hunting.** It hunts any clone it comes across, bots included.
+- **Going home.** Done foraging, a seeder with nobody to chase for 6 more
+  seconds flies home and back into the nest, leaving the world entirely.
+  A nest that's idle only looks around twice a second. A brood whose nest
+  is destroyed drifts about and dies off within 40 seconds.
 - **Flight.** They fly in a jinking, wasp-like way (125 cells a second
   flat out), circling in at their target, sting, dart away and come back.
   They keep a little apart from each other and bounce off rock.

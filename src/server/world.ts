@@ -328,6 +328,10 @@ import {
   SEEDER_IDLE,
   SEEDER_SENSE,
   SEEDER_STING,
+  SEEDER_LEG,
+  SEEDERS_MAX,
+  NEST_FORAGE_CD,
+  NEST_FORAGERS,
   SEEDER_STING_CD,
   SEEDER_STING_R,
   anchorNest,
@@ -2319,10 +2323,13 @@ export class World {
     }
     if ((this.tick + k) % NEST_LOOK !== 0 || this.tick < b.brood) return;
     const danger = b.alarm > 0 || this.beastTarget(b, pts[0], pts[1]) >= 0;
-    if (!danger || this.beasts.some((o) => o?.kind === BeastKind.Seeder && o.home === k)) return;
-    b.brood = this.tick + NEST_BROOD_CD;
+    if (this.beasts.some((o) => o?.kind === BeastKind.Seeder && o.home === k)) return;
+    // Quiet: now and then a few out to forage, while there aren't too many about.
+    const forage = !danger && this.beasts.filter((o) => o?.kind === BeastKind.Seeder).length < SEEDERS_MAX;
+    if (!danger && !forage) return;
+    b.brood = this.tick + (danger ? NEST_BROOD_CD : NEST_FORAGE_CD);
     const rng = this.beastRng;
-    for (let n = 0; n < NEST_BROOD; n++) {
+    for (let n = 0; n < (danger ? NEST_BROOD : NEST_FORAGERS); n++) {
       const slot = this.beasts.indexOf(null);
       if (slot < 0) break;
       // Out of the nest's mouth (its open side), fanned out a little.
@@ -2376,6 +2383,13 @@ export class World {
         gx = tgt.cx + Math.cos(a) * orbit;
         gy = tgt.cy + Math.sin(a) * orbit * 0.6;
       }
+    } else if (b.forage > 0) {
+      // Out foraging: to and fro, up toward the surface and back down round its nest, on the lookout.
+      b.forage--;
+      b.still = 0;
+      if (++b.legAge > 30 * 8 || Math.hypot(b.lastX - b.fx, b.lastY - b.fy) < 10 || b.legAge === 1) this.forageLeg(b, nest);
+      gx = b.lastX;
+      gy = b.lastY;
     } else {
       b.still++;
       if (nest && b.still > SEEDER_IDLE) {
@@ -2432,6 +2446,41 @@ export class World {
       b.vy = -Math.abs(b.vy) * 0.6 - 40;
       break;
     }
+  }
+
+  /**
+   * A foraging seeder's next leg: somewhere it can see from where it is
+   * (open air, in a straight line), SEEDER_LEG cells or so off. Ranging up,
+   * the higher the better (toward the surface, and out over it); ranging
+   * back, the nearer its nest (or anywhere, nest gone). It turns about each
+   * leg, or when it can't find a way on.
+   */
+  private forageLeg(b: Beast, nest: number[] | null): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    b.legAge = 2;
+    b.rangeUp = !b.rangeUp;
+    let best = -Infinity;
+    let bx = b.fx;
+    let by = b.fy;
+    for (let n = 0; n < 14; n++) {
+      const a = rng.range(0, Math.PI * 2);
+      const d = SEEDER_LEG * rng.range(0.4, 1);
+      const x = b.fx + Math.cos(a) * d;
+      const y = b.fy + Math.sin(a) * d;
+      if (x < 8 || x > WORLD_W - 8 || y < 8 || y > WORLD_H - 20) continue;
+      if (t.isSolid(Math.floor(x), Math.floor(y)) || !this.lineClear(b.fx, b.fy, x, y)) continue;
+      const surf = t.surfaceY(Math.floor(x));
+      // (Up: as high as it'll go, but not off into the sky: it skims the surface.)
+      const score = b.rangeUp ? -y - Math.max(0, surf - 40 - y) * 3 : nest ? -Math.hypot(x - nest[0], y - nest[1]) : rng.next();
+      if (score > best) {
+        best = score;
+        bx = x;
+        by = y;
+      }
+    }
+    b.lastX = bx;
+    b.lastY = by;
   }
 
   /** A seeder's sting: a little harm, and coral sown in one of the clone's limbs (not a droid's: metal). */

@@ -179,6 +179,18 @@ export const SEEDER_DART = 14;
 /** Ticks with nobody to chase before it flies home (and, nest gone, before it dies off). */
 export const SEEDER_IDLE = 30 * 6;
 export const SEEDER_EXPIRE = 30 * 40;
+/**
+ * Foraging: out of the nest, a brood ranges about before it heads home
+ * (SEEDER_FORAGE ticks), to and fro: up toward the surface, back down
+ * round the nest, on legs of SEEDER_LEG cells or so, hunting whoever it
+ * comes across. Now and then (NEST_FORAGE_CD) a quiet nest sends out a few
+ * to forage (NEST_FORAGERS), while there aren't too many about (SEEDERS_MAX).
+ */
+export const SEEDER_FORAGE = 30 * 50;
+export const SEEDER_LEG = 140;
+export const NEST_FORAGE_CD = 30 * 45;
+export const NEST_FORAGERS = 2;
+export const SEEDERS_MAX = 10;
 export const NEST_R = 7;
 export const NEST_HP = 420;
 /** The nest: how far it senses danger (with a line on it), how often it looks, how many to a brood, ticks between broods. */
@@ -331,6 +343,10 @@ export interface Beast {
   home: number;
   brood: number;
   alarm: number;
+  /** A seeder out foraging (ticks of it left: SEEDER_FORAGE from spawn), which way it's ranging (up toward the surface, or back), and how long it's been on this leg (ticks). Its waypoint is lastX, lastY. */
+  forage: number;
+  rangeUp: boolean;
+  legAge: number;
   /** Watching for a trap (see LOOP_STEPS): crawl steps this window, the box its head kept to; set when it means to drop off (steps left to find a place). */
   loopN: number;
   loopX0: number;
@@ -393,6 +409,9 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     home: -1,
     brood: 0,
     alarm: 0,
+    forage: 0,
+    rangeUp: true,
+    legAge: 0,
     loopN: 0,
     loopX0: x,
     loopX1: x,
@@ -434,6 +453,7 @@ export function newSeeder(t: Terrain, x: number, y: number, home: number): Beast
   b.fx = x;
   b.fy = y;
   b.home = home;
+  b.forage = SEEDER_FORAGE; // (out to forage, first)
   return b;
 }
 

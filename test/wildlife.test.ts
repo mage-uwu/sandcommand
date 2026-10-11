@@ -4,7 +4,7 @@ import { ACTOR_H, ACTOR_W, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/const
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { BEAST_BUILD, CORAL_LIMBS, MILLI_HEAD_WEAK, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { NEST_FORAGERS, SEEDER_FORAGE, BEAST_BUILD, CORAL_LIMBS, MILLI_HEAD_WEAK, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -600,14 +600,18 @@ describe('millipedes in the world', () => {
       world.terrainReplaced();
     };
 
-    it('a nest hangs from the roof and sends nothing out while all is quiet; danger in sight, out come three', () => {
+    it('a nest hangs from the roof; quiet, it sends a couple out to forage now and then; danger in sight, out come three', () => {
       const { world } = cave();
       wall(world, Mat.Rock);
       const n = putNest(world, 1150, 380);
       expect(n.hy).toBe(-1); // (grown on the roof)
       expect(world.beastPts[2][1]).toBeGreaterThan(382);
       for (let k = 0; k < 30 * 10; k++) world.step();
-      expect(seeders(world).length).toBe(0);
+      expect(seeders(world).length).toBe(NEST_FORAGERS);
+      for (const s2 of seeders(world)) expect(s2!.forage).toBeGreaterThan(0);
+      // (Those called in, its next brood due:) danger in sight.
+      for (let k = 0; k < world.beasts.length; k++) if (world.beasts[k]?.kind === BeastKind.Seeder) world.beasts[k] = null;
+      n.brood = 0;
       wall(world, Mat.Air);
       for (let k = 0; k < 30; k++) world.step();
       expect(seeders(world).length).toBe(NEST_BROOD);
@@ -718,9 +722,9 @@ describe('millipedes in the world', () => {
       const n = putNest(world, 1150, 380);
       for (let k = 0; k < 30 && seeders(world).length < 3; k++) world.step();
       expect(seeders(world).length).toBe(3);
-      // The clone out of reach (in a tank, say: they won't go for it).
+      // The clone out of reach (in a tank, say: they won't go for it): they forage a while, then home.
       a.alive = false;
-      for (let k = 0; k < 30 * 15 && seeders(world).length; k++) world.step();
+      for (let k = 0; k < SEEDER_FORAGE + 30 * 30 && seeders(world).length; k++) world.step();
       expect(seeders(world).length).toBe(0);
       expect(world.beasts[2]).not.toBeNull();
       // Out again, and the nest destroyed under them: in time they die off.
@@ -733,8 +737,29 @@ describe('millipedes in the world', () => {
       world.hurtBeast(2, 1e4, 255);
       expect(world.beasts[2]).toBeNull();
       a.alive = false;
-      for (let k = 0; k < 30 * 50 && seeders(world).length; k++) world.step();
+      for (let k = 0; k < SEEDER_FORAGE + 30 * 50 && seeders(world).length; k++) world.step();
       expect(seeders(world).length).toBe(0);
+    });
+
+    it('foragers range out from the nest, to and fro: up toward the surface, and back down', () => {
+      const { world, a } = cave();
+      a.alive = false; // (nobody to hunt)
+      const t = world.terrain;
+      // A shaft up out of the cave to the open surface.
+      for (let y = 150; y < 380; y++) for (let x = 1180; x < 1210; x++) t.set(x, y, Mat.Air);
+      world.terrainReplaced();
+      putNest(world, 1150, 380);
+      let top = Infinity;
+      let lowAfter = -Infinity;
+      for (let k = 0; k < SEEDER_FORAGE; k++) {
+        world.step();
+        for (const s2 of seeders(world)) {
+          top = Math.min(top, s2!.fy);
+          if (top < 300) lowAfter = Math.max(lowAfter, s2!.fy);
+        }
+      }
+      expect(top).toBeLessThan(300); // (well up the shaft, toward the surface)
+      expect(lowAfter).toBeGreaterThan(370); // (and back down to the cave again)
     });
 
     it('a seeder dies to a single rifle round; a nest takes a good few', () => {
