@@ -724,6 +724,23 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
     return { x, y, tx, ty, nx, ny };
   };
   const sway = (k: number) => (frozen ? 0 : Math.sin(now / 180 + k * 0.9) * 1.2);
+  /** A cell of a section's camouflage (at u along it, v across, its girth w). */
+  const camoPixel = (camo: number, px: number, py: number, u: number, v: number, w: number, i: number): string => {
+    const h = hsh(px, py, seed);
+    if (camo === BasCamo.Vein) {
+      const seam = Math.abs(v - w * 0.35 * Math.sin(u * 0.28 + seed + i * 1.7));
+      const seam2 = Math.abs(v + w * 0.45 - w * 0.2 * Math.sin(u * 0.5 + seed * 2));
+      const cluster = hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 11) > 0.82 && seam < w * 0.55;
+      if (seam < 1.6 || seam2 < 0.8 || cluster) return h > 0.88 ? gem[2] : (px + py) % 3 === 0 ? gem[1] : gem[0];
+      return BAS_ROCK[Math.floor(h * 4)];
+    }
+    if (camo === BasCamo.Drip) {
+      const layer = Math.floor((py + Math.sin(px * 0.3 + seed) * 1.5) / 2) % 4;
+      return DRIP[(layer + (h > 0.85 ? 1 : 0)) % 4];
+    }
+    if (h < 0.07) return '#5a1830';
+    return h > 0.88 ? BAS_CORAL[3] : BAS_CORAL[Math.floor(hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 5) * 3)];
+  };
 
   for (let i = n - 1; i >= 1; i--) {
     const { x, y, tx, ty, nx, ny } = seg(i);
@@ -762,19 +779,7 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
         else if (e > 0.62 && hsh(Math.floor(px / 2), Math.floor(py / 2), seed + i * 3) > 0.45) {
           // Round the rim, where plate gives way: fleshy membrane, blotched, pored.
           c = h < 0.08 ? '#2a1820' : BAS_FLESH[Math.floor(hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 9) * 4)];
-        } else if (camo === BasCamo.Vein) {
-          const seam = Math.abs(v - w * 0.35 * Math.sin(u * 0.28 + seed + i * 1.7));
-          const seam2 = Math.abs(v + w * 0.45 - w * 0.2 * Math.sin(u * 0.5 + seed * 2));
-          const cluster = hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 11) > 0.82 && seam < w * 0.55;
-          if (seam < 1.6 || seam2 < 0.8 || cluster) c = h > 0.88 ? gem[2] : (px + py) % 3 === 0 ? gem[1] : gem[0];
-          else c = BAS_ROCK[Math.floor(h * 4)];
-        } else if (camo === BasCamo.Drip) {
-          const layer = Math.floor((py + Math.sin(px * 0.3 + seed) * 1.5) / 2) % 4;
-          c = DRIP[(layer + (h > 0.85 ? 1 : 0)) % 4];
-        } else {
-          c = h > 0.88 ? BAS_CORAL[3] : BAS_CORAL[Math.floor(hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 5) * 3)];
-          if (h < 0.07) c = '#5a1830';
-        }
+        } else c = camoPixel(camo, px, py, u, v, w, i);
         ctx.fillStyle = c;
         ctx.fillRect(px, py, 1, 1);
       }
@@ -808,6 +813,8 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
   const back = 8; // (its skull, behind the hinge)
   const L = 20; // (the flaps' length, hinge to tip)
   const gape = frenzy ? 0.3 + 0.16 * Math.sin(now / 70) : 0;
+  // At rest, its head is dressed as the section behind it: the shut flytrap a spur of the same rock (or vein, or coral), its teeth and cilia drawn in.
+  const restCamo = frozen ? basCamoOf(seed, 1) : -1;
   const local = (u: number, v: number) => ({ x: x + tx * u + nx * v, y: y + ty * u + ny * v });
   const span = L + W + 4;
   for (let py = Math.floor(y - span); py <= Math.ceil(y + span); py++) {
@@ -826,7 +833,7 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
         const half = W * (1 - fu / L);
         // Teeth: long pale spikes off its inner rim, across the seam (shut, they interlock with the other's).
         const tu = (fu - 2 + (side > 0 ? 1.25 : 0)) % 2.5;
-        if (fv < 0 && fv > -3.6 && fu > 2 && fu < L - 2 && Math.abs(tu - 1.25) < 0.55 - (-fv / 3.6) * 0.3) {
+        if (!frozen && fv < 0 && fv > -3.6 && fu > 2 && fu < L - 2 && Math.abs(tu - 1.25) < 0.55 - (-fv / 3.6) * 0.3) {
           c = fv < -2.6 ? TOOTH[1] : TOOTH[0];
           break;
         }
@@ -834,7 +841,7 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
         const rim = fv > half - 1.1;
         const vein = Math.abs(((fu * 0.7 + fv * 1.3) % 4) - 2) < 0.35;
         const hh = hsh(px, py, seed + side);
-        c = rim && !frozen ? '#36363e' : fv < 1.4 ? FLAP[3] : vein ? FLAP[0] : FLAP[1 + (hh > 0.62 ? 1 : 0)];
+        c = frozen ? camoPixel(restCamo, px, py, u, v, W, 1) : rim ? '#36363e' : fv < 1.4 ? FLAP[3] : vein ? FLAP[0] : FLAP[1 + (hh > 0.62 ? 1 : 0)];
         break;
       }
       if (!c && gape > 0 && u > 0 && u < L && Math.abs(v) < Math.tan(gape) * u) {
@@ -844,7 +851,7 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
       if (!c && u <= 0.5 && u >= -back) {
         // Its skull: the back of the wedge, dark plate, a lighter crest.
         const half = W * (1 - Math.max(0, -u - back * 0.45) / back);
-        if (Math.abs(v) <= half) c = Math.abs(v) > half - 1.1 && !frozen ? '#120e14' : Math.abs(v) < 2 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(hsh(px, py, seed) * 2)];
+        if (Math.abs(v) <= half) c = frozen ? camoPixel(restCamo, px, py, u, v, W, 1) : Math.abs(v) > half - 1.1 ? '#120e14' : Math.abs(v) < 2 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(hsh(px, py, seed) * 2)];
       }
       if (c) {
         ctx.fillStyle = c;
@@ -852,8 +859,8 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
       }
     }
   }
-  // Cilia along the flaps' outer edges: fine hairs, waving.
-  for (const side of [-1, 1]) {
+  // Cilia along the flaps' outer edges: fine hairs, waving (drawn in, at rest).
+  for (const side of frozen ? [] : [-1, 1]) {
     const a = side * gape;
     for (let fu = 2; fu < L - 3; fu += 3) {
       const half = W * (1 - fu / L);

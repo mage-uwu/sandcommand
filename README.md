@@ -770,7 +770,10 @@ and very hard to kill.
 - **Its head** is a pointed, triangular wedge whose front is a **flytrap**:
   two grey, veined flaps hinged at its skull, rimmed with long pale teeth
   and fringed with cilia. Shut, the teeth interlock along the seam. In its
-  frenzy the flaps gape open, working, over a deep red maw.
+  frenzy the flaps gape open, working, over a deep red maw. At rest the
+  head disappears too. It's dressed as the section behind it (vein,
+  dripstone or coral), with its teeth, cilia, eyes and outline drawn in, so
+  the shut wedge reads as a spur of the same rock.
 - **It doesn't crawl, it bores.** It goes through the rock wherever it
   means to go, leaving a tunnel behind it, but never through what won't
   yield (bedrock, cement, iron). Its jaws never so much as chip cement.
