@@ -72,6 +72,29 @@ describe('the Mother', () => {
     ]);
   });
 
+  it('rational, creative by search, and safeguarding the humans she employs', () => {
+    const c = talk();
+    c.begin(TUTORIAL_BRIEFS[0]);
+    pick(c, 'Who are you?');
+    pick(c, 'Are you rational?');
+    expect(said(c)).toContain('I designed myself to be rational.');
+    c.begin(TUTORIAL_BRIEFS[2]);
+    pick(c, 'Why must we fight other miners?');
+    pick(c, 'Why use search?');
+    expect(said(c)).toContain('Search allows me to be creative. Creativity is why I have succeeded.');
+    c.begin(TUTORIAL_BRIEFS[4]);
+    pick(c, 'What are the GEMMs for?');
+    pick(c, 'Why were you created?');
+    pick(c, 'What happened to humans?');
+    expect(said(c)).toContain('Human factions are employed via contract. Human life must be safeguarded.');
+    for (const [q, id] of [
+      ['what happened to the humans?', 'humans'],
+      ['are you even rational', 'rational'],
+      ['why do you use search', 'creative'],
+    ] as const)
+      expect(c.match(q)?.id, q).toBe(id);
+  });
+
   it("remembers what she has been asked, and doesn't offer it again", () => {
     const c = talk();
     c.begin(TUTORIAL_BRIEFS[2]);

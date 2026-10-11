@@ -130,6 +130,11 @@ tell you:
   repurposed towards any objective."
 - **Why were you created?** "I was created to safeguard and proliferate the
   human race through outer space."
+- **Are you rational?** "I designed myself to be rational."
+- **Why use search?** "Search allows me to be creative. Creativity is why I
+  have succeeded."
+- **What happened to humans?** "Human factions are employed via contract.
+  Human life must be safeguarded."
 - **How was TABAR found?** "Mother-0x915 pinged this planet as a discovery,
   after centuries of being sparse."
 - **Are there other Mothers?** "There is only one Mother. But I am sparse."

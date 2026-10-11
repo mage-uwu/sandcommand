@@ -75,6 +75,24 @@ export const MOTHER_TOPICS: Readonly<Record<string, Topic>> = {
       'None of it is civilized. None of it built the ruins.',
     ],
   },
+  rational: {
+    id: 'rational',
+    ask: 'Are you rational?',
+    keys: ['rational', 'cold', 'emotion', 'emotions', 'logical', 'logic', 'designed yourself', 'heartless', 'machine'],
+    answer: ['I designed myself to be rational.'],
+  },
+  creative: {
+    id: 'creative',
+    ask: 'Why use search?',
+    keys: ['search', 'searching', 'creative', 'creativity', 'succeeded', 'success', 'algorithm', 'why search'],
+    answer: ['Search allows me to be creative. Creativity is why I have succeeded.'],
+  },
+  humans: {
+    id: 'humans',
+    ask: 'What happened to humans?',
+    keys: ['humans', 'human', 'humanity', 'mankind', 'people', 'what happened', 'real people'],
+    answer: ['Human factions are employed via contract. Human life must be safeguarded.'],
+  },
   fight: {
     id: 'fight',
     ask: 'Why must we fight other miners?',
@@ -144,7 +162,8 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
     ],
     talk: {
       start: { options: [{ to: 'who' }, { to: 'ruins' }] },
-      who: { topic: 'who', options: [{ to: 'lie' }, { to: 'end', ask: OK }] },
+      who: { topic: 'who', options: [{ to: 'rational' }, { to: 'lie' }] },
+      rational: { topic: 'rational', options: [{ to: 'lie' }, { to: 'end', ask: OK }] },
       lie: { topic: 'lie', options: [{ to: 'end', ask: OK }] },
       ruins: { topic: 'ruins', options: [{ to: 'found' }, { to: 'end', ask: OK }] },
       found: { topic: 'found', options: [{ to: 'others' }, { to: 'end', ask: OK }] },
@@ -158,7 +177,8 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
     lines: ['Other mining companies work TABAR. Their clones will try to kill you, and you will kill them.', 'I have dropped a rifle ahead of you.'],
     talk: {
       start: { options: [{ to: 'fight' }, { to: 'end', ask: OK }] },
-      fight: { topic: 'fight', options: [{ to: 'die' }, { to: 'end', ask: OK }] },
+      fight: { topic: 'fight', options: [{ to: 'creative' }, { to: 'die' }] },
+      creative: { topic: 'creative', options: [{ to: 'die' }, { to: 'end', ask: OK }] },
       die: { topic: 'die', options: [{ to: 'care' }, { to: 'end', ask: OK }] },
       care: { topic: 'care', options: [{ to: 'end', ask: OK }] },
       end: { say: ['Collect the rifle.'] },
@@ -171,7 +191,8 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
     talk: {
       start: { options: [{ to: 'gemms' }, { to: 'end', ask: OK }] },
       gemms: { topic: 'gemms', options: [{ to: 'created' }, { to: 'end', ask: OK }] },
-      created: { topic: 'created', options: [{ to: 'end', ask: OK }] },
+      created: { topic: 'created', options: [{ to: 'humans' }, { to: 'end', ask: OK }] },
+      humans: { topic: 'humans', options: [{ to: 'end', ask: OK }] },
       end: { say: ['Dig.'] },
     },
   },
