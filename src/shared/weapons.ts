@@ -307,8 +307,11 @@ export function muzzlePoint(def: WeaponDef, sx: number, sy: number, aim: number,
 }
 
 export const DIGGER_REACH = 13;
-export const DIGGER_R = 5;
-export const DIGGER_CORE = 2;
+/** A digger bite's reach and core (the core takes even hard rock); a spider droid's bites are wider still (it's a bigger body to get through). */
+export const DIGGER_R = 7;
+export const DIGGER_CORE = 3;
+export const DIGGER_R_DROID = 9;
+export const DIGGER_CORE_DROID = 4;
 
 /** Peak blast-wave speed (cells/s) explosions give to loose things in flight: grains, gibs, blood. */
 export const BLAST_IMPULSE = 260;

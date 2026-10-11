@@ -110,6 +110,52 @@ describe('tanks', () => {
     expect(a.body.y + ACTOR_H).toBeLessThanOrEqual(tank.y + 1); // out of the roof hatch
   });
 
+  it('a speck of terrain in its way (too high to climb) is crushed; a real wall still stops it', () => {
+    const { world, a, tank } = setup(36);
+    tapPickup(world, a);
+    const t = world.terrain;
+    const sx = Math.floor(tank.x) + TANK_W + 30;
+    // Two stray cells floating at hull height (above what the treads can climb).
+    t.set(sx, FLOOR - TANK_H + 3, Mat.Rock);
+    t.set(sx, FLOOR - TANK_H + 4, Mat.Rock);
+    world.terrainReplaced();
+    for (let k = 0; k < 60; k++) {
+      send(world, a, BTN_RIGHT);
+      world.step();
+    }
+    expect(tank.x).toBeGreaterThan(sx + 4);
+    expect(t.isSolid(sx, FLOOR - TANK_H + 3)).toBe(false);
+    // A wall of rock, the hull's height and more: it stops.
+    const wx = Math.floor(tank.x) + TANK_W + 20;
+    for (let x = wx; x < wx + 12; x++) for (let y = FLOOR - 60; y < FLOOR; y++) t.set(x, y, Mat.Rock);
+    world.terrainReplaced();
+    for (let k = 0; k < 90; k++) {
+      send(world, a, BTN_RIGHT);
+      world.step();
+    }
+    expect(tank.x + TANK_W).toBeLessThanOrEqual(wx + 1);
+    expect(t.isSolid(wx, FLOOR - 30)).toBe(true);
+  });
+
+  it('perched on a few floating cells, it crushes them and settles on the ground', () => {
+    const { world, a, tank } = setup(37);
+    tapPickup(world, a);
+    const t = world.terrain;
+    // Lift it onto a little floating stub, 8 cells off the floor.
+    const cx = Math.floor(tank.x) + 10;
+    t.set(cx, FLOOR - 8, Mat.Rock);
+    t.set(cx + 1, FLOOR - 8, Mat.Rock);
+    world.terrainReplaced();
+    tank.y = FLOOR - 8 - TANK_H;
+    tank.vy = 0;
+    tank.onGround = true;
+    for (let k = 0; k < 30; k++) {
+      send(world, a, 0);
+      world.step();
+    }
+    expect(tank.y + TANK_H).toBeGreaterThan(FLOOR - 3);
+  });
+
   it('jets lift it off the ground and burn fuel', () => {
     const { world, a, tank } = setup(34);
     tapPickup(world, a);

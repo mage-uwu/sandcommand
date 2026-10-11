@@ -207,7 +207,7 @@ export const CLASSES: readonly ClassDef[] = [
   { name: 'Scout', armor: 0.7, limit: 1, harm: 1, run: 1.12, jet: 1.15, fuel: 0.8, mask: ALL_PARTS & ~(1 << Part.Vest) },
   { name: 'Medium', armor: 1, limit: 1, harm: 1, run: 1, jet: 1, fuel: 1, mask: ALL_PARTS },
   { name: 'Heavy', armor: 3, limit: 2.5, harm: 0.4, run: 0.85, jet: 0.6, fuel: 1.5, mask: ALL_PARTS },
-  { name: 'Droid', armor: 1, limit: 1, harm: 1, run: 1.45, jet: 0, fuel: 1, mask: DROID_MASK, climb: true },
+  { name: 'Droid', armor: 1, limit: 1, harm: 1, run: 1.45, jet: 1, fuel: 1, mask: DROID_MASK, climb: true },
 ];
 
 /** Roll a class for a fresh clone (semi-random: mediums are most common; a droid now and then). */
@@ -314,7 +314,7 @@ export function mobility(mask: number, out: Mobility, cls = -1): Mobility {
     let n = 0;
     for (const l of DROID_LEGS) if (has(mask, l)) n++;
     out.legs = n >= 4 ? 2 : n >= 2 ? 1 : 0;
-    out.jet = false;
+    out.jet = true; // (its thrusters are in its chassis: a jetpack like anyone's)
     out.canFire = has(mask, DroidPart.Turret);
     out.oneHanded = false;
     return out;

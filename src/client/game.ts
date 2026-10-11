@@ -11,7 +11,7 @@ import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
-import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
+import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { type Flora, FloraKind, floraBox, GEYSER_CLOUD_R, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
@@ -402,7 +402,7 @@ export class Game implements FrameHandler {
   smoothY = 0;
   /** Prediction errors larger than 0.01 cells seen during reconciliation. */
   corrections = 0;
-  private pending: { seq: number; buttons: number }[] = [];
+  private pending: { seq: number; buttons: number; pull: number }[] = [];
   private seq = 0;
   private lastSelf: SelfState | null = null;
   private ack = 0;
@@ -465,7 +465,9 @@ export class Game implements FrameHandler {
     // respawned us and will apply it.
     // (Flying our dropship: the controls are the ship's; the clone stands still.)
     if (this.pilot >= 0 || this.rc >= 0) buttons = 0;
-    this.pending.push({ seq: this.seq, buttons });
+    // (The digger running: its pull, as the server applies it.)
+    const pull = this.alive && !this.drive && this.weapon === WeaponId.Digger && (buttons & BTN_FIRE) !== 0 && this.mob.canFire ? dequantizeAim(aimQ) : NaN;
+    this.pending.push({ seq: this.seq, buttons, pull });
     if (this.pending.length > 90) this.pending.shift();
     // The laser's charge, as the server counts it (for the meter and the glow).
     const charging = this.alive && !this.drive && this.weapon === WeaponId.Laser && (buttons & BTN_FIRE) !== 0 && this.reloadLeft === 0 && this.ammo > 0;
@@ -496,7 +498,7 @@ export class Game implements FrameHandler {
       if (this.drive.jetting) this.vehicleJets(this.drive);
     } else if (this.alive) {
       this.body.burdened = this.inv.some((it) => it.weapon === WeaponId.Idol);
-      stepBody(this.body, buttons, this.terrain, DT);
+      stepBody(this.body, buttons, this.terrain, DT, this.pending[this.pending.length - 1]?.pull ?? NaN);
       if (this.body.jetting) {
         const b = this.body;
         const left = b.vx < 0;
@@ -840,7 +842,7 @@ export class Game implements FrameHandler {
       return;
     }
     b.burdened = this.inv.some((it) => it.weapon === WeaponId.Idol);
-    for (const p of this.pending) stepBody(b, p.buttons, this.terrain, DT);
+    for (const p of this.pending) stepBody(b, p.buttons, this.terrain, DT, p.pull);
     // Hide small corrections by easing the visual offset back to zero.
     const ex = oldX - b.x;
     const ey = oldY - b.y;

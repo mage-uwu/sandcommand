@@ -33,12 +33,12 @@ function body(cls: number) {
 }
 
 describe('the spider droid', () => {
-  it('is a class of its own: a turret, a chassis, plating and six legs; no jetpack', () => {
+  it('is a class of its own: a turret, a chassis, plating and six legs; a jetpack in its chassis', () => {
     const s = newBodyState(ClassId.Droid);
     expect(s.mask).toBe(DROID_MASK);
     expect(DROID_LEGS.length).toBe(6);
     const mob = mobility(s.mask, { legs: 0, jet: true, canFire: false, oneHanded: true }, ClassId.Droid);
-    expect(mob).toEqual({ legs: 2, jet: false, canFire: true, oneHanded: false });
+    expect(mob).toEqual({ legs: 2, jet: true, canFire: true, oneHanded: false });
     // Now and then a fresh clone rolls one.
     let droids = 0;
     for (let i = 0; i < 1000; i++) if (rollClass(i / 1000) === ClassId.Droid) droids++;
@@ -209,13 +209,7 @@ describe('the spider droid\'s leap and glide', () => {
     expect(droid.rise).toBeGreaterThan(70);
   });
 
-  it('glides down on its thrusters: much further, gently, but they never lift it', () => {
-    const hop = leap(ClassId.Droid, false);
-    const glide = leap(ClassId.Droid, true);
-    expect(glide.dist).toBeGreaterThan(hop.dist * 1.6);
-    expect(glide.fall).toBeLessThan(80);
-    expect(glide.rise).toBeLessThan(hop.rise * 1.15);
-    // In the air from a standstill, thrusters on: still it comes down.
+  it('jets up like anyone with a jetpack (up held in the air lifts it), burning fuel', () => {
     const t = wallWorld(0);
     const b = body(ClassId.Droid);
     b.y = FLOOR - 200;
@@ -223,8 +217,29 @@ describe('the spider droid\'s leap and glide', () => {
     b.vy = 10;
     const y = b.y;
     for (let k = 0; k < 30; k++) stepBody(b, BTN_UP, t, DT);
-    expect(b.y).toBeGreaterThan(y);
+    expect(b.y).toBeLessThan(y - 20);
     expect(b.jetting).toBe(true);
     expect(b.fuel).toBeLessThan(100);
+    // As high as a clone jets, on the same pack.
+    const c = body(ClassId.Medium);
+    c.y = FLOOR - 200;
+    c.onGround = false;
+    c.vy = 10;
+    for (let k = 0; k < 30; k++) stepBody(c, BTN_UP, t, DT);
+    expect(Math.abs(b.y - c.y)).toBeLessThan(6);
+  });
+
+  it('without its jetpack (none left to it) it still glides down on its leg thrusters, never lifted', () => {
+    const t = wallWorld(0);
+    const b = body(ClassId.Droid);
+    b.jet = false;
+    b.y = FLOOR - 200;
+    b.onGround = false;
+    b.vy = 10;
+    const y = b.y;
+    for (let k = 0; k < 30; k++) stepBody(b, BTN_UP, t, DT);
+    expect(b.y).toBeGreaterThan(y);
+    expect(b.vy).toBeLessThan(80);
+    expect(b.jetting).toBe(true);
   });
 });

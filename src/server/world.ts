@@ -164,7 +164,7 @@ import {
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
 import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
-import { MAT_ADAMANT, Mat, digValue } from '../shared/materials.ts';
+import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
   F_FACE_LEFT,
@@ -241,7 +241,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastLair, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
@@ -3807,7 +3807,8 @@ export class World {
           break;
         }
       }
-      this.carve(ox + cos * d, oy + sin * d, DIGGER_R, DIGGER_CORE, 0, p.id);
+      const droid = p.body.cls === ClassId.Droid;
+      this.carve(ox + cos * d, oy + sin * d, droid ? DIGGER_R_DROID : DIGGER_R, droid ? DIGGER_CORE_DROID : DIGGER_CORE, 0, p.id);
       p.gold += digValue(this.terrain.removedByMat);
       return;
     }
@@ -4823,6 +4824,49 @@ export class World {
     p.camY = t.y + tankH(t) / 2;
   }
 
+  /**
+   * A vehicle held up by a speck of terrain grinds it away. A few stray
+   * cells in its path that it can't climb, a few over its hull when it
+   * jets up into them, or a few floating cells it's left perched on (air
+   * under them) are crushed out of its way. Nothing that won't yield
+   * (bedrock, doors, the ancient cement, iron), and only ever a speck
+   * (TANK_SPECK cells): a real wall or hill still stops it.
+   */
+  private crushSpecks(t: Tank, buttons: number, x0: number): void {
+    const terrain = this.terrain;
+    const w = tankW(t);
+    const h = tankH(t);
+    const ix = Math.floor(t.x);
+    const iy = Math.floor(t.y);
+    const cells: number[] = [];
+    // (Whether every solid cell in the strip can go, and gathers them; false if any can't, or there are too many.)
+    const strip = (x0s: number, y0s: number, x1s: number, y1s: number, under = false): boolean => {
+      cells.length = 0;
+      for (let y = y0s; y <= y1s; y++) {
+        for (let x = x0s; x <= x1s; x++) {
+          if (!terrain.isSolid(x, y)) continue;
+          const m = terrain.get(x, y);
+          if (MAT_FIXED[m] || MAT_ADAMANT[m] || MAT_TOUGH[m]) return false;
+          // (Perched on: only cells with air under them, not the top of a hill.)
+          if (under && (terrain.isSolid(x, y + 1) || terrain.isSolid(x, y + 2))) return false;
+          cells.push(x, y);
+          if (cells.length > TANK_SPECK * 2) return false;
+        }
+      }
+      return cells.length > 0;
+    };
+    const dir = (buttons & BTN_RIGHT ? 1 : 0) - (buttons & BTN_LEFT ? 1 : 0);
+    let hit = false;
+    // Driving into it and getting nowhere.
+    if (dir !== 0 && Math.abs(t.x - x0) < 0.05) hit = dir > 0 ? strip(ix + w, iy, ix + w + 2, iy + h - 1) : strip(ix - 3, iy, ix - 1, iy + h - 1);
+    // Jetting up into it.
+    if (!hit && buttons & BTN_UP && t.vy === 0 && !t.onGround) hit = strip(ix, iy - 2, ix + w - 1, iy - 1);
+    // Perched on a few floating cells.
+    if (!hit && t.onGround) hit = strip(ix, iy + h, ix + w - 1, iy + h, true) && cells.length <= TANK_PERCH * 2;
+    if (!hit) return;
+    for (let i = 0; i < cells.length; i += 2) if (terrain.isSolid(cells[i], cells[i + 1])) this.carve(cells[i], cells[i + 1], 1, 1, 2, t.pilot);
+  }
+
   private stepTanks(): void {
     for (let k = 0; k < MAX_TANKS; k++) {
       const t = this.tanks[k];
@@ -4843,8 +4887,10 @@ export class World {
       const buttons = pilot ? pilot.buttons : brain ? brain.buttons : 0;
       // (stepTank only takes a driver's buttons: the watchdog's brain counts as one.)
       if (brain) t.pilot = t.owner;
+      const x0 = t.x;
       const impact = stepTank(t, this.terrain, DT, buttons);
       if (brain) t.pilot = 255;
+      if (!isSpider(t) && !t.chute) this.crushSpecks(t, buttons, x0);
       if (t.y > WORLD_H) {
         this.destroyTank(k, t.lastHitBy);
         continue;
@@ -6026,7 +6072,9 @@ export class World {
       if (p.rc >= 0 && this.tanks[p.rc]?.pilot !== p.id) p.rc = -1;
       // Surfing: jump (W) to leap off; otherwise the vehicle carries it (seatRiders, after the vehicles move).
       if ((p.surf >= 0 || p.surfShip >= 0) && p.buttons & BTN_UP && !(prev & BTN_UP) && p.rc < 0 && p.pilot < 0) this.dismount(p, true);
-      const impact = p.tank >= 0 || p.surf >= 0 || p.surfShip >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT);
+      // (The digger running pulls toward its aim: the client predicts the same.)
+      const pull = p.pilot < 0 && p.rc < 0 && p.weapon === WeaponId.Digger && p.buttons & BTN_FIRE && p.mob.canFire ? dequantizeAim(p.aimQ) : NaN;
+      const impact = p.tank >= 0 || p.surf >= 0 || p.surfShip >= 0 ? 0 : stepBody(p.body, p.pilot >= 0 || p.rc >= 0 ? 0 : p.buttons, terrain, DT, pull);
       if (impact > FALL_DAMAGE_SPEED) {
         // A hard landing hurts the legs first, the torso if there are none.
         const amt = (impact - FALL_DAMAGE_SPEED) * 0.18; // two max-speed falls cost a leg
@@ -6793,6 +6841,9 @@ const PVP_RESPAWN_TICKS = 30 * 5;
 const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction, GameMode.Extermination];
 /** Siege attackers come back faster than anyone (their lives are what's counted). */
 const SIEGE_RESPAWN_TICKS = 30 * 6;
+/** The most cells of a speck a vehicle grinds out of its way (crushSpecks), and of one it's perched on. */
+const TANK_SPECK = 12;
+const TANK_PERCH = 4;
 /** Extermination waves run twenty-four minutes. */
 const EXTERMINATION_TICKS = 30 * 60 * 24;
 /** The lair's basilisks: a quarter of a wild one's hit points (four to kill, not one), still a long fight each. */

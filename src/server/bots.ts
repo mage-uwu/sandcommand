@@ -419,6 +419,8 @@ export class BotBrain {
     const near = tgt ? Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) : Infinity;
     const mine = this.myRide >= 0 ? world.tanks[this.myRide] : null;
     if (this.myRide >= 0 && (!mine || mine.pilot !== 255 || isPet(mine))) this.myRide = -1; // (in it, someone else is, or it's gone)
+    // (Under the vehicle it's going for, in a dip or a hole of its own digging: up out of it.)
+    let boardUp: { x: number; y: number } | null = null;
     if ((this.tanker || this.myRide >= 0) && (near > 120 || this.myRide >= 0) && !world.extractionLive && p.tank < 0) {
       for (let slot = 0; slot < world.tanks.length; slot++) {
         const k = world.tanks[slot];
@@ -431,6 +433,7 @@ export class BotBrain {
         const dx = Math.max(k.x - (p.body.x + 8), 0, p.body.x - (k.x + tankW(k)));
         const dy = Math.max(k.y - (p.body.y + 14), 0, p.body.y - (k.y + tankH(k)));
         pickup = dx <= 8 && dy <= 8 && (t & 7) === 0;
+        boardUp = Math.abs(kx - p.cx) < 40 && k.y + tankH(k) < p.body.y + ACTOR_H - 6 ? { x: kx, y: k.y + tankH(k) } : null;
         break;
       }
     }
@@ -523,7 +526,8 @@ export class BotBrain {
     // (Not in the endgame: with only a few enemies left, it's time to finish them.)
     let foesLeft = 0;
     if (this.prospector) for (const o of world.players) if (o && o.alive && o !== p && (p.team === Team.None || o.team !== p.team)) foesLeft++;
-    const goldAt = !calling && this.prospector && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && p.gold < cost && gunSlot >= 0 ? this.findGold(world, p) : null;
+    // (Not with a ride of its own waiting for it: that first.)
+    const goldAt = !calling && this.prospector && this.myRide < 0 && quiet && (foesLeft > ENDGAME_FOES || world.phase !== Phase.Live) && !nav && !world.extractionLive && !(world.kingLive && world.isKing(p)) && p.gold < cost && gunSlot >= 0 ? this.findGold(world, p) : null;
     if (goldAt) goalX = goldAt.x;
     // A cave map, and the target somewhere else in the caves (or up top): the way there.
     const cave = !nav && !goldAt && !calling && tgt && !this.seeTarget ? this.caveNav(world, p, tgt) : null;
@@ -606,7 +610,9 @@ export class BotBrain {
     // (Never at what won't yield: the caltrops' cement, the ruins' masonry, pig iron. It goes round those.)
     const toward = this.blind > 60 && tgt ? { x: tgt.cx, y: tgt.cy } : dugIn && quarry ? quarry : { x: p.cx + (Math.sign(goalX - p.cx) || 1) * 24, y: p.cy };
     const hardWay = hardBetween(world, sx, sy, toward.x, toward.y);
-    const digging = !world.extractionLive && digSlot >= 0 && (mining || !!route?.dig || (!this.seeTarget && !hardWay && (this.stuck > 75 || this.blind > 60)) || (dugIn && !hardWay));
+    // (Its vehicle overhead, a roof between: dig up to it.)
+    const digUp = !!boardUp && !headClear && !hardBetween(world, sx, sy, boardUp.x, boardUp.y);
+    const digging = !world.extractionLive && digSlot >= 0 && (mining || !!route?.dig || (!this.seeTarget && !hardWay && (this.stuck > 75 || this.blind > 60)) || (dugIn && !hardWay) || digUp);
     if (digging) want = digSlot;
     if (calling) want = radioSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
@@ -672,7 +678,8 @@ export class BotBrain {
       if (cave.up) buttons |= BTN_UP;
     } else if (route) {
       if (route.up && b.fuel > 4) buttons |= BTN_UP;
-    } else if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
+    } else if (boardUp && b.fuel > (b.onGround ? 40 : 5) && (headClear || !world.terrain.rectSolid(bx0, by0 - 5, bx0 + 7, by0 - 1))) buttons |= BTN_UP; // (up into the hole it's digging, too)
+    else if (tgt && tgt.cy < p.cy - 50 && b.fuel > 35) buttons |= BTN_UP;
     if (b.vy > 260 && b.fuel > 5) buttons |= BTN_UP;
     // An enemy dropship or drone overhead with no line on it from here: up on the jetpack for one.
     if (skyThreat && !this.air && b.fuel > 30 && headClear) buttons |= BTN_UP;
@@ -705,13 +712,13 @@ export class BotBrain {
     } else if (weapon === WeaponId.Digger) {
       // Dig at the target when it's just the other side of a floor or wall;
       // otherwise through the obstacle in the way.
-      let tx = (tgt ? tgt.cx : dugIn && quarry ? quarry.x : goalX) - p.cx;
-      let ty = (tgt ? tgt.cy : dugIn && quarry ? quarry.y : p.cy) - p.cy;
+      let tx = (tgt ? tgt.cx : digUp && boardUp ? boardUp.x : dugIn && quarry ? quarry.x : goalX) - p.cx;
+      let ty = (tgt ? tgt.cy : digUp && boardUp ? boardUp.y : dugIn && quarry ? quarry.y : p.cy) - p.cy;
       if (route?.dig) {
         // On its path: through the soft ground the path runs into.
         tx = route.digX - p.cx;
         ty = route.digY - p.cy;
-      } else if (this.blind <= 60 && !dugIn) {
+      } else if (this.blind <= 60 && !dugIn && !digUp) {
         // Blocked on the way somewhere: straight through whatever is ahead.
         tx = Math.sign(tx) || 1;
         ty = 0;

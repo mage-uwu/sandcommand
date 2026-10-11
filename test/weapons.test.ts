@@ -123,7 +123,15 @@ describe('digger', () => {
       return left;
     };
     const before = count();
-    for (const aim of [-0.5, -0.25, 0, 0.25, 0.5, 0.7]) hold(world, p, BTN_FIRE, WeaponId.Digger, 8, aim);
+    // (Held where it stands: the digger's pull would draw it into the hole it makes.)
+    const x0 = p.body.x;
+    for (const aim of [-0.5, -0.25, 0, 0.25, 0.5, 0.7]) {
+      for (let k = 0; k < 8; k++) {
+        hold(world, p, BTN_FIRE, WeaponId.Digger, 1, aim);
+        p.body.x = x0;
+        p.body.vx = 0;
+      }
+    }
     expect(count()).toBeLessThan(before / 3);
   });
 });

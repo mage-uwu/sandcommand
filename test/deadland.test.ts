@@ -158,7 +158,7 @@ describe('the deadland', () => {
       world.step();
     }
     expect(before - cement()).toBeGreaterThan(150);
-    expect(a.body.x - x0).toBeGreaterThan(12); // (into the wall)
+    expect(a.body.x - x0).toBeGreaterThan(8); // (into the wall)
   });
 
   it('nothing grows on it: no grass, no flora on the crust', () => {

@@ -156,7 +156,11 @@ export const WATER_LIFT = 0.92;
 export const WATER_SWIM = 420;
 export const WATER_DRAG = 0.9;
 
-export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): number {
+/** The digger's pull (cells/s²): running, it draws the clone a little toward where it's aimed. */
+export const DIG_PULL = 240;
+
+/** `pull`: the digger's aim while it runs (its pull, DIG_PULL), NaN when it isn't. */
+export function stepBody(b: Body, buttons: number, t: Terrain, dt: number, pull = NaN): number {
   // Stance: down crouches; held on the ground it goes prone. Standing back
   // up (or just rising a level) needs the headroom for it.
   const base = CLASSES[b.cls] ?? CLASSES[ClassId.Medium];
@@ -189,7 +193,8 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
   const dashDir = dir !== 0 ? dir : Math.sign(b.vx);
   const dashing = down && !b.onGround && buttons & BTN_UP && b.jet && b.fuel > 0 && dashDir !== 0;
   // A droid gliding: up held, falling, legs to steer by, fuel left (and not on a wall).
-  const gliding = !!base.climb && !b.onGround && (buttons & BTN_UP) !== 0 && b.vy > 0 && b.legs > 0 && b.fuel > 0 && !(b.cling ?? 0);
+  // (Only one that's lost its jetpack: with it, it jets like anyone.)
+  const gliding = !!base.climb && !b.jet && !b.onGround && (buttons & BTN_UP) !== 0 && b.vy > 0 && b.legs > 0 && b.fuel > 0 && !(b.cling ?? 0);
   if ((dir !== 0 || b.onGround) && !dashing) {
     const accel = (b.onGround ? ACTOR_GROUND_ACCEL : ACTOR_AIR_ACCEL) * dt;
     const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] * cls.run * STANCE_RUN[b.stance] * (gliding ? DROID_GLIDE_RUN : 1) - b.vx;
@@ -212,7 +217,7 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
         b.vx += Math.sin(DASH_ANGLE) * thrust * dashDir;
         b.vy -= Math.cos(DASH_ANGLE) * thrust;
         if (Math.abs(b.vx) > DASH_MAX) b.vx = Math.sign(b.vx) * DASH_MAX;
-      } else b.vy -= thrust;
+      } else if (!base.climb || b.vy > -ACTOR_MAX_RISE) b.vy -= thrust; // (a droid's pack lifts it no faster than a clone's: only its spring outruns that)
       b.fuel = Math.max(0, b.fuel - ACTOR_FUEL_BURN * cls.fuel * dt);
       b.jetting = true;
     }
@@ -220,6 +225,12 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number): numb
     b.fuel = Math.min(ACTOR_MAX_FUEL, b.fuel + ACTOR_FUEL_REGEN * dt);
   }
 
+  // The digger running: a slight pull toward where it's aimed. (On its feet,
+  // not up off them: it keeps its footing, and its stride, digging ahead.)
+  if (pull === pull) {
+    b.vx += Math.cos(pull) * DIG_PULL * dt;
+    if (!b.onGround || Math.sin(pull) > 0) b.vy += Math.sin(pull) * DIG_PULL * dt;
+  }
   b.vy += GRAVITY * dt;
   // In water (water.ts): it floats, swims (up held strokes upward, no fuel
   // needed; the pack refills), and everything is slow.

@@ -1194,6 +1194,14 @@ is a mole, below).
   downhill gains a little, and a big step costs a little momentum. Rolling
   over a dip, the treads follow the ground down instead of hopping off it.
   An idle tank slides off very steep ground.
+- **Specks.** A vehicle is never held up by a speck of terrain
+  (`crushSpecks`). It grinds a speck away when the speck is any of these:
+  - a few stray cells in its path that it can't climb (up to 12)
+  - a few over its hull when it jets up into them
+  - a few floating cells it's been left perched on (up to 4, air under them)
+
+  Bedrock, doors, the ancient cement and iron never yield, and a real wall
+  or hill still stops it.
 - **Tilted parts.** The art, the cannon and SMG mounts, the muzzles, the
   part hit zones and an exposed driver's head all rotate with the hull.
   Tilt is part of the predicted state, at full precision for the driver.
@@ -1598,6 +1606,10 @@ ground between them. Each complex is assembled like this:
 Everything is concrete and metal plate, so small arms barely scratch it.
 Explosion cores and diggers get through. The digger bites at the first
 solid cell along its aim, so a wall you're pressed against gets dug.
+While it runs it pulls the clone slightly toward its aim (`DIG_PULL`, 240
+cells/s², in the shared `stepBody` so prediction matches). On the ground
+that's a slow drift into the hole it's making, and in the air a gentle tug.
+It never lifts a clone off its feet.
 Building uses only integer arithmetic and the seeded RNG, so every engine
 produces the same complexes.
 
@@ -2125,18 +2137,21 @@ shots leave from, so it fires exactly from its face.
   on steep terrain**. It takes big steps in its stride, and pushing
   against a wall, or holding **W** with one within reach either side
   (up a shaft, say), it walks straight up it and over the top (`CLIMB_SPEED`
-  in the shared `stepBody`, so prediction stays exact). It has no jetpack,
-  and it never crouches or lies down.
-- **Leap and glide.** In place of a jetpack it has a spring and thrusters.
+  in the shared `stepBody`, so prediction stays exact). It never crouches
+  or lies down.
+- **Leap and jetpack.** It has a spring and a jetpack.
   - **Leap.** **W** springs it 1.55× as hard as a clone's jump, about
     80 cells (six bodies), over twice a clone's height.
-  - **Glide.** Holding W on the way down fires little blue thrusters under
-    its chassis. Their thrust is less than its weight, so they never lift
-    it, but they ease the fall to 50 cells/s and let it steer 1.35× wider
-    than it runs. A glide carries well over half again as far as a plain
-    leap.
-  - **Fuel.** They burn its fuel (16 a second, refilling on the ground).
+  - **Jetpack.** Holding W in the air fires its jetpack, built into the
+    chassis: the same pack as a clone's, on the same fuel, lifting it no
+    faster than a clone's does (only its spring outruns that). The
+    tarantula has no such pack; it keeps its glide.
+  - **Glide.** A droid without its jetpack still glides. Holding W on the
+    way down eases the fall to 50 cells/s on little blue leg thrusters,
+    which can't lift it.
   - **Walls.** A wall within reach still catches it to climb.
+  - **Digging.** Its digger bites are wider than a clone's (radius 9, core
+    4, against 7 and 3), so a body its size can dig its way through.
 - **Its look.** Drawn procedurally, like a real spider. Six long legs
   splay wide from hips along the chassis, each a two-bone limb (a short
   thigh, a long needle shin) solved so the knee rides high above the body
@@ -2309,7 +2324,7 @@ start at the clone's middle.
 | Bazooka | rocket, 380 | 14 | 60 rpm | semi | 1 | 2.2 s | 140 |
 | Grenade | grenade, 330 | 6 | 70 rpm | semi | 3 | 2.5 s | 90 |
 | Sniper | slug, 24000 (near instant) | 17 | 50 rpm | semi | 5 | 2.8 s | 600 |
-| Digger | carves terrain | 11 | 900 rpm | auto | ∞ | – | 40 |
+| Digger | carves terrain (radius 7, core 3) | 11 | 900 rpm | auto | ∞ | – | 40 |
 | Materializer | builds (see below) | 9 | 100 pieces/min | click | ∞ | – | 60 |
 | Radio | calls support (see below) | 6 | – | click | ∞ | – | 60 |
 | Repair Kit | health wave (see below) | 4 | once | click | 1 (used up) | – | 40 |
