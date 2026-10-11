@@ -250,8 +250,13 @@ import {
   MILLI_COIL_TICKS,
   MILLI_FREEZE_MAX,
   MILLI_FREEZE_MIN,
+  MILLI_DROP_REACH,
+  MILLI_DROP_STEER,
   MILLI_LUNGE,
   MILLI_LUNGE_TICKS,
+  MILLI_ROOST,
+  MILLI_SENSE_FROZEN,
+  onCeiling,
   MILLI_WANDER,
   MILLI_CRAWL,
   MILLI_HP,
@@ -1566,7 +1571,8 @@ export class World {
   private beastTarget(b: Beast, hx: number, hy: number): number {
     const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
     if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
-    let best = MILLI_SENSE;
+    // (Lying in wait, it sees further: a line on anyone in that reach wakes it.)
+    let best = b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
     let id = -1;
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
@@ -1616,6 +1622,13 @@ export class World {
       tgt = null;
       b.target = -1;
     }
+    // On a ceiling with its prey below: let go, and drop on them.
+    if (tgt && b.rear === 0 && b.coilCd === 0 && onCeiling(t, b) && tgt.cy > hy + 8 && Math.abs(tgt.cx - hx) < MILLI_DROP_REACH && this.lineClear(hx, hy, tgt.cx, tgt.cy)) {
+      b.attached = false;
+      b.pounce = true;
+      b.vy = 30;
+      b.frozen = 0;
+    }
     if (b.lunge > 0) b.lunge--;
     // Rearing, and spitting at the top of it.
     if (b.rear > 0) {
@@ -1630,19 +1643,32 @@ export class World {
     // Nothing about: wander a while, then freeze (and wait).
     if (!tgt && b.attached && b.rear === 0) {
       if (b.frozen > 0) b.frozen--;
-      else if (--b.wander <= 0) {
+      else if (--b.wander <= 0 && (!b.roost || onCeiling(t, b) || b.wander < -MILLI_WANDER * 4)) {
+        // Rest here, wherever it is (wanting a ceiling, it goes on until it's on one, or gives up after a while).
         b.frozen = MILLI_FREEZE_MIN + rng.int(MILLI_FREEZE_MAX - MILLI_FREEZE_MIN);
         b.wander = MILLI_WANDER + rng.int(MILLI_WANDER);
+        b.roost = rng.next() < MILLI_ROOST;
       }
     }
     if (!b.attached) {
-      // Falling: its body follows its head down.
+      // Falling: its body follows its head down (dropping on prey, it steers at them as it falls).
       const y0 = b.y;
       fallStep(t, b, DT, GRAVITY);
       const y1 = b.y;
       for (let y = y0 + 1; y <= y1; y++) {
         b.y = y;
         pushTrail(b);
+      }
+      if (b.attached) b.pounce = false;
+      else if (b.pounce && tgt) {
+        // (MILLI_DROP_STEER cells a tick, on average: the whole cells, and the fraction now and then.)
+        const steps = Math.floor(MILLI_DROP_STEER) + (rng.next() < MILLI_DROP_STEER % 1 ? 1 : 0);
+        for (let n = 0; n < steps && Math.abs(tgt.cx - b.x) > 1; n++) {
+          const nx = b.x + Math.sign(tgt.cx - b.x);
+          if (t.isSolid(nx, b.y)) break;
+          b.x = nx;
+          pushTrail(b);
+        }
       }
       if (b.y >= WORLD_H - 14) {
         this.beasts[k] = null;

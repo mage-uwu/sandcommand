@@ -530,17 +530,24 @@ terrain cell to a pixel).
   palettes, pored, polyps glowing). Its head is coral, with feelers, fangs
   and an eye.
 - **It freezes.** With nothing about, it wanders a while and then lies still
-  for 6 to 18 seconds. Frozen, it drops its dark plate rims, its legs stop
-  and its eye dims, so it melts into the cave and is hard to see. Hurt, it
-  thaws.
+  for anything from 20 seconds up to two minutes. It rests wherever it is:
+  a floor, a wall or a ceiling. More often than not it picks its way up
+  onto a ceiling first, to wait over whoever passes under. Frozen, it drops
+  its dark plate rims, its legs stop and its eye dims, so it melts into the
+  cave and is hard to see. Hurt, it thaws.
 - **It goes along any surface.** Floors, walls and ceilings alike, its body
   bending round every corner and lying along the ground under it. Its crawl
   follows the contour of the terrain grid: into a wall ahead it turns up
   it, and over an edge it turns down round it. The body follows the head's
   trail, a pair of legs stepping under each plate. Dig the ground out from
   under it and it falls until it lands, then takes hold again.
+- **Line of sight sets it off.** Lying in wait, it strikes the moment it has
+  a line on a clone within 420 cells (280 once it's moving).
+- **It drops from the ceiling.** Resting (or hunting) on a ceiling with its
+  prey below, it lets go and drops on them, steering as it falls, and
+  coils round them where it lands.
 - **It strikes very fast.** The moment it sees prey (whoever hurt it, or the
-  nearest clone in sight within about 280 cells) it thaws and lunges along
+  nearest clone in sight) it thaws and lunges along
   the surfaces at 160 cells a second for two and a half seconds, then hunts
   at 70. It picks its way by trying a few dozen steps each way along the
   ground and taking the one that gets it nearer.

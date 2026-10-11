@@ -40,12 +40,23 @@ export const MILLI_HUNT = 70;
 export const MILLI_LUNGE = 160;
 /** How long a lunge lasts (ticks). */
 export const MILLI_LUNGE_TICKS = 75;
-/** Freezing (its camouflage: still, it's hard to see): how long it holds still, the least and the most (ticks), and how long it wanders between. */
-export const MILLI_FREEZE_MIN = 30 * 6;
-export const MILLI_FREEZE_MAX = 30 * 18;
+/**
+ * Freezing (its camouflage: still, it's hard to see): how long it holds
+ * still, the least and the most (ticks: up to two minutes), and how long it
+ * wanders between. It rests wherever it is, walls and ceilings too; often it
+ * picks its way up onto a ceiling first (MILLI_ROOST of the time), to drop
+ * on whoever passes under.
+ */
+export const MILLI_FREEZE_MIN = 30 * 20;
+export const MILLI_FREEZE_MAX = 30 * 120;
 export const MILLI_WANDER = 30 * 6;
-/** How far it senses prey (with a line on it), and how far it spits. */
+export const MILLI_ROOST = 0.6;
+/** Dropping off a ceiling onto prey: how far to the side of it (cells) it'll let go, and how fast it steers as it falls (cells a tick). */
+export const MILLI_DROP_REACH = 60;
+export const MILLI_DROP_STEER = 1.5;
+/** How far it senses prey (with a line on it; lying in wait it sees further), and how far it spits. */
 export const MILLI_SENSE = 280;
+export const MILLI_SENSE_FROZEN = 420;
 export const MILLI_SPIT_RANGE = 210;
 /** Rearing to spit: ticks up, the tick it spits, the spit's speed; ticks between spits. */
 export const MILLI_REAR = 20;
@@ -98,6 +109,10 @@ export interface Beast {
   coilCd: number;
   /** Frozen still (ticks left), wandering before it next freezes (ticks left), lunging (ticks left). */
   frozen: number;
+  /** Dropping off a ceiling onto a clone (falling at them, steering). */
+  pounce: boolean;
+  /** This time round, it wants to rest on a ceiling (it wanders on until it's on one, for a while). */
+  roost: boolean;
   wander: number;
   lunge: number;
   /** Coiled round a clone (its id, or -1): ticks into it, where it holds them, the harm it's taken meanwhile. */
@@ -138,6 +153,8 @@ export function newMillipede(t: Terrain, x: number, y: number, dir: number): Bea
     spitCd: 30,
     coilCd: 0,
     frozen: 0,
+    pounce: false,
+    roost: false,
     wander: MILLI_WANDER,
     lunge: 0,
     coil: -1,
@@ -247,7 +264,12 @@ export function crawlStep(t: Terrain, b: Beast): void {
   }
 }
 
-/** Falling: down at its speed until it lands on something, then take hold. Returns the cells it fell. */
+/** Is it hanging from a ceiling (rock over its head, open under it)? */
+export function onCeiling(t: Terrain, b: Beast): boolean {
+  return b.attached && solidAt(t, b.x, b.y - 1) && !solidAt(t, b.x, b.y + 1);
+}
+
+/** Falling: down at its speed until it lands on something, then take hold. */
 export function fallStep(t: Terrain, b: Beast, dt: number, gravity: number): void {
   b.vy = Math.min(600, b.vy + gravity * dt);
   let n = Math.max(1, Math.round(b.vy * dt));

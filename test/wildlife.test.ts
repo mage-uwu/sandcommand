@@ -4,7 +4,7 @@ import { ACTOR_H, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -174,6 +174,30 @@ describe('millipedes in the world', () => {
     expect(b.frozen).toBe(0);
     expect(moved / 20).toBeGreaterThan(MILLI_HUNT / 30); // (faster than it hunts: a lunge)
     void a;
+  });
+
+  it('resting on a ceiling, it drops onto a clone that comes under it, and coils them', () => {
+    const { world, a } = cave();
+    // On the roof, a little way along from the clone, lying in wait.
+    const b = put(world, 1000, 380, 1);
+    while (!onCeiling(world.terrain, b) || Math.abs(b.x - 990) > 3) {
+      crawlStep(world.terrain, b);
+      pushTrail(b);
+    }
+    bodyPoints(world.terrain, b, world.beastPts[0]);
+    b.frozen = 30 * 100;
+    b.spitCd = 1e9;
+    let dropped = false;
+    for (let k = 0; k < 30 * 3 && b.coil < 0; k++) {
+      world.step();
+      if (!b.attached) dropped = true;
+    }
+    expect(dropped).toBe(true);
+    expect(b.coil).toBe(a.id);
+  });
+
+  it('lies in wait for up to two minutes', () => {
+    expect(MILLI_FREEZE_MAX).toBe(30 * 120);
   });
 
   it('a health wave washes the venom out', () => {
