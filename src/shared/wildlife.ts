@@ -1,4 +1,4 @@
-import { WORLD_H, WORLD_W } from './constants.ts';
+import { GRAVITY, WORLD_H, WORLD_W } from './constants.ts';
 import type { Terrain } from './terrain.ts';
 import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
 
@@ -187,6 +187,90 @@ export const SEEDER_EXPIRE = 30 * 40;
  * to forage (NEST_FORAGERS), while there aren't too many about (SEEDERS_MAX).
  */
 export const SEEDER_FORAGE = 30 * 50;
+/**
+ * The centipede-likes on the attack: a **sprint** at SPRINT_MULT times its
+ * speed, for SPRINT_MIN to SPRINT_MAX ticks (4 to 18 s), then a breather
+ * (SPRINT_REST) before the next; and a **fling**, launching itself off the
+ * wall, floor or ceiling it holds, through the air at its prey, when they're
+ * within reach (FLING_MIN..FLING_MAX cells, times its scale) and in sight,
+ * every FLING_CD ticks or so. In flight it's under gravity like anything.
+ */
+export const SPRINT_MULT = 2;
+export const SPRINT_MIN = 30 * 4;
+export const SPRINT_MAX = 30 * 18;
+export const SPRINT_REST = 30 * 6;
+export const FLING_MIN = 24;
+export const FLING_MAX = 120;
+export const FLING_SPEED = 240;
+export const FLING_CD = 30 * 4;
+/** How fast a creature falls at most (cells/s). */
+export const BEAST_FALL_MAX = 600;
+
+/**
+ * Launch a creature at (tx, ty) from where its head is (fx, fy): the speed
+ * along its way (FLING_SPEED times `scale`) and the arc to get there under
+ * gravity. Sets its velocity and its flight (`flung`, ticks).
+ */
+export function fling(b: Beast, hx: number, hy: number, tx: number, ty: number, scale = 1): void {
+  const dx = tx - hx;
+  const dy = ty - hy;
+  const d = Math.hypot(dx, dy) || 1;
+  const T = d / (FLING_SPEED * Math.sqrt(scale));
+  b.vx = dx / T;
+  b.vy = dy / T - 0.5 * GRAVITY * T;
+  b.flung = Math.ceil(T * 30) + 6;
+  b.flingCd = FLING_CD;
+}
+
+/** Keep up a creature's sprint while it's on the attack (`attacking`): its speed multiplier this tick. */
+export function sprintTick(b: Beast, attacking: boolean, roll: number): number {
+  if (b.flingCd > 0) b.flingCd--;
+  if (b.sprint > 0) {
+    b.sprint--;
+    if (b.sprint === 0) b.sprintCd = SPRINT_REST;
+  } else if (b.sprintCd > 0) b.sprintCd--;
+  else if (attacking) b.sprint = SPRINT_MIN + Math.floor(roll * (SPRINT_MAX - SPRINT_MIN));
+  if (!attacking && b.sprint > 0) {
+    b.sprint = 0;
+    b.sprintCd = SPRINT_REST;
+  }
+  return b.sprint > 0 ? SPRINT_MULT : 1;
+}
+
+/**
+ * A crawler in flight (flung at its prey): gravity and momentum, its head
+ * cell by cell through the air (the body follows), until it hits something:
+ * there it takes hold (or, nothing to hold, it drops).
+ */
+export function flingStep(t: Terrain, b: Beast, dt: number): void {
+  b.vy = Math.min(BEAST_FALL_MAX, b.vy + GRAVITY * dt);
+  if (b.flung > 0) b.flung--;
+  const steps = Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy) * dt));
+  for (let s = 0; s < steps; s++) {
+    const nx = b.fx + (b.vx * dt) / steps;
+    const ny = b.fy + (b.vy * dt) / steps;
+    const cx = Math.floor(nx);
+    const cy = Math.floor(ny);
+    if (solidAt(t, cx, cy)) {
+      // Landed (or struck a wall): it takes hold where it is.
+      b.flung = 0;
+      b.vx = 0;
+      b.vy = 0;
+      b.attached = reorient(t, b);
+      return;
+    }
+    b.fx = nx;
+    b.fy = ny;
+    if (cx !== b.x || cy !== b.y) {
+      b.x = cx;
+      b.y = cy;
+      pushTrail(b);
+    }
+    if (b.y >= WORLD_H - 2) return;
+  }
+  // Out of flight, still in the air: it drops from here.
+  if (b.flung === 0) b.vx = 0;
+}
 export const SEEDER_LEG = 140;
 export const NEST_FORAGE_CD = 30 * 45;
 export const NEST_FORAGERS = 2;
@@ -343,6 +427,16 @@ export interface Beast {
   home: number;
   brood: number;
   alarm: number;
+  /**
+   * The centipede-likes' attack (millipede, asp, basilisk): a sprint at
+   * twice its speed (ticks of it left; and ticks till it can sprint again),
+   * and a fling (in flight toward its prey: ticks left of it; and ticks till
+   * it can fling again).
+   */
+  sprint: number;
+  sprintCd: number;
+  flung: number;
+  flingCd: number;
   /** A seeder out foraging (ticks of it left: SEEDER_FORAGE from spawn), which way it's ranging (up toward the surface, or back), and how long it's been on this leg (ticks). Its waypoint is lastX, lastY. */
   forage: number;
   rangeUp: boolean;
@@ -409,6 +503,10 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     home: -1,
     brood: 0,
     alarm: 0,
+    sprint: 0,
+    sprintCd: 0,
+    flung: 0,
+    flingCd: 0,
     forage: 0,
     rangeUp: true,
     legAge: 0,
@@ -468,7 +566,7 @@ export function anchorNest(t: Terrain, b: Beast): boolean {
     [1, 0],
     [0, 1],
   ]) {
-    if (solidAt(t, b.x + ax, b.y + ay)) {
+    if (gripAt(t, b.x + ax, b.y + ay)) {
       b.hx = ax;
       b.hy = ay;
       b.attached = true;
@@ -531,7 +629,11 @@ export function flyStep(t: Terrain, b: Beast, gx: number, gy: number, dt: number
   if (Math.abs(b.vx) > 8) b.side = Math.sign(b.vx);
 }
 
+/** Can't be moved into: rock, or off the map (its edges are a barrier). */
 const solidAt = (t: Terrain, x: number, y: number) => x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H || t.isSolid(x, y);
+/** Can be held on to: real rock (the map's edges are no wall to climb, nor the sky a ceiling). */
+const gripAt = (t: Terrain, x: number, y: number) => y >= WORLD_H || (x >= 0 && y >= 0 && x < WORLD_W && t.isSolid(x, y));
+const offMap = (x: number, y: number) => x < 0 || y < 0 || x >= WORLD_W;
 
 /** The ground side of a heading, for a beast with the ground on hand `side`. */
 const groundX = (b: Beast) => (b.side > 0 ? -b.hy : b.hy);
@@ -553,16 +655,16 @@ function reorient(t: Terrain, b: Beast): boolean {
     [0, -1],
   ];
   // Keep the heading if it still works; else the first that does (preferring to keep going the same way round).
-  if (solidAt(t, b.x + groundX(b), b.y + groundY(b))) return true;
+  if (gripAt(t, b.x + groundX(b), b.y + groundY(b))) return true;
   for (const [hx, hy] of dirs) {
     b.hx = hx;
     b.hy = hy;
-    if (solidAt(t, b.x + groundX(b), b.y + groundY(b)) && !solidAt(t, b.x + hx, b.y + hy)) return true;
+    if (gripAt(t, b.x + groundX(b), b.y + groundY(b)) && !solidAt(t, b.x + hx, b.y + hy)) return true;
   }
   for (const [hx, hy] of dirs) {
     b.hx = hx;
     b.hy = hy;
-    if (solidAt(t, b.x + groundX(b), b.y + groundY(b))) return true;
+    if (gripAt(t, b.x + groundX(b), b.y + groundY(b))) return true;
   }
   return false;
 }
@@ -587,6 +689,12 @@ export function crawlStep(t: Terrain, b: Beast): void {
     b.attached = false;
     return;
   }
+  // (The map's edge ahead: no wall to climb. Back the way it came.)
+  if (offMap(b.x + b.hx, b.y + b.hy)) {
+    turnRound(b);
+    if (!reorient(t, b)) b.attached = false;
+    return;
+  }
   for (let turn = 0; turn < 4; turn++) {
     if (!solidAt(t, b.x + b.hx, b.y + b.hy)) break;
     // Concave corner: turn away from the ground (up the wall).
@@ -598,7 +706,7 @@ export function crawlStep(t: Terrain, b: Beast): void {
   }
   b.x += b.hx;
   b.y += b.hy;
-  if (!solidAt(t, b.x + groundX(b), b.y + groundY(b))) {
+  if (!gripAt(t, b.x + groundX(b), b.y + groundY(b))) {
     // Convex corner: turn toward the ground (down round the edge), and step round it.
     const gx = groundX(b);
     const gy = groundY(b);
@@ -608,7 +716,7 @@ export function crawlStep(t: Terrain, b: Beast): void {
       b.x += gx;
       b.y += gy;
     }
-    if (!solidAt(t, b.x + groundX(b), b.y + groundY(b)) && !reorient(t, b)) b.attached = false;
+    if (!gripAt(t, b.x + groundX(b), b.y + groundY(b)) && !reorient(t, b)) b.attached = false;
   }
 }
 
@@ -705,13 +813,15 @@ export const boreable = (t: Terrain, x: number, y: number) => {
  * moved (for the bores behind it).
  */
 export function boreStep(t: Terrain, b: Beast, gx: number, gy: number, speed: number, dt: number): number {
-  let want = Math.atan2(gy - b.fy, gx - b.fx);
-  // In the open, far from any rock: it falls back toward the ground.
+  const want = Math.atan2(gy - b.fy, gx - b.fx);
+  // Holding on: rock (real rock, not the map's edge) within reach of its head.
   const hx = Math.round(b.fx);
   const hy = Math.round(b.fy);
   let held = false;
-  for (let k = 2; k <= 10 && !held; k += 2) if (solidAt(t, hx, hy + k) || solidAt(t, hx + k, hy) || solidAt(t, hx - k, hy) || solidAt(t, hx, hy - k)) held = true;
-  if (!held && gy < b.fy + 40) want = Math.PI / 2;
+  for (let k = 2; k <= 10 && !held; k += 2) if (gripAt(t, hx, hy + k) || gripAt(t, hx + k, hy) || gripAt(t, hx - k, hy) || gripAt(t, hx, hy - k)) held = true;
+  // Flung (or nothing to hold): a thing in flight, under gravity, steering nowhere; caught by rock.
+  if (b.flung > 0) b.flung--;
+  if (b.flung > 0 || !held) return flyBallistic(t, b, dt, held);
   // Turn toward it (the short way round), at its rate.
   let d = ((want - b.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
   const max = BASILISK_TURN * dt;
@@ -729,17 +839,56 @@ export function boreStep(t: Terrain, b: Beast, gx: number, gy: number, speed: nu
   const nx = b.fx + Math.cos(b.ang) * step;
   const ny = b.fy + Math.sin(b.ang) * step;
   if (!boreable(t, Math.round(nx), Math.round(ny))) return 0;
+  // (Its going, kept: run off an edge, it carries on through the air with it.)
+  b.vx = (nx - b.fx) / dt;
+  b.vy = (ny - b.fy) / dt;
   b.fx = nx;
   b.fy = ny;
   b.x = Math.round(nx);
   b.y = Math.round(ny);
-  // Its trail, a point a cell (however far it went this tick).
+  trailTo(b);
+  return step;
+}
+
+/** A burrower's trail up to where its head is now, a point a cell (however far it went this tick). */
+function trailTo(b: Beast): void {
   const lx = b.trail[0];
   const ly = b.trail[1];
   const dist = Math.hypot(b.fx - lx, b.fy - ly);
   const n = Math.floor(dist);
   for (let k = 1; k <= n; k++) pushTrailF(b, lx + ((b.fx - lx) * k) / dist, ly + ((b.fy - ly) * k) / dist);
-  return step;
+}
+
+/**
+ * A burrower in flight (flung at its prey, or fallen off what it held):
+ * gravity and its own momentum, nothing else, its head turned along its
+ * way. Rock in its path stops it dead (there it takes hold again). Returns
+ * the cells it moved.
+ */
+function flyBallistic(t: Terrain, b: Beast, dt: number, held: boolean): number {
+  b.vy = Math.min(BEAST_FALL_MAX, b.vy + GRAVITY * dt);
+  const steps = Math.max(1, Math.ceil((Math.hypot(b.vx, b.vy) * dt) / 2));
+  let moved = 0;
+  for (let s = 0; s < steps; s++) {
+    const nx = b.fx + (b.vx * dt) / steps;
+    const ny = b.fy + (b.vy * dt) / steps;
+    if (solidAt(t, Math.round(nx), Math.round(ny)) || ny >= WORLD_H - 12) {
+      // Hit: it stops, and (rock to hand) holds on there.
+      b.vx = 0;
+      b.vy = 0;
+      b.flung = 0;
+      break;
+    }
+    moved += Math.hypot(nx - b.fx, ny - b.fy);
+    b.fx = nx;
+    b.fy = ny;
+  }
+  if (b.vx !== 0 || b.vy !== 0) b.ang = Math.atan2(b.vy, b.vx);
+  b.x = Math.round(b.fx);
+  b.y = Math.round(b.fy);
+  trailTo(b);
+  void held;
+  return moved;
 }
 
 /** A point onto a burrower's trail (not snapped to the grid). */
@@ -751,12 +900,12 @@ function pushTrailF(b: Beast, x: number, y: number): void {
 
 /** Is it on a floor (rock under its head, open over it)? */
 export function onFloor(t: Terrain, b: Beast): boolean {
-  return b.attached && solidAt(t, b.x, b.y + 1) && !solidAt(t, b.x, b.y - 1);
+  return b.attached && gripAt(t, b.x, b.y + 1) && !solidAt(t, b.x, b.y - 1);
 }
 
 /** Is it hanging from a ceiling (rock over its head, open under it)? */
 export function onCeiling(t: Terrain, b: Beast): boolean {
-  return b.attached && solidAt(t, b.x, b.y - 1) && !solidAt(t, b.x, b.y + 1);
+  return b.attached && gripAt(t, b.x, b.y - 1) && !solidAt(t, b.x, b.y + 1);
 }
 
 /** Falling: down at its speed until it lands on something, then take hold. */

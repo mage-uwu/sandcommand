@@ -4,7 +4,7 @@ import { ACTOR_H, ACTOR_W, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/const
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { NEST_FORAGERS, SEEDER_FORAGE, BEAST_BUILD, CORAL_LIMBS, MILLI_HEAD_WEAK, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { SPRINT_MAX, SPRINT_MIN, SPRINT_MULT, sprintTick, NEST_FORAGERS, SEEDER_FORAGE, BEAST_BUILD, CORAL_LIMBS, MILLI_HEAD_WEAK, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -99,7 +99,7 @@ describe('millipedes in the world', () => {
 
   it('rears up and spits venom at a clone it sees; the venom burns on long after the hit', () => {
     const { world, a } = cave();
-    put(world, 1180, 440, -1);
+    put(world, 1180, 440, -1).flingCd = 1e9; // (no flinging itself at them: spitting's what this is about)
     let reared = false;
     let hit = -1;
     for (let k = 0; k < 30 * 8 && hit < 0; k++) {
@@ -486,6 +486,7 @@ describe('millipedes in the world', () => {
     world.beasts.fill(null);
     const b = put(world, 1150, 440, -1);
     b.spitCd = 1e9;
+    b.flingCd = 1e9; // (it comes on along the ground, for the bot to see it coming)
     bot.body.x = 960;
     bot.body.y = 441 - ACTOR_H;
     bot.body.vx = 0;
@@ -497,6 +498,74 @@ describe('millipedes in the world', () => {
       if (!world.beasts[0] || world.beasts[0].hp < MILLI_HP) hurt = true;
     }
     expect(hurt).toBe(true);
+  });
+
+  describe('on the attack: sprint and fling (all the centipede-likes)', () => {
+    it('a millipede after prey sprints (twice its speed, 4 to 18 seconds), then rests', () => {
+      expect(SPRINT_MULT).toBe(2);
+      const b = newMillipede(room(1000, 400, 1100, 460), 1050, 460, 1);
+      let mult = 0;
+      let run = 0;
+      let best = 0;
+      for (let k = 0; k < 30 * 40; k++) {
+        const m = sprintTick(b, true, 0.5);
+        if (m === 2) {
+          mult++;
+          run++;
+          best = Math.max(best, run);
+        } else run = 0;
+      }
+      expect(best).toBeGreaterThanOrEqual(SPRINT_MIN);
+      expect(best).toBeLessThanOrEqual(SPRINT_MAX);
+      expect(mult).toBeLessThan(30 * 40); // (it rests between)
+      // Off the attack, no sprint.
+      expect(sprintTick(b, false, 0.5)).toBe(1);
+    });
+
+    it('a millipede flings itself off the ground through the air at a clone in reach, and takes hold of them', () => {
+      const { world, a } = cave();
+      const b = put(world, 1040, 440, -1);
+      b.spitCd = 1e9;
+      let flew = false;
+      let top = Infinity;
+      for (let k = 0; k < 30 * 6 && b.coil < 0 && a.alive; k++) {
+        world.step();
+        if (b.flung > 0) flew = true;
+        if (b.flung > 0) top = Math.min(top, b.fy);
+      }
+      expect(flew).toBe(true);
+      expect(top).toBeLessThan(436); // (up off the floor, in an arc)
+      expect(b.coil === a.id || !a.alive).toBe(true);
+    });
+
+    it("an asp flings at prey beyond its strike", () => {
+      const { world, a } = cave();
+      const b = newBeast(world.terrain, BeastKind.Asp, 1060, 440, -1);
+      world.beasts[1] = b;
+      bodyPoints(world.terrain, b, world.beastPts[1]);
+      let flew = false;
+      for (let k = 0; k < 30 * 6 && !flew; k++) {
+        world.step();
+        if (b.flung > 0) flew = true;
+      }
+      expect(flew).toBe(true);
+      void a;
+    });
+
+    it("the map's edge is no wall: a millipede at it turns back rather than climb it", () => {
+      const t = new Terrain();
+      for (let x = 0; x < WORLD_W; x++) for (let y = 500; y < 520; y++) t.mat[y * WORLD_W + x] = Mat.Rock;
+      t.rebuildAllPlanes();
+      const b = newMillipede(t, 6, 499, -1);
+      let highest = b.y;
+      for (let k = 0; k < 300; k++) {
+        crawlStep(t, b);
+        pushTrail(b);
+        highest = Math.min(highest, b.y);
+      }
+      expect(highest).toBeGreaterThan(495); // (never up the edge)
+      expect(b.x).toBeGreaterThan(20); // (back along the ground)
+    });
   });
 
   describe('the gem asp', () => {

@@ -138,6 +138,53 @@ describe('the basilisk', () => {
     expect(b.fy).toBeGreaterThan(560);
   });
 
+  it('nothing to hold (open air, or the map\'s edge, which is no wall): it falls, it never flies', () => {
+    for (const x of [1500, 3]) {
+      const { world, a, b } = deep();
+      a.body.x = x + 300;
+      a.body.y = SURF - ACTOR_H;
+      // Up in the open sky, awake, its prey on the ground off to one side and above-ish.
+      b.fx = x + 0.5;
+      b.fy = 60;
+      b.x = Math.round(b.fx);
+      b.y = 60;
+      b.trail = b.trail.map((v, i) => (i % 2 ? 60 : b.fx));
+      world.hurtBeast(0, 1, 255);
+      b.surfaced = true;
+      b.vx = b.vy = 0;
+      b.flingCd = 1e9; // (no flinging: just what it does with nothing to hold)
+      let y = b.fy;
+      let rose = false;
+      for (let k = 0; k < 30 * 3 && b.fy < SURF - 12; k++) {
+        world.step();
+        if (b.fy < y - 0.5) rose = true;
+        y = b.fy;
+      }
+      expect(rose, `x ${x}`).toBe(false);
+      expect(b.fy, `x ${x}`).toBeGreaterThan(SURF - 20); // (down on the ground)
+      // Straight down, as anything drops: no gliding off toward its prey.
+      expect(Math.abs(b.fx - (x + 0.5)), `x ${x}`).toBeLessThan(4);
+    }
+  });
+
+  it('on the hunt it flings itself at its prey through the air, and sprints', () => {
+    const { world, a, b } = deep();
+    world.hurtBeast(0, 1, 255);
+    for (let k = 0; k < 30 * 20 && !b.surfaced; k++) world.step();
+    a.body.x = b.fx + 180;
+    a.body.y = SURF - ACTOR_H;
+    let flew = false;
+    let sprinted = false;
+    for (let k = 0; k < 30 * 15 && a.alive && !flew; k++) {
+      a.hp = Math.min(a.hp, 100);
+      world.step();
+      if (b.flung > 0) flew = true;
+      if (b.sprint > 0) sprinted = true;
+    }
+    expect(flew || !a.alive).toBe(true);
+    expect(sprinted).toBe(true);
+  });
+
   it('clients see it asleep in the rock, then in its frenzy', () => {
     const inbox: Uint8Array[] = [];
     const { world, a, b } = deep();

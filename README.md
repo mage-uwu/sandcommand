@@ -720,6 +720,24 @@ terrain cell to a pixel).
 - **Bots** turn their guns on a creature coming at them that's nearer than
   whoever they're fighting.
 
+**On the attack: sprint and fling.** All the centipede-likes (millipede,
+asp, basilisk) attack the same way.
+- **Sprint.** After prey, now and then they sprint at twice their hunting
+  pace (`SPRINT_MULT`) for 4 to 18 seconds, then rest 6 before the next.
+- **Fling.** With prey in reach (24 to 120 cells; three times that for a
+  basilisk) and in sight, every few seconds one launches itself off the
+  wall, floor or ceiling it holds, through the air at them (`fling`). It
+  flies under gravity, an arc that lands on them, and takes hold wherever
+  it strikes. A millipede that lands on a clone coils round them, and an
+  asp bites.
+- **Anchored, or falling.** Whatever isn't holding on falls. A basilisk
+  with no rock within reach of its head drops like anything else
+  (`flyBallistic`), keeping only the momentum it had. It no longer glides
+  through the open air after its prey.
+- **The map's edges are no wall.** They stop a creature, but there's
+  nothing there to climb or hang from (`gripAt`). A crawler reaching the
+  edge turns back.
+
 **The gem asp** is the millipede's close cousin, about a clone's size:
 slim and snakelike, banded in jewel-bright gem scales and rock, with a
 fringe of tiny legs. It crawls the same surfaces.

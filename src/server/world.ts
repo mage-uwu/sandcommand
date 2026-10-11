@@ -287,6 +287,11 @@ import {
   VENOM_MAX,
   VENOM_RATE,
   bodyPoints,
+  fling,
+  flingStep,
+  sprintTick,
+  FLING_MIN,
+  FLING_MAX,
   crawlStep,
   fallStep,
   nearestPoint,
@@ -1830,6 +1835,17 @@ export class World {
       b.frozen = 0;
     }
     if (b.lunge > 0) b.lunge--;
+    // On the attack: a sprint now and then, and (prey in reach, in sight) a fling, off whatever it holds, through the air at them.
+    const pace = sprintTick(b, !!tgt, rng.next());
+    if (tgt && b.attached && b.flung === 0 && b.rear === 0 && b.frozen === 0 && b.coilCd === 0 && b.flingCd === 0 && rng.next() < 0.15) {
+      const d = Math.hypot(tgt.cx - hx, tgt.cy - hy);
+      if (d > FLING_MIN && d < FLING_MAX && this.lineClear(hx, hy, tgt.cx, tgt.cy)) {
+        b.fx = b.x + 0.5;
+        b.fy = b.y + 0.5;
+        fling(b, b.fx, b.fy, tgt.cx, tgt.cy);
+        b.attached = false;
+      }
+    }
     // Rearing, and spitting at the top of it.
     if (b.rear > 0) {
       if (++b.rear === MILLI_SPIT_AT && tgt) this.spit(b, hx, hy, tgt);
@@ -1850,7 +1866,14 @@ export class World {
         b.roost = rng.next() < MILLI_ROOST;
       }
     }
-    if (!b.attached) {
+    if (b.flung > 0) {
+      // Flung: through the air at them.
+      flingStep(t, b, DT);
+      if (b.y >= WORLD_H - 14) {
+        this.beasts[k] = null;
+        return;
+      }
+    } else if (!b.attached) {
       // Falling: its body follows its head down (dropping on prey, it steers at them as it falls).
       const y0 = b.y;
       fallStep(t, b, DT, GRAVITY);
@@ -1899,7 +1922,8 @@ export class World {
         turnRound(b);
         b.still = 0;
       }
-      b.owed += (tgt ? (b.lunge > 0 ? MILLI_LUNGE : MILLI_HUNT) : MILLI_CRAWL) * DT;
+      // (The sprint on its hunting pace: the lunge as it spots them is a burst of its own.)
+      b.owed += (tgt ? (b.lunge > 0 ? MILLI_LUNGE : MILLI_HUNT * pace) : MILLI_CRAWL) * DT;
       while (b.owed >= 1 && b.attached) {
         b.owed--;
         // A thin wall ahead with an opening beyond: its mouth bites through (a body-sized hole, up
@@ -2028,6 +2052,14 @@ export class World {
     b.lift += ((b.rear > 0 ? 1 : 0) - b.lift) * 0.4;
     if (b.lift < 0.01) b.lift = 0;
     if (b.lunge > 0) b.lunge--;
+    // On the attack: a sprint now and then, and a fling through the air at them (from further off than its strike).
+    const pace = sprintTick(b, !!tgt, rng.next());
+    if (tgt && b.attached && b.flung === 0 && b.rear === 0 && b.coilCd === 0 && b.flingCd === 0 && dist > ASP_TRIGGER && dist < FLING_MAX && rng.next() < 0.15 && this.lineClear(hx, hy, tgt.cx, tgt.cy)) {
+      b.fx = b.x + 0.5;
+      b.fy = b.y + 0.5;
+      fling(b, b.fx, b.fy, tgt.cx, tgt.cy);
+      b.attached = false;
+    }
     // Nothing about: wander a while, then curl up as a gem (on a floor: it goes on until it's on one).
     if (!tgt && b.attached && b.rear === 0 && --b.wander <= 0 && onFloor(t, b)) {
       b.gem = true;
@@ -2036,7 +2068,13 @@ export class World {
       bodyPoints(t, b, pts);
       return;
     }
-    if (!b.attached) {
+    if (b.flung > 0) {
+      flingStep(t, b, DT);
+      if (b.y >= WORLD_H - 14) {
+        this.beasts[k] = null;
+        return;
+      }
+    } else if (!b.attached) {
       const y0 = b.y;
       fallStep(t, b, DT, GRAVITY);
       const y1 = b.y;
@@ -2068,7 +2106,7 @@ export class World {
         turnRound(b);
         b.still = 0;
       }
-      b.owed += (b.lunge > 0 ? ASP_STRIKE : tgt ? ASP_HUNT : ASP_CRAWL) * DT;
+      b.owed += (b.lunge > 0 ? ASP_STRIKE : tgt ? ASP_HUNT * pace : ASP_CRAWL) * DT;
       while (b.owed >= 1 && b.attached) {
         b.owed--;
         crawlStep(t, b);
@@ -2326,6 +2364,10 @@ export class World {
         const via = lair ? this.basiliskRoute(b, prey.x, prey.y) : null;
         gx = via ? via.x : prey.x;
         gy = via ? via.y : prey.y;
+        // A sprint now and then; and, its prey in reach and in sight, it flings itself at them, off whatever it holds.
+        speed *= sprintTick(b, true, rng.next());
+        const d = Math.hypot(prey.x - b.fx, prey.y - b.fy);
+        if (b.flung === 0 && b.flingCd === 0 && d > FLING_MIN * 3 && d < FLING_MAX * 2.5 && rng.next() < 0.1 && this.lineClear(b.fx, b.fy, prey.x, prey.y)) fling(b, b.fx, b.fy, prey.x, prey.y, 3);
       } else if (--b.frenzy <= 0) {
         // Nothing left: down into the deep, to sleep.
         b.frenzy = 0;
