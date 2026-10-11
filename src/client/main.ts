@@ -363,7 +363,7 @@ function assistTargets(g: Game): AssistTarget[] {
   // spot) and mid-body. Never one lying in wait, frozen or curled up as a gem: the assist
   // mustn't give its camouflage away.
   for (const [slot, v] of g.beastViews) {
-    if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp) || v.frozen || v.gem) continue;
+    if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp && v.kind !== BeastKind.Basilisk) || v.frozen || v.gem) continue;
     const n = v.cur.length >> 1;
     if (n < 2) continue;
     const vx = (v.cur[0] - v.prev[0]) * TICK_RATE;

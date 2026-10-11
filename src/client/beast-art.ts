@@ -656,3 +656,156 @@ export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: n
     }
   }
 }
+
+/** A basilisk's camouflage sections: a great GEMM vein, dripstone, coral grown over it. */
+const BasCamo = { Vein: 0, Drip: 1, Coral: 2 } as const;
+const basCamoOf = (seed: number, i: number) => {
+  let at = 1;
+  for (let sec = 0; sec < 12; sec++) {
+    const len = 2 + Math.floor(hsh(seed, sec, 7) * 2);
+    if (i < at + len) return Math.floor(hsh(seed, sec, 8) * 3);
+    at += len;
+  }
+  return BasCamo.Drip;
+};
+const BAS_ROCK = ['#2e2a34', '#3a3540', '#46404c', '#524a56'];
+const DRIP = ['#6e6658', '#827a6a', '#988e7c', '#ada290'];
+const BAS_CORAL = ['#c83c6c', '#e8507e', '#ff7aa0', '#ffb0c8'];
+
+/**
+ * A basilisk, in pixels: three times a millipede, its plated body in long
+ * sections, each dressed as something the caves are made of: a great
+ * **GEMM vein** (crystal bands of pink, turquoise or emerald through dark
+ * rock, glinting), **dripstone** (layered pale stone, stalactite spikes
+ * hanging off its underside) or **coral** grown over it (lumpy, pored, its
+ * polyps glowing). Its head is a blunt wedge of plate. Asleep (`frozen`)
+ * it has no outline and no eye: a seam in the cave wall. Awake, a dim
+ * amber eye; in its frenzy its eyes burn red and its maw gapes, ringed
+ * with fangs, the way it's going.
+ */
+export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number[], seed: number, frozen: boolean, frenzy: boolean, now: number): void {
+  const n = pts.length >> 1;
+  if (n < 2) return;
+  const P = (i: number) => Math.max(0, Math.min(n - 1, i));
+  const gem = GEMS[seed % 3];
+  const R0 = 11;
+  for (let i = n - 1; i >= 0; i--) {
+    const x = pts[i * 2];
+    const y = pts[i * 2 + 1];
+    let tx = pts[P(i - 1) * 2] - pts[P(i + 1) * 2];
+    let ty = pts[P(i - 1) * 2 + 1] - pts[P(i + 1) * 2 + 1];
+    const l = Math.hypot(tx, ty) || 1;
+    tx /= l;
+    ty /= l;
+    const nx = -ty;
+    const ny = tx;
+    const w = R0 * (i === 0 ? 1.0 : 1 - (0.4 * i) / (n - 1));
+    const len = i === 0 ? 12 : 10;
+    const camo = i === 0 ? -1 : basCamoOf(seed, i);
+    const R = Math.ceil(Math.max(w, len)) + 1;
+    for (let py = Math.floor(y - R); py <= Math.ceil(y + R); py++) {
+      for (let px = Math.floor(x - R); px <= Math.ceil(x + R); px++) {
+        const dx = px + 0.5 - x;
+        const dy = py + 0.5 - y;
+        const u = dx * tx + dy * ty;
+        const v = dx * nx + dy * ny;
+        // The head a blunt wedge; the body plates ovals.
+        const e = i === 0 ? (Math.max(0, u) / len) ** 2 * 0.8 + (Math.min(0, u) / len) ** 2 + (v / (w * (1 - Math.max(0, u) / (len * 1.6)))) ** 2 : (u / len) ** 2 + (v / w) ** 2;
+        if (e > 1) continue;
+        const h = hsh(px, py, seed);
+        let c: string;
+        if (e > 0.82 && !frozen) c = '#120e14';
+        else if (camo === BasCamo.Vein) {
+          // A seam of crystal wandering through dark rock, a second thinner one, and clusters of facets along them.
+          const seam = Math.abs(v - w * 0.35 * Math.sin(u * 0.28 + seed + i * 1.7));
+          const seam2 = Math.abs(v + w * 0.45 - w * 0.2 * Math.sin(u * 0.5 + seed * 2));
+          const cluster = hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 11) > 0.82 && seam < w * 0.55;
+          if (seam < 1.6 || seam2 < 0.8 || cluster) c = h > 0.88 ? gem[2] : (px + py) % 3 === 0 ? gem[1] : gem[0];
+          else c = BAS_ROCK[Math.floor(h * 4)];
+        } else if (camo === BasCamo.Drip) {
+          const layer = Math.floor((py + Math.sin(px * 0.3 + seed) * 1.5) / 2) % 4;
+          c = DRIP[(layer + (h > 0.85 ? 1 : 0)) % 4];
+        } else if (camo === BasCamo.Coral) {
+          c = h > 0.88 ? BAS_CORAL[3] : BAS_CORAL[Math.floor(hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 5) * 3)];
+          if (h < 0.07) c = '#5a1830'; // (pores)
+        } else {
+          // The head: dark plate, lighter along its crest.
+          c = v < -w * 0.35 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(h * 2)];
+        }
+        ctx.fillStyle = c;
+        ctx.fillRect(px, py, 1, 1);
+      }
+    }
+    // Dripstone: stalactites hanging from its underside (straight down, whichever way it lies).
+    if (camo === BasCamo.Drip) {
+      for (let s = 0; s < 3; s++) {
+        const ox = x + tx * (s - 1) * len * 0.6;
+        const sl = 3 + Math.floor(hsh(i, s, seed) * 6);
+        const by = y + w * 0.7;
+        ctx.fillStyle = DRIP[1];
+        for (let k = 0; k < sl; k++) ctx.fillRect(Math.round(ox - (k < sl / 2 ? 1 : 0)), Math.round(by + k), k < sl / 2 ? 2 : 1, 1);
+        ctx.fillStyle = DRIP[3];
+        ctx.fillRect(Math.round(ox), Math.round(by), 1, 1);
+      }
+    }
+    // Coral: polyps on its back, glowing at the tips.
+    if (camo === BasCamo.Coral) {
+      for (let s = 0; s < 3; s++) {
+        const ox = x + tx * (s - 1) * len * 0.55 - nx * w * 0.85;
+        const oy = y + ty * (s - 1) * len * 0.55 - ny * w * 0.85;
+        ctx.fillStyle = BAS_CORAL[1];
+        ctx.fillRect(Math.round(ox), Math.round(oy) - 1, 1, 2);
+        ctx.fillStyle = frozen ? BAS_CORAL[2] : (Math.floor(now / 300) + s + i) % 3 === 0 ? '#fff4b0' : BAS_CORAL[3];
+        ctx.fillRect(Math.round(ox), Math.round(oy) - 2, 1, 1);
+      }
+    }
+    if (i === 0 && !frozen) {
+      // Eyes, either side of its crest; in its frenzy, red and burning, and its maw open, fangs round it.
+      for (const side of [-1, 1]) {
+        const ex = Math.round(x + tx * 3 + nx * side * w * 0.45);
+        const ey = Math.round(y + ty * 3 + ny * side * w * 0.45);
+        if (frenzy) {
+          ctx.fillStyle = `rgba(255,40,30,${0.3 + 0.2 * Math.sin(now / 80)})`;
+          ctx.fillRect(ex - 2, ey - 2, 5, 5);
+          ctx.fillStyle = '#ff3a2a';
+          ctx.fillRect(ex, ey, 2, 2);
+          ctx.fillStyle = '#ffe0a0';
+          ctx.fillRect(ex, ey, 1, 1);
+        } else {
+          ctx.fillStyle = '#c08030';
+          ctx.fillRect(ex, ey, 1, 1);
+        }
+      }
+      if (frenzy) {
+        const mx = x + tx * (len - 2);
+        const my = y + ty * (len - 2);
+        const gape = 3 + Math.sin(now / 60) * 1.2;
+        for (let py = Math.floor(my - gape - 1); py <= Math.ceil(my + gape + 1); py++) {
+          for (let px = Math.floor(mx - gape - 1); px <= Math.ceil(mx + gape + 1); px++) {
+            const d = Math.hypot(px + 0.5 - mx, py + 0.5 - my);
+            if (d > gape + 0.5) continue;
+            ctx.fillStyle = d > gape - 1 ? '#f4ecd8' : d > gape - 2 ? '#5a1010' : '#1a0406';
+            ctx.fillRect(px, py, 1, 1);
+          }
+        }
+      }
+    }
+  }
+}
+
+/** A chunk of a dead basilisk, tumbling: plate dressed as its section was (vein, dripstone, coral). */
+export function drawBasiliskGib(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, seed: number, i: number): void {
+  const tx = Math.cos(a);
+  const ty = Math.sin(a);
+  const camo = i === 0 ? -1 : basCamoOf(seed, i);
+  const gem = GEMS[seed % 3];
+  for (let v = -4; v <= 4; v++) {
+    for (let u = -6; u <= 6; u++) {
+      if ((u / 6.5) ** 2 + (v / 4.5) ** 2 > 1) continue;
+      const h = hsh(u, v, seed + i);
+      const c = camo === BasCamo.Vein ? (Math.abs(u + v) < 2 ? gem[h > 0.7 ? 1 : 0] : BAS_ROCK[Math.floor(h * 4)]) : camo === BasCamo.Drip ? DRIP[Math.floor(h * 4)] : camo === BasCamo.Coral ? BAS_CORAL[Math.floor(h * 3)] : BAS_ROCK[1 + Math.floor(h * 2)];
+      ctx.fillStyle = c;
+      ctx.fillRect(Math.round(x + u * tx - v * ty), Math.round(y + u * ty + v * tx), 1, 1);
+    }
+  }
+}

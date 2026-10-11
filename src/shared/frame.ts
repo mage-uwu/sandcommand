@@ -78,6 +78,8 @@ export interface BeastState {
   frozen: boolean;
   coiled: boolean;
   gem: boolean;
+  /** A basilisk in its killing frenzy. */
+  frenzy: boolean;
   pts: number[];
 }
 
@@ -579,7 +581,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             y += ((r.u8() << 24) >> 24) / BEAST_SCALE;
             pts.push(x, y);
           }
-          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, gem: (f & 8) !== 0, pts });
+          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, gem: (f & 8) !== 0, frenzy: (f & 16) !== 0, pts });
         }
         h.beasts(list);
         break;

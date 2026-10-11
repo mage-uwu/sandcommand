@@ -245,6 +245,16 @@ export class Sfx {
     this.burst(v, 0.05, big ? 0.5 : 0.3, 'highpass', big ? 3500 : 6000, 0.8, 0.5);
   }
 
+  /** A basilisk waking in its frenzy: a deep grinding roar, rock in its throat, that carries a long way. */
+  roar(x: number, y: number): void {
+    const v = this.voice(x, y, 0.8, 2.2, 2.5, true);
+    if (!v) return;
+    this.tone(v, 0, 1.8, 'sawtooth', 70, 38, 0.6);
+    this.tone(v, 0.05, 1.6, 'square', 104, 52, 0.25);
+    this.burst(v, 0, 1.9, 'lowpass', 900, 1.2, 0.8, 240);
+    this.burst(v, 0.3, 1.2, 'bandpass', 2200, 2, 0.3, 700);
+  }
+
   /** Seeders on the wing: a rasping, wavering buzz. */
   buzz(x: number, y: number): void {
     const v = this.voice(x, y, 0.3, 0.7);

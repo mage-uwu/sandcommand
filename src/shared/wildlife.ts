@@ -23,7 +23,7 @@ import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -195,13 +195,64 @@ export const CORAL_BURST = 0.45;
 /** The limbs coral takes hold in (body.ts Part: the gun arm, the off arm, the legs), in R_CORAL order. */
 export const CORAL_LIMBS = [2, 3, 4, 5] as const;
 
+/**
+ * The **basilisk**: the millipede's monstrous kin, three times its scale,
+ * plated in what the caves are made of (great GEMM veins, dripstone
+ * spikes, coral grown over it), and very hard to kill. It doesn't crawl:
+ * it bores through the rock wherever it means to go (never what won't
+ * yield: bedrock, cement, iron).
+ *
+ * It holds very still. It hibernates for minutes at a time (up to four),
+ * stirs, shifts a little through the rock, and sleeps again: a seam in the
+ * cave wall nobody looks at twice. Disturb it (come close, shoot it, blast
+ * near it) and it wakes in a killing frenzy. Its first instinct is to bore
+ * straight for the surface; up there it hunts anything it can see,
+ * leaping through the ground like a sandworm, and whatever its jaws close
+ * on dies. With nothing left in sight for a while, it dives back down
+ * into the deep and sleeps.
+ */
+export const BASILISK_SEGS = 15;
+export const BASILISK_GAP = 12;
+export const BASILISK_R = MILLI_R * 3;
+export const BASILISK_HP = 15000;
+/** Hibernation: how long it holds still, the least and the most (ticks: up to four minutes); how far it shifts when it stirs between (cells). */
+export const BASILISK_SLEEP_MIN = 30 * 90;
+export const BASILISK_SLEEP_MAX = 30 * 240;
+export const BASILISK_STIR = 90;
+/** What wakes it: a clone this near its head (with a line on it), or this near any of its body. */
+export const BASILISK_WAKE = 110;
+export const BASILISK_TOUCH = 40;
+/** Boring speeds (cells/s): stirring in its sleep, surfacing, hunting; how fast it turns (radians/s). */
+export const BASILISK_CREEP = 22;
+export const BASILISK_RISE = 70;
+export const BASILISK_HUNT = 115;
+export const BASILISK_TURN = 3.2;
+/** The tunnel it bores (radius), how often (cells travelled), and the rubble it throws (grains a bite). */
+export const BASILISK_BORE = 9;
+export const BASILISK_BORE_EVERY = 4;
+/** The frenzy: how far it sees prey up top (with a line on it, from its head or the surface right over it) and feels it (through the ground, anywhere near); how long it hunts on with nothing in sight before it dives. */
+export const BASILISK_SENSE = 520;
+export const BASILISK_FEEL = 220;
+export const BASILISK_CALM = 30 * 25;
+/** How deep it dives to sleep again (cells under the surface). */
+export const BASILISK_DEEP = 160;
+/** Its jaws: reach past its girth, harm to a clone (death), to a vehicle's hull (a share of a tank's), ticks between bites. */
+export const BASILISK_JAWS = 6;
+export const BASILISK_BITE = 400;
+export const BASILISK_CRUSH = 0.3;
+export const BASILISK_BITE_CD = 12;
+
 /** Each kind's build: body points, trail cells between them, hit radius, full health. */
 export const BEAST_BUILD = [
   { segs: MILLI_SEGS, gap: MILLI_GAP, r: MILLI_R, hp: MILLI_HP },
   { segs: ASP_SEGS, gap: ASP_GAP, r: ASP_R, hp: ASP_HP },
   { segs: 2, gap: 1, r: SEEDER_R, hp: SEEDER_HP },
   { segs: 1, gap: 1, r: NEST_R, hp: NEST_HP },
+  { segs: BASILISK_SEGS, gap: BASILISK_GAP, r: BASILISK_R, hp: BASILISK_HP },
 ] as const;
+
+/** Does this kind bore through the rock (no crawl: its head goes where it steers)? */
+export const burrows = (kind: number) => kind === BeastKind.Basilisk;
 
 /** Does this kind fly (no crawl, no trail: it's where it is)? */
 export const flies = (kind: number) => kind === BeastKind.Seeder;
@@ -279,6 +330,11 @@ export interface Beast {
   loopY0: number;
   loopY1: number;
   escape: number;
+  /** A burrower's heading (radians); its frenzy (ticks of hunting left; 0 calm) and whether it's reached the surface yet; cells bored since its last bite of rock. */
+  ang: number;
+  frenzy: number;
+  surfaced: boolean;
+  bored: number;
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
@@ -335,7 +391,18 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     loopY0: y,
     loopY1: y,
     escape: 0,
+    ang: dir < 0 ? Math.PI : 0,
+    frenzy: 0,
+    surfaced: false,
+    bored: 0,
   };
+  if (burrows(kind)) {
+    // Lying along the cave floor, its body trailing out behind its head (half sunk in the rock, like a seam of it).
+    b.trail = [];
+    for (let k = 0; k <= build.segs * build.gap; k++) b.trail.push(x - dir * k, y - 2);
+    b.fy = y - 2;
+    return b;
+  }
   if (flies(kind) || rooted(kind)) {
     b.trail = [x, y];
     if (rooted(kind)) anchorNest(t, b);
@@ -595,6 +662,65 @@ export function resetLoop(b: Beast): void {
   b.loopY0 = b.loopY1 = b.y;
 }
 
+/** Can a basilisk bore through this cell (nothing it won't yield: fixed, adamant, tough)? */
+export const boreable = (t: Terrain, x: number, y: number) => {
+  if (x < 2 || y < 2 || x >= WORLD_W - 2 || y >= WORLD_H - 10) return false;
+  const m = t.get(x, y);
+  return !(MAT_FIXED[m] || MAT_ADAMANT[m] || MAT_TOUGH[m]);
+};
+
+/**
+ * One tick of a burrower boring toward (gx, gy) at `speed` (cells/s): it
+ * turns toward it (BASILISK_TURN), and where the way ahead won't yield it
+ * swings aside to find a way round. Out in the open air with nothing to
+ * hold, it arcs back down into the ground (a leap). Returns the cells it
+ * moved (for the bores behind it).
+ */
+export function boreStep(t: Terrain, b: Beast, gx: number, gy: number, speed: number, dt: number): number {
+  let want = Math.atan2(gy - b.fy, gx - b.fx);
+  // In the open, far from any rock: it falls back toward the ground.
+  const hx = Math.round(b.fx);
+  const hy = Math.round(b.fy);
+  let held = false;
+  for (let k = 2; k <= 10 && !held; k += 2) if (solidAt(t, hx, hy + k) || solidAt(t, hx + k, hy) || solidAt(t, hx - k, hy) || solidAt(t, hx, hy - k)) held = true;
+  if (!held && gy < b.fy + 40) want = Math.PI / 2;
+  // Turn toward it (the short way round), at its rate.
+  let d = ((want - b.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  const max = BASILISK_TURN * dt;
+  b.ang += Math.max(-max, Math.min(max, d));
+  // Whatever won't yield, dead ahead: swing aside (the way that's open), and hold there.
+  const look = BASILISK_BORE + 2;
+  for (let tries = 0; tries < 6; tries++) {
+    const ax = Math.round(b.fx + Math.cos(b.ang) * look);
+    const ay = Math.round(b.fy + Math.sin(b.ang) * look);
+    if (boreable(t, ax, ay)) break;
+    d = tries % 2 === 0 ? 0.6 * (tries + 1) : -0.6 * (tries + 1);
+    b.ang += d;
+  }
+  const step = speed * dt;
+  const nx = b.fx + Math.cos(b.ang) * step;
+  const ny = b.fy + Math.sin(b.ang) * step;
+  if (!boreable(t, Math.round(nx), Math.round(ny))) return 0;
+  b.fx = nx;
+  b.fy = ny;
+  b.x = Math.round(nx);
+  b.y = Math.round(ny);
+  // Its trail, a point a cell (however far it went this tick).
+  const lx = b.trail[0];
+  const ly = b.trail[1];
+  const dist = Math.hypot(b.fx - lx, b.fy - ly);
+  const n = Math.floor(dist);
+  for (let k = 1; k <= n; k++) pushTrailF(b, lx + ((b.fx - lx) * k) / dist, ly + ((b.fy - ly) * k) / dist);
+  return step;
+}
+
+/** A point onto a burrower's trail (not snapped to the grid). */
+function pushTrailF(b: Beast, x: number, y: number): void {
+  b.trail.unshift(x, y);
+  const n = BEAST_BUILD[b.kind].segs * BEAST_BUILD[b.kind].gap * 2 + 2;
+  if (b.trail.length > n) b.trail.length = n;
+}
+
 /** Is it on a floor (rock under its head, open over it)? */
 export function onFloor(t: Terrain, b: Beast): boolean {
   return b.attached && solidAt(t, b.x, b.y + 1) && !solidAt(t, b.x, b.y - 1);
@@ -662,6 +788,22 @@ export function bodyPoints(t: Terrain, b: Beast, out: number[]): number[] {
   const tr = b.trail;
   const n = tr.length >> 1;
   const { segs, gap } = BEAST_BUILD[b.kind];
+  if (burrows(b.kind)) {
+    // Bored through the rock: its body is its tunnel, the trail as it is (smoothed), centred, no lift.
+    for (let s = 0; s < segs; s++) {
+      const k = Math.min(n - 1, s * gap);
+      let x = 0;
+      let y = 0;
+      let w = 0;
+      for (let j = Math.max(0, k - 3); j <= Math.min(n - 1, k + 3); j++) {
+        x += tr[j * 2];
+        y += tr[j * 2 + 1];
+        w++;
+      }
+      out.push(x / w + 0.5, y / w + 0.5);
+    }
+    return out;
+  }
   if (b.gem) {
     // Curled up as a gem: wound tight in a spiral, sitting on the floor over its head's cell.
     const up = openWay(t, b.x, b.y);

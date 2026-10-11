@@ -163,7 +163,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { MAT_ADAMANT, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -332,6 +332,28 @@ import {
   nestCentre,
   newSeeder,
   hitScale,
+  BASILISK_BITE,
+  BASILISK_BITE_CD,
+  BASILISK_BORE,
+  BASILISK_BORE_EVERY,
+  BASILISK_CALM,
+  BASILISK_CREEP,
+  BASILISK_CRUSH,
+  BASILISK_DEEP,
+  BASILISK_FEEL,
+  BASILISK_HP,
+  BASILISK_HUNT,
+  BASILISK_JAWS,
+  BASILISK_R,
+  BASILISK_RISE,
+  BASILISK_SENSE,
+  BASILISK_SLEEP_MAX,
+  BASILISK_SLEEP_MIN,
+  BASILISK_STIR,
+  BASILISK_TOUCH,
+  BASILISK_WAKE,
+  boreStep,
+  boreable,
   loopWatch,
   resetLoop,
 } from '../shared/wildlife.ts';
@@ -522,6 +544,8 @@ export class World {
   /** Is there wildlife on this world at all (the tutorial has none). */
   wildlife = true;
   private beastSpawnAt = 90;
+  /** When a basilisk may next come up (one at a time; a long while after the last is killed). */
+  private basiliskAt = 0;
   private readonly beastRng = new Rng(0xbea57);
   /** The valley's calm (no wildlife there: it's quiet, for now), and the venom list as last sent. */
   private calm: { x0: number; x1: number; y0: number } | null = null;
@@ -1590,6 +1614,9 @@ export class World {
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
       const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
       if (nests < (this.caves ? NESTS_CAVES : NESTS_PLAIN)) this.spawnNest();
+      else if (this.tick >= this.basiliskAt && !this.beasts.some((b) => b?.kind === BeastKind.Basilisk)) {
+        if (this.spawnBasilisk()) this.basiliskAt = Infinity;
+      }
       else if (this.beasts.filter((b) => b && (b.kind === BeastKind.Millipede || b.kind === BeastKind.Asp)).length < want) this.spawnBeast();
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
@@ -1598,6 +1625,7 @@ export class World {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
         else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
         else if (b.kind === BeastKind.Nest) this.stepNest(k, b);
+        else if (b.kind === BeastKind.Basilisk) this.stepBasilisk(k, b);
         else this.stepMillipede(k, b);
       }
     }
@@ -1964,6 +1992,182 @@ export class World {
     }
   }
 
+  /** A basilisk, hibernating down in the caves: on a deep, roomy floor (it's huge), far from everyone. */
+  private spawnBasilisk(): boolean {
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return false;
+    const t = this.terrain;
+    const rng = this.beastRng;
+    for (let n = 0; n < 400; n++) {
+      const x = 200 + rng.int(WORLD_W - 400);
+      const surf = t.surfaceY(x);
+      let y = surf + 130 + rng.int(Math.max(1, WORLD_H - surf - 160));
+      if (y >= WORLD_H - 20 || t.isSolid(x, y)) continue;
+      while (y < WORLD_H - 14 && !t.isSolid(x, y + 1)) y++;
+      if (y >= WORLD_H - 14 || y < surf + 120 || t.wet(x, y)) continue;
+      let room = 0;
+      while (room < 16 && !t.isSolid(x, y - room - 1)) room++;
+      if (room < 16) continue;
+      const c = this.calm;
+      if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
+      if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 700)) continue;
+      const b = newBeast(t, BeastKind.Basilisk, x, y - 8, rng.next() < 0.5 ? -1 : 1);
+      b.seed = rng.int(256);
+      b.frozen = BASILISK_SLEEP_MIN + rng.int(BASILISK_SLEEP_MAX - BASILISK_SLEEP_MIN);
+      this.beasts[slot] = b;
+      bodyPoints(t, b, this.beastPts[slot]);
+      return true;
+    }
+    return false;
+  }
+
+  /** Disturbed: a basilisk wakes in a killing frenzy (up top already, it hunts at once). */
+  private enrage(b: Beast): void {
+    if (b.kind !== BeastKind.Basilisk) return;
+    if (b.frenzy === 0) b.surfaced = b.fy <= this.terrain.surfaceY(Math.round(b.fx)) + 4;
+    b.frozen = 0;
+    b.frenzy = BASILISK_CALM;
+    b.still = 0;
+  }
+
+  /** Has anything come near enough a sleeping basilisk to wake it? */
+  private basiliskDisturbed(b: Beast, pts: number[]): boolean {
+    for (const p of this.players) {
+      if (!p || !p.alive || p.pilot >= 0) continue;
+      if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) < BASILISK_WAKE && this.lineClear(pts[0], pts[1], p.cx, p.cy)) return true;
+      if (nearestPoint(pts, p.cx, p.cy).d < BASILISK_TOUCH) return true;
+    }
+    return false;
+  }
+
+  /** What a frenzied basilisk goes for: the nearest it can see from its head (or feel, near enough, through the ground). A clone in a vehicle: the vehicle. */
+  private basiliskPrey(hx: number, hy: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+    for (const p of this.players) {
+      if (!p || !p.alive || p.pilot >= 0) continue;
+      const tk = p.tank >= 0 ? this.tanks[p.tank] : null;
+      const x = tk ? tk.x + tankW(tk) / 2 : p.cx;
+      const y = tk ? tankCoreY(tk) : p.cy;
+      const d = Math.hypot(x - hx, y - hy);
+      if (d >= bestD || d > BASILISK_SENSE) continue;
+      // (Just under the ground, it watches the surface over it, as a shark the water.)
+      const sy = Math.min(hy, this.terrain.surfaceY(Math.round(hx)) - 3);
+      if (d > BASILISK_FEEL && !this.lineClear(hx, hy, x, y) && !this.lineClear(hx, sy, x, y)) continue;
+      bestD = d;
+      best = { x, y };
+    }
+    return best;
+  }
+
+  /**
+   * One tick of a basilisk. Hibernating, it holds still (BASILISK_SLEEP_*),
+   * waking at once if anything comes near (or hurts it: hurtBeast); its
+   * sleep over, it stirs, shifts a little through the rock and sleeps again.
+   * Frenzied, it bores for the surface first; up top it hunts whatever it
+   * sees or feels, and its jaws kill what they close on. With nothing about
+   * for a while (BASILISK_CALM) it dives deep (BASILISK_DEEP) and sleeps.
+   */
+  private stepBasilisk(k: number, b: Beast): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const pts = this.beastPts[k];
+    if (b.coilCd > 0) b.coilCd--;
+    const surf = t.surfaceY(Math.round(b.fx));
+    let gx = b.fx;
+    let gy = b.fy;
+    let speed = 0;
+    if (b.frenzy === 0) {
+      if ((this.tick + k) % 10 === 0 && this.basiliskDisturbed(b, pts)) this.enrage(b);
+      else if (b.frozen > 0) {
+        b.frozen--;
+        return; // (very still)
+      }
+    }
+    if (b.frenzy === 0) {
+      // Stirring (or diving to sleep): a short way through the rock, then sleep.
+      if (b.still === 0) {
+        b.lastX = Math.max(80, Math.min(WORLD_W - 80, b.fx + (rng.next() - 0.5) * 2 * BASILISK_STIR));
+        b.lastY = Math.max(surf + BASILISK_DEEP * 0.6, Math.min(WORLD_H - 40, b.fy + (rng.next() - 0.3) * BASILISK_STIR));
+      }
+      gx = b.lastX;
+      gy = b.lastY;
+      speed = b.fy < surf + BASILISK_DEEP * 0.5 ? BASILISK_RISE : BASILISK_CREEP;
+      if (Math.hypot(gx - b.fx, gy - b.fy) < 10 || ++b.still > 30 * 15) {
+        b.still = 0;
+        b.frozen = BASILISK_SLEEP_MIN + rng.int(BASILISK_SLEEP_MAX - BASILISK_SLEEP_MIN);
+      }
+    } else if (!b.surfaced) {
+      // Its first instinct: up, the straightest way it can bore, to the surface.
+      gx = b.fx + Math.cos(b.ang) * 6;
+      gy = surf - 12;
+      speed = BASILISK_RISE;
+      if (b.fy <= surf + 3) b.surfaced = true;
+    } else {
+      const prey = this.basiliskPrey(b.fx, b.fy);
+      speed = BASILISK_HUNT;
+      if (prey) {
+        b.frenzy = BASILISK_CALM;
+        gx = prey.x;
+        gy = prey.y;
+      } else if (--b.frenzy <= 0) {
+        // Nothing left: down into the deep, to sleep.
+        b.frenzy = 0;
+        b.still = 1;
+        b.lastX = b.fx;
+        b.lastY = Math.min(WORLD_H - 40, surf + BASILISK_DEEP);
+        b.surfaced = false;
+      } else {
+        // Prowling, just under the ground, the way it was going.
+        gx = b.fx + (Math.cos(b.ang) >= 0 ? 60 : -60);
+        gy = surf + 18;
+      }
+    }
+    if (speed > 0) {
+      const moved = boreStep(t, b, gx, gy, speed, DT);
+      b.bored += moved;
+      if (b.bored >= BASILISK_BORE_EVERY) {
+        b.bored = 0;
+        // (Only a bite where there's rock to take.)
+        const ax = b.fx + Math.cos(b.ang) * BASILISK_BORE * 0.5;
+        const ay = b.fy + Math.sin(b.ang) * BASILISK_BORE * 0.5;
+        if (t.isSolid(Math.round(ax), Math.round(ay)) || t.isSolid(Math.round(b.fx), Math.round(b.fy + BASILISK_BORE - 2)) || t.isSolid(Math.round(b.fx), Math.round(b.fy - BASILISK_BORE + 2))) {
+          // (Near anything that won't yield, a soft bite only: its jaws never so much as chip cement or bedrock.)
+          let hard = false;
+          for (let dy = -BASILISK_BORE - 2; dy <= BASILISK_BORE + 2 && !hard; dy += 2) {
+            for (let dx = -BASILISK_BORE - 2; dx <= BASILISK_BORE + 2; dx += 2) {
+              if (!boreable(t, Math.round(ax + dx), Math.round(ay + dy))) {
+                hard = true;
+                break;
+              }
+            }
+          }
+          this.carve(ax, ay, BASILISK_BORE, hard ? 0 : BASILISK_BORE, 3);
+        }
+      }
+    }
+    bodyPoints(t, b, pts);
+    // Its jaws.
+    if (b.frenzy > 0 && b.coilCd === 0) {
+      const reach = BASILISK_R + BASILISK_JAWS;
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
+        if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > reach) continue;
+        this.damage(p, BASILISK_BITE, NO_OWNER, W_BASILISK);
+        b.coilCd = BASILISK_BITE_CD;
+      }
+      for (let s = 0; s < this.tanks.length; s++) {
+        const tk = this.tanks[s];
+        if (!tk) continue;
+        const cx = Math.max(tk.x, Math.min(tk.x + tankW(tk), pts[0]));
+        const cy = Math.max(tk.y, Math.min(tk.y + tankH(tk), pts[1]));
+        if (Math.hypot(cx - pts[0], cy - pts[1]) > reach) continue;
+        this.hurtTankPart(s, TankPart.Hull, TANK_HP * BASILISK_CRUSH, NO_OWNER);
+        b.coilCd = BASILISK_BITE_CD;
+      }
+    }
+  }
+
   /** A coral nest, grown on a cave roof (or a wall) down in the caves, with room under it, far from any clone. */
   private spawnNest(): boolean {
     const slot = this.beasts.indexOf(null);
@@ -2282,9 +2486,11 @@ export class World {
     b.frozen = 0;
     b.gem = false;
     if (b.kind === BeastKind.Nest) b.alarm = 30 * 8; // (hurt: it senses danger, whoever it is)
+    if (b.kind === BeastKind.Basilisk) this.enrage(b);
     if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
     if (b.hp > 0) return;
     this.beasts[k] = null;
+    if (b.kind === BeastKind.Basilisk) this.basiliskAt = this.tick + BASILISK_RESPAWN;
     const w = this.broadcast;
     w.u8(R_BEAST_DIE);
     w.u8(k);
@@ -2298,7 +2504,7 @@ export class World {
       if (!this.beasts[k]) continue;
       const { d, i } = nearestPoint(this.beastPts[k], x, y);
       const kind = this.beasts[k]!.kind;
-      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : 1) * hitScale(kind, i) * (1 - d / r), by);
+      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : kind === BeastKind.Basilisk ? 0.6 : 1) * hitScale(kind, i) * (1 - d / r), by);
     }
   }
 
@@ -2990,7 +3196,14 @@ export class World {
       const armoured = kind === BeastKind.Millipede;
       // (Where it struck: a millipede's head is its weak spot.)
       const scale = hitScale(kind, nearestPoint(this.beastPts[bk], x, y).i);
-      this.hurtBeast(bk, (armoured ? (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0) : def.damage) * scale, owner);
+      // A basilisk's plates: half what gets through them, next to nothing what doesn't; a shaped charge a small share.
+      const dmg =
+        kind === BeastKind.Basilisk
+          ? (energy > TANK_INTEGRITY ? def.damage * 0.5 : def.damage * 0.05) + (def.antiArmor ? BASILISK_HP * def.antiArmor * 0.15 : 0)
+          : armoured
+            ? (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0)
+            : def.damage;
+      this.hurtBeast(bk, dmg * scale, owner);
     } else if (actor >= SHIP_ID_BASE) {
       const sh = this.ships[actor - SHIP_ID_BASE];
       if (sh) {
@@ -3618,7 +3831,7 @@ export class World {
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
-      if (!b || (b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp) || b.frozen > 0 || b.gem) continue;
+      if (!b || (b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp && b.kind !== BeastKind.Basilisk) || b.frozen > 0 || b.gem) continue;
       const pts = this.beastPts[k];
       const m = (pts.length >> 2) << 1;
       consider(pts[0], pts[1], 0, 0);
@@ -3683,7 +3896,7 @@ export class World {
       if (!pts) continue;
       for (let i = 0; i < pts.length; i += 2) {
         if (segmentCircle(x0, y0, x1 - x0, y1 - y0, pts[i], pts[i + 1], BEAST_BUILD[this.beasts[k]!.kind].r + w) >= 0) {
-          this.hurtBeast(k, wound * hitScale(this.beasts[k]!.kind, i >> 1), by);
+          this.hurtBeast(k, wound * hitScale(this.beasts[k]!.kind, i >> 1) * (this.beasts[k]!.kind === BeastKind.Basilisk ? 0.3 : 1), by);
           break;
         }
       }
@@ -6231,7 +6444,9 @@ export class World {
       let nBeast = 0;
       for (let k = 0; k < MAX_BEASTS; k++) {
         const pts = this.beasts[k] ? this.beastPts[k] : null;
-        if (pts && pts.length && pts[0] >= vx0 - 60 && pts[0] <= vx1 + 60 && pts[1] >= vy0 - 60 && pts[1] <= vy1 + 60) nBeast++;
+        // (By its head, with room for its body: a basilisk's is long.)
+        const m = this.beasts[k]?.kind === BeastKind.Basilisk ? 220 : 60;
+        if (pts && pts.length && pts[0] >= vx0 - m && pts[0] <= vx1 + m && pts[1] >= vy0 - m && pts[1] <= vy1 + m) nBeast++;
       }
       if (nBeast > 0 || p.beastsSent) {
         w.u8(R_BEASTS);
@@ -6239,13 +6454,14 @@ export class World {
         for (let k = 0; k < MAX_BEASTS && nBeast > 0; k++) {
           const b = this.beasts[k];
           const pts = b ? this.beastPts[k] : null;
-          if (!b || !pts || !pts.length || pts[0] < vx0 - 60 || pts[0] > vx1 + 60 || pts[1] < vy0 - 60 || pts[1] > vy1 + 60) continue;
+          const m = b?.kind === BeastKind.Basilisk ? 220 : 60;
+          if (!b || !pts || !pts.length || pts[0] < vx0 - m || pts[0] > vx1 + m || pts[1] < vy0 - m || pts[1] > vy1 + m) continue;
           w.u8(k);
           w.u8(b.kind);
           w.u8(b.seed);
           w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
           w.u8(Math.round(b.lift * 255));
-          w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0));
+          w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0));
           w.u16(clampU16(pts[0] * POS_SCALE));
           w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
           for (let i = 2; i < pts.length; i += 2) {
@@ -6476,6 +6692,8 @@ const NESTS_PLAIN = 1;
 /** Of the creatures that come up, how many are asps (the rest millipedes). */
 const ASP_SHARE = 0.55;
 const BEAST_RESPAWN = 30 * 25;
+/** After a basilisk is killed, how long before another comes up. */
+const BASILISK_RESPAWN = 30 * 60 * 6;
 const SHIP_MASS = 120;
 /** Station altitude over the ground, turret reach, how long a radio waits between calls. */
 const SHIP_ALT = 80;

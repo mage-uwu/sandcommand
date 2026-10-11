@@ -757,6 +757,47 @@ eyespot) beating fast. They come from a **coral nest**.
   don't take it.
 - **Fragile.** 14 hit points: one rifle round, or a blast nearby.
 
+**The basilisk** is the millipede's monstrous kin: three times its scale,
+and very hard to kill.
+- **Its disguise.** Its plated body comes in long sections, each dressed as
+  something the caves are made of: a great **GEMM vein** (wandering seams
+  of pink, turquoise or emerald crystal through dark rock), **dripstone**
+  (layered pale stone with stalactites hanging off its underside) or
+  **coral** grown over it (pored, its polyps glowing).
+- **It doesn't crawl, it bores.** It goes through the rock wherever it
+  means to go, leaving a tunnel behind it, but never through what won't
+  yield (bedrock, cement, iron). Its jaws never so much as chip cement.
+- **It holds very still.** It hibernates for 90 seconds up to four minutes
+  at a time: no outline, no eye, just a seam in the cave wall. Between
+  sleeps it stirs, shifts a little way through the rock, and sleeps again.
+  Bots don't see it while it sleeps (they'd only wake it), and neither does
+  the aim assist.
+- **Disturb it and it wakes in a killing frenzy.** A clone with a line on
+  its head within 110 cells, or within 40 of any part of it, wakes it. So
+  does anything that hurts it, a blast included. It wakes with a grinding
+  roar that carries far, its eyes burning red, its fanged maw gaping.
+- **Its first instinct is the surface.** It bores straight up through the
+  rock to reach it.
+- **Then it kills anything it sees.** Up top it prowls just under the
+  ground, like a shark, watching the surface over it. Anything in sight
+  within 520 cells it goes for, as does anything it feels through the
+  ground within 220. It surges through the earth at 115 cells a second and
+  leaps out of it after prey, arcing back down. Its jaws kill a clone
+  outright and crush 30% off a vehicle's hull a bite.
+- **Then it sleeps again.** With nothing in sight for 25 seconds, it dives
+  160 cells down into the deep and hibernates.
+- **Very hard to kill.** It has 15,000 hit points behind armour:
+  - a round that gets through its plates does half its harm, and one that
+    doesn't, a twentieth: rifle fire barely scratches it, and it takes
+    hundreds of sniper slugs;
+  - blasts do 0.6 of their harm;
+  - beams do 0.3;
+  - shaped charges take a share of the whole.
+- **Where it lives.** One comes up per map, hibernating on a roomy floor deep
+  in the caves, far from everyone (none in the Valley of Souls' calm). Kill
+  it and another comes up six minutes later. Killed, it breaks into chunks
+  of plate, each dressed as its section was.
+
 ## Frosting: craters, gem caverns, geysers and flora
 
 Each map is grown with some extra frosting after its bunkers and caves.

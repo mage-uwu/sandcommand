@@ -9,7 +9,7 @@ import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank,
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -165,6 +165,7 @@ export interface Sfx {
   /** A creature rearing up, hissing (a millipede's deeper, an asp's sharp). */
   hiss(x: number, y: number, big: boolean): void;
   buzz(x: number, y: number): void;
+  roar(x: number, y: number): void;
 }
 
 const CAREER_KEY = 'sc.career';
@@ -1107,7 +1108,7 @@ export class Game implements FrameHandler {
   private waterBodies: { x: number; y: number; level: number; volume: number }[] = [];
 
   /** Wildlife in view (R_BEASTS): each creature's body points as last sent and the frame before (to draw between them). */
-  readonly beastViews = new Map<number, { kind: number; seed: number; hp: number; lift: number; prevLift: number; attached: boolean; frozen: boolean; coiled: boolean; gem: boolean; prev: number[]; cur: number[] }>();
+  readonly beastViews = new Map<number, { kind: number; seed: number; hp: number; lift: number; prevLift: number; attached: boolean; frozen: boolean; coiled: boolean; gem: boolean; frenzy: boolean; prev: number[]; cur: number[] }>();
   /**
    * A dead millipede's segments, each flung off whole (its own camouflage
    * and all), tumbling, bouncing, coming to rest and fading: where, how it's
@@ -1132,13 +1133,16 @@ export class Game implements FrameHandler {
         v.frozen = b.frozen;
         v.coiled = b.coiled;
         v.gem = b.gem;
+        // A basilisk woken: its roar.
+        if (!v.frenzy && b.frenzy) this.sfx?.roar(b.pts[0], b.pts[1]);
+        v.frenzy = b.frenzy;
       } else {
         // A brood out of its nest: the buzz of it (once for the lot).
         if (b.kind === BeastKind.Seeder && performance.now() - this.buzzAt > 1500) {
           this.buzzAt = performance.now();
           this.sfx?.buzz(b.pts[0], b.pts[1]);
         }
-        this.beastViews.set(b.slot, { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, prev: b.pts, cur: b.pts });
+        this.beastViews.set(b.slot, { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, prev: b.pts, cur: b.pts });
       }
     }
     for (const k of [...this.beastViews.keys()]) if (!seen.has(k)) this.beastViews.delete(k);
@@ -1690,6 +1694,7 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === W_COIL) text = `${vn} was crushed and bitten by a millipede`;
     else if (killer === 255 && weapon === W_ASP) text = `${vn} was bitten by a gem asp`;
     else if (killer === 255 && weapon === W_SEED) text = `${vn} was overgrown by a seeder's coral`;
+    else if (killer === 255 && weapon === W_BASILISK) text = `${vn} was devoured by a basilisk`;
     else if (killer === 255 && weapon === ProjKind.Venom) text = `${vn} was spat on by a millipede`;
     else if (killer === 255 && weapon === W_VENOM) text = `${vn} died of venom`;
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
@@ -2060,6 +2065,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === W_COIL) return 'crushed and bitten by a millipede';
   if (killer === 255 && weapon === W_ASP) return 'bitten by a gem asp';
   if (killer === 255 && weapon === W_SEED) return "overgrown by a seeder's coral";
+  if (killer === 255 && weapon === W_BASILISK) return 'devoured by a basilisk';
   if (killer === 255 && weapon === ProjKind.Venom) return "spat on by a millipede";
   if (killer === 255 && weapon === W_VENOM) return 'died of venom';
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';

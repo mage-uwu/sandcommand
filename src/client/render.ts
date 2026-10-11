@@ -23,7 +23,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { drawAsp, drawAspGem, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
+import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
@@ -387,9 +387,12 @@ export class Renderer {
       const pts = this.beastPts;
       pts.length = 0;
       for (let i = 0; i < v.cur.length; i++) pts.push(v.prev[i] + (v.cur[i] - v.prev[i]) * alpha);
-      if (pts[0] < camX - halfW - 80 || pts[0] > camX + halfW + 80 || pts[1] < camY - halfH - 80 || pts[1] > camY + halfH + 80) continue;
+      // (By its head, with room for its body: a basilisk's is long.)
+      const m = v.kind === BeastKind.Basilisk ? 240 : 80;
+      if (pts[0] < camX - halfW - m || pts[0] > camX + halfW + m || pts[1] < camY - halfH - m || pts[1] > camY + halfH + m) continue;
       const lift = v.prevLift + (v.lift - v.prevLift) * alpha;
-      if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
+      if (v.kind === BeastKind.Basilisk) drawBasilisk(ctx, pts, v.seed, v.frozen, v.frenzy, now);
+      else if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
       else if (v.kind === BeastKind.Nest) drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
       else if (v.kind === BeastKind.Asp) {
         if (v.gem) drawAspGem(ctx, game.terrain, gemOf, v.cur, v.seed, now);
@@ -888,7 +891,8 @@ export class Renderer {
     for (const g of game.segmentGibs) {
       if (g.x < camX - halfW - 10 || g.x > camX + halfW + 10 || g.y < camY - halfH - 10 || g.y > camY + halfH + 10) continue;
       ctx.globalAlpha = Math.min(1, g.life / 30);
-      if (g.kind === BeastKind.Seeder || g.kind === BeastKind.Nest) drawCritterGib(ctx, g.x, g.y, g.a, g.kind, g.seed, g.i);
+      if (g.kind === BeastKind.Basilisk) drawBasiliskGib(ctx, g.x, g.y, g.a, g.seed, g.i);
+      else if (g.kind === BeastKind.Seeder || g.kind === BeastKind.Nest) drawCritterGib(ctx, g.x, g.y, g.a, g.kind, g.seed, g.i);
       else drawSegmentGib(ctx, game.terrain, this.groundColor, g.x, g.y, g.a, g.kind, g.seed, g.i, now);
     }
     ctx.globalAlpha = 1;
