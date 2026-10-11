@@ -312,12 +312,13 @@ import {
   pushTrail,
   segmentCircle,
   turnRound,
-  CORAL_BURST,
+  CORAL_FATAL,
   CORAL_GROW,
   CORAL_HP,
   CORAL_LIMBS,
   CORAL_SEED,
-  CORAL_WOUND,
+  CORPSE_BROOD,
+  CORPSE_BROOD_MORE,
   NEST_BROOD,
   NEST_BROOD_CD,
   NEST_LOOK,
@@ -444,6 +445,8 @@ export class Player {
   venom = 0;
   /** Coral seeded in its limbs (a seeder's sting), by CORAL_LIMBS: how far grown (0..1; 1 full grown, crusted over). */
   readonly coral = new Float32Array(CORAL_LIMBS.length);
+  /** Whether the nest in its limbs will kill it (rolled when it first takes hold, CORAL_FATAL). */
+  coralFatal = false;
   /** Wildlife was in this client's view last frame (so an empty R_BEASTS tells it they've gone). */
   beastsSent = false;
   /** Each creature's record as this client last got it (World.beastRev; -1: it doesn't have it), so an unchanged one goes as a byte. */
@@ -2442,54 +2445,78 @@ export class World {
     const near = limbs.filter((i) => (CORAL_LIMBS[i] >= Part.LegB) === low);
     const pick = near.length ? near : limbs;
     const i = pick[this.beastRng.int(pick.length)];
-    if (p.coral[i] >= 1) {
-      // Full grown already: stung again, it may burst.
-      if (this.beastRng.next() < CORAL_BURST) this.burstCoral(p, i);
-      return;
-    }
-    p.coral[i] = Math.min(1, Math.max(p.coral[i], 0.02) + CORAL_SEED);
+    // Its fate, when the nest first takes hold in it (stung again, it only grows faster).
+    if (!p.coral.some((c) => c > 0)) p.coralFatal = this.beastRng.next() < CORAL_FATAL;
+    p.coral[i] = Math.min(0.99, Math.max(p.coral[i], 0.02) + CORAL_SEED);
   }
 
   /**
-   * One tick of the coral in a clone's limbs: it grows (faster the more of
-   * it there is), harming the limb and the clone as it goes; full grown, it
-   * bursts the limb off (CORAL_BURST of the time) or crusts over and stops.
-   * True if it did anything.
+   * One tick of the nest growing in a clone's limbs: slowly (faster the more
+   * of it there is), a slow drain on the clone as it goes. Full grown, its
+   * fate (rolled when it took hold, CORAL_FATAL): it bursts out of the limb
+   * and kills (a new nest on the corpse: corpseNest), or it withers and
+   * drops off. True if it did anything.
    */
   private coralTick(p: Player): boolean {
     let any = false;
     for (let i = 0; i < CORAL_LIMBS.length; i++) {
       const c = p.coral[i];
-      if (c <= 0 || c >= 1) continue;
-      const part = CORAL_LIMBS[i];
-      if (!has(p.parts.mask, part)) {
+      if (c <= 0) continue;
+      if (!has(p.parts.mask, CORAL_LIMBS[i])) {
         p.coral[i] = 0;
         continue;
       }
       any = true;
       const next = Math.min(1, c + CORAL_GROW * (0.5 + c * 1.5));
       p.coral[i] = next;
-      const res = this.strikeScratch;
-      res.hp = 0;
-      res.detached.length = 0;
-      res.vital = false;
-      harm(p.parts, part, CORAL_WOUND, res);
-      res.hp = CORAL_HP;
-      this.applyStrikeQuiet(p, res);
-      if (!p.alive) return true;
-      if (!has(p.parts.mask, part)) p.coral[i] = 0;
-      else if (next >= 1 && this.beastRng.next() < CORAL_BURST) this.burstCoral(p, i);
-      if (!p.alive) return true;
+      if (next < 1) continue;
+      if (p.coralFatal) {
+        // It bursts out of the limb, and the host is done for.
+        this.burstCoral(p, i);
+        if (p.alive) this.damage(p, 1e4, NO_OWNER, W_SEED, false, true);
+        return true;
+      }
+      // It withers and drops off (all of it: the host threw it off).
+      p.coral.fill(0);
+      return true;
     }
+    if (any) this.damage(p, CORAL_HP, NO_OWNER, W_SEED, true);
     return any;
   }
 
-  /** Coral wounds: torn-off parts flying as usual, the harm quiet (like bleeding). */
-  private applyStrikeQuiet(p: Player, res: StrikeResult): void {
-    const hp = res.hp;
-    res.hp = 0;
-    if (res.detached.length) this.applyStrike(p, res, NO_OWNER, W_SEED, p.cx, p.cy);
-    this.damage(p, hp, NO_OWNER, W_SEED, true);
+  /**
+   * A clone died with the nest in it: a new nest grows on its corpse (falling
+   * to lie where it does), and CORPSE_BROOD to CORPSE_BROOD + CORPSE_BROOD_MORE
+   * of its brood crawl straight out of the body, already hunting.
+   */
+  private corpseNest(p: Player): void {
+    if (!this.wildlife) return;
+    const t = this.terrain;
+    const x = Math.round(p.cx);
+    let y = Math.round(p.body.y + ACTOR_H - 4);
+    while (y > 2 && t.isSolid(x, y)) y--;
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return;
+    const nest = newBeast(t, BeastKind.Nest, x, y, 1);
+    nest.attached = false;
+    nest.brood = this.tick + NEST_BROOD_CD; // (its first brood is already out)
+    this.beasts[slot] = nest;
+    nestCentre(nest, this.beastPts[slot]);
+    const rng = this.beastRng;
+    const n = CORPSE_BROOD + rng.int(CORPSE_BROOD_MORE + 1);
+    for (let k = 0; k < n; k++) {
+      const s = this.beasts.indexOf(null);
+      if (s < 0) break;
+      const sx = x + rng.range(-3, 3);
+      const sy = y - 3 - rng.range(0, 4);
+      if (t.isSolid(Math.floor(sx), Math.floor(sy))) continue;
+      const b = newSeeder(t, sx, sy, slot);
+      b.vx = rng.range(-70, 70);
+      b.vy = -rng.range(40, 110);
+      b.seed = rng.int(256);
+      this.beasts[s] = b;
+      flierPoints(b, this.beastPts[s]);
+    }
   }
 
   /** Full grown coral bursts out of a limb, and the limb comes off. */
@@ -3263,6 +3290,9 @@ export class World {
     victim.alive = false;
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
+    // Dead with the nest in it (stung, and not yet over it): the nest takes the corpse.
+    if (victim.coral.some((c) => c > 0) || weapon === W_SEED) this.corpseNest(victim);
+    victim.coral.fill(0);
     this.leaveTank(victim, false);
     // Regicide: soldiers come back by drop rocket after a while; the king never does.
     // PvP: everyone comes back, quickly. Siege: defenders come back; attackers

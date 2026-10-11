@@ -617,43 +617,71 @@ export function drawCritterGib(ctx: CanvasRenderingContext2D, x: number, y: numb
 }
 
 /**
- * Coral growing out of a clone's limb: tufts of branching coral springing
- * from the cells (x0..x1, y0..y1), out the way `ox` (-1, 1: away from the
- * body), more and longer the more grown it is (0..1); full grown, crusted
- * all over it and its polyps glowing.
+ * The nest a seeder's sting sows, growing out of a clone's limb: a little
+ * hive of the coral nest's own papery stuff budding from the limb's cells
+ * (x0..x1, y0..y1), out the way `ox` (-1, 1: away from the body), swelling
+ * the more grown it is (0..1). It's banded in the nest's pinks and pocked
+ * with dark cells, the limb crusting over with it as it spreads. Well
+ * grown, a mouth opens at its tip and glows, and something stirs in it.
  */
 export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, ox: number, grown: number, seed: number, now: number): void {
-  const w = x1 - x0 + 1;
-  const h = y1 - y0 + 1;
-  // Crusted: the limb itself overgrown.
-  if (grown > 0.45) {
+  // The limb crusting over with it (more of it, the further along).
+  if (grown > 0.3) {
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
-        if (hsh(x - x0, y - y0, seed) > grown) continue;
-        ctx.fillStyle = hsh(x - x0, y - y0, seed + 1) > 0.5 ? '#e44a82' : '#ff7aa8';
+        if (hsh(x - x0, y - y0, seed) > (grown - 0.3) * 1.4) continue;
+        ctx.fillStyle = hsh(x - x0, y - y0, seed + 1) > 0.8 ? '#2a0818' : hsh(x - x0, y - y0, seed + 2) > 0.5 ? '#e44a82' : '#ff8aa8';
         ctx.fillRect(x, y, 1, 1);
       }
     }
   }
-  const tufts = 1 + Math.floor(grown * 5);
-  for (let k = 0; k < tufts; k++) {
-    const bx = x0 + Math.floor(hsh(k, 1, seed) * w);
-    const by = y0 + Math.floor(hsh(k, 2, seed) * h);
-    const len = 1 + Math.round(grown * 3 * (0.5 + hsh(k, 3, seed)));
-    const up = hsh(k, 4, seed) > 0.5 ? -1 : 0;
-    let x = bx;
-    let y = by;
-    for (let s = 1; s <= len; s++) {
-      x += ox;
-      if (s % 2 === 0) y += up;
-      ctx.fillStyle = s === len ? (grown > 0.6 && (Math.floor(now / 300) + k) % 3 === 0 ? '#fff4b0' : '#ffc0d4') : '#d83a70';
-      ctx.fillRect(x, y, 1, 1);
-      // A side branch off the middle.
-      if (s === 2 && len > 2) {
-        ctx.fillStyle = '#ff8aa8';
-        ctx.fillRect(x, y + (up ? 1 : -1), 1, 1);
+  // The hive budding out of it: a lumpy teardrop, its stalk in the limb, its mouth outward.
+  const R = 1.2 + grown * 4.2;
+  const ax = ox;
+  const ay = -0.25; // (tilted a touch upward, as a nest hangs off its stalk)
+  const al = Math.hypot(ax, ay);
+  const ux = ax / al;
+  const uy = ay / al;
+  const vx = -uy;
+  const vy = ux;
+  const bx = (x0 + x1 + 1) / 2 + ox * ((x1 - x0 + 1) / 2);
+  const by = (y0 + y1 + 1) / 2;
+  const cx = bx + ux * R * 0.9;
+  const cy = by + uy * R * 0.9;
+  const glow = 0.5 + 0.5 * Math.sin(now / 300 + seed);
+  const ext = Math.ceil(R + 2);
+  for (let py = Math.floor(cy - ext); py <= Math.ceil(cy + ext); py++) {
+    for (let px = Math.floor(cx - ext); px <= Math.ceil(cx + ext); px++) {
+      const dx = px + 0.5 - cx;
+      const dy = py + 0.5 - cy;
+      const a = (dx * ux + dy * uy) / R; // along it: -1 at the stalk, +1 at the mouth
+      const b = (dx * vx + dy * vy) / R;
+      const th = Math.atan2(b, a);
+      const lump = 0.12 * Math.sin(th * 5 + seed) + 0.07 * Math.sin(th * 9 + seed * 2);
+      // Narrow at the stalk, swelling toward the mouth.
+      const w = Math.sqrt(Math.max(0, 1 - a * a)) * (0.55 + 0.35 * (a + 1) * 0.5) + lump;
+      if (Math.abs(b) > w || a < -1 || a > 1 + lump) continue;
+      const edge = R > 2 && (Math.abs(b) > w - 1 / R || a > 1 + lump - 1 / R);
+      const h = hsh(px, py, seed);
+      let c: string;
+      if (edge) c = '#3a0c22';
+      else {
+        const band = Math.floor((a * R + 8 + Math.sin(b * R * 0.9 + seed) * 0.8) / 1.6) % 3;
+        c = band === 0 ? '#ff6a9c' : band === 1 ? '#e44a82' : '#ff8aa8';
+        if (h > 0.92) c = '#ffc0d4';
+        // Its cells.
+        if (hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 7) > 0.84 && h > 0.35) c = '#2a0818';
+        // Its mouth, once it's grown: glowing from within, something stirring.
+        if (grown > 0.55 && a > 0.55 && Math.abs(b) < 0.35) c = h > 0.5 ? (glow > 0.5 ? '#ffd060' : '#ff9a40') : '#401020';
       }
+      ctx.fillStyle = c;
+      ctx.fillRect(px, py, 1, 1);
     }
+  }
+  // Nearly ripe: a wing's flicker at its mouth.
+  if (grown > 0.8 && Math.floor(now / 180 + seed) % 5 === 0) {
+    ctx.fillStyle = '#fff4b0';
+    ctx.fillRect(Math.round(cx + ux * R), Math.round(cy + uy * R) - 1, 1, 1);
   }
 }
 

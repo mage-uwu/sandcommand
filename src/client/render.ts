@@ -3126,14 +3126,14 @@ export class Renderer {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
     }
-    // Coral in our limbs: which, and how far grown (a full-grown one may burst off).
+    // A seeder's nest growing in our limbs: which, and how far along (full grown, it bursts out, or withers).
     const coral = game.myCoral;
     if (coral.some((c) => c > 0)) {
       const names = ['GUN ARM', 'ARM', 'LEG', 'LEG'];
       const worst = Math.max(...coral);
       const pulse = 0.6 + 0.4 * Math.sin(performance.now() / (worst >= 1 ? 90 : 220));
       ctx.fillStyle = `rgba(255,110,160,${pulse})`;
-      ctx.fillText(`CORAL ${coral.map((c, i) => (c > 0 ? `${names[i]} ${Math.round(c * 100)}%` : '')).filter(Boolean).join(' · ')}`, 14 * s, 150 * s);
+      ctx.fillText(`NEST ${coral.map((c, i) => (c > 0 ? `${names[i]} ${Math.round(c * 100)}%` : '')).filter(Boolean).join(' · ')}`, 14 * s, 150 * s);
     }
     if (game.drive) bar(32 * s, game.drive.fuel, TANK_MAX_FUEL, '#3c8cd2', `TANK JET ${Math.round(game.drive.fuel)}`);
     else bar(32 * s, game.body.fuel, ACTOR_MAX_FUEL, '#3c8cd2', `JET ${Math.round(game.body.fuel)}`);

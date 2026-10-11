@@ -186,12 +186,20 @@ export const NEST_SENSE = 230;
 export const NEST_LOOK = 15;
 export const NEST_BROOD = 3;
 export const NEST_BROOD_CD = 30 * 10;
-/** Coral seeded in a limb: how much a sting sows (of full grown), how fast it grows (a tick), the harm it does a tick to the clone and the limb, how often full grown it bursts the limb off. */
-export const CORAL_SEED = 0.2;
-export const CORAL_GROW = 1 / (30 * 14);
-export const CORAL_HP = 0.06;
-export const CORAL_WOUND = 0.05;
-export const CORAL_BURST = 0.45;
+/**
+ * A seeder's sting sows its nest in the clone's limb: how much a sting sows
+ * (of full grown), how fast it grows (a tick: about a minute from one
+ * sting), the slow harm it does a tick to the clone, and how often it's
+ * fatal (CORAL_FATAL: rolled once, when it first takes hold). Full grown,
+ * a fatal one bursts out and kills; the rest wither and drop off.
+ */
+export const CORAL_SEED = 0.15;
+export const CORAL_GROW = 1 / (30 * 60);
+export const CORAL_HP = 0.012;
+export const CORAL_FATAL = 0.5;
+/** A clone the nest killed (or anyone dying with it in them): a new nest on the corpse, and this many of its brood out of it at once (the least, and how many more at most). */
+export const CORPSE_BROOD = 2;
+export const CORPSE_BROOD_MORE = 1;
 /** The limbs coral takes hold in (body.ts Part: the gun arm, the off arm, the legs), in R_CORAL order. */
 export const CORAL_LIMBS = [2, 3, 4, 5] as const;
 

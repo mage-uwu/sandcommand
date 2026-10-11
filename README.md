@@ -766,17 +766,26 @@ eyespot) beating fast. They come from a **coral nest**.
 - **Flight.** They fly in a jinking, wasp-like way (125 cells a second
   flat out), circling in at their target, sting, dart away and come back.
   They keep a little apart from each other and bounce off rock.
-- **The sting** is melee only and does just 2 harm. But it **seeds the
-  limb** it lands on with coral: a leg if it came in low, an arm if high.
-  The coral grows out of the limb, faster the more of it there is. As it
-  grows it harms the limb and the clone: from a single sting, about 15
-  harm over the 8 or so seconds it takes to grow in full. Full grown, it **bursts the limb clean off**
-  in a spray of pink coral and blood 45% of the time. Otherwise it crusts
-  over and stops, but a fresh sting on a crusted limb can still burst it.
-  You see the coral sprouting from the limb, its polyps glowing as it
-  matures and shedding pink spores. The HUD lists your seeded limbs and
-  how far grown each is. A health wave clears it all. Droids' metal limbs
-  don't take it.
+- **The sting** is melee only and does just 2 harm. But it **sows the nest
+  in the limb** it lands on: a leg if it came in low, an arm if high.
+  - **The growth.** A little hive of the nest's own papery pink stuff buds
+    out of the limb, banded and pocked with dark cells. It swells as it
+    grows and crusts the limb over. Well grown, a mouth opens at its tip
+    and glows, and something stirs in it.
+  - **Slow.** From one sting it takes about a minute to grow full, faster
+    the more of it there is. More stings speed it up. It drains the clone
+    very slowly as it grows (`CORAL_HP`), only a few points over that
+    minute.
+  - **Its fate** is rolled once, when it first takes hold: **about one in
+    two is fatal** (`CORAL_FATAL`). Full grown, a fatal one bursts out of
+    the limb, which comes off, and kills. The rest wither and drop off.
+  - **Cures and immunity.** A health wave clears it. A droid's metal limbs
+    don't take it.
+  - **The HUD.** `NEST` lists the limbs it's in and how far along each is.
+- **The corpse.** A clone that dies with the nest in it, however it dies,
+  becomes a nest (`corpseNest`). A new nest grows on the corpse and falls
+  to lie where the body did. Two or three of its brood crawl straight out
+  of the body, already hunting, tethered to their new nest.
 - **Fragile.** 14 hit points: one rifle round, or a blast nearby.
 
 **The basilisk** is the millipede's monstrous kin: three times its scale,

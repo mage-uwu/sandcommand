@@ -623,7 +623,7 @@ describe('millipedes in the world', () => {
       expect(seeders(world).length).toBe(NEST_BROOD);
     });
 
-    it('seeders, head-sized, fly at the clone and sting: a little harm, and coral seeded in a limb that grows and eats at it', () => {
+    it('seeders, head-sized, fly at the clone and sting: a little harm, and their nest sown in a limb, growing slowly and draining it slowly', () => {
       const { world, a } = cave();
       putNest(world, 1150, 380);
       const hp0 = a.hp;
@@ -636,32 +636,70 @@ describe('millipedes in the world', () => {
       expect(SEEDER_R * 2).toBeLessThan(ACTOR_W); // (a clone's head, about)
       expect(SEEDER_STING).toBeLessThanOrEqual(2);
       expect(a.hp).toBeGreaterThan(hp0 - 12); // (stings barely scratch)
-      // The nest gone and the swarm with it, the coral grows on, harming them as it goes.
+      // The nest gone and the swarm with it, the one in its limb grows on, slowly, draining it slowly.
       world.beasts.fill(null);
       const i = a.coral.findIndex((c) => c > 0);
       const c0 = a.coral[i];
       const hp1 = a.hp;
-      for (let k = 0; k < 30 * 4; k++) world.step();
+      for (let k = 0; k < 30 * 10; k++) world.step();
       expect(a.coral[i]).toBeGreaterThan(c0);
-      expect(a.hp).toBeLessThan(hp1 - 3);
+      expect(a.coral[i]).toBeLessThan(c0 + 0.35); // (a minute or so to full grown)
+      expect(a.hp).toBeLessThan(hp1 - 1);
+      expect(a.hp).toBeGreaterThan(hp1 - 8); // (very slow)
     });
 
-    it('full grown, the coral sometimes bursts the limb clean off, else crusts over', () => {
-      let burst = 0;
-      let crust = 0;
+    it('full grown, about half the time it bursts out and kills; else it withers and drops off', () => {
       const { world, a } = cave();
-      for (let trial = 0; trial < 16; trial++) {
-        resetBody(a.parts, ClassId.Medium, 0);
-        a.hp = 100;
+      const sting = (world as unknown as { sting(p: unknown, b: unknown): void }).sting.bind(world);
+      // Its fate is rolled when it first takes hold: about half of them fatal.
+      let fatal = 0;
+      for (let k = 0; k < 200; k++) {
         a.coral.fill(0);
-        a.coral[2] = 0.999; // (a back leg: CORAL_LIMBS[2])
-        for (let k = 0; k < 3; k++) world.step();
-        if (!has(a.parts.mask, Part.LegB)) burst++;
-        else if (a.coral[2] >= 1) crust++;
+        a.hp = 100;
+        sting(a, newSeeder(world.terrain, a.cx, a.cy + 6, -1));
+        if (a.coralFatal) fatal++;
       }
-      expect(burst).toBeGreaterThan(0);
-      expect(crust).toBeGreaterThan(0);
-      expect(CORAL_LIMBS[2]).toBe(Part.LegB);
+      expect(fatal).toBeGreaterThan(70);
+      expect(fatal).toBeLessThan(130);
+      world.beasts.fill(null);
+      // Not fatal: full grown, it withers and drops off.
+      a.hp = 100;
+      a.coral.fill(0);
+      a.coralFatal = false;
+      a.coral[2] = 0.999;
+      for (let k = 0; k < 3; k++) world.step();
+      expect(a.alive).toBe(true);
+      expect(a.coral.every((c) => c === 0)).toBe(true);
+      // Fatal: it bursts out of the limb, and kills.
+      a.coralFatal = true;
+      a.coral[2] = 0.999;
+      for (let k = 0; k < 3 && a.alive; k++) world.step();
+      expect(a.alive).toBe(false);
+    });
+
+    it('dead with the nest in it: a new nest takes the corpse, and two or three of its brood come out of the body, hunting', () => {
+      const { world, a } = cave();
+      a.coral.fill(0);
+      a.coralFatal = true;
+      a.coral[2] = 0.999;
+      const b = world.addPlayer('b', { send() {} })!;
+      deliverAll(world, [b]);
+      b.body.x = 1200;
+      b.body.y = 441 - ACTOR_H;
+      const at = { x: a.cx, y: a.cy };
+      for (let k = 0; k < 3 && a.alive; k++) world.step();
+      expect(a.alive).toBe(false);
+      const nests = world.beasts.filter((o) => o?.kind === BeastKind.Nest);
+      expect(nests.length).toBe(1);
+      expect(Math.abs(nests[0]!.x - at.x)).toBeLessThan(6);
+      const brood = seeders(world);
+      expect(brood.length).toBeGreaterThanOrEqual(2);
+      expect(brood.length).toBeLessThanOrEqual(3);
+      for (const s2 of brood) expect(s2!.home).toBe(world.beasts.indexOf(nests[0]));
+      // The nest falls to lie on the cave floor where the body fell.
+      for (let k = 0; k < 30 * 2; k++) world.step();
+      const n = world.beasts.find((o) => o?.kind === BeastKind.Nest)!;
+      expect(n.y).toBeGreaterThan(430);
     });
 
     it("droids' metal limbs don't take it; a health wave clears it", () => {
