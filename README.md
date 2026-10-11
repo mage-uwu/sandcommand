@@ -1107,12 +1107,14 @@ come back by drop rocket, as in Regicide.
     10 seconds.
   - **Going home.** With nobody left to hear, it makes its way back to its
     den and sleeps.
-- **Tougher than rifles, weaker than wild.** Lair basilisks have a quarter
-  of a wild one's hit points, so there are four to kill instead of one. A
-  cache of heavy weapons (bazooka, anti-tank cannon, autocannon) lies
-  beside every chute's mouth, because rifles barely scratch them.
-- **Starting gold.** Everyone starts the wave with enough gold for one call
-  on the radio. Tanks still come down by parachute.
+- **Tougher than rifles.** Lair basilisks have half a wild one's hit
+  points, and there are four to kill instead of one. A cache of heavy
+  weapons (bazooka, anti-tank cannon, autocannon) lies beside every
+  chute's mouth, because rifles barely scratch them.
+- **Fought on foot, mostly.** No gold is handed out at the start, and just
+  one tank comes down by parachute. Radio calls for a vehicle (tank,
+  watchdog, tarantula, mole or dropship) are refused once three are about
+  (`LAIR_VEHICLES`).
 - **Lesser life.** The lair isn't only the basilisks'. From the start it
   has four wasps' nests hung from its roof (their foragers ranging through
   the chambers and up the chutes) and a dozen millipedes, a few asps among

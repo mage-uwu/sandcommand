@@ -1133,7 +1133,8 @@ export class World {
   /**
    * Extermination opening: a basilisk hibernating on the floor of every den
    * (sleeping the wave away, unless someone wakes it: and that's easy), and
-   * gold enough for a call on the radio each, to begin with.
+   * the cave's lesser life (stockLair). No gold handed out: it's fought on
+   * foot, mostly (LAIR_VEHICLES).
    */
   private startExtermination(): void {
     this.beasts.fill(null);
@@ -1154,7 +1155,6 @@ export class World {
     for (let n = 0; n < LAIR_NESTS + LAIR_CRAWLERS + 8 && this.stockLair(); n++) {
       // (stocking)
     }
-    for (const p of this.players) if (p) p.gold = Math.max(p.gold, CALL_COST);
   }
 
   private kingAlive(team: number): boolean {
@@ -2979,7 +2979,8 @@ export class World {
     }
     // One or two tanks come down by parachute for whoever gets to them first
     // (Extraction's tanks wait in the labyrinth instead).
-    if (this.tankDrops && mode !== GameMode.Extraction && mode !== GameMode.Siege) this.dropTanks(1 + this.rng.int(2));
+    // (Extermination is fought on foot, mostly: just the one.)
+    if (this.tankDrops && mode !== GameMode.Extraction && mode !== GameMode.Siege) this.dropTanks(mode === GameMode.Extermination ? 1 : 1 + this.rng.int(2));
     if (mode === GameMode.Regicide) this.startRegicide();
     if (mode === GameMode.Siege) this.startSiege();
     if (mode === GameMode.Extraction) this.startExtraction();
@@ -5431,6 +5432,8 @@ export class World {
     const p = this.players[id];
     const cost = callCost(kind);
     if (!p || !p.alive || p.tank >= 0 || p.weapon !== WeaponId.Radio || p.callCd > 0 || p.gold < cost) return false;
+    // (Extermination: only so many vehicles about at once.)
+    if (this.exterminationLive && this.tanks.filter(Boolean).length + this.ships.filter(Boolean).length >= LAIR_VEHICLES) return false;
     if (kind === CallKind.Tarantula) {
       // One tarantula each (a watchdog besides is fine).
       const slot = this.tanks.indexOf(null);
@@ -7104,8 +7107,10 @@ const BAS_REPLAN = 12;
 const BAS_SEARCH = 24000;
 const NAV_DX = [1, -1, 0, 0, 1, 1, -1, -1];
 const NAV_DY = [0, 0, 1, -1, 1, -1, 1, -1];
-/** The lair's basilisks: a quarter of a wild one's hit points (four to kill, not one), still a long fight each. */
-const LAIR_HP = 0.25;
+/** The lair's basilisks: half a wild one's hit points (four to kill, not one), a long, hard fight each. */
+const LAIR_HP = 0.5;
+/** Extermination is fought on foot, mostly: at most this many vehicles (tanks, watchdogs, tarantulas, moles, dropships) about at once (more radio calls for one are refused). */
+const LAIR_VEHICLES = 3;
 /** What lies by each tunnel mouth in the lair, just clear of the hole. */
 const LAIR_CACHE = [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon];
 const TUNNEL_CLEAR = 24;

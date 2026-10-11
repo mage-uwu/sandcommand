@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Reader } from '../src/shared/codec.ts';
-import { GameMode, Phase, TEAMS_IN_MODE, Team } from '../src/shared/protocol.ts';
+import { CALL_COST, CallKind, GameMode, Phase, TEAMS_IN_MODE, Team } from '../src/shared/protocol.ts';
 import { MapKind } from '../src/shared/worldgen.ts';
 import { LAIR_DENS } from '../src/shared/lair.ts';
 import { BASILISK_HP, BeastKind } from '../src/shared/wildlife.ts';
@@ -39,13 +39,13 @@ describe('Extermination', () => {
     expect(world.friendly(ps[0].id, ps[1])).toBe(true);
   });
 
-  it('a cache of heavy weapons lies by every tunnel mouth, and the basilisks are a quarter as tough as a wild one', () => {
+  it('a cache of heavy weapons lies by every chute mouth, and the basilisks are half as tough as a wild one', () => {
     const { world } = exterm(308, 2);
     for (const mx of world.lair!.mouths) {
       const near = world.items.filter((it) => Math.abs(it.x - mx) < 60);
       for (const w of [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon]) expect(near.map((it) => it.weapon)).toContain(w);
     }
-    for (const { b } of basilisks(world)) expect(b!.hp).toBe(BASILISK_HP / 4);
+    for (const { b } of basilisks(world)) expect(b!.hp).toBe(BASILISK_HP / 2);
   });
 
   it('woken, a basilisk stays on its own ground: it finds its way through the cave to a clone and kills it', () => {
@@ -78,6 +78,26 @@ describe('Extermination', () => {
     expect(a.lastWeapon).toBe(W_BASILISK);
     // It never went for the surface.
     expect(highest).toBeGreaterThan(world.terrain.surfaceY(Math.round(d.floorX)) + 60);
+  });
+
+  it('fought on foot, mostly: one tank by parachute, no free gold, and radio calls refused once three vehicles are about', () => {
+    const world = new World(310, { mode: 'ffa', rotation: [GameMode.Extermination], bots: 0 });
+    const ps = Array.from({ length: 2 }, (_, i) => world.addPlayer(`p${i}`, { send() {} })!);
+    for (let t = 0; t < 3000 && world.phase !== Phase.Live; t++) world.step();
+    expect(world.tanks.filter(Boolean).length).toBe(1);
+    for (const p of ps) expect(p.gold).toBeLessThan(CALL_COST);
+    for (let t = 0; t < 1200 && !ps[0].alive; t++) world.step();
+    const [a] = ps;
+    world.equip(a, WeaponId.Radio);
+    const call = () => {
+      a.gold = 1e6;
+      a.callCd = 0;
+      return world.call(a.id, CallKind.Tank);
+    };
+    expect(call()).toBe(true);
+    expect(call()).toBe(true);
+    expect(world.tanks.filter(Boolean).length + world.ships.filter(Boolean).length).toBe(3);
+    expect(call()).toBe(false);
   });
 
   it('the lair crawls with millipedes and hangs with wasps\' nests, kept up; but no basilisk ever comes back', () => {
