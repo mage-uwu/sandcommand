@@ -106,6 +106,8 @@ import {
 } from '../shared/craft.ts';
 import {
   BLEED_PER_STUMP,
+  DROID_HEADLESS_BLEED,
+  headless,
   type BodyState,
   type Mobility,
   PART_COUNT,
@@ -5564,6 +5566,8 @@ export class World {
       // Open stumps bleed (machines' just spark); bleeding out credits whoever did it.
       const n = FACTIONS[p.parts.faction].bleeds ? stumps(p.parts.mask, p.parts.cls) : 0;
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
+      // A droid with its turret gone bleeds out fast through the torn socket.
+      if (headless(p.parts.mask, p.parts.cls)) this.damage(p, DROID_HEADLESS_BLEED * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
       // Venom burns on in the blood, a little each tick.
       if (p.venom > 0) {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { BTN_RIGHT, BTN_UP, newBody, stepBody } from '../src/shared/actor.ts';
-import { CLASSES, ClassId, DROID_LEGS, DROID_MASK, DroidPart, has, mobility, newBodyState, newStrike, partAt, resetBody, rollClass, strike, harm } from '../src/shared/body.ts';
+import { CLASSES, ClassId, DROID_LEGS, DROID_MASK, DroidPart, has, mobility, newBodyState, newStrike, partAt, resetBody, rollClass, strike, harm, DROID_HEADLESS_BLEED, headless } from '../src/shared/body.ts';
+import { World } from '../src/server/world.ts';
+import { deliverAll } from './helpers.ts';
 import { ACTOR_H, DT, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { TANK_HP } from '../src/shared/tank.ts';
@@ -112,12 +114,37 @@ describe('the spider droid', () => {
     expect(has(s.mask, DroidPart.Chassis)).toBe(true); // still alive, dragging itself
   });
 
-  it('shot in the turret it can no longer fire, but lives', () => {
+  it('shot in the turret it can no longer fire (but lives on, for a few seconds)', () => {
     const s = newBodyState(ClassId.Droid);
     for (let k = 0; k < 40 && has(s.mask, DroidPart.Turret); k++) strike(s, DroidPart.Turret, RIFLE, 16, newStrike());
     const mob = mobility(s.mask, { legs: 0, jet: false, canFire: true, oneHanded: false }, ClassId.Droid);
     expect(mob.canFire).toBe(false);
     expect(has(s.mask, DroidPart.Chassis)).toBe(true);
+  });
+
+  it('its turret gone, it bleeds out fast through the torn socket (an intact one does not)', () => {
+    const world = new World(7, { mode: 'sandbox', bots: 0 });
+    world.wildlife = false;
+    const a = world.addPlayer('a', { send() {} })!;
+    const b = world.addPlayer('b', { send() {} })!;
+    deliverAll(world, [a, b]);
+    for (const p of [a, b]) {
+      resetBody(p.parts, ClassId.Droid, 0);
+      p.hp = 100;
+    }
+    a.parts.mask &= ~(1 << DroidPart.Turret);
+    let t = 0;
+    while (a.alive && t < 30 * 20) {
+      world.step();
+      t++;
+    }
+    expect(a.alive).toBe(false);
+    expect(t / 30).toBeGreaterThan(100 / DROID_HEADLESS_BLEED - 2);
+    expect(t / 30).toBeLessThan(100 / DROID_HEADLESS_BLEED + 2);
+    expect(b.alive).toBe(true);
+    expect(b.hp).toBe(100);
+    expect(headless(a.parts.mask, ClassId.Droid)).toBe(true);
+    expect(headless(b.parts.mask, ClassId.Droid)).toBe(false);
   });
 });
 

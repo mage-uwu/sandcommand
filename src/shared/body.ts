@@ -137,6 +137,14 @@ function armorOn(mask: number, part: number, cls = -1): number {
 
 const BLUNT = 0.03; // HP per unit of energy stopped by a layer
 export const BLEED_PER_STUMP = 1.2; // HP per second per missing limb
+/**
+ * A spider droid with its turret (gun and mount) shot off: its neck socket
+ * is torn open into the chassis, and it bleeds out fast, sparking and
+ * smoking (HP per second: from full, about eleven seconds).
+ */
+export const DROID_HEADLESS_BLEED = 9;
+/** Has a droid lost its turret? */
+export const headless = (mask: number, cls: number) => cls === ClassId.Droid && !has(mask, DroidPart.Turret);
 
 export const has = (mask: number, part: number) => (mask & (1 << part)) !== 0;
 

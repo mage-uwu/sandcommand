@@ -262,6 +262,19 @@ export function stumpDrip(p: Particles, x: number, y: number, parts: number, syn
     } else if (Math.random() < 0.6) p.spawn(PK.Blood, x + ox, y + oy, rnd(-25, 25), rnd(-30, 10), 40);
   }
 }
+/**
+ * A spider droid's torn turret socket (its turret shot off), at the top of
+ * its chassis: a stream of sparks spitting out of it and dark smoke boiling
+ * up, now and then a gout of flame: it's bleeding out.
+ */
+export function droidSocket(p: Particles, x: number, y: number): void {
+  const sx = x + 4;
+  const sy = y + 6;
+  if (Math.random() < 0.55) p.spawn(PK.Spark, sx + rnd(-1.5, 1.5), sy, rnd(-70, 70), rnd(-130, -30), 6 + Math.random() * 8);
+  if (Math.random() < 0.35) p.spawn(PK.Smoke, sx + rnd(-1, 1), sy - 1, rnd(-8, 8), rnd(-30, -12), 35 + Math.random() * 30, 0, Math.random() < 0.5 ? 0x2a2a2e : 0x4a4a50);
+  if (Math.random() < 0.04) p.spawn(PK.Smoke, sx, sy - 1, rnd(-6, 6), rnd(-40, -20), 12, 0, 0xff8a30);
+}
+
 const STUMPS: [number, number, number][] = [
   [Part.GunArm, 6, 4],
   [Part.OffArm, 2, 5],

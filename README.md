@@ -1938,7 +1938,9 @@ shots leave from, so it fires exactly from its face.
 - **Its parts** (`DROID_PARTS` in `src/shared/body.ts`). It reuses the
   ten part slots, and the same mask bits on the wire, with its own
   meanings, so nothing that carries part masks had to change:
-  - the turret (the head's slot): shoot it off and it can't fire;
+  - the turret (the head's slot): shoot it off and it can't fire, and it
+    **bleeds out fast** (9 HP a second, about 11 seconds from full) through
+    the torn socket, which spits sparks and boils dark smoke;
   - the chassis (the torso's): vital, and its wounds are the droid's HP;
   - armour plating over the chassis;
   - six legs (the arms', legs', helmet's and vest's slots).
