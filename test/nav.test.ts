@@ -64,6 +64,7 @@ describe('deadland bots', () => {
     let world: World | null = null;
     for (let s = 1; s < 60 && !world; s++) {
       const w = new World(s, { mode: 'ffa', bots: 8, rotation: [GameMode.Regicide], tanks: false });
+      w.wildlife = false; // (the bots' own way across: no millipedes hunting them on it)
       w.addPlayer('watcher', { send() {} });
       for (let k = 0; k < 3000 && w.phase !== Phase.Live; k++) w.step();
       if (lastBiome === Biome.Deadland) world = w;

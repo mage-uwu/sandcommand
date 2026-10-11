@@ -535,6 +535,17 @@ terrain cell to a pixel).
   onto a ceiling first, to wait over whoever passes under. Frozen, it drops
   its dark plate rims, its legs stop and its eye dims, so it melts into the
   cave and is hard to see. Hurt, it thaws.
+- **It scavenges.** Between rests it roams, for 25–50 seconds at a stretch.
+  It remembers the last 64 patches of cave (16 px squares) it has crawled
+  through. Every few seconds it sends a ghost crawl 60 steps each way and
+  turns towards whichever way reaches more ground it hasn't seen. So it
+  works its way along whole tunnel systems instead of pacing one spot.
+- **It digs with its mouth, but only through to an opening.** When its head
+  meets a wall (rock standing at least its body's height, not a step it
+  would just climb) with a body-sized opening no more than 8 px beyond, it
+  bites a hole big enough for its body and slides through. That lets it move smoothly between
+  passages joined only by a thin wall or a narrow crack. It never digs into
+  blind rock, and cement, iron and bedrock are beyond its jaws.
 - **It goes along any surface.** Floors, walls and ceilings alike, its body
   bending round every corner and lying along the ground under it. Its crawl
   follows the contour of the terrain grid: into a wall ahead it turns up

@@ -1,5 +1,6 @@
 import { WORLD_H, WORLD_W } from './constants.ts';
 import type { Terrain } from './terrain.ts';
+import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
 
 /**
  * Wildlife: the planet's own creatures. Nobody drives them, ever; the server
@@ -49,7 +50,23 @@ export const MILLI_LUNGE_TICKS = 75;
  */
 export const MILLI_FREEZE_MIN = 30 * 20;
 export const MILLI_FREEZE_MAX = 30 * 120;
-export const MILLI_WANDER = 30 * 6;
+export const MILLI_WANDER = 30 * 25;
+/**
+ * Scavenging (its third state, neither lying in wait nor hunting): it roams,
+ * after ground it hasn't been over (it remembers the last MILLI_SEEN patches
+ * of MILLI_PATCH cells it crossed), and it bites its way through a thin wall
+ * with its mouth where there's an opening already beyond it (within
+ * MILLI_MOUTH cells along its way), so it flows on between passages that
+ * barely connect. Never into blind rock, nor through what won't yield.
+ */
+export const MILLI_SEEN = 64;
+export const MILLI_PATCH = 16;
+export const MILLI_MOUTH = 8;
+/** Its bite: radius of the hole (body-sized), ticks between bites. */
+export const MILLI_MOUTH_R = 3;
+export const MILLI_MOUTH_CD = 4;
+/** How tall a wall (and how roomy the opening past it) must be for it to bite through. */
+export const MILLI_BITE_H = 6;
 export const MILLI_ROOST = 0.6;
 /** Dropping off a ceiling onto prey: how far to the side of it (cells) it'll let go, and how fast it steers as it falls (cells a tick). */
 export const MILLI_DROP_REACH = 60;
@@ -154,6 +171,9 @@ export interface Beast {
   roost: boolean;
   /** An asp curled up as a gem (its disguise; `frozen` is how long it holds it). */
   gem: boolean;
+  /** The patches of ground it's crossed lately (newest last), and when it can next bite through a wall. */
+  seen: number[];
+  biteAt: number;
   wander: number;
   lunge: number;
   /** Coiled round a clone (its id, or -1): ticks into it, where it holds them, the harm it's taken meanwhile. */
@@ -201,6 +221,8 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     pounce: false,
     roost: false,
     gem: false,
+    seen: [],
+    biteAt: 0,
     wander: MILLI_WANDER,
     lunge: 0,
     coil: -1,
@@ -309,6 +331,51 @@ export function crawlStep(t: Terrain, b: Beast): void {
     if (!solidAt(t, b.x + groundX(b), b.y + groundY(b)) && !reorient(t, b)) b.attached = false;
   }
 }
+
+/** The patch of ground a cell is in (for remembering where it's been). */
+export const patchOf = (x: number, y: number) => (Math.floor(x / MILLI_PATCH) << 12) | Math.floor(y / MILLI_PATCH);
+
+/** Remember the patch its head is in now. */
+export function noteSeen(b: Beast): void {
+  const k = patchOf(b.x, b.y);
+  if (b.seen[b.seen.length - 1] === k) return;
+  const i = b.seen.indexOf(k);
+  if (i >= 0) b.seen.splice(i, 1);
+  b.seen.push(k);
+  if (b.seen.length > MILLI_SEEN) b.seen.shift();
+}
+
+/**
+ * A wall it could bite through: solid right ahead of its head along its way,
+ * and open air again (two cells of it, a real opening) within MILLI_MOUTH,
+ * with nothing between that won't yield to a mouth (fixed, adamant, tough).
+ * Returns how far the opening is (cells), or 0.
+ */
+export function mouthOpening(t: Terrain, b: Beast): number {
+  if (!b.attached || !solidAt(t, b.x + b.hx, b.y + b.hy)) return 0;
+  const ax = -groundX(b);
+  const ay = -groundY(b);
+  // A wall, not a step it would just climb: rock ahead stands its body's height.
+  for (let h = 2; h <= MILLI_BITE_H; h += 2) if (!solidAt(t, b.x + b.hx + ax * h, b.y + b.hy + ay * h)) return 0;
+  for (let k = 1; k <= MILLI_MOUTH; k++) {
+    const x = b.x + b.hx * k;
+    const y = b.y + b.hy * k;
+    if (x < 4 || y < 4 || x >= WORLD_W - 4 || y >= WORLD_H - 14) return 0;
+    if (!t.isSolid(x, y)) {
+      if (k === 1) return 0;
+      // A real opening beyond, room for its body, not a pore in the rock.
+      for (let j = 1; j <= 2; j++) for (let h = 0; h <= MILLI_BITE_H; h += 2) if (solidAt(t, x + b.hx * j + ax * h, y + b.hy * j + ay * h)) return 0;
+      return k;
+    }
+    const m = t.get(x, y);
+    if (MAT_FIXED[m] || MAT_ADAMANT[m] || MAT_TOUGH[m]) return 0;
+  }
+  return 0;
+}
+
+/** Away from its ground (the open side of its heading). */
+export const awayX = (b: Beast) => -groundX(b);
+export const awayY = (b: Beast) => -groundY(b);
 
 /** Is it on a floor (rock under its head, open over it)? */
 export function onFloor(t: Terrain, b: Beast): boolean {

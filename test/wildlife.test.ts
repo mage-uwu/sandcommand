@@ -177,6 +177,63 @@ describe('millipedes in the world', () => {
     void a;
   });
 
+  describe('scavenging', () => {
+    /** The cave with the clone walled off, and a wall (x0..x1) of `mat` across the tunnel. */
+    function split(x0: number, x1: number, mat: number) {
+      const { world, a } = cave();
+      for (let y = 380; y <= 440; y++) for (let x = 900; x < 910; x++) world.terrain.set(x, y, Mat.Rock);
+      for (let y = 380; y <= 440; y++) for (let x = x0; x <= x1; x++) world.terrain.set(x, y, mat);
+      world.terrainReplaced();
+      const b = put(world, 1240, 440, -1);
+      b.spitCd = 1e9;
+      b.wander = 1e9; // (never settles to freeze here)
+      void a;
+      return { world, b };
+    }
+    const reach = (world: World, b: ReturnType<typeof put>, ticks: number) => {
+      let minX = b.x;
+      let maxX = b.x;
+      for (let k = 0; k < ticks; k++) {
+        world.step();
+        minX = Math.min(minX, b.x);
+        maxX = Math.max(maxX, b.x);
+      }
+      return { minX, maxX };
+    };
+
+    it('mouths its way through a thin wall into the open passage beyond', () => {
+      const { world, b } = split(1100, 1104, Mat.Dirt);
+      const { minX } = reach(world, b, 1500);
+      expect(minX).toBeLessThan(1090);
+    });
+
+    it('will not dig blind: a thick wall with no opening it can reach stays whole', () => {
+      const { world, b } = split(1060, 1104, Mat.Dirt);
+      const { minX } = reach(world, b, 1500);
+      expect(minX).toBeGreaterThan(1050);
+      expect(world.terrain.isSolid(1080, 438)).toBe(true);
+    });
+
+    it('cement, iron and the like are beyond its jaws', () => {
+      for (const mat of [Mat.Cement, Mat.Iron]) {
+        const { world, b } = split(1100, 1104, mat);
+        const { minX } = reach(world, b, 1500);
+        expect(minX).toBeGreaterThan(1098);
+      }
+    });
+
+    it('roams the whole length of a long tunnel rather than pacing one spot', () => {
+      const { world } = cave();
+      for (let y = 380; y <= 440; y++) for (let x = 900; x < 910; x++) world.terrain.set(x, y, Mat.Rock);
+      world.terrainReplaced();
+      const b = put(world, 1100, 440, -1);
+      b.spitCd = 1e9;
+      b.wander = 1e9;
+      const { minX, maxX } = reach(world, b, 3000);
+      expect(maxX - minX).toBeGreaterThan(250);
+    });
+  });
+
   it('resting on a ceiling, it drops onto a clone that comes under it, and coils them', () => {
     const { world, a } = cave();
     // On the roof, a little way along from the clone, lying in wait.

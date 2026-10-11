@@ -257,6 +257,13 @@ import {
   MILLI_ROOST,
   MILLI_SENSE_FROZEN,
   onCeiling,
+  mouthOpening,
+  noteSeen,
+  patchOf,
+  awayX,
+  awayY,
+  MILLI_MOUTH_R,
+  MILLI_MOUTH_CD,
   MILLI_WANDER,
   MILLI_CRAWL,
   MILLI_HP,
@@ -1704,8 +1711,11 @@ export class World {
           if (back < ahead - 10) turnRound(b);
           b.turnAt = this.tick + 15;
         } else {
-          if (rng.next() < 0.3) turnRound(b);
-          b.turnAt = this.tick + 120 + rng.int(240);
+          // Scavenging: whichever way along the ground leads over more ground it hasn't been over.
+          const ahead = this.probeNovel(b, false);
+          const back = this.probeNovel(b, true);
+          if (back > ahead + 3 || (back === ahead && rng.next() < 0.15)) turnRound(b);
+          b.turnAt = this.tick + 60 + rng.int(90);
         }
       }
       // Getting nowhere (boxed in): turn round.
@@ -1720,8 +1730,19 @@ export class World {
       b.owed += (tgt ? (b.lunge > 0 ? MILLI_LUNGE : MILLI_HUNT) : MILLI_CRAWL) * DT;
       while (b.owed >= 1 && b.attached) {
         b.owed--;
+        // A thin wall ahead with an opening beyond: its mouth bites through (a body-sized hole, up
+        // off its ground so the floor under it stays), and it flows on into the next passage.
+        const gap = mouthOpening(t, b);
+        if (gap > 0) {
+          if (this.tick < b.biteAt) break;
+          const ox = awayX(b) * MILLI_MOUTH_R;
+          const oy = awayY(b) * MILLI_MOUTH_R;
+          for (let k = 1; k <= gap; k += 2) this.carve(b.x + b.hx * k + ox, b.y + b.hy * k + oy, MILLI_MOUTH_R, 2, 2);
+          b.biteAt = this.tick + MILLI_MOUTH_CD;
+        }
         crawlStep(t, b);
         pushTrail(b);
+        noteSeen(b);
         // (At a lunge's speed it can reach them mid-tick.)
         if (tgt && b.coilCd === 0 && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < MILLI_COIL_R) break;
       }
@@ -1890,6 +1911,22 @@ export class World {
         break;
       }
     }
+  }
+
+  /** How much ground it hasn't been over lately a creature would cross going `back` (round) or on, a few dozen steps along the ground. */
+  private probeNovel(b: Beast, back: boolean): number {
+    const g = { ...b, trail: [] };
+    if (back) turnRound(g);
+    const seen = new Set(b.seen);
+    let fresh = 0;
+    let last = -1;
+    for (let n = 0; n < 60 && g.attached; n++) {
+      crawlStep(this.terrain, g);
+      const k = patchOf(g.x, g.y);
+      if (k !== last && !seen.has(k)) fresh++;
+      last = k;
+    }
+    return fresh;
   }
 
   /** How near (x, y) a creature would get going `back` (round) or on, a few dozen steps along the ground. */
