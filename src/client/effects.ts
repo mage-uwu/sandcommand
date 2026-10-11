@@ -571,6 +571,27 @@ export function venomDrip(p: Particles, x: number, y: number, amount: number): v
   if (Math.random() < Math.min(0.5, 0.08 + amount / 250)) p.spawn(PK.Blood, x + rnd(-3, 3), y + rnd(-6, 4), rnd(-8, 8), rnd(-10, 10), 40);
 }
 
+/** Coral bursting out of a limb as it comes off: shards and polyps of pink coral, a puff of spores, blood. */
+export function coralBurst(p: Particles, x: number, y: number): void {
+  const pinks = [0xff4f8b, 0xff7aa8, 0xffb0cc, 0xff9a60];
+  for (let k = 0; k < 14; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 50 + Math.random() * 140;
+    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 70, rnd(400, 650), (k % 2 ? GIB_STALK : GIB_SAC) | GIB_INORGANIC, pinks[k % pinks.length]);
+  }
+  for (let k = 0; k < 10; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 20 + Math.random() * 60;
+    p.spawn(PK.Smoke, x, y, Math.cos(a) * s, Math.sin(a) * s - 20, 30 + Math.random() * 30, 0, Math.random() < 0.6 ? 0xffa0c8 : 0xffd0e0);
+  }
+  bloodSplat(p, x, y, 8, 120);
+}
+
+/** Coral growing out of a clone: now and then a pink spore drifts off it (more, the more grown it is). */
+export function coralSpores(p: Particles, x: number, y: number, grown: number): void {
+  if (Math.random() < 0.04 + grown * 0.18) p.spawn(PK.Smoke, x + rnd(-4, 4), y + rnd(-6, 6), rnd(-6, 6), rnd(-14, -2), 25 + Math.random() * 25, 0, 0xffa0c8);
+}
+
 /** A millipede killed: its pink coral plates, legs and gems flung off along its whole body, and its blood. */
 export function beastGibs(p: Particles, pts: readonly number[]): void {
   const gems = [0xff2a8a, 0x18c8c0, 0x22b85a];

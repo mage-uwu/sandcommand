@@ -611,6 +611,39 @@ fringe of tiny legs. It crawls the same surfaces.
 - Over half the creatures that come up are asps (the rest millipedes): up
   to seven at once on a cave map and four on any other.
 
+**Seeders** are small fliers, each about the size of a clone's head: a
+raven's glossy black head and pale beak, a wasp's black-and-gold striped
+abdomen with its sting, and a butterfly's painted wings (black rims, an
+eyespot) beating fast. They come from a **coral nest**.
+- **The nest** is a hive of papery coral hung from a cave roof (or a wall)
+  on a stalk. It is banded in pinks, pocked with dark cells, and glows at
+  its mouth. Three grow on a cave map and one on any other, deep down and
+  at least 300 cells apart.
+- **Broods of three, only on danger.** A nest sends nothing out while all
+  is quiet. When it senses danger (a clone in sight within 230 cells, or
+  something hurting it), out come three seeders. It sends another brood
+  once that one is gone, no sooner than 10 seconds after the last, for as
+  long as the danger lasts. **It has to be destroyed**: 420 hit points.
+- **Low cost to the server.** Seeders with nobody to chase for 6 seconds
+  fly home and back into the nest, leaving the world entirely. A nest
+  that's idle only looks around twice a second. A brood whose nest is
+  destroyed drifts about and dies off within 40 seconds.
+- **Flight.** They fly in a jinking, wasp-like way (125 cells a second
+  flat out), circling in at their target, sting, dart away and come back.
+  They keep a little apart from each other and bounce off rock.
+- **The sting** is melee only and does just 2 harm. But it **seeds the
+  limb** it lands on with coral: a leg if it came in low, an arm if high.
+  The coral grows out of the limb, faster the more of it there is. As it
+  grows it harms the limb and the clone: from a single sting, about 15
+  harm over the 8 or so seconds it takes to grow in full. Full grown, it **bursts the limb clean off**
+  in a spray of pink coral and blood 45% of the time. Otherwise it crusts
+  over and stops, but a fresh sting on a crusted limb can still burst it.
+  You see the coral sprouting from the limb, its polyps glowing as it
+  matures and shedding pink spores. The HUD lists your seeded limbs and
+  how far grown each is. A health wave clears it all. Droids' metal limbs
+  don't take it.
+- **Fragile.** 14 hit points: one rifle round, or a blast nearby.
+
 ## Frosting: craters, gem caverns, geysers and flora
 
 Each map is grown with some extra frosting after its bunkers and caves.

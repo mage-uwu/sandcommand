@@ -159,7 +159,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { MAT_ADAMANT, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -186,6 +186,7 @@ import {
   R_BEASTS,
   R_BEAST_DIE,
   R_VENOM,
+  R_CORAL,
   BEAST_SCALE,
   GF_CAVE,
   GF_RUMBLE,
@@ -304,6 +305,28 @@ import {
   pushTrail,
   segmentCircle,
   turnRound,
+  CORAL_BURST,
+  CORAL_GROW,
+  CORAL_HP,
+  CORAL_LIMBS,
+  CORAL_SEED,
+  CORAL_WOUND,
+  NEST_BROOD,
+  NEST_BROOD_CD,
+  NEST_LOOK,
+  NEST_SENSE,
+  SEEDER_DART,
+  SEEDER_EXPIRE,
+  SEEDER_IDLE,
+  SEEDER_SENSE,
+  SEEDER_STING,
+  SEEDER_STING_CD,
+  SEEDER_STING_R,
+  anchorNest,
+  flierPoints,
+  flyStep,
+  nestCentre,
+  newSeeder,
 } from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -385,6 +408,8 @@ export class Player {
   regrow = 0;
   /** Venom in the blood (a millipede's): the harm still to come, a little each tick (VENOM_RATE). */
   venom = 0;
+  /** Coral seeded in its limbs (a seeder's sting), by CORAL_LIMBS: how far grown (0..1; 1 full grown, crusted over). */
+  readonly coral = new Float32Array(CORAL_LIMBS.length);
   /** Wildlife was in this client's view last frame (so an empty R_BEASTS tells it they've gone). */
   beastsSent = false;
   /** A bot's skill, 1 (beginner) to 5 (expert): dealt out by World.dealSkills. */
@@ -494,6 +519,7 @@ export class World {
   /** The valley's calm (no wildlife there: it's quiet, for now), and the venom list as last sent. */
   private calm: { x0: number; x1: number; y0: number } | null = null;
   private venomSent = '';
+  private coralSent = '';
   /** Dropships: aerial support, called in by radio. */
   readonly ships: (Ship | null)[] = new Array(MAX_SHIPS).fill(null);
   /** Enemies spotted from the air, per side (spotKey): clone id -> the tick the sighting goes stale. */
@@ -1555,16 +1581,21 @@ export class World {
     if (this.tick >= this.beastSpawnAt) {
       this.beastSpawnAt = this.tick + BEAST_RESPAWN;
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
-      if (this.beasts.filter(Boolean).length < want) this.spawnBeast();
+      const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
+      if (nests < (this.caves ? NESTS_CAVES : NESTS_PLAIN)) this.spawnNest();
+      else if (this.beasts.filter((b) => b && (b.kind === BeastKind.Millipede || b.kind === BeastKind.Asp)).length < want) this.spawnBeast();
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
       if (b) {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
+        else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
+        else if (b.kind === BeastKind.Nest) this.stepNest(k, b);
         else this.stepMillipede(k, b);
       }
     }
     this.sendVenom();
+    this.sendCoral();
   }
 
   /** A millipede, somewhere down in the caves: on a floor with room over it, deep, out of the water, far from any clone. */
@@ -1600,7 +1631,7 @@ export class World {
     const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
     if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
     // (Lying in wait, it sees further: a line on anyone in that reach wakes it.)
-    let best = b.kind === BeastKind.Asp ? ASP_SENSE : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
+    let best = b.kind === BeastKind.Seeder ? SEEDER_SENSE : b.kind === BeastKind.Nest ? NEST_SENSE : b.kind === BeastKind.Asp ? ASP_SENSE : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
     let id = -1;
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
@@ -1913,6 +1944,277 @@ export class World {
     }
   }
 
+  /** A coral nest, grown on a cave roof (or a wall) down in the caves, with room under it, far from any clone. */
+  private spawnNest(): boolean {
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return false;
+    const t = this.terrain;
+    const rng = this.beastRng;
+    for (let n = 0; n < 80; n++) {
+      const x = 60 + rng.int(WORLD_W - 120);
+      const surf = t.surfaceY(x);
+      let y = surf + 60 + rng.int(Math.max(1, WORLD_H - surf - 100));
+      if (t.isSolid(x, y)) continue;
+      // Up to the roof over it.
+      while (y > surf + 40 && !t.isSolid(x, y - 1)) y--;
+      if (!t.isSolid(x, y - 1) || t.wet(x, y)) continue;
+      let room = 0;
+      while (room < 24 && !t.isSolid(x, y + room + 1)) room++;
+      if (room < 24) continue;
+      const c = this.calm;
+      if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
+      if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 420)) continue;
+      if (this.beasts.some((o) => o?.kind === BeastKind.Nest && Math.hypot(o.x - x, o.y - y) < 300)) continue;
+      const b = newBeast(t, BeastKind.Nest, x, y, 1);
+      this.beasts[slot] = b;
+      nestCentre(b, this.beastPts[slot]);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * One tick of a coral nest. Every NEST_LOOK ticks it feels about it for
+   * danger (a clone in sight within NEST_SENSE, or its alarm up: it was
+   * hurt), and with danger about and none of its brood still out, it sends
+   * out a brood of NEST_BROOD seeders (no sooner than NEST_BROOD_CD after the
+   * last). Its rock dug away, it falls, and lies where it lands.
+   */
+  private stepNest(k: number, b: Beast): void {
+    const t = this.terrain;
+    const pts = this.beastPts[k];
+    if (b.alarm > 0) b.alarm--;
+    if (!b.attached || !t.isSolid(b.x + b.hx, b.y + b.hy)) {
+      if (!anchorNest(t, b)) {
+        b.vy = Math.min(400, b.vy + GRAVITY * DT);
+        for (let n = Math.max(1, Math.round(b.vy * DT)); n > 0; n--) {
+          if (t.isSolid(b.x, b.y + 1)) {
+            b.vy = 0;
+            anchorNest(t, b);
+            break;
+          }
+          b.y++;
+        }
+        if (b.y >= WORLD_H - 14) {
+          this.beasts[k] = null;
+          return;
+        }
+      }
+      nestCentre(b, pts);
+    }
+    if ((this.tick + k) % NEST_LOOK !== 0 || this.tick < b.brood) return;
+    const danger = b.alarm > 0 || this.beastTarget(b, pts[0], pts[1]) >= 0;
+    if (!danger || this.beasts.some((o) => o?.kind === BeastKind.Seeder && o.home === k)) return;
+    b.brood = this.tick + NEST_BROOD_CD;
+    const rng = this.beastRng;
+    for (let n = 0; n < NEST_BROOD; n++) {
+      const slot = this.beasts.indexOf(null);
+      if (slot < 0) break;
+      // Out of the nest's mouth (its open side), fanned out a little.
+      const sx = pts[0] - b.hx * 4 + rng.range(-2, 2);
+      const sy = pts[1] - b.hy * 4 + rng.range(-2, 2);
+      if (t.isSolid(Math.floor(sx), Math.floor(sy))) continue;
+      const s = newSeeder(t, sx, sy, k);
+      s.vx = -b.hx * 60 + rng.range(-50, 50);
+      s.vy = -b.hy * 60 + rng.range(-50, 50);
+      s.seed = rng.int(256);
+      this.beasts[slot] = s;
+      flierPoints(s, this.beastPts[slot]);
+    }
+  }
+
+  /**
+   * One tick of a seeder. It goes for the nearest clone it can see: in at
+   * them in a wasp's jinking flight, a sting, and a dart away
+   * (SEEDER_DART), and in again. Nobody to chase for SEEDER_IDLE, it flies
+   * home and back into its nest; its nest gone, it drifts about and in time
+   * dies off (SEEDER_EXPIRE).
+   */
+  private stepSeeder(k: number, b: Beast): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const pts = this.beastPts[k];
+    if (b.coilCd > 0) b.coilCd--;
+    if (b.lunge > 0) b.lunge--;
+    if ((this.tick + k) % 8 === 0 || b.target < 0) b.target = this.beastTarget(b, b.fx, b.fy);
+    let tgt = b.target >= 0 ? this.players[b.target] : null;
+    if (tgt && (!tgt.alive || tgt.tank >= 0 || tgt.pilot >= 0)) {
+      tgt = null;
+      b.target = -1;
+    }
+    const home = b.home >= 0 ? this.beasts[b.home] : null;
+    const nest = home && home.kind === BeastKind.Nest ? this.beastPts[b.home] : null;
+    if (!nest) b.home = -1;
+    let gx: number;
+    let gy: number;
+    if (tgt) {
+      b.still = 0;
+      if (b.lunge > 0) {
+        // Darting off after a sting: away and up.
+        gx = b.fx + Math.sign(b.fx - tgt.cx || 1) * 40;
+        gy = tgt.cy - 30;
+      } else {
+        // In at them, circling a little as it comes (each its own way round).
+        const d = Math.hypot(tgt.cx - b.fx, tgt.cy - b.fy);
+        const orbit = d > 24 ? 14 : 0;
+        const a = this.tick * 0.12 + b.seed;
+        gx = tgt.cx + Math.cos(a) * orbit;
+        gy = tgt.cy + Math.sin(a) * orbit * 0.6;
+      }
+    } else {
+      b.still++;
+      if (nest && b.still > SEEDER_IDLE) {
+        // Home, and in.
+        gx = nest[0];
+        gy = nest[1];
+        if (Math.hypot(gx - b.fx, gy - b.fy) < 6) {
+          this.beasts[k] = null;
+          return;
+        }
+      } else {
+        if (!nest && b.still > SEEDER_EXPIRE) {
+          this.hurtBeast(k, b.hp, NO_OWNER);
+          return;
+        }
+        // Hanging about: a lazy drift round its nest (or where it is).
+        const cx = nest ? nest[0] : b.fx;
+        const cy = nest ? nest[1] + 16 : b.fy;
+        const a = this.tick * 0.03 + b.seed;
+        gx = cx + Math.cos(a) * 26;
+        gy = cy + Math.sin(a * 1.3) * 12;
+      }
+    }
+    // Keep a little apart from the rest of the swarm.
+    for (let o = 0; o < MAX_BEASTS; o++) {
+      const s = this.beasts[o];
+      if (o === k || !s || s.kind !== BeastKind.Seeder) continue;
+      const dx = b.fx - s.fx;
+      const dy = b.fy - s.fy;
+      const d = Math.hypot(dx, dy);
+      if (d > 0.01 && d < 8) {
+        gx += (dx / d) * 10;
+        gy += (dy / d) * 10;
+      }
+    }
+    flyStep(t, b, gx, gy, DT, rng.range(-1, 1), rng.range(-1, 1));
+    if (b.fy >= WORLD_H - 4 || b.fy < 2) {
+      this.beasts[k] = null;
+      return;
+    }
+    flierPoints(b, pts);
+    // The sting, for whoever it's on.
+    if (b.coilCd > 0) return;
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || this.shielded(p)) continue;
+      const bx = p.body.x;
+      const by = p.top;
+      const h = p.body.y + ACTOR_H - p.top;
+      if (b.fx < bx - SEEDER_STING_R || b.fx > bx + ACTOR_W + SEEDER_STING_R || b.fy < by - SEEDER_STING_R || b.fy > by + h + SEEDER_STING_R) continue;
+      this.sting(p, b);
+      b.coilCd = SEEDER_STING_CD;
+      b.lunge = SEEDER_DART;
+      b.vx = -b.vx * 0.6;
+      b.vy = -Math.abs(b.vy) * 0.6 - 40;
+      break;
+    }
+  }
+
+  /** A seeder's sting: a little harm, and coral sown in one of the clone's limbs (not a droid's: metal). */
+  private sting(p: Player, b: Beast): void {
+    this.damage(p, SEEDER_STING, NO_OWNER, W_SEED);
+    if (!p.alive || p.parts.cls === ClassId.Droid) return;
+    const limbs = CORAL_LIMBS.map((part, i) => i).filter((i) => has(p.parts.mask, CORAL_LIMBS[i]));
+    if (!limbs.length) return;
+    // Where it struck: the legs if it came in low, the arms if high, else any.
+    const low = b.fy > p.top + (p.body.y + ACTOR_H - p.top) * 0.6;
+    const near = limbs.filter((i) => (CORAL_LIMBS[i] >= Part.LegB) === low);
+    const pick = near.length ? near : limbs;
+    const i = pick[this.beastRng.int(pick.length)];
+    if (p.coral[i] >= 1) {
+      // Full grown already: stung again, it may burst.
+      if (this.beastRng.next() < CORAL_BURST) this.burstCoral(p, i);
+      return;
+    }
+    p.coral[i] = Math.min(1, Math.max(p.coral[i], 0.02) + CORAL_SEED);
+  }
+
+  /**
+   * One tick of the coral in a clone's limbs: it grows (faster the more of
+   * it there is), harming the limb and the clone as it goes; full grown, it
+   * bursts the limb off (CORAL_BURST of the time) or crusts over and stops.
+   * True if it did anything.
+   */
+  private coralTick(p: Player): boolean {
+    let any = false;
+    for (let i = 0; i < CORAL_LIMBS.length; i++) {
+      const c = p.coral[i];
+      if (c <= 0 || c >= 1) continue;
+      const part = CORAL_LIMBS[i];
+      if (!has(p.parts.mask, part)) {
+        p.coral[i] = 0;
+        continue;
+      }
+      any = true;
+      const next = Math.min(1, c + CORAL_GROW * (0.5 + c * 1.5));
+      p.coral[i] = next;
+      const res = this.strikeScratch;
+      res.hp = 0;
+      res.detached.length = 0;
+      res.vital = false;
+      harm(p.parts, part, CORAL_WOUND, res);
+      res.hp = CORAL_HP;
+      this.applyStrikeQuiet(p, res);
+      if (!p.alive) return true;
+      if (!has(p.parts.mask, part)) p.coral[i] = 0;
+      else if (next >= 1 && this.beastRng.next() < CORAL_BURST) this.burstCoral(p, i);
+      if (!p.alive) return true;
+    }
+    return any;
+  }
+
+  /** Coral wounds: torn-off parts flying as usual, the harm quiet (like bleeding). */
+  private applyStrikeQuiet(p: Player, res: StrikeResult): void {
+    const hp = res.hp;
+    res.hp = 0;
+    if (res.detached.length) this.applyStrike(p, res, NO_OWNER, W_SEED, p.cx, p.cy);
+    this.damage(p, hp, NO_OWNER, W_SEED, true);
+  }
+
+  /** Full grown coral bursts out of a limb, and the limb comes off. */
+  private burstCoral(p: Player, i: number): void {
+    const part = CORAL_LIMBS[i];
+    p.coral[i] = 0;
+    if (!has(p.parts.mask, part)) return;
+    const res = this.strikeScratch;
+    res.hp = 0;
+    res.detached.length = 0;
+    res.vital = false;
+    harm(p.parts, part, 1e4, res);
+    res.hp = 6;
+    const legs = part >= Part.LegB;
+    this.applyStrike(p, res, NO_OWNER, W_SEED, p.cx, p.cy + (legs ? 5 : -1));
+  }
+
+  /** Who has coral in their limbs, and how far grown (for clients to show it): when that changes much, and now and then while anyone does. */
+  private sendCoral(): void {
+    let key = '';
+    for (const p of this.players) {
+      if (!p || !p.alive || !p.coral.some((c) => c > 0)) continue;
+      key += `${p.id}:`;
+      for (const c of p.coral) key += `${Math.round(c * 16)},`;
+    }
+    if (key === this.coralSent && (key === '' || this.tick % 15 !== 0)) return;
+    this.coralSent = key;
+    const sick = this.players.filter((p): p is Player => !!p && p.alive && p.coral.some((c) => c > 0));
+    const w = this.broadcast;
+    w.u8(R_CORAL);
+    w.u8(sick.length);
+    for (const p of sick) {
+      w.u8(p.id);
+      for (const c of p.coral) w.u8(Math.round(Math.min(1, c) * 255));
+    }
+  }
+
   /** How much ground it hasn't been over lately a creature would cross going `back` (round) or on, a few dozen steps along the ground. */
   private probeNovel(b: Beast, back: boolean): number {
     const g = { ...b, trail: [] };
@@ -1959,6 +2261,7 @@ export class World {
     // Hurt, it thaws; hurt hard enough while it holds someone, it lets them go.
     b.frozen = 0;
     b.gem = false;
+    if (b.kind === BeastKind.Nest) b.alarm = 30 * 8; // (hurt: it senses danger, whoever it is)
     if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
     if (b.hp > 0) return;
     this.beasts[k] = null;
@@ -3332,6 +3635,7 @@ export class World {
   private mendTick(t: Player): void {
     t.hp = Math.min(ACTOR_MAX_HP, t.hp + REPAIR_HP);
     t.venom = 0; // (the nanobots wash the venom out)
+    t.coral.fill(0); // (and the coral)
     const parts = t.parts;
     for (let part = 0; part < PART_COUNT; part++) if (has(parts.mask, part)) parts.wounds[part] = Math.max(0, parts.wounds[part] - REPAIR_WOUND);
     const missing = (parts.cls === ClassId.Droid ? DROID_REGROWABLE : REGROWABLE).find((part) => !has(parts.mask, part));
@@ -3375,6 +3679,7 @@ export class World {
     b.vy = vy;
     b.fuel = 100;
     p.venom = 0;
+    p.coral.fill(0);
     // Every clone rolls a class (scout, medium or heavy) and the mercenary
     // vendor that supplied it (Guild-Tech, Rust Nomads, Synth Legion).
     resetBody(p.parts, rollClass(this.rng.next()), rollFaction(this.rng.next()));
@@ -5267,6 +5572,7 @@ export class World {
         this.damage(p, v, NO_OWNER, W_VENOM, true);
         if (!p.alive) continue;
       }
+      if (this.coralTick(p) && !p.alive) continue;
       if (p.pilot >= 0) {
         // Flying the dropship: the clone stands inert; the view (and interest) is the ship's.
         const sh = this.ships[p.pilot]!;
@@ -6009,9 +6315,12 @@ const DIGGER_ADAMANT = 8;
 /** Ids for wildlife (wildlife.ts), above every dropship's. */
 const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
 /** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */
-const MAX_BEASTS = 8;
+const MAX_BEASTS = 24;
 const BEASTS_CAVES = 7;
 const BEASTS_PLAIN = 4;
+/** Coral nests on a cave map and on any other (seeders don't count toward the creatures: they're the nests' broods). */
+const NESTS_CAVES = 3;
+const NESTS_PLAIN = 1;
 /** Of the creatures that come up, how many are asps (the rest millipedes). */
 const ASP_SHARE = 0.55;
 const BEAST_RESPAWN = 30 * 25;

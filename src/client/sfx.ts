@@ -245,6 +245,15 @@ export class Sfx {
     this.burst(v, 0.05, big ? 0.5 : 0.3, 'highpass', big ? 3500 : 6000, 0.8, 0.5);
   }
 
+  /** Seeders on the wing: a rasping, wavering buzz. */
+  buzz(x: number, y: number): void {
+    const v = this.voice(x, y, 0.3, 0.7);
+    if (!v) return;
+    this.tone(v, 0, 0.7, 'sawtooth', 190, 230, 0.18);
+    this.tone(v, 0.05, 0.6, 'square', 240, 200, 0.08);
+    this.burst(v, 0, 0.6, 'bandpass', 1400, 4, 0.25, 1800);
+  }
+
   /** A blast; `radius` sizes it (a bomblet pops, a dropship bomb shakes the ground). */
   explode(x: number, y: number, radius: number): void {
     const s = clamp(radius / 40, 0.4, 2.5);

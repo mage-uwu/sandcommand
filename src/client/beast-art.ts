@@ -448,3 +448,211 @@ export function drawAspGem(ctx: CanvasRenderingContext2D, t: Terrain, tint: GemT
     ctx.fillRect(Math.round(bx + up.x + s * 4), Math.round(by + up.y + c2 * 4), 1, 1);
   }
 }
+
+/** A seeder's wing paints, by its seed: ground, rim, eyespot. */
+const WING_PAINTS = [
+  ['#ff5a8c', '#140c14', '#40f0e0'],
+  ['#ff9a3a', '#140c14', '#fff4e0'],
+  ['#b05aff', '#140c14', '#ffd040'],
+  ['#40d8c0', '#140c14', '#ff5a8c'],
+];
+
+/**
+ * A seeder, about a clone's head in size: a raven's glossy black head and
+ * a pale beak, a wasp's striped abdomen with its sting, and a butterfly's
+ * painted wings (black rims, an eyespot) beating fast over its back. `pts`:
+ * its head, then its tail (the way it's going).
+ */
+export function drawSeeder(ctx: CanvasRenderingContext2D, pts: readonly number[], seed: number, now: number): void {
+  const x = pts[0];
+  const y = pts[1];
+  let tx = x - pts[2];
+  let ty = y - pts[3];
+  const l = Math.hypot(tx, ty);
+  if (l < 0.01) {
+    tx = 1;
+    ty = 0;
+  } else {
+    tx /= l;
+    ty /= l;
+  }
+  // Its back: up the screen, whichever way it's going.
+  let nx = -ty;
+  let ny = tx;
+  if (ny > 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  const put = (u: number, v: number, c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x + u * tx + v * nx - 0.5), Math.round(y + u * ty + v * ny - 0.5), 1, 1);
+  };
+  /** An ellipse in its own frame (centre u, v; half-lengths a, b), coloured by `col(e, u, v)` (e: 0 centre, 1 rim). */
+  const blob = (cu: number, cv: number, a: number, b: number, col: (e: number, u: number, v: number) => string | null) => {
+    const R = Math.ceil(Math.max(a, b)) + 1;
+    for (let v = -R; v <= R; v++) {
+      for (let u = -R; u <= R; u++) {
+        const e = ((u + 0.5 - 0.5) / a) ** 2 + (v / b) ** 2;
+        if (e > 1) continue;
+        const c = col(e, cu + u, cv + v);
+        if (c) put(cu + u, cv + v, c);
+      }
+    }
+  };
+  const paint = WING_PAINTS[seed % WING_PAINTS.length];
+  // The beat: wing tips swing from over its back to under its belly, fast.
+  const beat = Math.sin(now / 26 + seed);
+  // (Never edge on: a butterfly's wings always show some of their paint.)
+  const tip = (beat < 0 ? -1 : 1) * (2.4 + 2.6 * Math.abs(beat));
+  const wing = (cu: number, len: number, reach: number, dark: boolean) => {
+    blob(cu, reach / 2 + Math.sign(reach) * 0.5, len, Math.abs(reach) / 2 + 0.3, (e, u, v) => {
+      if (e > 0.7) return paint[1];
+      const spot = (u - cu) ** 2 + (v - reach * 0.55) ** 2 < 1.1;
+      const c = spot ? paint[2] : hsh(Math.round(u * 3), Math.round(v * 3), seed) > 0.8 ? shade(paint[0], 1.3) : paint[0];
+      return dark ? shade(c, 0.6) : c;
+    });
+  };
+  // The far wings, behind its body.
+  wing(-1, 2, tip * 0.8, true);
+  // The wasp's abdomen, banded black and gold a cell at a time, and its sting.
+  blob(-3, -0.3, 2.1, 1.2, (_e, u) => (Math.floor(u + 9) % 2 ? '#1c1418' : '#ffc040'));
+  put(-5.4, -0.8, '#f4ecd8');
+  // Legs, dangling.
+  put(0, -1.6, '#2a2430');
+  put(-1, -1.8, '#2a2430');
+  // The raven's head and breast: glossy black, a blue sheen on top; its beak, its eye.
+  blob(0.9, 0.1, 1.4, 1.1, (e, _u, v) => (v > 0.6 && e < 0.7 ? '#4a5878' : '#16121c'));
+  put(2.6, 0, '#b8b0a8');
+  put(3.5, -0.2, '#d8d0c4');
+  put(1.4, 0.6, Math.floor(now / 400 + seed) % 7 === 0 ? '#16121c' : '#ff3a5a');
+  // The near wings, over it.
+  wing(0, 2.6, tip, false);
+}
+
+/**
+ * A coral nest: a hive of papery coral hung off the rock (a roof, a wall)
+ * by a stalk, banded in pinks, pocked with dark cells, polyps glowing
+ * round it, and at its open end a mouth with something stirring inside it.
+ * Hurt, it cracks.
+ */
+export function drawNest(ctx: CanvasRenderingContext2D, t: Terrain, x: number, y: number, seed: number, hp: number, now: number): void {
+  const open = openWay(t, x, y);
+  const ax = open.x;
+  const ay = open.y;
+  const bx = -ay;
+  const by = ax;
+  // The stalk back to the rock.
+  ctx.fillStyle = '#8a2a50';
+  pixLine(ctx, x, y, x - ax * 8, y - ay * 8);
+  ctx.fillStyle = '#5a1838';
+  pixLine(ctx, x + bx, y + by, x - ax * 7 + bx, y - ay * 7 + by);
+  const R = 9;
+  const glow = 0.5 + 0.5 * Math.sin(now / 300 + seed);
+  for (let py = Math.floor(y - R); py <= Math.ceil(y + R); py++) {
+    for (let px = Math.floor(x - R); px <= Math.ceil(x + R); px++) {
+      const dx = px + 0.5 - x;
+      const dy = py + 0.5 - y;
+      const a = dx * ax + dy * ay; // along it: + toward its mouth
+      const b = dx * bx + dy * by;
+      // A teardrop: narrow at the stalk, swelling, rounded off at the mouth; its rim lumpy.
+      const th = Math.atan2(b, a);
+      const lump = 0.8 * Math.sin(th * 5 + seed) + 0.5 * Math.sin(th * 9 + seed * 2);
+      const w = 5.2 * Math.sqrt(Math.max(0, 1 - ((a - 0.8) / 7) ** 2)) * (0.75 + 0.25 * Math.min(1, (a + 6) / 6)) + lump * 0.5;
+      if (Math.abs(b) > w || a < -6.2 || a > 7.4 + lump * 0.4) continue;
+      const edge = Math.abs(b) > w - 1 || a > 6.6 + lump * 0.4;
+      const h = hsh(px, py, seed);
+      let c: string;
+      if (edge) c = '#3a0c22';
+      else {
+        // Bands of papery coral, layered down it.
+        const band = Math.floor((a + 8 + Math.sin(b * 0.9 + seed) * 0.8) / 2.1) % 3;
+        c = band === 0 ? '#ff6a9c' : band === 1 ? '#e44a82' : '#ff8aa8';
+        if (h > 0.9) c = '#ffc0d4';
+        // Its cells: dark pocks.
+        if (hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 7) > 0.86 && h > 0.3) c = '#2a0818';
+        // Its mouth, at the open end, glowing from within.
+        if (a > 4.2 && Math.abs(b) < 1.8) c = h > 0.5 ? (glow > 0.5 ? '#ffd060' : '#ff9a40') : '#401020';
+        // Hurt: cracks.
+        if (hp < 0.6 && hsh(Math.floor(px + py * 0.5), 0, seed + 3) > 0.55 + hp * 0.7 && Math.abs((px * 3 + py * 5 + seed) % 11) < 1) c = '#200410';
+      }
+      ctx.fillStyle = c;
+      ctx.fillRect(px, py, 1, 1);
+    }
+  }
+  // Polyps round it, their tips glowing.
+  for (let k = 0; k < 7; k++) {
+    const th = (k / 7) * Math.PI * 2 + seed;
+    const a = Math.cos(th) * 5;
+    const b = Math.sin(th) * 5.6;
+    const px = x + ax * a + bx * b;
+    const py = y + ay * a + by * b;
+    if (a < -4) continue;
+    ctx.fillStyle = (Math.floor(now / 250) + k) % 4 === 0 ? '#fff4b0' : '#ffb0d0';
+    ctx.fillRect(Math.round(px), Math.round(py), 1, 1);
+  }
+}
+
+/** A seeder's or a nest's pieces, tumbling: a wing (or a body) of a seeder, a shard of coral nest. */
+export function drawCritterGib(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, kind: number, seed: number, i: number): void {
+  const tx = Math.cos(a);
+  const ty = Math.sin(a);
+  const put = (u: number, v: number, c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x + u * tx - v * ty), Math.round(y + u * ty + v * tx), 1, 1);
+  };
+  if (kind === 2) {
+    const paint = WING_PAINTS[seed % WING_PAINTS.length];
+    if (i === 0) {
+      for (let u = -1; u <= 1; u++) put(u, 0, '#16121c');
+      put(2, 0, '#b8b0a8');
+    } else {
+      for (let u = -1; u <= 1; u++) for (let v = 0; v <= 2; v++) put(u, v, v === 2 || Math.abs(u) === 1 ? paint[1] : paint[0]);
+      put(0, 1, paint[2]);
+    }
+    return;
+  }
+  const pinks = ['#ff6a9c', '#e44a82', '#ff8aa8', '#ffc0d4'];
+  for (let u = -1; u <= 1; u++) for (let v = -1; v <= 0; v++) if (hsh(u, v, seed + i) > 0.2) put(u, v, pinks[(i + u + 3) % 4]);
+  put(0, 1, '#2a0818');
+}
+
+/**
+ * Coral growing out of a clone's limb: tufts of branching coral springing
+ * from the cells (x0..x1, y0..y1), out the way `ox` (-1, 1: away from the
+ * body), more and longer the more grown it is (0..1); full grown, crusted
+ * all over it and its polyps glowing.
+ */
+export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, ox: number, grown: number, seed: number, now: number): void {
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  // Crusted: the limb itself overgrown.
+  if (grown > 0.45) {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (hsh(x - x0, y - y0, seed) > grown) continue;
+        ctx.fillStyle = hsh(x - x0, y - y0, seed + 1) > 0.5 ? '#e44a82' : '#ff7aa8';
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+  const tufts = 1 + Math.floor(grown * 5);
+  for (let k = 0; k < tufts; k++) {
+    const bx = x0 + Math.floor(hsh(k, 1, seed) * w);
+    const by = y0 + Math.floor(hsh(k, 2, seed) * h);
+    const len = 1 + Math.round(grown * 3 * (0.5 + hsh(k, 3, seed)));
+    const up = hsh(k, 4, seed) > 0.5 ? -1 : 0;
+    let x = bx;
+    let y = by;
+    for (let s = 1; s <= len; s++) {
+      x += ox;
+      if (s % 2 === 0) y += up;
+      ctx.fillStyle = s === len ? (grown > 0.6 && (Math.floor(now / 300) + k) % 3 === 0 ? '#fff4b0' : '#ffc0d4') : '#d83a70';
+      ctx.fillRect(x, y, 1, 1);
+      // A side branch off the middle.
+      if (s === 2 && len > 2) {
+        ctx.fillStyle = '#ff8aa8';
+        ctx.fillRect(x, y + (up ? 1 : -1), 1, 1);
+      }
+    }
+  }
+}

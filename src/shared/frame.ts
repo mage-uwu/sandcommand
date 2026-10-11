@@ -39,6 +39,7 @@ import {
   R_BEASTS,
   R_BEAST_DIE,
   R_VENOM,
+  R_CORAL,
   BEAST_SCALE,
   GameMode,
   R_SHIPS,
@@ -59,7 +60,7 @@ import {
   FACTION_SHIFT,
 } from './protocol.ts';
 import type { Terrain } from './terrain.ts';
-import { BEAST_BUILD } from './wildlife.ts';
+import { BEAST_BUILD, CORAL_LIMBS } from './wildlife.ts';
 
 /** Body points per creature kind (wildlife.ts BeastKind). */
 const BEAST_POINTS = BEAST_BUILD.map((b) => b.segs);
@@ -330,6 +331,8 @@ export interface FrameHandler {
   beastDie(slot: number, kind: number, seed: number): void;
   /** Who has venom in their blood, and how much harm it has still to do (R_VENOM). */
   venom(list: { id: number; amount: number }[]): void;
+  /** Coral seeded in clones' limbs (R_CORAL): per clone, how far grown in each of CORAL_LIMBS (0..1). */
+  coral(list: { id: number; levels: number[] }[]): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
   /** A new map: its seed, kind (worldgen MapKind) and every chunk's hash as generated. */
   wave(seed: number, hashes: Uint32Array, kind: number): void;
@@ -592,6 +595,18 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const list: { id: number; amount: number }[] = [];
         for (let i = 0; i < n; i++) list.push({ id: r.u8(), amount: r.u8() });
         h.venom(list);
+        break;
+      }
+      case R_CORAL: {
+        const n = r.u8();
+        const list: { id: number; levels: number[] }[] = [];
+        for (let i = 0; i < n; i++) {
+          const id = r.u8();
+          const levels: number[] = [];
+          for (let k = 0; k < CORAL_LIMBS.length; k++) levels.push(r.u8() / 255);
+          list.push({ id, levels });
+        }
+        h.coral(list);
         break;
       }
       case R_WATER: {
@@ -900,6 +915,7 @@ export const nullHandler: FrameHandler = {
   beasts() {},
   beastDie() {},
   venom() {},
+  coral() {},
   beam() {},
   heal() {},
   teams() {},

@@ -3,12 +3,13 @@ import { BTN_FIRE, type Body, copyBody, newBody, shoulderAt, stepBody } from '..
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, applyFrameRecords } from '../shared/frame.ts';
+import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -24,7 +25,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -163,6 +164,7 @@ export interface Sfx {
   calm(level: number): void;
   /** A creature rearing up, hissing (a millipede's deeper, an asp's sharp). */
   hiss(x: number, y: number, big: boolean): void;
+  buzz(x: number, y: number): void;
 }
 
 const CAREER_KEY = 'sc.career';
@@ -587,6 +589,17 @@ export class Game implements FrameHandler {
       const s = this.snaps.get(id);
       const last = s?.[s.length - 1];
       if (last && last.flags & F_ALIVE) venomDrip(this.particles, last.x + 4, last.y + 7, amount);
+    }
+    // Coral growing out of limbs: it sheds spores, the more grown the more.
+    for (const [id, levels] of this.coralIn) {
+      const m = Math.max(...levels);
+      if (id === this.myId) {
+        if (this.alive) coralSpores(this.particles, this.body.x + 4, this.body.y + 7, m);
+        continue;
+      }
+      const s = this.snaps.get(id);
+      const last = s?.[s.length - 1];
+      if (last && last.flags & F_ALIVE) coralSpores(this.particles, last.x + 4, last.y + 7, m);
     }
     if (this.sfx) this.soundBeds(this.sfx);
     // Bodies in the engine so shrapnel stops in them and grains bounce off
@@ -1098,6 +1111,7 @@ export class Game implements FrameHandler {
    * turned and spinning, which creature (seed) and segment it was, life left (ticks).
    */
   readonly segmentGibs: { x: number; y: number; vx: number; vy: number; a: number; va: number; kind: number; seed: number; i: number; life: number }[] = [];
+  private buzzAt = -1e9;
   beasts(list: BeastState[]): void {
     const seen = new Set<number>();
     for (const b of list) {
@@ -1115,27 +1129,37 @@ export class Game implements FrameHandler {
         v.frozen = b.frozen;
         v.coiled = b.coiled;
         v.gem = b.gem;
-      } else this.beastViews.set(b.slot, { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, prev: b.pts, cur: b.pts });
+      } else {
+        // A brood out of its nest: the buzz of it (once for the lot).
+        if (b.kind === BeastKind.Seeder && performance.now() - this.buzzAt > 1500) {
+          this.buzzAt = performance.now();
+          this.sfx?.buzz(b.pts[0], b.pts[1]);
+        }
+        this.beastViews.set(b.slot, { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, prev: b.pts, cur: b.pts });
+      }
     }
     for (const k of [...this.beastViews.keys()]) if (!seen.has(k)) this.beastViews.delete(k);
   }
   beastDie(slot: number, _kind: number, _seed: number): void {
     const v = this.beastViews.get(slot);
     if (!v) return;
-    beastGibs(this.particles, v.cur);
-    // Every segment flung off whole.
-    const n = v.cur.length >> 1;
+    if (v.kind === BeastKind.Nest) coralBurst(this.particles, v.cur[0], v.cur[1]);
+    else if (v.kind === BeastKind.Seeder) bloodSplat(this.particles, v.cur[0], v.cur[1], 3, 60);
+    else beastGibs(this.particles, v.cur);
+    // Every segment flung off whole (a nest in shards; a seeder's wings torn off it).
+    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Seeder ? 3 : v.cur.length >> 1;
     for (let i = 0; i < n; i++) {
-      const x = v.cur[i * 2];
-      const y = v.cur[i * 2 + 1];
+      const at = Math.min(i, (v.cur.length >> 1) - 1);
+      const x = v.cur[at * 2] + (v.kind === BeastKind.Nest ? (Math.random() - 0.5) * 10 : 0);
+      const y = v.cur[at * 2 + 1] + (v.kind === BeastKind.Nest ? (Math.random() - 0.5) * 10 : 0);
       const j = Math.min(n - 1, i + 1);
-      const a = Math.atan2(v.cur[Math.max(0, i - 1) * 2 + 1] - v.cur[j * 2 + 1], v.cur[Math.max(0, i - 1) * 2] - v.cur[j * 2]);
+      const a = at < i || n < 2 ? Math.random() * Math.PI * 2 : Math.atan2(v.cur[Math.max(0, i - 1) * 2 + 1] - v.cur[j * 2 + 1], v.cur[Math.max(0, i - 1) * 2] - v.cur[j * 2]);
       const out = Math.random() * Math.PI * 2;
       const sp = 50 + Math.random() * 130;
       this.segmentGibs.push({ x, y, vx: Math.cos(out) * sp, vy: Math.sin(out) * sp - 90, a, va: (Math.random() - 0.5) * 18, kind: v.kind, seed: v.seed, i, life: 30 * 6 + Math.floor(Math.random() * 60) });
     }
     if (this.segmentGibs.length > 120) this.segmentGibs.splice(0, this.segmentGibs.length - 120);
-    this.sfx?.gib(v.cur[0], v.cur[1], 1.5, false);
+    this.sfx?.gib(v.cur[0], v.cur[1], v.kind === BeastKind.Seeder ? 0.4 : 1.5, false);
     this.beastViews.delete(slot);
   }
   /** Venom in clones' blood (R_VENOM): id -> the harm it still has to do. */
@@ -1143,6 +1167,16 @@ export class Game implements FrameHandler {
   venom(list: { id: number; amount: number }[]): void {
     this.venomIn.clear();
     for (const v of list) this.venomIn.set(v.id, v.amount);
+  }
+  /** Coral seeded in clones' limbs (R_CORAL): id -> how far grown in each of CORAL_LIMBS (0..1). */
+  readonly coralIn = new Map<number, number[]>();
+  coral(list: { id: number; levels: number[] }[]): void {
+    this.coralIn.clear();
+    for (const c of list) this.coralIn.set(c.id, c.levels);
+  }
+  /** Ours, for the HUD (empty: none). */
+  get myCoral(): readonly number[] {
+    return (this.alive && this.coralIn.get(this.myId)) || [];
   }
   /** Ours, for the HUD (0: none). */
   get myVenom(): number {
@@ -1652,6 +1686,7 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Dart) text = `${vn} took a poisoned dart`;
     else if (killer === 255 && weapon === W_COIL) text = `${vn} was crushed and bitten by a millipede`;
     else if (killer === 255 && weapon === W_ASP) text = `${vn} was bitten by a gem asp`;
+    else if (killer === 255 && weapon === W_SEED) text = `${vn} was overgrown by a seeder's coral`;
     else if (killer === 255 && weapon === ProjKind.Venom) text = `${vn} was spat on by a millipede`;
     else if (killer === 255 && weapon === W_VENOM) text = `${vn} died of venom`;
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
@@ -1978,6 +2013,9 @@ export class Game implements FrameHandler {
   }
 
   detach(id: number, part: number, x: number, y: number, vx: number, vy: number): void {
+    // A limb with coral in it: the coral bursts out with it, in a spray of pink.
+    const ci = CORAL_LIMBS.indexOf(part as (typeof CORAL_LIMBS)[number]);
+    if (ci >= 0 && (this.coralIn.get(id)?.[ci] ?? 0) > 0) coralBurst(this.particles, x, y);
     if (this.isDroid(id)) droidPartOff(this.particles, part, x, y, vx, vy);
     else limbOff(this.particles, part, x, y, vx, vy, this.players.get(id)?.rgb ?? 0xcccccc, this.synthetic(id));
     this.sfx?.limb(x, y, this.synthetic(id));
@@ -2018,6 +2056,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
   if (killer === 255 && weapon === W_COIL) return 'crushed and bitten by a millipede';
   if (killer === 255 && weapon === W_ASP) return 'bitten by a gem asp';
+  if (killer === 255 && weapon === W_SEED) return "overgrown by a seeder's coral";
   if (killer === 255 && weapon === ProjKind.Venom) return "spat on by a millipede";
   if (killer === 255 && weapon === W_VENOM) return 'died of venom';
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';

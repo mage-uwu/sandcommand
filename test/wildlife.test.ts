@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ClassId, resetBody } from '../src/shared/body.ts';
-import { ACTOR_H, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
+import { ClassId, Part, has, resetBody } from '../src/shared/body.ts';
+import { ACTOR_H, ACTOR_W, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { BEAST_BUILD, CORAL_LIMBS, NEST_BROOD, SEEDER_R, SEEDER_STING, nestCentre, newSeeder, ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -333,6 +333,52 @@ describe('millipedes in the world', () => {
     expect(game.beastViews.size).toBe(0);
   });
 
+  it('clients see the nest and its brood, the coral in their limbs, and a burst limb', () => {
+    const inbox: Uint8Array[] = [];
+    const world = new World(7);
+    (world as unknown as { beastSpawnAt: number }).beastSpawnAt = 1e9;
+    const a = world.addPlayer('a', { send: (d) => inbox.push(d) })!;
+    deliverAll(world, [a]);
+    const game = new Game();
+    game.myId = a.id;
+    const pump = () => {
+      for (const m of inbox.splice(0)) {
+        const r = new Reader(m);
+        r.u8();
+        const tk = r.u32();
+        const ack = r.u16();
+        game.applyFrame(tk, ack, r);
+      }
+    };
+    const t = world.terrain;
+    for (let y = 300; y < 520; y++) for (let x = 760; x < 1400; x++) t.set(x, y, x >= 880 && x <= 1260 && y >= 380 && y <= 440 ? Mat.Air : Mat.Rock);
+    world.terrainReplaced();
+    resetBody(a.parts, ClassId.Medium, 0);
+    a.body.x = 960;
+    a.body.y = 441 - ACTOR_H;
+    world.beasts.fill(null);
+    const n = newBeast(t, BeastKind.Nest, 1100, 380, 1);
+    world.beasts[2] = n;
+    nestCentre(n, world.beastPts[2]);
+    for (let k = 0; k < 20; k++) world.step();
+    pump();
+    const kinds = [...game.beastViews.values()].map((v) => v.kind);
+    expect(kinds.filter((k) => k === BeastKind.Nest).length).toBe(1);
+    expect(kinds.filter((k) => k === BeastKind.Seeder).length).toBe(3);
+    for (const v of game.beastViews.values()) if (v.kind === BeastKind.Seeder) expect(v.cur.length).toBe(4);
+    // Coral in a leg: the client hears how far grown.
+    a.coral[3] = 0.5;
+    world.step();
+    pump();
+    expect(game.myCoral[3]).toBeGreaterThan(0.45);
+    // Full grown, it bursts (forced here): the leg goes, and with it the coral.
+    (world as unknown as { burstCoral(p: unknown, i: number): void }).burstCoral(a, 3);
+    expect(has(a.parts.mask, Part.LegF)).toBe(false);
+    world.step();
+    pump();
+    expect(game.myCoral.length === 0 || game.myCoral[3] === 0).toBe(true);
+  });
+
   it('bots turn their guns on one coming at them', () => {
     const world = new World(75);
     (world as unknown as { beastSpawnAt: number }).beastSpawnAt = 1e9;
@@ -431,6 +477,124 @@ describe('millipedes in the world', () => {
     });
   });
 
+  describe('seeders and their coral nest', () => {
+    const putNest = (world: World, x: number, y: number) => {
+      const b = newBeast(world.terrain, BeastKind.Nest, x, y, 1);
+      world.beasts[2] = b;
+      nestCentre(b, world.beastPts[2]);
+      return b;
+    };
+    const seeders = (world: World) => world.beasts.filter((b) => b?.kind === BeastKind.Seeder);
+    const wall = (world: World, mat: number) => {
+      for (let y = 380; y <= 440; y++) for (let x = 1000; x < 1010; x++) world.terrain.set(x, y, mat);
+      world.terrainReplaced();
+    };
+
+    it('a nest hangs from the roof and sends nothing out while all is quiet; danger in sight, out come three', () => {
+      const { world } = cave();
+      wall(world, Mat.Rock);
+      const n = putNest(world, 1150, 380);
+      expect(n.hy).toBe(-1); // (grown on the roof)
+      expect(world.beastPts[2][1]).toBeGreaterThan(382);
+      for (let k = 0; k < 30 * 10; k++) world.step();
+      expect(seeders(world).length).toBe(0);
+      wall(world, Mat.Air);
+      for (let k = 0; k < 30; k++) world.step();
+      expect(seeders(world).length).toBe(NEST_BROOD);
+      expect(NEST_BROOD).toBe(3);
+    });
+
+    it('a nest that is shot senses danger even with nobody in sight', () => {
+      const { world } = cave();
+      wall(world, Mat.Rock);
+      putNest(world, 1150, 380);
+      world.hurtBeast(2, 10, 255);
+      for (let k = 0; k < 30; k++) world.step();
+      expect(seeders(world).length).toBe(NEST_BROOD);
+    });
+
+    it('seeders, head-sized, fly at the clone and sting: a little harm, and coral seeded in a limb that grows and eats at it', () => {
+      const { world, a } = cave();
+      putNest(world, 1150, 380);
+      const hp0 = a.hp;
+      let stung = -1;
+      for (let k = 0; k < 30 * 12 && stung < 0; k++) {
+        world.step();
+        if (a.coral.some((c) => c > 0)) stung = k;
+      }
+      expect(stung).toBeGreaterThanOrEqual(0);
+      expect(SEEDER_R * 2).toBeLessThan(ACTOR_W); // (a clone's head, about)
+      expect(SEEDER_STING).toBeLessThanOrEqual(2);
+      expect(a.hp).toBeGreaterThan(hp0 - 12); // (stings barely scratch)
+      // The nest gone and the swarm with it, the coral grows on, harming them as it goes.
+      world.beasts.fill(null);
+      const i = a.coral.findIndex((c) => c > 0);
+      const c0 = a.coral[i];
+      const hp1 = a.hp;
+      for (let k = 0; k < 30 * 4; k++) world.step();
+      expect(a.coral[i]).toBeGreaterThan(c0);
+      expect(a.hp).toBeLessThan(hp1 - 3);
+    });
+
+    it('full grown, the coral sometimes bursts the limb clean off, else crusts over', () => {
+      let burst = 0;
+      let crust = 0;
+      const { world, a } = cave();
+      for (let trial = 0; trial < 16; trial++) {
+        resetBody(a.parts, ClassId.Medium, 0);
+        a.hp = 100;
+        a.coral.fill(0);
+        a.coral[2] = 0.999; // (a back leg: CORAL_LIMBS[2])
+        for (let k = 0; k < 3; k++) world.step();
+        if (!has(a.parts.mask, Part.LegB)) burst++;
+        else if (a.coral[2] >= 1) crust++;
+      }
+      expect(burst).toBeGreaterThan(0);
+      expect(crust).toBeGreaterThan(0);
+      expect(CORAL_LIMBS[2]).toBe(Part.LegB);
+    });
+
+    it("droids' metal limbs don't take it; a health wave clears it", () => {
+      const { world, a } = cave();
+      a.coral[0] = 0.5;
+      (world as unknown as { mendTick(p: unknown): void }).mendTick(a);
+      expect(a.coral[0]).toBe(0);
+      resetBody(a.parts, ClassId.Droid, 0);
+      const s = newSeeder(world.terrain, a.cx, a.cy, -1);
+      (world as unknown as { sting(p: unknown, b: unknown): void }).sting(a, s);
+      expect(a.coral.every((c) => c === 0)).toBe(true);
+    });
+
+    it('with nobody left to chase, the brood flies home into the nest (out of the world); the nest gone, they die off', () => {
+      const { world, a } = cave();
+      const n = putNest(world, 1150, 380);
+      for (let k = 0; k < 30 && seeders(world).length < 3; k++) world.step();
+      expect(seeders(world).length).toBe(3);
+      // The clone out of reach (in a tank, say: they won't go for it).
+      a.alive = false;
+      for (let k = 0; k < 30 * 15 && seeders(world).length; k++) world.step();
+      expect(seeders(world).length).toBe(0);
+      expect(world.beasts[2]).not.toBeNull();
+      // Out again, and the nest destroyed under them: in time they die off.
+      a.alive = true;
+      a.hp = 100;
+      n.brood = 0; // (its next brood ready)
+      world.hurtBeast(2, 1, 255);
+      for (let k = 0; k < 30 * 2; k++) world.step();
+      expect(seeders(world).length).toBeGreaterThan(0);
+      world.hurtBeast(2, 1e4, 255);
+      expect(world.beasts[2]).toBeNull();
+      a.alive = false;
+      for (let k = 0; k < 30 * 50 && seeders(world).length; k++) world.step();
+      expect(seeders(world).length).toBe(0);
+    });
+
+    it('a seeder dies to a single rifle round; a nest takes a good few', () => {
+      expect(BEAST_BUILD[BeastKind.Seeder].hp).toBeLessThan(PROJ[ProjKind.Bullet].damage + 1);
+      expect(BEAST_BUILD[BeastKind.Nest].hp).toBeGreaterThan(PROJ[ProjKind.Bullet].damage * 10);
+    });
+  });
+
   it('both kinds come up in the caves', () => {
     const world = new World(12);
     world.beasts.fill(null);
@@ -441,6 +605,25 @@ describe('millipedes in the world', () => {
     for (const b of world.beasts) if (b) kinds.add(b.kind);
     expect(kinds.has(BeastKind.Millipede)).toBe(true);
     expect(kinds.has(BeastKind.Asp)).toBe(true);
+  });
+
+  it('coral nests grow on cave roofs, deep, well apart', () => {
+    let nests = 0;
+    for (const seed of [11, 12, 13]) {
+      const world = new World(seed);
+      world.beasts.fill(null);
+      for (let k = 0; k < 3; k++) (world as unknown as { spawnNest(): boolean }).spawnNest();
+      const t = world.terrain;
+      const found = world.beasts.filter((b) => b?.kind === BeastKind.Nest);
+      for (const b of found) {
+        expect(t.isSolid(b!.x, b!.y)).toBe(false);
+        expect(t.isSolid(b!.x, b!.y - 1)).toBe(true);
+        expect(b!.y).toBeGreaterThan(t.surfaceY(b!.x) + 40);
+        for (const o of found) if (o !== b) expect(Math.hypot(o!.x - b!.x, o!.y - b!.y)).toBeGreaterThan(299);
+      }
+      nests += found.length;
+    }
+    expect(nests).toBeGreaterThan(3);
   });
 
   it('on a real map they turn up in the caves, holding on to the rock', () => {

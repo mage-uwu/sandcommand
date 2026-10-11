@@ -123,6 +123,12 @@ export const R_BEAST_DIE = 42;
  * (harm still to come). Sent when the list changes and now and then while it's not empty.
  */
 export const R_VENOM = 43;
+/**
+ * Coral seeded in clones' limbs (seeders' stings): u8 count, then per clone
+ * u8 id and, for each of CORAL_LIMBS, u8 how far grown (0..255 of full).
+ * Sent when it changes much and now and then while anyone has it.
+ */
+export const R_CORAL = 44;
 /** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
 export const GF_CAVE = 1;
 export const GF_RUMBLE = 2;
@@ -145,7 +151,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 61;
+export const PROTOCOL_VERSION = 62;
 
 /** Last Man Standing round phases. */
 export const Phase = {

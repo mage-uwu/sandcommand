@@ -23,7 +23,7 @@ import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0, Asp: 1 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -131,11 +131,64 @@ export const ASP_DISGUISE_MIN = 30 * 60;
 export const ASP_DISGUISE_MAX = 30 * 240;
 export const ASP_WANDER = 30 * 5;
 
+/**
+ * **Seeders**: small fliers, about a clone's head in size: a wasp's striped
+ * sting-tail, a raven's black head and beak, a butterfly's painted wings.
+ * They come out of a **coral nest** (a hive of coral grown on a cave roof or
+ * wall), three at a time, and only when the nest senses danger: someone in
+ * sight of it, or something hurting it. A nest goes on sending out broods
+ * for as long as the danger's there; it has to be destroyed. With nobody
+ * left to chase, seeders fly home and back into it (out of the world: no
+ * cost while nobody's about); a brood whose nest is gone dies off.
+ *
+ * They only sting. A sting does little harm (SEEDER_STING) but *seeds* the
+ * limb it lands on with coral (World: Player.coral). The coral grows out of
+ * the limb, harming it and the clone as it goes, and full grown it may burst
+ * the limb right off (CORAL_BURST of the time); otherwise it crusts over and
+ * stops. A health wave clears it. Droids' metal limbs don't take it.
+ */
+export const SEEDER_R = 2.8;
+export const SEEDER_HP = 14;
+/** Flight: top speed and how hard it turns (cells/s, cells/s²), and how far it sees prey. */
+export const SEEDER_SPEED = 125;
+export const SEEDER_ACCEL = 700;
+export const SEEDER_SENSE = 260;
+/** Its sting: reach (cells past a clone's box), harm, ticks between stings, ticks it darts off after one. */
+export const SEEDER_STING_R = 3;
+export const SEEDER_STING = 2;
+export const SEEDER_STING_CD = 40;
+export const SEEDER_DART = 14;
+/** Ticks with nobody to chase before it flies home (and, nest gone, before it dies off). */
+export const SEEDER_IDLE = 30 * 6;
+export const SEEDER_EXPIRE = 30 * 40;
+export const NEST_R = 7;
+export const NEST_HP = 420;
+/** The nest: how far it senses danger (with a line on it), how often it looks, how many to a brood, ticks between broods. */
+export const NEST_SENSE = 230;
+export const NEST_LOOK = 15;
+export const NEST_BROOD = 3;
+export const NEST_BROOD_CD = 30 * 10;
+/** Coral seeded in a limb: how much a sting sows (of full grown), how fast it grows (a tick), the harm it does a tick to the clone and the limb, how often full grown it bursts the limb off. */
+export const CORAL_SEED = 0.2;
+export const CORAL_GROW = 1 / (30 * 14);
+export const CORAL_HP = 0.06;
+export const CORAL_WOUND = 0.05;
+export const CORAL_BURST = 0.45;
+/** The limbs coral takes hold in (body.ts Part: the gun arm, the off arm, the legs), in R_CORAL order. */
+export const CORAL_LIMBS = [2, 3, 4, 5] as const;
+
 /** Each kind's build: body points, trail cells between them, hit radius, full health. */
 export const BEAST_BUILD = [
   { segs: MILLI_SEGS, gap: MILLI_GAP, r: MILLI_R, hp: MILLI_HP },
   { segs: ASP_SEGS, gap: ASP_GAP, r: ASP_R, hp: ASP_HP },
+  { segs: 2, gap: 1, r: SEEDER_R, hp: SEEDER_HP },
+  { segs: 1, gap: 1, r: NEST_R, hp: NEST_HP },
 ] as const;
+
+/** Does this kind fly (no crawl, no trail: it's where it is)? */
+export const flies = (kind: number) => kind === BeastKind.Seeder;
+/** Does this kind stay put (a nest)? */
+export const rooted = (kind: number) => kind === BeastKind.Nest;
 
 /** Venom: a dose (harm it does in all), the most the blood holds, the harm a tick. */
 export const VENOM_DOSE = 36;
@@ -194,6 +247,13 @@ export interface Beast {
   lastX: number;
   lastY: number;
   still: number;
+  /** A flier's place (cells, fractional) and speed; its nest (a beast slot, or -1). A nest's next brood (tick) and its alarm (ticks left). */
+  fx: number;
+  fy: number;
+  vx: number;
+  home: number;
+  brood: number;
+  alarm: number;
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
@@ -238,7 +298,18 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     lastX: x,
     lastY: y,
     still: 0,
+    fx: x + 0.5,
+    fy: y + 0.5,
+    vx: 0,
+    home: -1,
+    brood: 0,
+    alarm: 0,
   };
+  if (flies(kind) || rooted(kind)) {
+    b.trail = [x, y];
+    if (rooted(kind)) anchorNest(t, b);
+    return b;
+  }
   reorient(t, b);
   // Its body laid out along the ground behind its head: crawl a copy of it backwards from there.
   const ghost = { ...b, trail: [] };
@@ -249,6 +320,89 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     b.trail.push(ghost.x, ghost.y);
   }
   return b;
+}
+
+/** A seeder at (x, y), out of nest `home`. */
+export function newSeeder(t: Terrain, x: number, y: number, home: number): Beast {
+  const b = newBeast(t, BeastKind.Seeder, Math.floor(x), Math.floor(y), 1);
+  b.fx = x;
+  b.fy = y;
+  b.home = home;
+  return b;
+}
+
+/**
+ * Which way a nest's anchor is (hx, hy: the rock it's grown on, up for a
+ * roof by preference, then the walls, then a floor): none, and it falls.
+ */
+export function anchorNest(t: Terrain, b: Beast): boolean {
+  for (const [ax, ay] of [
+    [0, -1],
+    [-1, 0],
+    [1, 0],
+    [0, 1],
+  ]) {
+    if (solidAt(t, b.x + ax, b.y + ay)) {
+      b.hx = ax;
+      b.hy = ay;
+      b.attached = true;
+      return true;
+    }
+  }
+  b.attached = false;
+  return false;
+}
+
+/** A nest's centre: hung off its anchor by its own size. */
+export function nestCentre(b: Beast, out: number[]): number[] {
+  out.length = 0;
+  out.push(b.x + 0.5 - b.hx * (NEST_R - 2), b.y + 0.5 - b.hy * (NEST_R - 2));
+  return out;
+}
+
+/** A flier's body: its head, and its tail a little behind (the way it's going; level if it's hovering). */
+export function flierPoints(b: Beast, out: number[]): number[] {
+  out.length = 0;
+  const sp = Math.hypot(b.vx, b.vy);
+  const dx = sp > 8 ? b.vx / sp : b.side;
+  const dy = sp > 8 ? b.vy / sp : 0;
+  out.push(b.fx, b.fy, b.fx - dx * 3.2, b.fy - dy * 3.2 + 0.6);
+  return out;
+}
+
+/**
+ * One tick of flight toward (gx, gy): it turns toward it (SEEDER_ACCEL),
+ * never faster than SEEDER_SPEED, a little jink in it (a wasp's flight:
+ * `jink` is the fraction of a turn's worth thrown in at random, from
+ * `rnd` -1..1 pairs); into rock it bounces off.
+ */
+export function flyStep(t: Terrain, b: Beast, gx: number, gy: number, dt: number, jx: number, jy: number, speed = SEEDER_SPEED): void {
+  let dx = gx - b.fx;
+  let dy = gy - b.fy;
+  const d = Math.hypot(dx, dy) || 1;
+  // Wanted velocity: at it, slowing as it arrives.
+  const want = Math.min(speed, d * 6);
+  dx = (dx / d) * want - b.vx;
+  dy = (dy / d) * want - b.vy;
+  const dl = Math.hypot(dx, dy) || 1;
+  const a = Math.min(dl, SEEDER_ACCEL * dt);
+  b.vx += (dx / dl) * a + jx * SEEDER_ACCEL * dt * 0.6;
+  b.vy += (dy / dl) * a + jy * SEEDER_ACCEL * dt * 0.6;
+  const sp = Math.hypot(b.vx, b.vy);
+  if (sp > speed) {
+    b.vx *= speed / sp;
+    b.vy *= speed / sp;
+  }
+  // Move, an axis at a time, bouncing off rock.
+  const nx = b.fx + b.vx * dt;
+  if (solidAt(t, Math.floor(nx), Math.floor(b.fy))) b.vx *= -0.5;
+  else b.fx = nx;
+  const ny = b.fy + b.vy * dt;
+  if (solidAt(t, Math.floor(b.fx), Math.floor(ny))) b.vy *= -0.5;
+  else b.fy = ny;
+  b.x = Math.floor(b.fx);
+  b.y = Math.floor(b.fy);
+  if (Math.abs(b.vx) > 8) b.side = Math.sign(b.vx);
 }
 
 const solidAt = (t: Terrain, x: number, y: number) => x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H || t.isSolid(x, y);

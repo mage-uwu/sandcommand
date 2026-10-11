@@ -22,8 +22,8 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { drawAsp, drawAspGem, drawMillipede, drawSegmentGib } from './beast-art.ts';
-import { BeastKind } from '../shared/wildlife.ts';
+import { drawAsp, drawAspGem, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
+import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -388,10 +388,53 @@ export class Renderer {
       for (let i = 0; i < v.cur.length; i++) pts.push(v.prev[i] + (v.cur[i] - v.prev[i]) * alpha);
       if (pts[0] < camX - halfW - 80 || pts[0] > camX + halfW + 80 || pts[1] < camY - halfH - 80 || pts[1] > camY + halfH + 80) continue;
       const lift = v.prevLift + (v.lift - v.prevLift) * alpha;
-      if (v.kind === BeastKind.Asp) {
+      if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
+      else if (v.kind === BeastKind.Nest) drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
+      else if (v.kind === BeastKind.Asp) {
         if (v.gem) drawAspGem(ctx, game.terrain, gemOf, v.cur, v.seed, now);
         else drawAsp(ctx, game.terrain, pts, v.seed, lift, now);
       } else drawMillipede(ctx, game.terrain, this.groundColor, pts, v.seed, lift, v.frozen, now);
+    }
+  }
+  /**
+   * Coral a seeder sowed, growing out of a clone's limbs (CORAL_LIMBS, how far
+   * grown each): tufts out of each leg, the off arm, and the gun arm along
+   * from the shoulder; lying down, all of it along the body.
+   */
+  private drawCoral(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, levels: readonly number[], id: number, now: number): void {
+    const left = Math.cos(aim) < 0;
+    const ix = Math.round(x);
+    const iy = Math.round(y);
+    const out = left ? 1 : -1; // (out the back: away from the gun)
+    for (let i = 0; i < CORAL_LIMBS.length; i++) {
+      const g = levels[i] ?? 0;
+      const part = CORAL_LIMBS[i];
+      if (g <= 0 || !has(parts, part)) continue;
+      const seed = id * 31 + i * 7;
+      if (stance === Stance.Prone) {
+        drawCoralGrowth(ctx, ix + 1 + i * 2, iy + ACTOR_H - 3, ix + 2 + i * 2, iy + ACTOR_H - 2, out, g, seed, now);
+        continue;
+      }
+      if (part === Part.GunArm) {
+        const sh = shoulderAt(x, y, stance, left, this.shPt);
+        const ex = Math.round(sh.x + Math.cos(aim) * 2.5);
+        const ey = Math.round(sh.y + Math.sin(aim) * 2.5);
+        drawCoralGrowth(ctx, Math.min(ex, Math.round(sh.x)), Math.min(ey, Math.round(sh.y)), Math.max(ex, Math.round(sh.x)), Math.max(ey, Math.round(sh.y)), left ? -1 : 1, g, seed, now);
+        continue;
+      }
+      const d = PARTS[part];
+      const rx0 = left ? ACTOR_W - 1 - d.rx1 : d.rx0;
+      const rx1 = left ? ACTOR_W - 1 - d.rx0 : d.rx1;
+      let ry0 = d.ry0 + STANCE_DROP[stance];
+      let ry1 = d.ry1 + STANCE_DROP[stance];
+      if (part === Part.LegB || part === Part.LegF) {
+        // (The legs fold under a crouch: squeezed into the bottom of the box.)
+        const legH = stance === Stance.Crouch ? 3 : 5;
+        ry0 = ACTOR_H - legH;
+        ry1 = ACTOR_H - 1;
+      }
+      const ox = part === Part.LegF ? -out : out;
+      drawCoralGrowth(ctx, ix + rx0, iy + ry0, ix + rx1, iy + ry1, ox, g, seed, now);
     }
   }
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
@@ -795,6 +838,8 @@ export class Renderer {
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
       this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id);
+      const coral = game.coralIn.get(v.id);
+      if (coral) this.drawCoral(ctx, v.x, v.y, aimR, v.stance, v.parts, coral, v.id, now);
       // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
       if (v.weapon === WeaponId.Laser && v.flags & F_FIRING) {
         const sh = shoulderAt(v.x, v.y, v.stance, Math.cos(aimR) < 0, this.shPt);
@@ -823,6 +868,7 @@ export class Renderer {
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId);
+      if (game.myCoral.length) this.drawCoral(ctx, selfX, selfY, myAim, b.stance, game.parts, game.myCoral, game.myId, now);
       if (game.laserCharge > 0) {
         const m = WEAPONS[WeaponId.Laser].muzzle;
         this.drawLaserCharge(ctx, mySh.x + Math.cos(myAim) * m, mySh.y + Math.sin(myAim) * m, game.laserCharge / LASER_MAX, now);
@@ -841,7 +887,8 @@ export class Renderer {
     for (const g of game.segmentGibs) {
       if (g.x < camX - halfW - 10 || g.x > camX + halfW + 10 || g.y < camY - halfH - 10 || g.y > camY + halfH + 10) continue;
       ctx.globalAlpha = Math.min(1, g.life / 30);
-      drawSegmentGib(ctx, game.terrain, this.groundColor, g.x, g.y, g.a, g.kind, g.seed, g.i, now);
+      if (g.kind === BeastKind.Seeder || g.kind === BeastKind.Nest) drawCritterGib(ctx, g.x, g.y, g.a, g.kind, g.seed, g.i);
+      else drawSegmentGib(ctx, game.terrain, this.groundColor, g.x, g.y, g.a, g.kind, g.seed, g.i, now);
     }
     ctx.globalAlpha = 1;
 
@@ -3057,6 +3104,15 @@ export class Renderer {
       g.addColorStop(1, `rgba(120,0,20,${Math.min(0.4, 0.1 + venom / 300) * pulse})`);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
+    }
+    // Coral in our limbs: which, and how far grown (a full-grown one may burst off).
+    const coral = game.myCoral;
+    if (coral.some((c) => c > 0)) {
+      const names = ['GUN ARM', 'ARM', 'LEG', 'LEG'];
+      const worst = Math.max(...coral);
+      const pulse = 0.6 + 0.4 * Math.sin(performance.now() / (worst >= 1 ? 90 : 220));
+      ctx.fillStyle = `rgba(255,110,160,${pulse})`;
+      ctx.fillText(`CORAL ${coral.map((c, i) => (c > 0 ? `${names[i]} ${Math.round(c * 100)}%` : '')).filter(Boolean).join(' · ')}`, 14 * s, 150 * s);
     }
     if (game.drive) bar(32 * s, game.drive.fuel, TANK_MAX_FUEL, '#3c8cd2', `TANK JET ${Math.round(game.drive.fuel)}`);
     else bar(32 * s, game.body.fuel, ACTOR_MAX_FUEL, '#3c8cd2', `JET ${Math.round(game.body.fuel)}`);
