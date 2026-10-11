@@ -234,6 +234,26 @@ describe('the tarantula, upgraded', () => {
     expect(s.fuel).toBe(0);
   });
 
+  it('trapped (a wall its legs can\'t get over between it and its owner), it cuts its way through with its laser', () => {
+    const { world, a } = yard(433);
+    const { spider } = callSpider(world, a);
+    // A cave: a roof over it, and a wall from the floor to the roof just ahead of it; its owner on the far side.
+    const wx = Math.round(centre(spider) + tankW(spider) / 2) + 20;
+    for (let x = 600; x < 1600; x++) for (let y = FLOOR - 130; y < FLOOR - 100; y++) world.terrain.set(x, y, Mat.Bedrock);
+    for (let x = wx; x < wx + 40; x++) for (let y = FLOOR - 100; y < FLOOR; y++) world.terrain.set(x, y, Mat.Dirt);
+    world.terrainReplaced();
+    a.body.x = wx + 140;
+    let cut = 0;
+    for (let k = 0; k < 30 * 25 && centre(spider) < wx + 40; k++) {
+      a.body.x = wx + 140;
+      a.hp = 100;
+      world.step();
+    }
+    for (let x = wx; x < wx + 40; x++) for (let y = FLOOR - 80; y < FLOOR; y++) if (world.terrain.get(x, y) === Mat.Air) cut++;
+    expect(cut).toBeGreaterThan(400); // (a hole through the wall)
+    expect(centre(spider)).toBeGreaterThan(wx); // (and it's gone on through it)
+  });
+
   it('three times the laser, missiles with a grenade\'s blast', () => {
     expect(SPIDER_BEAM_WOUND).toBe(66);
     expect(PROJ[ProjKind.SpiderMissile].splashDamage).toBe(PROJ[ProjKind.Grenade].splashDamage);

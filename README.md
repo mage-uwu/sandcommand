@@ -1058,6 +1058,15 @@ each watchdog, each tarantula, in that order. **Shift+P** goes the other way.
     - **Digging with it.** Five beams a second dig about as fast as a
       digger in soil, and faster through concrete. Pig iron still resists
       it, and a door takes damage instead.
+    - **Double duty on its own.** Thinking for itself, a tarantula that
+      seems trapped digs its way out with the laser. Trapped means it has
+      pushed against something its legs won't take it over for a second
+      and a half, or got no nearer where it's going for two and a half
+      (a pit, a cave-in, a wall up to the roof). It cuts for about two
+      seconds: first whatever is right in the way of its body ahead, then
+      toward where it's going (straight ahead, in a sweep tall enough for
+      its body, when that's about level). A foe in sight still comes
+      first, and it never fires through its owner.
   - **On its own** it thinks as the watchdog does, with its own kit
     (`SPIDER_KIT`): it looks further (560 cells) and screens further out
     (90). Its laser reaches 420 cells and needs no leading, its missiles

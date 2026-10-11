@@ -50,9 +50,19 @@ export interface DogMemory {
   jet: number;
   /** Which side of its owner it heels on (-1 left, 1 right). */
   side: number;
+  /** Getting no nearer where it's going: the nearest it's got, and ticks since it got any nearer. */
+  bestD: number;
+  since: number;
+  /** Ticks left cutting its way out with its laser (a tarantula, trapped). */
+  dig: number;
 }
 
-export const newDogMemory = (): DogMemory => ({ lastX: 0, stuck: 0, jet: 0, side: 1 });
+export const newDogMemory = (): DogMemory => ({ lastX: 0, stuck: 0, jet: 0, side: 1, bestD: Infinity, since: 0, dig: 0 });
+
+/** Trapped: pushing at something it can't get over this long, or getting no nearer where it's going this long (ticks); and how long it then digs. */
+const TRAPPED_STUCK = 45;
+const TRAPPED_NO_GAIN = 75;
+const DIG_TICKS = 50;
 
 /** How far it looks for trouble around its owner, how far out it goes to meet it, and its guns' reach. */
 export const DOG_ALERT = 420;
@@ -76,6 +86,8 @@ export interface PetKit {
   /** Clones closer than this get the primary only. */
   cannonMin: number;
   jets: boolean;
+  /** Its primary is a laser that cuts terrain: trapped, it digs its way out with it. */
+  digs?: boolean;
 }
 
 export const DOG_KIT: PetKit = {
@@ -102,6 +114,7 @@ export const SPIDER_KIT: PetKit = {
   turret: true,
   cannonMin: 70,
   jets: false,
+  digs: true,
 };
 /** It holds fire when its owner is within this of the line (or of where a shell lands). */
 const OWNER_CLEAR = 14;
@@ -114,6 +127,8 @@ export function dogThink(
   foes: readonly DogFoe[],
   see: (x0: number, y0: number, x1: number, y1: number) => boolean,
   kit: PetKit = DOG_KIT,
+  /** Is the ground solid at a cell (for a digger to find what's in its way). */
+  solid: (x: number, y: number) => boolean = () => false,
 ): { buttons: number; aim: number } {
   const w = tankW(t);
   const h = tankH(t);
@@ -136,14 +151,17 @@ export function dogThink(
 
   // Where to be: between the owner and the threat, out toward it; or at heel.
   let goal = cx;
+  let goalY = cy;
   if (home) {
     if (threat) {
       const dx = threat.x - home.cx;
       goal = home.cx + Math.sign(dx || 1) * Math.min(Math.abs(dx) * 0.5, kit.screen);
+      goalY = home.cy;
     } else {
       // Heel on whichever side it's already on (no driving through its owner).
       if (Math.abs(cx - home.cx) > 30) mem.side = Math.sign(cx - home.cx) || 1;
       goal = home.cx + mem.side * (w / 2 + 16);
+      goalY = home.cy;
     }
   }
   const dx = goal - cx;
@@ -167,6 +185,18 @@ export function dogThink(
     buttons |= BTN_UP;
   }
 
+  // Trapped? Getting no nearer where it's going (a hole it fell in, a cave-in, a wall too tall for its legs).
+  const far = Math.hypot(goal - cx, goalY - cy);
+  if (far < 50 || far < mem.bestD - 4) {
+    mem.bestD = far;
+    mem.since = 0;
+  } else mem.since++;
+  if (kit.digs && mem.dig === 0 && (mem.stuck > TRAPPED_STUCK || mem.since > TRAPPED_NO_GAIN)) {
+    mem.dig = DIG_TICKS;
+    mem.since = 0;
+    mem.bestD = far;
+  }
+
   // Guns: the nearest hostile it can see from the turret.
   const gx = cx;
   const gy = t.y + (kit.turret ? tankH(t) * 0.28 : 3); // (a tarantula: its head)
@@ -180,6 +210,24 @@ export function dogThink(
     }
   }
   let aim = t.aim;
+  if (mem.dig > 0) mem.dig--;
+  if (!tgt && mem.dig > 0) {
+    // The laser doing double duty: cutting a way out toward where it's going, swept up and down
+    // so the hole's big enough for its body (never through its owner).
+    // First whatever's right in the way of its body, ahead (the nearest solid cell); with nothing
+    // there, toward where it's going (about level: straight ahead, a tunnel it can walk on through).
+    const ahead = goal >= cx ? 1 : -1;
+    let block: { x: number; y: number } | null = null;
+    for (let k = 0; k < 14 && !block; k++) {
+      const x = Math.round(ahead > 0 ? t.x + w + k : t.x - 1 - k);
+      for (let y = Math.round(t.y); y <= Math.round(t.y + h) && !block; y += 2) if (solid(x, y)) block = { x, y };
+    }
+    const level = Math.abs(goalY - cy) < h;
+    const a = block ? Math.atan2(block.y + 0.5 - gy, block.x + 0.5 - gx) : (level ? (ahead > 0 ? 0 : Math.PI) : Math.atan2(goalY - gy, goal - gx)) + Math.sin(mem.dig * 0.4) * 0.45;
+    const reach = Math.min(far, 80);
+    if (!home || segDist(home.cx, home.cy, gx, gy, gx + Math.cos(a) * reach, gy + Math.sin(a) * reach) > OWNER_CLEAR) buttons |= BTN_FIRE;
+    return { buttons, aim: a };
+  }
   if (!tgt) {
     // Nothing to shoot: the turret looks the way it's going (or toward the threat).
     if (threat) aim = Math.atan2(threat.y - gy, threat.x - gx);

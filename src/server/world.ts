@@ -4092,7 +4092,7 @@ export class World {
       const sy = sh.y + SHIP_H / 2;
       if (near(sx, sy)) foes.push({ x: sx, y: sy, vx: sh.vx, vy: sh.vy, vehicle: true });
     }
-    return dogThink(t, mem, owner ? { cx: owner.cx, cy: owner.cy, alive: owner.alive } : null, foes, (x0, y0, x1, y1) => this.lineClear(x0, y0, x1, y1), isSpider(t) ? SPIDER_KIT : DOG_KIT);
+    return dogThink(t, mem, owner ? { cx: owner.cx, cy: owner.cy, alive: owner.alive } : null, foes, (x0, y0, x1, y1) => this.lineClear(x0, y0, x1, y1), isSpider(t) ? SPIDER_KIT : DOG_KIT, (x, y) => this.terrain.isSolid(x, y));
   }
 
   /** Is the straight line between two points free of terrain? */
