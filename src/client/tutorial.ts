@@ -218,14 +218,16 @@ export class Tutorial {
         }
         break;
       case TStep.Gun:
-        if (me.inv.some((it) => it.weapon === WeaponId.Rifle)) {
+        if (this.hasRifle()) {
           this.next();
           // Straight into your hands, ready for the next step.
           w.equip(me, WeaponId.Rifle);
-        }
+        } else this.keepRifle(a.gun);
         break;
       case TStep.Shoot:
-        if (me.firing && me.weapon === WeaponId.Rifle) this.shots++;
+        // (Dropped it? It stays on the ground for you to take back: see coach.)
+        if (!this.hasRifle()) this.keepRifle(me.cx);
+        else if (me.firing && me.weapon === WeaponId.Rifle) this.shots++;
         if (this.shots >= 3) this.next();
         break;
       case TStep.Gold: {
@@ -268,6 +270,28 @@ export class Tutorial {
         break;
     }
     if (this.note && w.tick - this.noteAt > 30 * 5) this.note = '';
+  }
+
+  private hasRifle(): boolean {
+    return this.me.inv.some((it) => it.weapon === WeaponId.Rifle);
+  }
+
+  /** The rifle lying on the ground for the player to take, if there is one. */
+  rifle(): { x: number; y: number } | null {
+    return this.world.items.find((it) => it.weapon === WeaponId.Rifle) ?? null;
+  }
+
+  /**
+   * While the player is meant to pick the rifle up, it must be there to
+   * pick up: ground items rot away (ITEM_LIFE), so this one is kept fresh,
+   * and if it's gone anyway (fallen out of the world, say) another is laid
+   * down at `x`.
+   */
+  private keepRifle(x: number): void {
+    const w = this.world;
+    const it = w.items.find((o) => o.weapon === WeaponId.Rifle);
+    if (it) it.age = 0;
+    else w.dropItem(WeaponId.Rifle, x, w.terrain.surfaceY(Math.round(x)) - 6);
   }
 
   /** The vehicle the player bought (the first there is), if any. */
@@ -317,10 +341,16 @@ export class Tutorial {
         return out('Move', touch ? 'Drag the left stick left or right to run.' : 'Press A and D (or the arrow keys) to run.');
       case TStep.Jet:
         return out('Jetpack', touch ? 'Push the left stick up to jump, and keep it up to fire your jetpack.' : 'Press W or Space to jump. Hold it to fire your jetpack.');
-      case TStep.Gun:
-        return out('Pick up a gun', touch ? 'A rifle is lying ahead. Run to it and tap ▲ PICK.' : 'A rifle is lying ahead. Run to it and press F (or 3) to pick it up.', surf(a.gun));
-      case TStep.Shoot:
+      case TStep.Gun: {
+        const r = this.rifle();
+        return out('Pick up a gun', touch ? 'A rifle is lying ahead. Run to it and tap ▲ PICK.' : 'A rifle is lying ahead. Run to it and press F (or 3) to pick it up.', r ? { x: r.x, y: r.y - ACTOR_H - 4 } : surf(a.gun));
+      }
+      case TStep.Shoot: {
+        const r = this.rifle();
+        if (!this.hasRifle())
+          return out('Pick up a gun', touch ? 'You dropped your rifle. Run to it and tap ▲ PICK.' : 'You dropped your rifle. Run to it and press F (or 3) to pick it back up.', r ? { x: r.x, y: r.y - ACTOR_H - 4 } : null);
         return out('Shoot', touch ? 'Drag the right stick to aim. Push it past halfway to fire.' : 'Aim with the mouse and click to fire.');
+      }
       case TStep.Gold:
         return out(
           'Dig GEMMs',

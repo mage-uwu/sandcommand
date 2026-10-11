@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BTN_FIRE, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
 import { ACTOR_W } from '../src/shared/constants.ts';
-import { invByte } from '../src/shared/items.ts';
+import { ITEM_LIFE, invByte } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { CALL_COST, CallKind, quantizeAim } from '../src/shared/protocol.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
@@ -147,5 +147,43 @@ describe('tutorial: any vehicle, any way aboard', () => {
     }
     expect(me.surf).toBeGreaterThanOrEqual(0);
     expect(tut.step).toBe(TStep.Mob);
+  });
+
+  it("the rifle never rots away while it's wanted, comes back if it's lost, and can be dropped and picked up again", () => {
+    const tut = new Tutorial('Recruit', { send() {} });
+    const w = tut.world;
+    const me = tut.me;
+    let seq = 0;
+    const press = (buttons: number, pickup = false) => {
+      w.input(me.id, { seq: ++seq & 0xffff, buttons, aim: 0, inv: invByte(me.slot, me.invVersion, pickup) });
+      w.step();
+      tut.update();
+    };
+    for (let k = 0; k < 1200 && !me.alive; k++) press(0);
+    for (let k = 0; k < 900 && tut.step < TStep.Gun; k++) press(tut.step === TStep.Move ? BTN_RIGHT : BTN_UP);
+    expect(tut.step).toBe(TStep.Gun);
+    const rifles = () => w.items.filter((it) => it.weapon === WeaponId.Rifle);
+    // Dawdling far longer than a dropped weapon lasts: the rifle's still there.
+    for (let k = 0; k < ITEM_LIFE + 300; k++) press(0);
+    expect(rifles().length).toBe(1);
+    // Gone anyway (say it fell out of the world): another is laid down, and the arrow points at it.
+    w.items.splice(w.items.indexOf(rifles()[0]), 1);
+    press(0);
+    expect(rifles().length).toBe(1);
+    const r = rifles()[0];
+    expect(Math.abs(r.x - tut.arena.gun)).toBeLessThan(2);
+    expect(Math.abs(tut.coach(false).target!.x - r.x)).toBeLessThan(1);
+    // Picked up, then dropped during the shooting lesson: shots don't count until it's back in hand.
+    me.body.x = r.x - ACTOR_W / 2;
+    me.body.y = w.terrain.surfaceY(Math.round(r.x)) - 14;
+    for (let k = 0; k < 120 && tut.step === TStep.Gun; k++) press(0, k % 4 === 0);
+    expect(tut.step).toBe(TStep.Shoot);
+    me.inv = me.inv.filter((it) => it.weapon !== WeaponId.Rifle);
+    w.dropItem(WeaponId.Rifle, me.cx + 30, w.terrain.surfaceY(Math.round(me.cx + 30)) - 6);
+    for (let k = 0; k < 40; k++) press(BTN_FIRE);
+    expect(tut.step).toBe(TStep.Shoot);
+    expect(tut.coach(false).title).toBe('Pick up a gun');
+    expect(tut.coach(false).body).toMatch(/dropped your rifle/);
+    expect(tut.coach(false).target).not.toBeNull();
   });
 });
