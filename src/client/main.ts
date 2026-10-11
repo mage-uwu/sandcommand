@@ -19,6 +19,7 @@ import { LocalLink } from './local.ts';
 import { type Brief, Conversation } from './mother.ts';
 import { MOTHER_TOPICS, MOTHER_UNKNOWN, TUTORIAL_BRIEFS } from './mother-script.ts';
 import { MotherDialog } from './mother-ui.ts';
+import { BeastKind } from '../shared/wildlife.ts';
 import { Renderer } from './render.ts';
 import { lastComplexes, lastCraters, lastBuried, lastGemCaverns, lastMonuments } from '../shared/worldgen.ts';
 import { TouchControls } from './touch.ts';
@@ -357,6 +358,19 @@ function assistTargets(g: Game): AssistTarget[] {
     // A tank by its driver; a watchdog or tarantula by its owner, driven or not.
     const who = isPet(t) ? t.owner : t.pilot;
     if (who !== 255 && foe(who)) out.push({ x: t.x + tankW(t) / 2, y: tankCoreY(t), vx: t.vx, vy: t.vy, g: 2000 + t.slot, core: true });
+  }
+  // Wildlife that's out and about: a millipede or an asp by its head (the millipede's weak
+  // spot) and mid-body. Never one lying in wait, frozen or curled up as a gem: the assist
+  // mustn't give its camouflage away.
+  for (const [slot, v] of g.beastViews) {
+    if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp) || v.frozen || v.gem) continue;
+    const n = v.cur.length >> 1;
+    if (n < 2) continue;
+    const vx = (v.cur[0] - v.prev[0]) * TICK_RATE;
+    const vy = (v.cur[1] - v.prev[1]) * TICK_RATE;
+    const m = n >> 1;
+    out.push({ x: v.cur[0], y: v.cur[1], vx, vy, g: 3000 + slot });
+    out.push({ x: v.cur[m * 2], y: v.cur[m * 2 + 1], vx, vy, g: 3000 + slot, core: true });
   }
   return out;
 }

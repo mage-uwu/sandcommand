@@ -76,6 +76,16 @@ export const MILLI_MOUTH_CD = 4;
 /** How tall a wall (and how roomy the opening past it) must be for it to bite through. */
 export const MILLI_BITE_H = 6;
 export const MILLI_ROOST = 0.6;
+/**
+ * Caught going round and round a little island of rock (a lump in the air,
+ * a pillar's knob): it notices. Every LOOP_STEPS crawl steps it looks at
+ * the box its head kept to; if that's no bigger than LOOP_BOX either way,
+ * it's lapping a trap, and at the next place with open air under it, it
+ * lets go and drops, to find real ground again. (It gives up waiting for
+ * such a place after LOOP_STEPS more.)
+ */
+export const LOOP_STEPS = 220;
+export const LOOP_BOX = 40;
 /** Dropping off a ceiling onto prey: how far to the side of it (cells) it'll let go, and how fast it steers as it falls (cells a tick). */
 export const MILLI_DROP_REACH = 60;
 export const MILLI_DROP_STEER = 1.5;
@@ -262,6 +272,13 @@ export interface Beast {
   home: number;
   brood: number;
   alarm: number;
+  /** Watching for a trap (see LOOP_STEPS): crawl steps this window, the box its head kept to; set when it means to drop off (steps left to find a place). */
+  loopN: number;
+  loopX0: number;
+  loopX1: number;
+  loopY0: number;
+  loopY1: number;
+  escape: number;
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
@@ -312,6 +329,12 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     home: -1,
     brood: 0,
     alarm: 0,
+    loopN: 0,
+    loopX0: x,
+    loopX1: x,
+    loopY0: y,
+    loopY1: y,
+    escape: 0,
   };
   if (flies(kind) || rooted(kind)) {
     b.trail = [x, y];
@@ -538,6 +561,39 @@ export function mouthOpening(t: Terrain, b: Beast): number {
 /** Away from its ground (the open side of its heading). */
 export const awayX = (b: Beast) => -groundX(b);
 export const awayY = (b: Beast) => -groundY(b);
+
+/**
+ * After a crawl step: watch for being caught lapping a little island, and
+ * say whether to let go now (it means to drop off, and there's open air
+ * under its head to drop into).
+ */
+export function loopWatch(t: Terrain, b: Beast): boolean {
+  if (b.escape > 0) {
+    b.escape--;
+    if (!solidAt(t, b.x, b.y + 1) && !solidAt(t, b.x, b.y + 2)) {
+      b.escape = 0;
+      resetLoop(b);
+      return true;
+    }
+    return false;
+  }
+  b.loopX0 = Math.min(b.loopX0, b.x);
+  b.loopX1 = Math.max(b.loopX1, b.x);
+  b.loopY0 = Math.min(b.loopY0, b.y);
+  b.loopY1 = Math.max(b.loopY1, b.y);
+  if (++b.loopN >= LOOP_STEPS) {
+    if (b.loopX1 - b.loopX0 <= LOOP_BOX && b.loopY1 - b.loopY0 <= LOOP_BOX) b.escape = LOOP_STEPS;
+    resetLoop(b);
+  }
+  return false;
+}
+
+/** Start watching afresh from where it is. */
+export function resetLoop(b: Beast): void {
+  b.loopN = 0;
+  b.loopX0 = b.loopX1 = b.x;
+  b.loopY0 = b.loopY1 = b.y;
+}
 
 /** Is it on a floor (rock under its head, open over it)? */
 export function onFloor(t: Terrain, b: Beast): boolean {

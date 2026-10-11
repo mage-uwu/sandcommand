@@ -164,6 +164,9 @@ whoever is nearest, and a clear point at someone still picks them.
 On the enemy it picked, the point goes by angle alone. A head is a target
 of its own beside centre mass: aim a touch high for the headshot, a touch
 low for the body. On a dropship, nudge between its hull and pods.
+Wildlife on the move counts too. A millipede or a gem asp locks by its head
+(the millipede's weak spot) or its mid-body. One lying in wait, frozen or
+curled up as a gem, is left alone: the assist never gives camouflage away.
 
 **Locked on, it stays on.** Once the aim has locked onto someone it stays
 on them while they're in sight, whoever else comes into view. Changing
@@ -608,6 +611,12 @@ terrain cell to a pixel).
   it, and over an edge it turns down round it. The body follows the head's
   trail, a pair of legs stepping under each plate. Dig the ground out from
   under it and it falls until it lands, then takes hold again.
+- **It notices when it's going in circles.** Caught lapping a little island
+  of rock (a lump in the air, a pillar's knob), it would orbit forever. So
+  when it isn't after anyone it watches its own track: 220 crawl steps that
+  stay inside a 40-cell box mean a trap. At the next spot with open air
+  below its head, it lets go and drops to find real ground. The gem asp
+  does the same.
 - **Line of sight sets it off.** Lying in wait, it strikes the moment it has
   a line on a clone within 420 cells (280 once it's moving).
 - **It drops from the ceiling.** Resting (or hunting) on a ceiling with its

@@ -330,6 +330,8 @@ import {
   nestCentre,
   newSeeder,
   hitScale,
+  loopWatch,
+  resetLoop,
 } from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -1777,6 +1779,13 @@ export class World {
         crawlStep(t, b);
         pushTrail(b);
         noteSeen(b);
+        // Caught lapping a little island of rock (and not after anyone): drop off it at the first chance.
+        if (tgt) resetLoop(b);
+        else if (loopWatch(t, b)) {
+          b.attached = false;
+          b.vy = 30;
+          break;
+        }
         // (At a lunge's speed it can reach them mid-tick.)
         if (tgt && b.coilCd === 0 && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < MILLI_COIL_R) break;
       }
@@ -1928,6 +1937,12 @@ export class World {
         b.owed--;
         crawlStep(t, b);
         pushTrail(b);
+        if (tgt) resetLoop(b);
+        else if (loopWatch(t, b)) {
+          b.attached = false;
+          b.vy = 30;
+          break;
+        }
         if (tgt && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < ASP_BITE_R) break;
       }
     }

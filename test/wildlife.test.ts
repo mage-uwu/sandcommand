@@ -177,6 +177,30 @@ describe('millipedes in the world', () => {
     void a;
   });
 
+  it('caught lapping a little island of rock, it notices the trap, lets go and drops off to find real ground', () => {
+    for (const kind of [BeastKind.Millipede, BeastKind.Asp]) {
+      const { world } = cave();
+      const t = world.terrain;
+      // A tall room, the clone walled off out of sight, and a lump of rock hanging in the middle of it.
+      for (let y = 300; y <= 440; y++) for (let x = 1012; x <= 1260; x++) t.set(x, y, Mat.Air);
+      for (let y = 300; y <= 440; y++) for (let x = 1000; x < 1012; x++) t.set(x, y, Mat.Rock);
+      for (let y = 340; y <= 356; y++) for (let x = 1120; x <= 1140; x++) t.set(x, y, Mat.Rock);
+      world.terrainReplaced();
+      const b = newBeast(t, kind, 1130, 339, 1);
+      b.wander = 1e9; // (no settling down to freeze or disguise itself)
+      b.spitCd = 1e9;
+      world.beasts[0] = b;
+      bodyPoints(t, b, world.beastPts[0]);
+      let lapped = 0;
+      for (let k = 0; k < 30 * 40 && b.y < 430; k++) {
+        world.step();
+        if (b.x > 1110 && b.x < 1150 && b.y > 330 && b.y < 366) lapped++;
+      }
+      expect(lapped, `kind ${kind}`).toBeGreaterThan(30); // (it did go round it a while)
+      expect(b.y, `kind ${kind}`).toBeGreaterThanOrEqual(430); // (and then it dropped to the floor)
+    }
+  });
+
   describe('scavenging', () => {
     /** The cave with the clone walled off, and a wall (x0..x1) of `mat` across the tunnel. */
     function split(x0: number, x1: number, mat: number) {
