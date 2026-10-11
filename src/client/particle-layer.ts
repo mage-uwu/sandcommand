@@ -123,7 +123,8 @@ export class ParticleLayer {
           break;
         }
         case PK.Blood:
-          buf[o] = BLOOD;
+          // (Red, unless it's some creature's own: an asp's gem-coloured goo.)
+          buf[o] = color[i] ? fromRgb(color[i]) : BLOOD;
           break;
         case PK.Stone: {
           // A chunk of dripstone: two cells square, lit top left, dark bottom right.

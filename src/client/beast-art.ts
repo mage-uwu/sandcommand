@@ -272,10 +272,10 @@ function hood(ctx: CanvasRenderingContext2D, s: Seg, seed: number, lift: number,
 export function drawSegmentGib(ctx: CanvasRenderingContext2D, t: Terrain, ground: GroundColor, x: number, y: number, a: number, kind: number, seed: number, i: number, now: number): void {
   const tx = Math.cos(a);
   const ty = Math.sin(a);
-  // (An asp's segments: small, gem or rock.)
+  // (An asp's segments: small, all gem: the rock was only ever skin-deep.)
   const asp = kind === 1;
   const w = asp ? (i === 0 ? 2.1 : 1.9 - i / 7) : i === 0 ? 3.9 : 3.8 - (1.6 * i) / 14;
-  plate(ctx, t, ground, { x, y, tx, ty, nx: -ty, ny: tx, w, len: asp ? 1.9 : i === 0 ? 3.4 : 2.9, camo: asp ? (Math.floor((i + (seed & 1)) / 2) % 2 === 0 ? Camo.Gem : Camo.Rock) : camoOf(seed, i) }, seed, asp ? 1 : i, true, now);
+  plate(ctx, t, ground, { x, y, tx, ty, nx: -ty, ny: tx, w, len: asp ? 1.9 : i === 0 ? 3.4 : 2.9, camo: asp ? Camo.Gem : camoOf(seed, i) }, seed, asp ? 1 : i, true, now);
 }
 
 /** The colour of the GEMM veins round a cell (the renderer's own: a disguise has to match), as [r, g, b]. */

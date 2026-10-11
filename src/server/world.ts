@@ -2573,13 +2573,18 @@ export class World {
     w.u32(this.rng.nextU32());
   }
 
-  /** A blast's overpressure on every creature in reach (from its nearest body point). */
+  /**
+   * A blast's overpressure on every creature in reach (from its nearest body
+   * point). A gem asp is soft all through: the blast falls off only half as
+   * fast across its reach (two or three grenades anywhere near finish one).
+   */
   private splashBeasts(x: number, y: number, r: number, dmg: number, by: number): void {
     for (let k = 0; k < MAX_BEASTS; k++) {
       if (!this.beasts[k]) continue;
       const { d, i } = nearestPoint(this.beastPts[k], x, y);
       const kind = this.beasts[k]!.kind;
-      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : kind === BeastKind.Basilisk ? 0.6 : 1) * hitScale(kind, i) * (1 - d / r), by);
+      const falloff = kind === BeastKind.Asp ? 1 - (0.5 * d) / r : 1 - d / r;
+      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : kind === BeastKind.Basilisk ? 0.6 : 1) * hitScale(kind, i) * falloff, by);
     }
   }
 

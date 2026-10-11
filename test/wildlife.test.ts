@@ -495,6 +495,22 @@ describe('millipedes in the world', () => {
       expect(a.venom).toBeGreaterThan(0);
     });
 
+    it('soft: two or three grenades finish it, whether to the face or only near it', () => {
+      const g = PROJ[ProjKind.Grenade];
+      for (const off of [0, 20, 40]) {
+        const { world, a } = cave();
+        putAsp(world, 1150, 440, -1);
+        let nades = 0;
+        for (; nades < 6 && world.beasts[1]; nades++) {
+          const pts = world.beastPts[1];
+          (world as unknown as { splashBeasts(x: number, y: number, r: number, dmg: number, by: number): void }).splashBeasts(pts[0] - off, pts[1], g.splashR, g.splashDamage, a.id);
+        }
+        expect(world.beasts[1], `${off} off`).toBe(null);
+        expect(nades, `${off} off`).toBeGreaterThanOrEqual(2);
+        expect(nades, `${off} off`).toBeLessThanOrEqual(3);
+      }
+    });
+
     it('no armour: a few rounds kill it', () => {
       const { world, a } = cave();
       putAsp(world, 1100, 440, -1);

@@ -331,15 +331,24 @@ function glassColor(t: Terrain, x: number, y: number): number {
   return (255 << 24) | (b << 16) | (g << 8) | r;
 }
 
-/** Blend an ABGR terrain pixel toward dried-blood red by stain intensity. */
-function bloodied(c: number, stain: number): number {
+/** What each stain tint dries to: red blood, then an asp's goo by gem (pink, turquoise, emerald). */
+const STAIN_RGB = [
+  [110, 12, 14],
+  [196, 30, 110],
+  [24, 160, 150],
+  [30, 150, 74],
+] as const;
+
+/** Blend an ABGR terrain pixel toward dried blood (or an asp's goo, by tint) by stain intensity. */
+function bloodied(c: number, stain: number, tint = 0): number {
   const k = Math.min(0.8, stain / 300);
+  const [sr, sg, sb] = STAIN_RGB[tint] ?? STAIN_RGB[0];
   const r = c & 255;
   const g = (c >> 8) & 255;
   const b = (c >> 16) & 255;
-  const nr = Math.round(r + (110 - r) * k);
-  const ng = Math.round(g + (12 - g) * k);
-  const nb = Math.round(b + (14 - b) * k);
+  const nr = Math.round(r + (sr - r) * k);
+  const ng = Math.round(g + (sg - g) * k);
+  const nb = Math.round(b + (sb - b) * k);
   return (255 << 24) | (nb << 16) | (ng << 8) | nr;
 }
 
@@ -524,6 +533,7 @@ export class Renderer {
     fpx.fill(0);
     let fronts = 0;
     const stain = game.stain;
+    const stainTint = game.stainTint;
     const backdrop = game.backdrop;
     const skyline = game.skyline;
     for (let y = 0; y < CHUNK; y++) {
@@ -572,7 +582,7 @@ export class Renderer {
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);
         }
         const st = stain[row + x];
-        if (st) c = bloodied(c, st);
+        if (st) c = bloodied(c, st, stainTint[row + x]);
         px[y * CHUNK + x] = c;
       }
     }

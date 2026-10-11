@@ -25,7 +25,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -233,11 +233,15 @@ export class Game implements FrameHandler {
   private readonly bodyField = new ActorField(ACTOR_W, ACTOR_H);
   /** Per-cell blood stain intensity (0-255). Cosmetic, never networked. */
   readonly stain = new Uint8Array(WORLD_W * WORLD_H);
+  /** Whose blood each stain is: 0 red, 1..3 an asp's goo (ASP_GOO, by gem). */
+  readonly stainTint = new Uint8Array(WORLD_W * WORLD_H);
   private readonly particleHooks = {
-    stain: (x: number, y: number) => {
+    stain: (x: number, y: number, color: number) => {
       if (x < 0 || y < 0 || x >= WORLD_W || y >= WORLD_H) return;
       const c = y * WORLD_W + x;
       this.stain[c] = Math.min(255, this.stain[c] + 110);
+      const goo = ASP_GOO.findIndex((g) => g === color);
+      this.stainTint[c] = color ? (goo >= 0 ? goo + 1 : this.stainTint[c]) : 0;
       this.terrain.markRenderDirty(x, y);
     },
   };
@@ -1128,6 +1132,8 @@ export class Game implements FrameHandler {
         // Rearing up: it hisses.
         if (v.lift < 0.05 && b.lift >= 0.05) this.sfx?.hiss(b.pts[0], b.pts[1], b.kind === 0);
         v.lift = b.lift;
+        // An asp hurt: its goo spatters (more, the harder it was hit).
+        if (b.kind === BeastKind.Asp && b.hp < v.hp) gooSplat(this.particles, b.pts[0], b.pts[1], b.seed, Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
         v.hp = b.hp;
         v.attached = b.attached;
         v.frozen = b.frozen;
@@ -1152,6 +1158,7 @@ export class Game implements FrameHandler {
     if (!v) return;
     if (v.kind === BeastKind.Nest) coralBurst(this.particles, v.cur[0], v.cur[1]);
     else if (v.kind === BeastKind.Seeder) bloodSplat(this.particles, v.cur[0], v.cur[1], 3, 60);
+    else if (v.kind === BeastKind.Asp) aspGibs(this.particles, v.cur, v.seed);
     else beastGibs(this.particles, v.cur);
     // Every segment flung off whole (a nest in shards; a seeder's wings torn off it).
     const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Seeder ? 3 : v.cur.length >> 1;

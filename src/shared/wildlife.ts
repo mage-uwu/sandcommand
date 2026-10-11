@@ -128,7 +128,7 @@ export const MILLI_COIL_CD = 90;
 export const ASP_SEGS = 8;
 export const ASP_GAP = 2;
 export const ASP_R = 2.2;
-export const ASP_HP = 110;
+export const ASP_HP = 100;
 export const ASP_CRAWL = 30;
 export const ASP_HUNT = 60;
 /** Its strike: speed (cells/s) and how long it lasts (ticks). */

@@ -160,8 +160,8 @@ KIND_WEAPON[PK.Stone] = W_ROCKFALL;
 export interface ParticleHooks {
   /** A grain came to rest: deposit it as terrain (server). */
   settle?: (x: number, y: number, mat: number) => void;
-  /** Blood hit solid terrain at cell (x, y) (client stain layer). */
-  stain?: (x: number, y: number) => void;
+  /** Blood hit solid terrain at cell (x, y) (client stain layer); `color` its own (0: red blood). */
+  stain?: (x: number, y: number, color: number) => void;
 }
 
 /**
@@ -569,7 +569,7 @@ export class Particles {
       y[i] = py;
       if (hit.hit) {
         if (mode === C_STAIN) {
-          hooks.stain?.(hit.cx, hit.cy);
+          hooks.stain?.(hit.cx, hit.cy, this.color[i]);
           this.removeAt(i);
           continue;
         }

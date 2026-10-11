@@ -719,8 +719,15 @@ fringe of tiny legs. It crawls the same surfaces.
   forked tongue flickering, and hisses. Then it strikes, very fast (230
   cells a second), and bites: 30 harm and a dose of venom. It hunts on at
   60 cells a second, biting again when it can.
-- **Fragile.** 110 hit points and no armour, so a few rounds kill it.
+- **Fragile.** 100 hit points and no armour, so a few rounds kill it.
   Shooting a suspicious gem is fair: hurt, it wakes.
+- **Soft all through.** A blast loses only half its strength across its
+  reach on an asp, so two or three grenades kill one, whether they land on
+  its face or just near it.
+- **Gem goo.** It bleeds a gooey blood the colour of its gem (pink,
+  turquoise or emerald), and the goo stains wherever it lands. Killed, it
+  bursts into gobbets and strings of goo, and its segments fly off as gem
+  pieces.
 - Over half the creatures that come up are asps (the rest millipedes): up
   to seven at once on a cave map and four on any other.
 

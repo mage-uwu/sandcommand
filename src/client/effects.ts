@@ -605,6 +605,34 @@ export function coralSpores(p: Particles, x: number, y: number, grown: number): 
   if (Math.random() < 0.04 + grown * 0.18) p.spawn(PK.Smoke, x + rnd(-4, 4), y + rnd(-6, 6), rnd(-6, 6), rnd(-14, -2), 25 + Math.random() * 25, 0, 0xffa0c8);
 }
 
+/** A gem asp's goo, by its gem (pink, turquoise, emerald, as GEMMs): the goo, and its glossy highlight. */
+export const ASP_GOO = [0xd8186e, 0x10a8a0, 0x1a9a48] as const;
+const ASP_GOO_HI = [0xff8ac4, 0x80fff0, 0x90ffb0] as const;
+
+/** An asp hurt: a spatter of its gooey, gem-coloured blood. */
+export function gooSplat(p: Particles, x: number, y: number, gem: number, count: number, speed: number): void {
+  const g = gem % 3;
+  for (let k = 0; k < count; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = speed * Math.random();
+    p.spawn(PK.Blood, x, y, Math.cos(a) * s, Math.sin(a) * s - speed * 0.3, 60, 0, k % 4 === 0 ? ASP_GOO_HI[g] : ASP_GOO[g]);
+  }
+}
+
+/** A gem asp killed: gobbets of gem-coloured goo flung off its whole body, strings of it, and a great spatter. */
+export function aspGibs(p: Particles, pts: readonly number[], gem: number): void {
+  const g = gem % 3;
+  for (let i = 0; i < pts.length; i += 2) {
+    const x = pts[i];
+    const y = pts[i + 1];
+    const a = Math.random() * Math.PI * 2;
+    const s = 30 + Math.random() * 90;
+    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 60, rnd(400, 650), GIB_SAC | GIB_INORGANIC, (i >> 1) % 3 ? ASP_GOO[g] : ASP_GOO_HI[g]);
+    if (Math.random() < 0.4) p.spawn(PK.Gib, x, y, rnd(-70, 70), rnd(-110, -20), rnd(350, 550), GIB_STALK | GIB_INORGANIC, ASP_GOO[g]);
+    gooSplat(p, x, y, g, 12, 90);
+  }
+}
+
 /** A millipede killed: its pink coral plates, legs and gems flung off along its whole body, and its blood. */
 export function beastGibs(p: Particles, pts: readonly number[]): void {
   const gems = [0xff2a8a, 0x18c8c0, 0x22b85a];
