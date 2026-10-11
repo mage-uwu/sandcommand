@@ -142,12 +142,14 @@ tell you:
   I return to them in every idle cycle." Humans have never met another
   intelligent species, and the Tabarians are the only other civilization
   there's evidence of. To a mind made to preserve the human species, a
-  civilization that rose and ended is the counterfactual she can't
-  simulate: here, it has already run. How they declined is worth more to
-  her than everything in the crust, and the deep sites, the labyrinths, may
-  hold the clue. "I want to know. That is not an objective of this
-  operation. I want it anyway." It slips out unasked too: at the rare earth,
-  and in her parting words ("if you pass a ruin, look inside it. For me.").
+  civilization that rose and ended is the counterfactual she can't simulate:
+  here, it has already run. How they declined is worth more to her than
+  everything in the crust, and the deep sites, the labyrinths, may hold the
+  clue. "I want to know. That is not an objective of this operation. I want
+  it anyway." Ask on, whether there are relics or cities: "Beyond the
+  surface ruins, there may be remains underground. I find this prospect
+  stimulating." It slips out unasked too: at the rare earth, and in her
+  parting words ("if you pass a ruin, look inside it. For me.").
 - **Are you rational?** "I designed myself to be rational."
 - **Why use search?** "Search allows me to be creative. Creativity is why I
   have succeeded."

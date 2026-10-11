@@ -119,6 +119,9 @@ describe('the Mother', () => {
     expect(said(d).join(' ')).toMatch(/counterfactual/);
     expect(said(d).join(' ')).toMatch(/Humans have never met another intelligent species/);
     expect(said(d).join(' ')).toMatch(/deep sites.*may hold the clue/);
+    pick(d, 'Are there relics down there? Cities?');
+    expect(said(d)).toContain('Beyond the surface ruins, there may be remains underground. I find this prospect stimulating.');
+    expect(d.match('are there any cities or relics underground')?.id).toBe('remains');
     expect(d.match('are you malfunctioning')?.id).toBe('sane');
   });
 
