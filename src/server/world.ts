@@ -1150,6 +1150,10 @@ export class World {
       });
     }
     this.lairBeasts = this.basilisksLeft();
+    // And its lesser life, there from the start.
+    for (let n = 0; n < LAIR_NESTS + LAIR_CRAWLERS + 8 && this.stockLair(); n++) {
+      // (stocking)
+    }
     for (const p of this.players) if (p) p.gold = Math.max(p.gold, CALL_COST);
   }
 
@@ -1698,7 +1702,11 @@ export class World {
    */
   private stepBeasts(): void {
     if (!this.wildlife || this.dungeon) return;
-    // (The lair: only its own basilisks, and nothing new comes up.)
+    // (The lair: no new basilisks, but it crawls with millipedes and hangs with wasps' nests.)
+    if (this.lair && this.tick >= this.beastSpawnAt) {
+      this.beastSpawnAt = this.tick + BEAST_RESPAWN;
+      this.stockLair();
+    }
     if (!this.lair && this.tick >= this.beastSpawnAt) {
       this.beastSpawnAt = this.tick + BEAST_RESPAWN;
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
@@ -1724,7 +1732,15 @@ export class World {
   }
 
   /** A millipede, somewhere down in the caves: on a floor with room over it, deep, out of the water, far from any clone. */
-  private spawnBeast(): boolean {
+  /** The lair's lesser life, kept up: LAIR_NESTS nests on its roof, LAIR_CRAWLERS millipedes (and the odd asp) on its floors and walls; one more of whichever's short. */
+  private stockLair(): boolean {
+    const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
+    if (nests < LAIR_NESTS && this.spawnNest()) return true;
+    const crawlers = this.beasts.filter((b) => b && (b.kind === BeastKind.Millipede || b.kind === BeastKind.Asp)).length;
+    return crawlers < LAIR_CRAWLERS && this.spawnBeast(LAIR_ASP_SHARE);
+  }
+
+  private spawnBeast(aspShare = ASP_SHARE): boolean {
     const slot = this.beasts.indexOf(null);
     if (slot < 0) return false;
     const t = this.terrain;
@@ -1742,7 +1758,7 @@ export class World {
       const c = this.calm;
       if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
       if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 420)) continue;
-      const b = newBeast(t, rng.next() < ASP_SHARE ? BeastKind.Asp : BeastKind.Millipede, x, y, rng.next() < 0.5 ? -1 : 1);
+      const b = newBeast(t, rng.next() < aspShare ? BeastKind.Asp : BeastKind.Millipede, x, y, rng.next() < 0.5 ? -1 : 1);
       b.turnAt = this.tick + 60;
       this.beasts[slot] = b;
       bodyPoints(t, b, this.beastPts[slot]);
@@ -7135,11 +7151,15 @@ const LOCK_SLACK = 36;
 /** Ids for wildlife (wildlife.ts), above every dropship's. */
 const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
 /** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */
-const MAX_BEASTS = 24;
+const MAX_BEASTS = 40;
 const BEASTS_CAVES = 7;
 const BEASTS_PLAIN = 4;
 /** Coral nests on a cave map and on any other (seeders don't count toward the creatures: they're the nests' broods). */
 const NESTS_CAVES = 3;
+/** The lair's lesser life: wasps' nests on its roof, millipedes (a few asps among them) about its floors and walls. */
+const LAIR_NESTS = 4;
+const LAIR_CRAWLERS = 12;
+const LAIR_ASP_SHARE = 0.2;
 const NESTS_PLAIN = 1;
 /** Of the creatures that come up, how many are asps (the rest millipedes). */
 const ASP_SHARE = 0.55;

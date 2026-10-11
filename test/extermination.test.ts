@@ -51,6 +51,9 @@ describe('Extermination', () => {
   it('woken, a basilisk stays on its own ground: it finds its way through the cave to a clone and kills it', () => {
     const { world, ps } = exterm(309, 2);
     const [a, other] = ps;
+    // (Only the basilisks: the lesser life out of the way.)
+    for (let i = 0; i < world.beasts.length; i++) if (world.beasts[i] && world.beasts[i]!.kind !== BeastKind.Basilisk) world.beasts[i] = null;
+    (world as unknown as { beastSpawnAt: number }).beastSpawnAt = 1e9;
     // (The other far off, up top over the far end.)
     other.body.x = WORLD_W - 100;
     other.body.y = world.terrain.surfaceY(WORLD_W - 100) - ACTOR_H;
@@ -77,10 +80,26 @@ describe('Extermination', () => {
     expect(highest).toBeGreaterThan(world.terrain.surfaceY(Math.round(d.floorX)) + 60);
   });
 
-  it('nothing else comes up in the lair', () => {
-    const { world } = exterm(302, 2);
-    for (let t = 0; t < 30 * 40; t++) world.step();
-    expect(world.beasts.every((b) => !b || b.kind === BeastKind.Basilisk)).toBe(true);
+  it('the lair crawls with millipedes and hangs with wasps\' nests, kept up; but no basilisk ever comes back', () => {
+    const { world, ps } = exterm(302, 2);
+    const count = (k: number) => world.beasts.filter((o) => o?.kind === k).length;
+    // From the start: nests on the roof, millipedes (and a few asps) about the cave.
+    expect(count(BeastKind.Nest)).toBeGreaterThanOrEqual(3);
+    expect(count(BeastKind.Millipede) + count(BeastKind.Asp)).toBeGreaterThanOrEqual(10);
+    expect(count(BeastKind.Millipede)).toBeGreaterThan(count(BeastKind.Asp));
+    const lair = world.lair!;
+    for (const b of world.beasts) {
+      if (!b || b.kind === BeastKind.Seeder) continue;
+      expect(b.x).toBeGreaterThan(lair.x0 - 200);
+      expect(b.x).toBeLessThan(lair.x1 + 200);
+    }
+    // Killed off, they come back; a basilisk killed doesn't.
+    const k = world.beasts.findIndex((o) => o?.kind === BeastKind.Basilisk);
+    world.hurtBeast(k, 1e9, ps[0].id);
+    for (let i = 0; i < world.beasts.length; i++) if (world.beasts[i]?.kind === BeastKind.Millipede) world.beasts[i] = null;
+    for (let t = 0; t < 30 * 60; t++) world.step();
+    expect(count(BeastKind.Millipede) + count(BeastKind.Asp)).toBeGreaterThan(0);
+    expect(count(BeastKind.Basilisk)).toBe(LAIR_DENS - 1);
   });
 
   it('the fallen come back by drop rocket', () => {

@@ -1113,7 +1113,12 @@ come back by drop rocket, as in Regicide.
   beside every chute's mouth, because rifles barely scratch them.
 - **Starting gold.** Everyone starts the wave with enough gold for one call
   on the radio. Tanks still come down by parachute.
-- **Nothing else.** No other wildlife comes up in the lair.
+- **Lesser life.** The lair isn't only the basilisks'. From the start it
+  has four wasps' nests hung from its roof (their foragers ranging through
+  the chambers and up the chutes) and a dozen millipedes, a few asps among
+  them, about its floors and walls. They're kept topped up through the
+  wave (`stockLair`). A basilisk killed never comes back. To fit it all,
+  a world now holds up to 40 creatures (`MAX_BEASTS`).
 
 **The HUD.** The match card counts the basilisks left and how many are
 awake. The minimap marks each one: dim while it sleeps, a pulsing red dot
