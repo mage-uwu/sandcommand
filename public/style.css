@@ -92,3 +92,36 @@ body.touch .help:not(.touch-help) { display: none; }
 .buttons button.secondary { flex: 0 0 34%; color: var(--accent); background: transparent; border: 1px solid var(--accent); }
 /* Out of the tutorial, from anywhere in it. */
 #exitTutorial { position: fixed; top: 84px; right: 10px; z-index: 30; width: auto; margin: 0; padding: 6px 12px; font-size: 12px; color: var(--ink, #e8dcc8); background: rgba(10, 10, 14, 0.6); border: 1px solid rgba(255, 255, 255, 0.25); }
+
+/* The Mother's briefs (mother-ui.ts): a retro terminal dialog, her portrait on the left. */
+.mother { position: fixed; left: 0; right: 0; bottom: max(3vh, 10px); z-index: 30; display: flex; justify-content: center; padding: 0 10px; pointer-events: none; }
+.mother.hidden { display: none; }
+.mother-box { pointer-events: auto; display: flex; gap: 14px; width: min(820px, 100%); max-height: min(62vh, 440px); padding: 12px; background: rgba(4, 8, 6, 0.94); border: 2px solid #5dff9a; box-shadow: 0 0 0 4px rgba(4, 8, 6, 0.94), 0 0 0 6px #2c7a4a, 0 18px 60px rgba(0, 0, 0, 0.7); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; color: #b8ffd0; text-shadow: 0 0 6px rgba(93, 255, 154, 0.35); }
+.mother-side { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mother-face { width: 144px; height: 192px; image-rendering: pixelated; border: 2px solid #2c7a4a; background: #04050b; }
+.mother-name { font-size: 11px; letter-spacing: 0.12em; text-align: center; color: #5dff9a; }
+.mother-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mother-head { font-size: 12px; letter-spacing: 0.2em; color: #5dff9a; border-bottom: 1px dashed #2c7a4a; padding-bottom: 6px; margin-bottom: 6px; }
+.mother-log { flex: 1; min-height: 60px; overflow-y: auto; font-size: 14px; line-height: 1.45; padding-right: 4px; }
+.mother-log p { margin: 0 0 8px; white-space: pre-wrap; }
+.mother-log p.y { color: #ffc23d; text-shadow: 0 0 6px rgba(255, 194, 61, 0.35); }
+.mother-log p.o { color: #fff3a8; border: 1px solid #8a7a2a; padding: 6px 8px; background: rgba(60, 50, 10, 0.35); }
+.mother-log p.o b { color: #ffe14a; }
+.mother-cursor { font-style: normal; animation: blink 0.9s infinite steps(1); }
+.mother-choices { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.mother-choice { width: 100%; margin: 0; padding: 5px 8px; font: inherit; font-size: 13px; font-weight: normal; letter-spacing: 0; text-align: left; color: #b8ffd0; background: transparent; border: 1px solid #2c7a4a; }
+.mother-choice:hover, .mother-choice:focus { background: rgba(93, 255, 154, 0.12); color: #e8fff0; }
+.mother-foot { display: flex; gap: 8px; align-items: stretch; }
+.mother-ask { flex: 1; display: flex; align-items: center; gap: 6px; margin: 0; color: #5dff9a; }
+.mother-ask input { flex: 1; min-width: 0; padding: 7px 8px; font: inherit; font-size: 13px; color: #e8fff0; background: #020403; border: 1px solid #2c7a4a; }
+.mother-go { width: auto; margin: 0; padding: 7px 14px; font: inherit; font-size: 13px; letter-spacing: 0.12em; color: #04120a; background: #5dff9a; }
+#motherBtn { position: fixed; top: 118px; right: 10px; z-index: 30; width: auto; margin: 0; padding: 6px 10px; font-size: 12px; letter-spacing: 0.08em; color: #04120a; background: #5dff9a; }
+#motherBtn.hidden { display: none; }
+@media (max-height: 520px) {
+  .mother-face { width: 96px; height: 128px; }
+  .mother-box { max-height: 82vh; padding: 8px; gap: 10px; }
+  .mother-log { font-size: 12px; }
+}
+@media (max-width: 560px) {
+  .mother-side { display: none; }
+}

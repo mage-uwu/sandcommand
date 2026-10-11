@@ -17,6 +17,8 @@ const MAX_CATCHUP = 4;
 export class LocalLink implements Link {
   readonly tutorial: Tutorial;
   rttMs = 0;
+  /** Held still (the Mother is briefing): the world doesn't step. */
+  paused = false;
   kbIn = 0;
   private timer: ReturnType<typeof setInterval>;
   private last = performance.now();
@@ -41,6 +43,10 @@ export class LocalLink implements Link {
 
   private pump(): void {
     const now = performance.now();
+    if (this.paused) {
+      this.last = now;
+      return;
+    }
     let n = 0;
     while (now - this.last >= TICK_MS && n < MAX_CATCHUP) {
       this.tutorial.world.step();

@@ -16,6 +16,9 @@ import { Game } from './game.ts';
 import { InputState } from './input.ts';
 import { type Link, type NetHandlers, Net } from './net.ts';
 import { LocalLink } from './local.ts';
+import { type Brief, Conversation } from './mother.ts';
+import { MOTHER_TOPICS, MOTHER_UNKNOWN, TUTORIAL_BRIEFS } from './mother-script.ts';
+import { MotherDialog } from './mother-ui.ts';
 import { Renderer } from './render.ts';
 import { lastComplexes, lastCraters, lastBuried, lastGemCaverns, lastMonuments } from '../shared/worldgen.ts';
 import { TouchControls } from './touch.ts';
@@ -37,6 +40,27 @@ const roomsEl = $<HTMLDivElement>('rooms');
 const chatInput = $<HTMLInputElement>('chat');
 const tutorialBtn = $<HTMLButtonElement>('tutorial');
 const exitTutorialBtn = $<HTMLButtonElement>('exitTutorial');
+const motherBtn = $<HTMLButtonElement>('motherBtn');
+/** The Mother's dialog, and the tutorial's conversation with her (what she's been asked carries through it), and the step she last briefed. */
+const mother = new MotherDialog(document.body);
+let motherTalk: Conversation | null = null;
+let briefedStep = -1;
+/** Open the Mother's dialog in the tutorial: holds the world still and the game's keys idle while it's up. */
+function openMother(brief: Brief | null): void {
+  if (!(net instanceof LocalLink) || !motherTalk || mother.isOpen) return;
+  const link = net;
+  link.paused = true;
+  input.typing = true;
+  mother.open(motherTalk, brief, () => {
+    link.paused = false;
+    input.typing = false;
+  });
+}
+motherBtn.addEventListener('click', () => openMother(null));
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyB' || input.typing || e.repeat || !(net instanceof LocalLink)) return;
+  openMother(null);
+});
 
 const input = new InputState(canvas);
 const renderer = new Renderer(canvas);
@@ -200,7 +224,12 @@ async function join(tutorial = false): Promise<void> {
       overlay.classList.add('hidden');
       touch.setVisible(true);
       exitTutorialBtn.classList.toggle('hidden', !tutorial);
-      if (tutorial) return;
+      motherBtn.classList.toggle('hidden', !tutorial);
+      if (tutorial) {
+        motherTalk = new Conversation(MOTHER_TOPICS, MOTHER_UNKNOWN);
+        briefedStep = -1;
+        return;
+      }
       const q = new URLSearchParams(location.search);
       q.set('room', w.room);
       history.replaceState(null, '', `?${q}`);
@@ -235,6 +264,9 @@ async function join(tutorial = false): Promise<void> {
 
 /** Out of the tutorial, back to the menu. */
 function leaveTutorial(msg: string): void {
+  mother.close();
+  motherTalk = null;
+  motherBtn.classList.add('hidden');
   net?.close();
   net = null;
   game = null;
@@ -598,11 +630,20 @@ function frame(now: number): void {
       g.localTick(buttons, quantizeAim(aim), (seq) => n.input(seq, buttons, quantizeAim(aim), inv));
     }
     if (net instanceof LocalLink) {
-      // The tutorial: its prompt for this moment, in the words of the controls in use; and, once it's over, back to the menu.
-      const c = net.tutorial.coach(touchFirst());
-      g.coach = c;
-      if (c.done && !tutorialDoneAt) tutorialDoneAt = now;
-      if (tutorialDoneAt && now - tutorialDoneAt > 7000) {
+      // The tutorial: each step briefed by the Mother (her words, then the objective); its
+      // prompt for this moment on the card, in the words of the controls in use; and, once
+      // it's over and she's had her last word, back to the menu.
+      const tut = net.tutorial;
+      if (tut.step !== briefedStep && !mother.isOpen && motherTalk) {
+        briefedStep = tut.step;
+        const b = TUTORIAL_BRIEFS[Math.min(tut.step, TUTORIAL_BRIEFS.length - 1)];
+        const o = tut.coach(touchFirst(), true);
+        openMother({ ...b, objective: o.done ? undefined : `${o.title}. ${o.body}` });
+      }
+      const c = tut.coach(touchFirst());
+      g.coach = mother.isOpen ? null : c;
+      if (c.done && !mother.isOpen && !tutorialDoneAt) tutorialDoneAt = now;
+      if (tutorialDoneAt && now - tutorialDoneAt > 4000) {
         tutorialDoneAt = 0;
         leaveTutorial('Tutorial complete! You\'re ready: Deploy.');
       }

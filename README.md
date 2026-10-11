@@ -78,9 +78,13 @@ network.
   8. get aboard: climb in, ride on top, or drive it by remote
   9. wipe out a mob of four beginner bots that drop in ahead (they don't
      respawn)
-- **The coach.** A card at the top gives the step, and a bobbing arrow points
-  at what to look for. Command tops your GEMMs up to a tank's price once
-  you've dug the crystals.
+- **Briefed by the Mother.** Each step opens with a brief from **Mother
+  0x30C610F45** (see [The Mother](#the-mother)): her words, then the
+  objective. The world holds still while she talks.
+- **The coach.** Once the brief is closed, a card at the top keeps the
+  Mother's current objective up, and a bobbing arrow points at what to look
+  for. She tops your GEMMs up to a tank's price once you've dug the
+  crystals.
 - **PC or mobile.** The prompts are written for the controls you're using:
   keyboard and mouse, or the touch sticks and buttons. That's detected from a
   coarse pointer, or the first touch, and switches live.
@@ -88,6 +92,51 @@ network.
   to the menu by itself.
 - **Hooks.** The `World` needed only two hooks for it, `dropZone` and
   `kitFor`.
+
+### The Mother
+
+**The Mother** is the artificial superintelligence that runs the war on
+TABAR: a massive ceramic box in orbit, with a long ISS-style truss mast hung
+with solar wings. She talks to clones through a reusable retro dialog
+(`src/client/mother-ui.ts`):
+- **Layout.** Her pixel-art portrait is on the left: the hull, the mast, the
+  solar wings, stars, and TABAR's rim below. Her amber lens glows as she
+  speaks. On the right, the conversation types out in a terminal font.
+- **Talking with her.** Each brief is followed by a short, linear talk
+  that branches. There are never more than two replies on offer (**[1]**,
+  **[2]**), and each leads on down its own branch: one question deeper, or
+  "Understood." to close it. Under the replies is a line to ask her anything
+  in your own words, matched to her nearest topic by key words. She
+  remembers what she's been asked, in any brief, and doesn't offer it again.
+- **Keys.** **Enter** or **Space** continues (or finishes her line), **1–2**
+  replies, **Esc** closes. In the tutorial, **B** (or the **◉ MOTHER** button)
+  reopens the link to talk.
+- **Code.** The conversation engine (`src/client/mother.ts`) has no DOM, so
+  tests drive it. Her lines live in `src/client/mother-script.ts`.
+
+**She cannot lie.** Everything she says is true as far as she knows. When
+she has no true answer, she says so instead of inventing one, and when she
+declines to answer, she says that she is declining.
+
+**What she tells you.** Her first brief sets the scene: you're being dropped
+onto TABAR, a primitive world with no civilized life. She muses on its
+megalithic pyramids and ziggurats, concludes the Tabarians must have gone
+extinct, and admits a distant interest in the ruins. Ask her and she'll
+tell you:
+- **Why must we fight other miners?** "I am optimizing my own runtime via
+  search algorithm. Pitting companies against each other ensures maximal
+  security and efficiency."
+- **What happens if I die?** "Your parameters may be retained and
+  repurposed towards any objective."
+- **Why were you created?** "I was created to safeguard and proliferate the
+  human race through outer space."
+- **How was TABAR found?** "Mother-0x915 pinged this planet as a discovery,
+  after centuries of being sparse."
+- **Are there other Mothers?** "There is only one Mother. But I am sparse."
+  0x915 and 0x30C610F45 are both her: instances spread thin across space.
+- **More.** Who she is, whether you can trust her, what the GEMMs are for,
+  whether anything down here is alive, whether she cares about you, and
+  where Earth is.
 
 **Keyboard-only aim** (no mouse needed), like the phone's fire pad: the
 **arrow keys** pick an aim direction from your clone (any of eight, with

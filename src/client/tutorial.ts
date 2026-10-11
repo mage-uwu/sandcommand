@@ -19,6 +19,9 @@ import { type ClientLink, type Player, World } from '../server/world.ts';
  * 5. dig the gold pocket, 6. dig the rare earth crystals beside it,
  * 7. call in a tank by radio, 8. climb in, 9. wipe out the mob that comes.
  *
+ * Each step is briefed by the Mother (mother-script.ts, shown by main.ts):
+ * her words, then the objective, which stays up on the card while it's done.
+ *
  * The prompts are written for the controls in use: keyboard and mouse, or
  * the touch sticks and buttons (`coach(touch)`). No DOM here: tests drive it.
  */
@@ -291,8 +294,11 @@ export class Tutorial {
     this.noteAt = this.world.tick;
   }
 
-  /** What to tell the player now, in the words of the controls they're using. */
-  coach(touch: boolean): Coach {
+  /**
+   * What to tell the player now, in the words of the controls they're using.
+   * (`briefing`: the step's own objective, even while the clone's still on its way down.)
+   */
+  coach(touch: boolean, briefing = false): Coach {
     const a = this.arena;
     const t = this.world.terrain;
     const surf = (x: number) => ({ x, y: t.surfaceY(x) - ACTOR_H - 10 });
@@ -305,7 +311,7 @@ export class Tutorial {
       note: this.note,
       done: this.step === TStep.Done,
     });
-    if (!this.me.alive && this.step === TStep.Move) return out('Loading out', 'Your clone is on its way down in a drop rocket.');
+    if (!briefing && !this.me.alive && this.step === TStep.Move) return out('Loading out', 'Your clone is on its way down in a drop rocket.');
     switch (this.step) {
       case TStep.Move:
         return out('Move', touch ? 'Drag the left stick left or right to run.' : 'Press A and D (or the arrow keys) to run.');

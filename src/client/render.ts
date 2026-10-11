@@ -15,6 +15,7 @@ import { bannerLines, layoutSub } from './banner.ts';
 import type { InputState } from './input.ts';
 import type { Link } from './net.ts';
 import type { Coach } from './tutorial.ts';
+import { MOTHER_NAME } from './mother-script.ts';
 import { drawFlora, drawGeysers } from './flora-art.ts';
 import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
@@ -1451,7 +1452,8 @@ export class Renderer {
 
   /**
    * The tutorial's prompt: a terminal-green card at the top of the screen
-   * with the step, what to do, and (for a few seconds) what just happened.
+   * with the Mother's current objective (she briefs each one first:
+   * mother-ui.ts), what to do, and (for a few seconds) what just happened.
    */
   private drawCoach(c: Coach, dpr: number, W: number): void {
     const ctx = this.ctx;
@@ -1485,7 +1487,7 @@ export class Renderer {
     ctx.textAlign = 'left';
     ctx.fillStyle = c.done ? '#ffe14a' : '#5dff9a';
     ctx.font = `bold ${fs}px ${MONO}`;
-    ctx.fillText(c.done ? `> ${c.title.toUpperCase()}` : `> TUTORIAL ${c.n}/${c.of} · ${c.title.toUpperCase()}`, x + pad, y + pad + fs);
+    ctx.fillText(c.done ? `> ${c.title.toUpperCase()}` : `> ${MOTHER_NAME} · OBJECTIVE ${c.n}/${c.of} · ${c.title.toUpperCase()}`, x + pad, y + pad + fs);
     ctx.font = `${fs}px ${MONO}`;
     ctx.fillStyle = '#e6f5ea';
     lines.forEach((l, i) => ctx.fillText(l, x + pad, y + pad + head + (i + 0.8) * lh));
