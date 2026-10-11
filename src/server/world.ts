@@ -192,6 +192,7 @@ import {
   R_VENOM,
   R_CORAL,
   BEAST_SCALE,
+  BEAST_SAME,
   GF_CAVE,
   GF_RUMBLE,
   GF_TOXIC,
@@ -445,6 +446,8 @@ export class Player {
   readonly coral = new Float32Array(CORAL_LIMBS.length);
   /** Wildlife was in this client's view last frame (so an empty R_BEASTS tells it they've gone). */
   beastsSent = false;
+  /** Each creature's record as this client last got it (World.beastRev; -1: it doesn't have it), so an unchanged one goes as a byte. */
+  readonly beastSeen = new Int32Array(MAX_BEASTS).fill(-1);
   /** A bot's skill, 1 (beginner) to 5 (expert): dealt out by World.dealSkills. */
   skill = 3;
   /** Ticks of mending left from a health wave it was caught in, and the last wave that caught it. */
@@ -6303,11 +6306,55 @@ export class World {
     );
   }
 
+  /** Each creature's R_BEASTS record (after its slot) as of this tick, a revision bumped whenever it changes, and (scratch) whether it's in the view being written. */
+  private readonly beastRec: (Uint8Array | null)[] = new Array(MAX_BEASTS).fill(null);
+  private readonly beastRev = new Int32Array(MAX_BEASTS);
+  private readonly beastOf: (Beast | null)[] = new Array(MAX_BEASTS).fill(null);
+  private readonly beastInView = new Uint8Array(MAX_BEASTS);
+  private beastRevs = 0;
+
+  /**
+   * Encode every creature's record once a tick (not once per client), and
+   * note which have changed since the last tick: a client that has one as
+   * it stands is sent only its slot.
+   */
+  private encodeBeasts(): void {
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const b = this.beasts[k];
+      const pts = b ? this.beastPts[k] : null;
+      if (!b || !pts || !pts.length) {
+        this.beastRec[k] = null;
+        this.beastOf[k] = null;
+        continue;
+      }
+      const w = this.tmp.reset();
+      w.u8(b.kind);
+      w.u8(b.seed);
+      w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
+      w.u8(Math.round(b.lift * 255));
+      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0));
+      w.u16(clampU16(pts[0] * POS_SCALE));
+      w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
+      for (let i = 2; i < pts.length; i += 2) {
+        w.u8(Math.max(-127, Math.min(127, Math.round((pts[i] - pts[i - 2]) * BEAST_SCALE))) & 255);
+        w.u8(Math.max(-127, Math.min(127, Math.round((pts[i + 1] - pts[i - 1]) * BEAST_SCALE))) & 255);
+      }
+      const rec = w.finish();
+      const old = this.beastRec[k];
+      if (this.beastOf[k] !== b || !old || old.length !== rec.length || !old.every((v, i) => v === rec[i])) {
+        this.beastRev[k] = ++this.beastRevs;
+        this.beastRec[k] = rec;
+        this.beastOf[k] = b;
+      }
+    }
+  }
+
   private replicate(): void {
     this.encodeActors();
     const actorBytes = this.actorRecords.buf;
     const ACTOR_REC = 16; // bytes per encoded actor, see encodeActors()
     const broadcast = this.broadcast.finish();
+    this.encodeBeasts();
     const sendScores = this.tick % TICKS_PER_SCORE === 0;
     let scores: Uint8Array | null = null;
     if (sendScores) {
@@ -6637,36 +6684,34 @@ export class World {
       }
 
       // Wildlife in view, every frame (and an empty list once the last has gone, so the client drops them).
+      // Each one's record was encoded once this tick (encodeBeasts); one this client already has as it
+      // stands (lying in wait, say, or a nest) goes as its slot alone, flagged.
       let nBeast = 0;
       for (let k = 0; k < MAX_BEASTS; k++) {
         const pts = this.beasts[k] ? this.beastPts[k] : null;
         // (By its head, with room for its body: a basilisk's is long.)
         const m = this.beasts[k]?.kind === BeastKind.Basilisk ? 220 : 60;
-        if (pts && pts.length && pts[0] >= vx0 - m && pts[0] <= vx1 + m && pts[1] >= vy0 - m && pts[1] <= vy1 + m) nBeast++;
+        const inView = !!pts && pts.length > 0 && pts[0] >= vx0 - m && pts[0] <= vx1 + m && pts[1] >= vy0 - m && pts[1] <= vy1 + m;
+        this.beastInView[k] = inView ? 1 : 0;
+        if (inView) nBeast++;
       }
       if (nBeast > 0 || p.beastsSent) {
         w.u8(R_BEASTS);
         w.u8(nBeast);
-        for (let k = 0; k < MAX_BEASTS && nBeast > 0; k++) {
-          const b = this.beasts[k];
-          const pts = b ? this.beastPts[k] : null;
-          const m = b?.kind === BeastKind.Basilisk ? 220 : 60;
-          if (!b || !pts || !pts.length || pts[0] < vx0 - m || pts[0] > vx1 + m || pts[1] < vy0 - m || pts[1] > vy1 + m) continue;
-          w.u8(k);
-          w.u8(b.kind);
-          w.u8(b.seed);
-          w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
-          w.u8(Math.round(b.lift * 255));
-          w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0));
-          w.u16(clampU16(pts[0] * POS_SCALE));
-          w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
-          for (let i = 2; i < pts.length; i += 2) {
-            w.u8(Math.max(-127, Math.min(127, Math.round((pts[i] - pts[i - 2]) * BEAST_SCALE))) & 255);
-            w.u8(Math.max(-127, Math.min(127, Math.round((pts[i + 1] - pts[i - 1]) * BEAST_SCALE))) & 255);
+        for (let k = 0; k < MAX_BEASTS; k++) {
+          if (!this.beastInView[k]) {
+            p.beastSeen[k] = -1; // (out of its view: the client forgets it)
+            continue;
+          }
+          if (p.beastSeen[k] === this.beastRev[k]) w.u8(k | BEAST_SAME);
+          else {
+            w.u8(k);
+            w.bytes(this.beastRec[k]!);
+            p.beastSeen[k] = this.beastRev[k];
           }
         }
         p.beastsSent = nBeast > 0;
-      }
+      } else p.beastSeen.fill(-1);
 
       // Dropships: all of them, every frame (there are only a few).
       let nShip = 0;

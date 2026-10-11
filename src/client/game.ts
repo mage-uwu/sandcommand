@@ -194,6 +194,33 @@ function saveCareer(c: { kills: number; deaths: number }): void {
 /** Kills per death (kills alone while deathless). */
 export const kdRatio = (kills: number, deaths: number) => kills / Math.max(1, deaths);
 
+/** A creature in view, as the client keeps it (Game.beastViews). */
+export interface BeastView {
+  kind: number;
+  seed: number;
+  hp: number;
+  lift: number;
+  prevLift: number;
+  attached: boolean;
+  frozen: boolean;
+  coiled: boolean;
+  gem: boolean;
+  frenzy: boolean;
+  /** Its body points as last sent, and the frame before. */
+  prev: number[];
+  cur: number[];
+  /** Its recent states by server tick (newest last), for Game.beastPose. */
+  snaps: { tick: number; pts: number[]; lift: number }[];
+}
+
+/** Note a creature's state as of server tick `tick` (its latest points and rearing). */
+function pushBeastSnap(v: BeastView, tick: number): void {
+  const s = v.snaps;
+  if (s.length && s[s.length - 1].tick >= tick) s.pop(); // (a resent tick: the newer word)
+  s.push({ tick, pts: v.cur, lift: v.lift });
+  if (s.length > 8) s.shift();
+}
+
 export class Game implements FrameHandler {
   readonly terrain = new Terrain();
   readonly loaded = new Uint8Array(CHUNK_COUNT);
@@ -1113,8 +1140,16 @@ export class Game implements FrameHandler {
   }
   private waterBodies: { x: number; y: number; level: number; volume: number }[] = [];
 
-  /** Wildlife in view (R_BEASTS): each creature's body points as last sent and the frame before (to draw between them). */
-  readonly beastViews = new Map<number, { kind: number; seed: number; hp: number; lift: number; prevLift: number; attached: boolean; frozen: boolean; coiled: boolean; gem: boolean; frenzy: boolean; prev: number[]; cur: number[] }>();
+  /**
+   * Wildlife in view (R_BEASTS): each creature's body points as last sent
+   * and the frame before, and its recent states by server tick (`snaps`), to
+   * draw it at the same render time as everything else (beastPose).
+   */
+  readonly beastViews = new Map<number, BeastView>();
+  /** Wildlife that dropped out of the last R_BEASTS (killed, most likely: its R_BEAST_DIE follows in the same frame). */
+  private readonly beastsGone = new Map<number, BeastView>();
+  /** Scratch for beastPose. */
+  private readonly posePts: number[] = [];
   /**
    * A dead millipede's segments, each flung off whole (its own camouflage
    * and all), tumbling, bouncing, coming to rest and fading: where, how it's
@@ -1124,9 +1159,19 @@ export class Game implements FrameHandler {
   private buzzAt = -1e9;
   beasts(list: BeastState[]): void {
     const seen = new Set<number>();
+    this.beastsGone.clear();
     for (const b of list) {
       seen.add(b.slot);
       const v = this.beastViews.get(b.slot);
+      if (b.same) {
+        // Just as it was: another snapshot of it standing still.
+        if (v) {
+          v.prev = v.cur;
+          v.prevLift = v.lift;
+          pushBeastSnap(v, this.frameTick);
+        }
+        continue;
+      }
       if (v && v.kind === b.kind && v.seed === b.seed && v.cur.length === b.pts.length) {
         v.prev = v.cur;
         v.cur = b.pts;
@@ -1144,20 +1189,61 @@ export class Game implements FrameHandler {
         // A basilisk woken: its roar.
         if (!v.frenzy && b.frenzy) this.sfx?.roar(b.pts[0], b.pts[1]);
         v.frenzy = b.frenzy;
+        pushBeastSnap(v, this.frameTick);
       } else {
         // A brood out of its nest: the buzz of it (once for the lot).
         if (b.kind === BeastKind.Seeder && performance.now() - this.buzzAt > 1500) {
           this.buzzAt = performance.now();
           this.sfx?.buzz(b.pts[0], b.pts[1]);
         }
-        this.beastViews.set(b.slot, { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, prev: b.pts, cur: b.pts });
+        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, prev: b.pts, cur: b.pts, snaps: [] };
+        pushBeastSnap(nv, this.frameTick);
+        this.beastViews.set(b.slot, nv);
       }
     }
-    for (const k of [...this.beastViews.keys()]) if (!seen.has(k)) this.beastViews.delete(k);
+    for (const [k, v] of this.beastViews) {
+      if (seen.has(k)) continue;
+      this.beastViews.delete(k);
+      this.beastsGone.set(k, v);
+    }
   }
+
+  /**
+   * A creature as it's drawn: its body points and how far it's reared, at
+   * the render time remote clones, vehicles and craft are drawn at
+   * (renderTick: a few ticks back, between two snapshots), so it stands
+   * where they do relative to it (coiled round one, biting another). The
+   * points are scratch: copy them to keep them.
+   */
+  beastPose(v: BeastView): { pts: number[]; lift: number; vx: number; vy: number } {
+    const s = v.snaps;
+    const rt = this.renderTick();
+    let a = s[0];
+    let c = s[0];
+    for (let i = s.length - 1; i >= 0; i--) {
+      if (s[i].tick <= rt) {
+        a = s[i];
+        c = s[Math.min(i + 1, s.length - 1)];
+        break;
+      }
+    }
+    const t = a === c ? 0 : Math.max(0, Math.min(1, (rt - a.tick) / (c.tick - a.tick)));
+    const out = this.posePts;
+    out.length = 0;
+    // (A jump too far to be motion, a fall through the floor say: no sliding across it.)
+    const jump = Math.abs(c.pts[0] - a.pts[0]) > 64 || Math.abs(c.pts[1] - a.pts[1]) > 64;
+    for (let i = 0; i < c.pts.length; i++) out.push(jump ? c.pts[i] : a.pts[i] + (c.pts[i] - a.pts[i]) * t);
+    const span = c.tick - a.tick || 1;
+    return { pts: out, lift: a.lift + (c.lift - a.lift) * t, vx: ((c.pts[0] - a.pts[0]) / span) * TICK_RATE, vy: ((c.pts[1] - a.pts[1]) / span) * TICK_RATE };
+  }
+
   beastDie(slot: number, _kind: number, _seed: number): void {
-    const v = this.beastViews.get(slot);
+    // (Most often it's already gone from the list, in the same frame: it was dropped from view as it died.)
+    const v = this.beastViews.get(slot) ?? this.beastsGone.get(slot);
     if (!v) return;
+    this.beastsGone.delete(slot);
+    // Where it's drawn, not where it last was.
+    v.cur = [...this.beastPose(v).pts];
     if (v.kind === BeastKind.Nest) coralBurst(this.particles, v.cur[0], v.cur[1]);
     else if (v.kind === BeastKind.Seeder) bloodSplat(this.particles, v.cur[0], v.cur[1], 3, 60);
     else if (v.kind === BeastKind.Asp) aspGibs(this.particles, v.cur, v.seed);
@@ -1176,7 +1262,7 @@ export class Game implements FrameHandler {
     }
     if (this.segmentGibs.length > 120) this.segmentGibs.splice(0, this.segmentGibs.length - 120);
     this.sfx?.gib(v.cur[0], v.cur[1], v.kind === BeastKind.Seeder ? 0.4 : 1.5, false);
-    this.beastViews.delete(slot);
+    if (this.beastViews.get(slot) === v) this.beastViews.delete(slot);
   }
   /** Venom in clones' blood (R_VENOM): id -> the harm it still has to do. */
   readonly venomIn = new Map<number, number>();

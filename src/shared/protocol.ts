@@ -115,9 +115,13 @@ export const R_WATER = 40;
  * round a clone, 8: curled up as a gem, 16: a basilisk's frenzy), u16 head x, u16 head y (+Y_BIAS), both x
  * POS_SCALE, then for each further body point i8 dx, i8 dy from the one
  * before (x BEAST_SCALE). An empty list once the last in view has gone.
+ * A slot with BEAST_SAME set has no record after it: the creature is just
+ * as the client last had it (encoded once a tick, World.encodeBeasts).
  */
 export const R_BEASTS = 41;
 export const BEAST_SCALE = 8;
+/** In R_BEASTS, a slot with this bit set: that creature as the client last had it (no record follows). */
+export const BEAST_SAME = 0x80;
 /** A creature killed: u8 slot, u8 kind, u32 seed (its gibs, from where the client last saw it). */
 export const R_BEAST_DIE = 42;
 /**
@@ -153,7 +157,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 66;
+export const PROTOCOL_VERSION = 67;
 
 /** Last Man Standing round phases. */
 export const Phase = {

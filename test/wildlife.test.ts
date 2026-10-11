@@ -364,11 +364,67 @@ describe('millipedes in the world', () => {
     world.step();
     pump();
     expect(game.myVenom).toBeGreaterThan(40);
-    // Killed: gone from the client.
+    // Killed: gone from the client, in pieces (its gibs flung where it was drawn).
     world.hurtBeast(0, 1e6, a.id);
     world.step();
     pump();
     expect(game.beastViews.size).toBe(0);
+    expect(game.segmentGibs.length).toBe(MILLI_SEGS);
+  });
+
+  it("a creature that hasn't changed is sent as its slot alone; the client keeps it, and draws it at the clones' render time", () => {
+    const { world, a } = cave();
+    const inbox: Uint8Array[] = [];
+    const c = world.addPlayer('c', { send: (d) => inbox.push(d) })!;
+    deliverAll(world, [c]);
+    // (Watching from in the rock over the cave, out of its sight; the other clone well away.)
+    c.body.x = 1150;
+    c.body.y = 340;
+    a.body.x = 3000;
+    a.body.y = 200;
+    const game = new Game();
+    game.myId = c.id;
+    const got: { same: boolean; slot: number }[][] = [];
+    const orig = game.beasts.bind(game);
+    game.beasts = (list) => {
+      got.push(list.map((b) => ({ same: !!b.same, slot: b.slot })));
+      orig(list);
+    };
+    const pump = () => {
+      for (const m of inbox.splice(0)) {
+        const r = new Reader(m);
+        r.u8();
+        const tk = r.u32();
+        const ack = r.u16();
+        game.applyFrame(tk, ack, r);
+      }
+    };
+    // Lying in wait (frozen): one full record, then just its slot.
+    const b = put(world, 1180, 440, -1);
+    b.frozen = 30 * 100;
+    bodyPoints(world.terrain, b, world.beastPts[0]);
+    for (let k = 0; k < 5; k++) {
+      world.step();
+      pump();
+    }
+    // (It settles onto its perch the first tick.)
+    expect(got[0]).toEqual([{ same: false, slot: 0 }]);
+    for (const l of got.slice(2)) expect(l).toEqual([{ same: true, slot: 0 }]);
+    const v = game.beastViews.get(0)!;
+    const pts = world.beastPts[0];
+    for (let i = 0; i < pts.length; i++) expect(Math.abs(v.cur[i] - pts[i])).toBeLessThan(0.5);
+    expect(v.snaps.length).toBeGreaterThan(3);
+    // Hurt (it wakes): full records once more, and its pose is drawn from its snapshots (at the render time).
+    got.length = 0;
+    world.hurtBeast(0, 1, c.id);
+    for (let k = 0; k < 10; k++) {
+      world.step();
+      pump();
+    }
+    expect(got.some((l) => l.some((e) => !e.same))).toBe(true);
+    const pose = game.beastPose(game.beastViews.get(0)!);
+    expect(pose.pts.length).toBe(MILLI_SEGS * 2);
+    void a;
   });
 
   it('clients see the nest and its brood, the coral in their limbs, and a burst limb', () => {

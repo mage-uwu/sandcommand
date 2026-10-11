@@ -383,15 +383,15 @@ function assistTargets(g: Game): AssistTarget[] {
   // Wildlife that's out and about: a millipede or an asp by its head (the millipede's weak
   // spot) and mid-body. Never one lying in wait, frozen or curled up as a gem: the assist
   // mustn't give its camouflage away.
+  // (Where it's drawn, as the clones are: Game.beastPose.)
   for (const [slot, v] of g.beastViews) {
     if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp && v.kind !== BeastKind.Basilisk) || v.frozen || v.gem) continue;
-    const n = v.cur.length >> 1;
+    const pose = g.beastPose(v);
+    const n = pose.pts.length >> 1;
     if (n < 2) continue;
-    const vx = (v.cur[0] - v.prev[0]) * TICK_RATE;
-    const vy = (v.cur[1] - v.prev[1]) * TICK_RATE;
     const m = n >> 1;
-    out.push({ x: v.cur[0], y: v.cur[1], vx, vy, g: 3000 + slot });
-    out.push({ x: v.cur[m * 2], y: v.cur[m * 2 + 1], vx, vy, g: 3000 + slot, core: true });
+    out.push({ x: pose.pts[0], y: pose.pts[1], vx: pose.vx, vy: pose.vy, g: 3000 + slot });
+    out.push({ x: pose.pts[m * 2], y: pose.pts[m * 2 + 1], vx: pose.vx, vy: pose.vy, g: 3000 + slot, core: true });
   }
   return out;
 }

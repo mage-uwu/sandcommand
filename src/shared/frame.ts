@@ -41,6 +41,7 @@ import {
   R_VENOM,
   R_CORAL,
   BEAST_SCALE,
+  BEAST_SAME,
   GameMode,
   Phase,
   R_SHIPS,
@@ -82,6 +83,8 @@ export interface BeastState {
   /** A basilisk in its killing frenzy. */
   frenzy: boolean;
   pts: number[];
+  /** Just as last sent (R_BEASTS BEAST_SAME): nothing else here is filled in. */
+  same?: boolean;
 }
 
 export interface SelfState {
@@ -587,6 +590,10 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const list: BeastState[] = [];
         for (let i = 0; i < n; i++) {
           const slot = r.u8();
+          if (slot & BEAST_SAME) {
+            list.push({ slot: slot & ~BEAST_SAME, kind: 0, seed: 0, hp: 0, lift: 0, attached: false, frozen: false, coiled: false, gem: false, frenzy: false, pts: [], same: true });
+            continue;
+          }
           const kind = r.u8();
           const seed = r.u8();
           const hp = r.u8() / 255;

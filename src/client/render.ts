@@ -396,18 +396,20 @@ export class Renderer {
     this.groundTerrain = game.terrain;
     for (const [, v] of game.beastViews) {
       if (v.coiled !== coiled) continue;
+      // (At the render time the clones and vehicles round it are drawn at: Game.beastPose.)
+      const pose = game.beastPose(v);
       const pts = this.beastPts;
       pts.length = 0;
-      for (let i = 0; i < v.cur.length; i++) pts.push(v.prev[i] + (v.cur[i] - v.prev[i]) * alpha);
+      for (let i = 0; i < pose.pts.length; i++) pts.push(pose.pts[i]);
       // (By its head, with room for its body: a basilisk's is long.)
       const m = v.kind === BeastKind.Basilisk ? 240 : 80;
       if (pts[0] < camX - halfW - m || pts[0] > camX + halfW + m || pts[1] < camY - halfH - m || pts[1] > camY + halfH + m) continue;
-      const lift = v.prevLift + (v.lift - v.prevLift) * alpha;
+      const lift = pose.lift;
       if (v.kind === BeastKind.Basilisk) drawBasilisk(ctx, pts, v.seed, v.frozen, v.frenzy, now);
       else if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
       else if (v.kind === BeastKind.Nest) drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
       else if (v.kind === BeastKind.Asp) {
-        if (v.gem) drawAspGem(ctx, game.terrain, gemOf, v.cur, v.seed, now);
+        if (v.gem) drawAspGem(ctx, game.terrain, gemOf, pts, v.seed, now);
         else drawAsp(ctx, game.terrain, pts, v.seed, lift, now);
       } else drawMillipede(ctx, game.terrain, this.groundColor, pts, v.seed, lift, v.frozen, now);
     }

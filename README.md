@@ -2278,6 +2278,19 @@ interested client as a byte copy.
   latency. Steady-state prediction error is zero.
 - **Other clones:** rendered 3 ticks (100 ms) in the past and interpolated
   between snapshots, with a smoothed estimate of the server clock.
+- **Wildlife:** on the same clock as the clones, vehicles and dropships. Each
+  creature's states are kept by server tick and drawn at that render time
+  (`Game.beastPose`), so a millipede coiled round a clone or a basilisk
+  biting a tank sits where they do. Arrival jitter doesn't shake it either.
+  The aim assist targets creatures where they're drawn.
+- **Wildlife bandwidth:** the server encodes each creature's record once a
+  tick (`encodeBeasts`), not once per client. A creature a client already
+  has as it stands goes as one byte, its slot flagged `BEAST_SAME`, where a
+  full record is 24 to 38 bytes. That covers anything lying in wait, an asp
+  curled up as a gem, a sleeping basilisk or a nest.
+- **Wildlife deaths:** a creature killed drops out of the frame's list just
+  before its death event arrives. The client holds on to it until then, so
+  its gibs, goo and death sound always play where it was drawn.
 - **Projectiles:** sent once as a spawn event (exact float32 state) and then
   simulated locally with the same kernel. The server sends one end event for
   impacts and explosions.
