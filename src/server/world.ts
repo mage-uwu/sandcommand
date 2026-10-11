@@ -52,6 +52,8 @@ import {
   tankLocal,
   tankSink,
   tankW,
+  gunPivotY,
+  tankCoreY,
   tankH,
   isDog,
   TankKind,
@@ -3537,9 +3539,47 @@ export class World {
    */
   private lockedAim(p: Player, aim: number, speed: number, gravity: number, muzzle: number): number {
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, Math.cos(aim) < 0, this.shoulderPt);
-    const ox = sh.x;
-    const oy = sh.y;
-    const own = { vx: p.body.vx * 0.25, vy: p.body.vy * 0.25 };
+    return this.lockOnto(p, sh.x, sh.y, aim, speed, gravity, p.body.vx * 0.25, p.body.vy * 0.25, muzzle);
+  }
+
+  /**
+   * A vehicle's gun fired locked on by whoever's at its controls (`by`:
+   * driving a tank or a tarantula, from inside or by remote, or flying a
+   * dropship): set true on its target as a clone's shot is (lockedAim),
+   * from its gun (its muzzle at (mx, my)), the vehicle's motion (vx, vy) carried into the
+   * shot. A watchdog thinking for itself, or nobody locked: the aim as it is.
+   */
+  private vehicleAim(by: number, t: Tank, cannon: boolean, aim: number, speed: number, gravity: number, vx: number, vy: number): number {
+    const p = by >= 0 && by < MAX_PLAYERS ? this.players[by] : null;
+    if (!p || !this.lockedBy(by)) return aim;
+    // Which target: by angle from where the gun pivots, as the driver's client aims.
+    this.lockOnto(p, t.x + tankW(t) / 2, gunPivotY(t), aim, speed, gravity, vx, vy, 0);
+    const tgt = this.lockPick;
+    if (!tgt) return aim;
+    // Then aimed from its muzzle, wherever that is on the vehicle (it moves as the gun swings: settle it).
+    let a = aim;
+    for (let k = 0; k < 3; k++) {
+      const m = tankMuzzle(t, cannon, a, this.tankMz);
+      const b = speed > 0 ? ballisticAim(m.x, m.y, tgt, speed, gravity, { vx, vy }, 0) : null;
+      a = b ? b.aim : Math.atan2(tgt.y - m.y, tgt.x - m.x);
+    }
+    return a;
+  }
+
+  /** Is `by` at a vehicle's controls with its guns locked on? */
+  private lockedBy(by: number): boolean {
+    const p = by >= 0 && by < MAX_PLAYERS ? this.players[by] : null;
+    return !!p && p.alive && (p.buttons & BTN_LOCK) !== 0 && (p.tank >= 0 || p.rc >= 0 || p.pilot >= 0);
+  }
+
+  /** What the last lockOnto settled on (its point and motion), or null. */
+  private lockPick: { x: number; y: number; vx: number; vy: number } | null = null;
+
+  /** The aim from (ox, oy) set true on the target near it (see lockedAim). */
+  private lockOnto(p: Player, ox: number, oy: number, aim: number, speed: number, gravity: number, ovx: number, ovy: number, muzzle: number, off = false): number {
+    this.lockPick = null;
+    if (off) return aim;
+    const own = { vx: ovx, vy: ovy };
     let best = aim;
     let bestD = Infinity;
     const consider = (x: number, y: number, vx: number, vy: number) => {
@@ -3547,10 +3587,13 @@ export class World {
       if (dist < 6) return;
       const b = speed > 0 ? ballisticAim(ox, oy, { x, y, vx, vy }, speed, gravity, own, muzzle) : null;
       const a = b ? b.aim : Math.atan2(y - oy, x - ox);
-      const d = Math.abs(((a - aim + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-      if (d < bestD && d < Math.max(LOCK_SLACK_MIN, Math.atan2(LOCK_SLACK, dist)) && this.lineClear(ox, oy, x, y)) {
+      // (How near the aim was: to the shot that would hit it, or straight at it, whichever, as a client may or may not lead.)
+      const off = (u: number) => Math.abs(((u - aim + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      const d = Math.min(off(a), off(Math.atan2(y - oy, x - ox)));
+      if (d < bestD && d < Math.atan2(LOCK_SLACK, dist) && this.lineClear(ox, oy, x, y)) {
         bestD = d;
         best = a;
+        this.lockPick = { x, y, vx, vy };
       }
     };
     for (const q of this.players) {
@@ -3558,6 +3601,20 @@ export class World {
       // Its head, and centre mass (whichever the aim was on is the nearer).
       consider(q.cx, q.top + 1.5, q.body.vx, q.body.vy);
       consider(q.cx, q.cy, q.body.vx, q.body.vy);
+    }
+    // Enemy vehicles: a tank (or watchdog, or tarantula) by its core; a dropship by its hull. Never its own.
+    for (let k = 0; k < this.tanks.length; k++) {
+      const t = this.tanks[k];
+      if (!t || p.tank === k || p.rc === k) continue;
+      const who = isPet(t) ? t.owner : t.pilot;
+      const d = who !== 255 ? this.players[who] : null;
+      if (!d || d === p || this.friendly(p.id, d)) continue;
+      consider(t.x + tankW(t) / 2, tankCoreY(t), t.vx, t.vy);
+    }
+    for (let k = 0; k < this.ships.length; k++) {
+      const sh = this.ships[k];
+      if (!sh || p.pilot === k || sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)) continue;
+      consider(sh.x + SHIP_W / 2, sh.y + SHIP_H / 2, sh.vx, sh.vy);
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
@@ -3572,7 +3629,9 @@ export class World {
 
   /** A tarantula's laser: a thin beam out of its head, at whatever it's aimed at. */
   private spiderBeam(t: Tank, by: number): void {
-    const m = tankMuzzle(t, false, t.aim, this.tankMz);
+    let m = tankMuzzle(t, false, t.aim, this.tankMz);
+    const set = this.vehicleAim(by, t, false, m.a, 0, 0, 0, 0);
+    if (set !== m.a) m = tankMuzzle(t, false, set, this.tankMz);
     this.beam(by, m.x, m.y, m.a, SPIDER_BEAM_WIDTH, SPIDER_BEAM_ENERGY, SPIDER_BEAM_WOUND, 0.12, 0, 255, true);
     t.firedSmg = true;
   }
@@ -4531,10 +4590,19 @@ export class World {
   }
 
   private tankShot(t: Tank, owner: number, cannon: boolean): void {
-    const m = tankMuzzle(t, cannon, t.aim, this.tankMz);
+    let m = tankMuzzle(t, cannon, t.aim, this.tankMz);
+    // Locked on by its driver: set true on the target (vehicleAim), at this gun's speed and drop.
+    const shot = isSpider(t) ? ProjKind.SpiderMissile : isMole(t) ? (cannon ? ProjKind.Plasma : ProjKind.MoleRound) : cannon ? ProjKind.Shell : ProjKind.TankBullet;
+    const shotSpeed = isSpider(t) ? SPIDER_MISSILE_SPEED : isMole(t) ? (cannon ? PLASMA_SPEED : SMG_SPEED) : cannon ? CANNON_SPEED : SMG_SPEED;
+    const carry = isMole(t) && cannon ? 0.5 : isSpider(t) ? 0 : 0.25;
+    const set = this.vehicleAim(owner, t, cannon, m.a, shotSpeed, GRAVITY * PROJ[shot].gravity, t.vx * carry, t.vy * carry);
+    // (The barrel swung onto it: the shot leaves from where its muzzle is now.)
+    if (set !== m.a) m = tankMuzzle(t, cannon, set, this.tankMz);
+    // Locked on, the gunner holds it steady: half the spread, as a braced clone's.
+    const steady = this.lockedBy(owner) ? 0.5 : 1;
     if (isSpider(t)) {
       // A missile off the rack, from one tube or the other (they take turns), a little ragged.
-      const a = m.a + (this.rng.next() - 0.5) * 0.06;
+      const a = m.a + (this.rng.next() - 0.5) * 0.06 * steady;
       const side = (t.tube = (t.tube ?? 0) ^ 1) ? 1 : -1;
       const ox = -Math.sin(m.a) * side * 2.2;
       const oy = Math.cos(m.a) * side * 2.2;
@@ -4545,18 +4613,18 @@ export class World {
     if (isMole(t)) {
       if (cannon) {
         // A gout of plasma, a little ragged, carried along with the hull.
-        const a = m.a + (this.rng.next() - 0.5) * 0.16;
+        const a = m.a + (this.rng.next() - 0.5) * 0.16 * steady;
         const sp = PLASMA_SPEED * (0.92 + this.rng.next() * 0.16);
         this.spawnProj(this.nextProjId++, ProjKind.Plasma, owner, m.x, m.y, Math.cos(a) * sp + t.vx * 0.5, Math.sin(a) * sp + t.vy * 0.5);
         t.firedCannon = true;
       } else {
-        const a = m.a + (this.rng.next() - 0.5) * 2 * SMG_SPREAD * 0.8;
+        const a = m.a + (this.rng.next() - 0.5) * 2 * SMG_SPREAD * 0.8 * steady;
         this.spawnProj(this.nextProjId++, ProjKind.MoleRound, owner, m.x, m.y, Math.cos(a) * SMG_SPEED + t.vx * 0.25, Math.sin(a) * SMG_SPEED + t.vy * 0.25);
         t.firedSmg = true;
       }
       return;
     }
-    const a = m.a + (this.rng.next() - 0.5) * 2 * (cannon ? 0.01 : SMG_SPREAD);
+    const a = m.a + (this.rng.next() - 0.5) * 2 * (cannon ? 0.01 : SMG_SPREAD) * steady;
     const speed = cannon ? CANNON_SPEED : SMG_SPEED;
     this.spawnProj(this.nextProjId++, cannon ? ProjKind.Shell : ProjKind.TankBullet, owner, m.x, m.y, Math.cos(a) * speed + t.vx * 0.25, Math.sin(a) * speed + t.vy * 0.25);
     if (cannon) {
@@ -5176,7 +5244,9 @@ export class World {
           // The pilot's guns: both turrets on the pilot's aim, firing while the trigger's held.
           sh.aim[side] = dequantizeAim(pilot.aimQ);
           if (sh.gunCd[side] > 0 || !(pilot.buttons & BTN_FIRE)) continue;
-          const a = sh.aim[side] + (this.rng.next() - 0.5) * 0.06;
+          // (Locked on: each turret set true on the target from where it sits.)
+          sh.aim[side] = this.lockOnto(pilot, gx, gy, sh.aim[side], 900, GRAVITY * PROJ[ProjKind.ShipGun].gravity, sh.vx * 0.3, sh.vy * 0.3, 9, !(pilot.buttons & BTN_LOCK));
+          const a = sh.aim[side] + (this.rng.next() - 0.5) * 0.06 * (pilot.buttons & BTN_LOCK ? 0.5 : 1);
           this.spawnProj(this.nextProjId++, ProjKind.ShipGun, sh.owner, gx + Math.cos(a) * 9, gy + Math.sin(a) * 9, Math.cos(a) * 900 + sh.vx * 0.3, Math.sin(a) * 900 + sh.vy * 0.3);
           sh.gunCd[side] = 5;
           sh.fired[side] = true;
@@ -6389,12 +6459,11 @@ const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
 const DIGGER_ADAMANT = 8;
 /**
  * A locked-on shot is set true on its target (World.lockedAim) if the aim
- * was within this many cells of it at its range (what a target moving at a
- * run covers in the lag between the client's view and the server), or this
- * angle (radians), whichever allows more.
+ * was within this many cells of it at its range: what a target moving at a
+ * run covers in the lag between the client's view and the server. (A
+ * distance, not an angle: the lag's the same however far off they are.)
  */
 const LOCK_SLACK = 36;
-const LOCK_SLACK_MIN = 0.05;
 /** Ids for wildlife (wildlife.ts), above every dropship's. */
 const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
 /** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */

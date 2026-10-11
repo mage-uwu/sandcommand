@@ -5,7 +5,9 @@ import { WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { LASER_MIN, WeaponId } from '../src/shared/weapons.ts';
-import { World } from '../src/server/world.ts';
+import { type Player, World } from '../src/server/world.ts';
+import { gunPivotY, newTank, newTarantula, tankW } from '../src/shared/tank.ts';
+import { SHIP_H, SHIP_W, newShip } from '../src/shared/dropship.ts';
 import { deliverAll } from './helpers.ts';
 
 /**
@@ -26,6 +28,8 @@ function duel(seed: number) {
   }
   // The shooter up on a pillar, looking down across the runner's path (a target crossing the line of fire, not running along it).
   for (let y = 250; y < 400; y++) for (let x = 990; x < 1012; x++) t.set(x, y, Mat.Bedrock);
+  // (A thin slab across its top, room for a vehicle to stand: thin, so the line down from it stays clear.)
+  for (let y = 250; y < 258; y++) for (let x = 930; x < 1012; x++) t.set(x, y, Mat.Bedrock);
   world.terrainReplaced();
   const p = world.addPlayer('shooter', { send() {} })!;
   const q = world.addPlayer('runner', { send() {} })!;
@@ -33,7 +37,7 @@ function duel(seed: number) {
   for (let k = 0; k < 90 && !(p.alive && q.alive); k++) world.step();
   for (const [c, x, y] of [
     [p, 996, 250],
-    [q, 1100, 400],
+    [q, 1300, 400],
   ] as const) {
     resetBody(c.parts, ClassId.Medium, 0);
     c.hp = 100;
@@ -98,5 +102,83 @@ describe('a locked-on shot goes where the target really is', () => {
     for (let k = 0; k < 20; k++) world.step();
     expect(q.hp).toBe(100);
     expect(q.parts.mask).toBe(ALL);
+  });
+
+  /** The shooter at the controls of a vehicle up on the pillar, firing one burst at where its client sees the runner. */
+  function vehicleShot(kind: 'tank' | 'tarantula', lock: boolean, seed: number): boolean {
+    const { world, p, q } = duel(seed);
+    const v = kind === 'tank' ? newTank(986, 250 - 30) : newTarantula(988, 250 - 40, p.id);
+    v.chute = false;
+    world.tanks[0] = v;
+    // At the controls (so a tarantula's own head doesn't walk it off), then let it settle on the pillar.
+    if (kind === 'tank') (p as Player).tank = 0;
+    else (p as Player).rc = 0;
+    v.pilot = p.id;
+    for (let k = 0; k < 40; k++) {
+      world.input(p.id, { seq: k + 1, buttons: 0, aim: 0, inv: 0 });
+      world.step();
+    }
+    let seq = 40;
+    let qseq = 0;
+    const seen: { x: number; y: number }[] = [];
+    const mask = q.parts.mask;
+    q.hp = 100;
+    for (let k = 0; k < 60; k++) {
+      world.input(q.id, { seq: ++qseq & 0xffff, buttons: BTN_RIGHT, aim: 0, inv: 0 });
+      seen.push({ x: q.cx, y: q.cy });
+      const view = seen[Math.max(0, seen.length - 1 - LAG)];
+      const aim = Math.atan2(view.y - gunPivotY(v), view.x - (v.x + tankW(v) / 2));
+      // (A short burst, as a gunner fires a machine gun; the tarantula's beam, one pulse.)
+      const firing = kind === 'tank' ? k >= 30 && k < 36 : k === 30;
+      world.input(p.id, { seq: ++seq & 0xffff, buttons: (firing ? BTN_FIRE : 0) | (lock ? BTN_LOCK : 0), aim: quantizeAim(aim), inv: 0 });
+      world.step();
+    }
+    return !q.alive || q.hp < 100 || q.parts.mask !== mask;
+  }
+
+  for (const kind of ['tank', 'tarantula'] as const) {
+    it(`${kind}: driven locked on, its gun sets true on the running clone too`, () => {
+      let free = 0;
+      let locked = 0;
+      for (const seed of [3, 5, 9]) {
+        if (vehicleShot(kind, false, seed)) free++;
+        if (vehicleShot(kind, true, seed)) locked++;
+      }
+      // (A machine gun's spread can put a stray round on them unlocked now and then; locked on, every burst finds them.)
+      expect(free).toBeLessThanOrEqual(kind === 'tank' ? 1 : 0);
+      expect(locked).toBe(3);
+    });
+  }
+
+  it('dropship: flown locked on, its turrets set true on the running clone too', () => {
+    const burst = (lock: boolean, seed: number) => {
+      const { world, p, q } = duel(seed);
+      const sh = newShip(1060, 180, p.id, p.team);
+      world.ships[0] = sh;
+      (p as Player).pilot = 0;
+      sh.pilot = p.id;
+      let seq = 0;
+      let qseq = 0;
+      const seen: { x: number; y: number }[] = [];
+      const mask = q.parts.mask;
+      for (let k = 0; k < 70; k++) {
+        world.input(q.id, { seq: ++qseq & 0xffff, buttons: BTN_RIGHT, aim: 0, inv: 0 });
+        seen.push({ x: q.cx, y: q.cy });
+        const view = seen[Math.max(0, seen.length - 1 - LAG)];
+        const aim = Math.atan2(view.y - (sh.y + SHIP_H / 2), view.x - (sh.x + SHIP_W / 2));
+        const firing = k >= 30 && k < 42;
+        world.input(p.id, { seq: ++seq & 0xffff, buttons: (firing ? BTN_FIRE : 0) | (lock ? BTN_LOCK : 0), aim: quantizeAim(aim), inv: 0 });
+        world.step();
+      }
+      return !q.alive || q.hp < 100 || q.parts.mask !== mask;
+    };
+    let free = 0;
+    let locked = 0;
+    for (const seed of [3, 5, 9]) {
+      if (burst(false, seed)) free++;
+      if (burst(true, seed)) locked++;
+    }
+    expect(free).toBeLessThanOrEqual(1);
+    expect(locked).toBe(3);
   });
 });

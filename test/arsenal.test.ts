@@ -191,7 +191,9 @@ describe('landmines', () => {
 describe('locked-on fire', () => {
   /** Hold the rifle's trigger for a second and a half, level; the worst angle (off the aim line) of the rounds it fires. */
   const worst = (lock: boolean) => {
-    const { world, a } = yard(221, 600);
+    const { world, a, b } = yard(221, 600);
+    // (Nobody near the line for the lock to set the shots true on: it's the gun's own steadiness on test.)
+    if (lock) b.body.x = 300; // (behind: the shots go the other way)
     world.equip(a, WeaponId.Rifle);
     a.aimQ = quantizeAim(0);
     for (let k = 0; k < 15; k++) world.step();

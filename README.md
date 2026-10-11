@@ -203,12 +203,26 @@ where a running target is seen, a fast shot lands behind it. The bots,
 thinking on the server, never had that problem. So a shot fired locked on
 (by the assist or the scope) is set true by the server (`World.lockedAim`).
 It takes the target the aim was on: the nearest head or body by angle,
-within 36 cells of the aim at its range, or 3 degrees, whichever allows
-more. Then it aims at where that target really is now, leading it by the
+within 36 cells of the aim at its range (a distance, not an angle: the lag
+it makes up for is the same however far off they are). Then it aims at where that target really is now, leading it by the
 shot's flight the way a bot does. This covers rifles, snipers and every
 other gun a clone carries, and the laser's beam, which is aimed straight
 at the target, instant. With nothing near enough the aim, the shot goes
 where it was aimed.
+- **Vehicle guns too.** The same holds for a tank's machine gun and
+  cannon, a mole's guns, a tarantula's beam and missiles (driven from inside
+  or by remote) and a dropship's turrets. The target is picked by angle
+  from where the gun pivots, as the driver's client aims. The shot is then
+  solved from the gun's real muzzle, which moves as the barrel swings, so
+  it's re-solved until it settles.
+- **Steadier when locked.** Locked on, a vehicle's guns fire at half their
+  spread, as a braced clone's do.
+- **What it can lock.** Enemy tanks, watchdogs, tarantulas and dropships
+  count as targets, besides clones and wildlife on the move. Never your own
+  vehicle or a teammate's.
+- **On the client.** Driving a tank from inside now aims from its turret,
+  leads with its gun's speed, and gets the mouse assist like a remote-driven
+  one.
 
 **Lock first, then fire.** A thumb coming down on the fire pad locks on
 before a round goes. A target not already locked waits a moment (~0.1 s)

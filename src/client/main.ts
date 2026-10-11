@@ -480,7 +480,8 @@ function frame(now: number): void {
       // Flying our dropship: aim from the ship (its turrets), not the clone.
       const flying = g.pilotedShip();
       // Driving our watchdog by remote: aim from its turret.
-      const dogged = flying ? null : g.remoteDog();
+      // (Or driving one from inside it: the same, its guns from its turret.)
+      const dogged = flying ? null : (g.remoteDog() ?? g.drive);
       let ox = flying ? flying.x + SHIP_W / 2 : dogged ? dogged.x + tankW(dogged) / 2 : sh.x;
       let oy = flying ? flying.y + SHIP_H / 2 : dogged ? gunPivotY(dogged) : sh.y;
       let aim: number;
@@ -526,7 +527,7 @@ function frame(now: number): void {
         if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark, kd.x === lastKey.x && kd.y === lastKey.y ? lastG : undefined, ASSIST_CONE);
         // (A tap on a spot is a deliberate pick too.)
         else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
-        else if (mouseAssist && !g.drive && (flying || dogged || !NO_ASSIST.has(g.weapon))) {
+        else if (mouseAssist && (flying || dogged || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
           const reach = Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80)));
           // Locked on, it stays on them until the mouse swings well off them.
