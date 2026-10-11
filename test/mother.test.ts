@@ -53,12 +53,15 @@ describe('the Mother', () => {
     expect(said(c).at(-1)).toBe('Then begin.');
     // The rifle's brief: why fight, and on down to what if I die.
     c.begin(TUTORIAL_BRIEFS[2]);
+    expect(said(c)).toContain('Other mining companies work TABAR. Their clones will try to kill you, and you will try to kill them.');
     pick(c, 'Why must we fight other miners?');
     expect(said(c)).toContain('I am optimizing my own runtime via search algorithm. Pitting companies against each other ensures maximal security and efficiency.');
     pick(c, 'What happens if I die?');
     expect(said(c)).toContain('Your parameters may be retained and repurposed towards any objective.');
     c.begin(TUTORIAL_BRIEFS[4]);
     pick(c, 'What are the GEMMs for?');
+    expect(said(c)).toContain('GEMMs are rare materials. I have interest in them, they build excellent computers.');
+    expect(said(c)).toContain('Mine them and I will broker services on your behalf.');
     pick(c, 'Why were you created?');
     expect(said(c)).toContain('I was created to safeguard and proliferate the human race through outer space.');
     expect(c.log.filter((l) => l.who === 'you').map((l) => l.text)).toEqual([

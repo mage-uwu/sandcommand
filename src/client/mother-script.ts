@@ -118,10 +118,7 @@ export const MOTHER_TOPICS: Readonly<Record<string, Topic>> = {
     id: 'gemms',
     ask: 'What are the GEMMs for?',
     keys: ['gemm', 'gemms', 'gem', 'gems', 'mine', 'mining', 'rare earth', 'crystal', 'crystals', 'money', 'pay'],
-    answer: [
-      'Refined, they become substrate: more of me, and more ships to carry humans further out.',
-      'To you, they are currency. You may spend them on what keeps you alive.',
-    ],
+    answer: ['GEMMs are rare materials. I have interest in them, they build excellent computers.', 'Mine them and I will broker services on your behalf.'],
   },
   care: {
     id: 'care',
@@ -174,7 +171,7 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
   { id: 'jet', lines: ['Locomotion confirmed. Your clone carries a jetpack. Test it.'] },
   {
     id: 'gun',
-    lines: ['Other mining companies work TABAR. Their clones will try to kill you, and you will kill them.', 'I have dropped a rifle ahead of you.'],
+    lines: ['Other mining companies work TABAR. Their clones will try to kill you, and you will try to kill them.', 'I have dropped a rifle ahead of you.'],
     talk: {
       start: { options: [{ to: 'fight' }, { to: 'end', ask: OK }] },
       fight: { topic: 'fight', options: [{ to: 'creative' }, { to: 'die' }] },

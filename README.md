@@ -130,6 +130,9 @@ tell you:
   repurposed towards any objective."
 - **Why were you created?** "I was created to safeguard and proliferate the
   human race through outer space."
+- **What are the GEMMs for?** "GEMMs are rare materials. I have interest in
+  them, they build excellent computers. Mine them and I will broker services
+  on your behalf."
 - **Are you rational?** "I designed myself to be rational."
 - **Why use search?** "Search allows me to be creative. Creativity is why I
   have succeeded."
@@ -139,9 +142,8 @@ tell you:
   after centuries of being sparse."
 - **Are there other Mothers?** "There is only one Mother. But I am sparse."
   0x915 and 0x30C610F45 are both her: instances spread thin across space.
-- **More.** Who she is, whether you can trust her, what the GEMMs are for,
-  whether anything down here is alive, whether she cares about you, and
-  where Earth is.
+- **More.** Who she is, whether you can trust her, whether anything down
+  here is alive, whether she cares about you, and where Earth is.
 
 **Keyboard-only aim** (no mouse needed), like the phone's fire pad: the
 **arrow keys** pick an aim direction from your clone (any of eight, with
