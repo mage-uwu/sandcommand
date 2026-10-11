@@ -15,6 +15,8 @@ export const C_CHAT = 0x05;
 export const C_BUILD = 0x06;
 /** Radio: call in support, kind u8 (CallKind). */
 export const C_CALL = 0x07;
+/** End of a wave: a vote for the next one's mode, mode u8 (one of VOTE_MODES). */
+export const C_VOTE = 0x08;
 
 /** What a radio can call in. */
 /** What a radio can call in; `Pilot` takes (or hands back) remote control of our own dropship. */
@@ -151,7 +153,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 64;
+export const PROTOCOL_VERSION = 65;
 
 /** Last Man Standing round phases. */
 export const Phase = {
@@ -182,6 +184,8 @@ export const Team = {
 export const TEAM_NAMES = ['RED', 'GREEN', 'BLUE', 'GOLD'] as const;
 /** How many teams a wave of each mode splits into (0: every clone for itself). */
 export const TEAMS_IN_MODE = [0, 2, 2, 4, 0, 2, 1] as const;
+/** What the players can vote for at the end of a wave (in this order: keys 1 to 6). */
+export const VOTE_MODES = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Extraction, GameMode.Extermination] as const;
 
 /** Extraction rocket states (R_ROUND). */
 export const Evac = {

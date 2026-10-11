@@ -1,6 +1,6 @@
 import { ACTOR_H, ACTOR_W, CHUNK_COUNT, GRAVITY, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
-import { CallKind, PROTOCOL_VERSION, quantizeAim } from '../shared/protocol.ts';
+import { CallKind, PROTOCOL_VERSION, Phase, VOTE_MODES, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import { LASER_MIN, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
@@ -63,11 +63,31 @@ addEventListener('keydown', (e) => {
   openMother(null);
 });
 
+/** The vote on the next mode is up (the wave's result is showing). */
+const voteOpen = () => !!game?.roundState?.vote && game.roundState.phase === Phase.Victory;
+/** Vote for the mode at `i` in VOTE_MODES. */
+function castVote(i: number): void {
+  if (i >= 0 && i < VOTE_MODES.length) net?.vote(VOTE_MODES[i]);
+}
+// With the vote up, keys 1 to 6 vote (ahead of the inventory keys, which they'd otherwise be).
+addEventListener(
+  'keydown',
+  (e) => {
+    if (!voteOpen() || input.typing || e.repeat) return;
+    const m = /^Digit([1-6])$/.exec(e.code);
+    if (!m) return;
+    castVote(Number(m[1]) - 1);
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  },
+  { capture: true },
+);
+
 const input = new InputState(canvas);
 const renderer = new Renderer(canvas);
 const touch = new TouchControls(canvas, input, {
   chat: () => input.onChatKey?.(),
-  overUi: (x, y) => (!!game?.building && renderer.menuHit(x, y) >= 0) || (!!game?.calling && renderer.callMenuHit(x, y) >= 0),
+  overUi: (x, y) => (!!game?.building && renderer.menuHit(x, y) >= 0) || (!!game?.calling && renderer.callMenuHit(x, y) >= 0) || (voteOpen() && renderer.voteHit(x, y) >= 0),
   // Building, or out of the wave: taps on the right act on the spot touched.
   // (With the radio out the fire pad stays a stick: it scrolls the menu, and fires to call.)
   pointMode: () => !game || !game.alive || game.building,
@@ -620,6 +640,8 @@ function frame(now: number): void {
       // asks the server to build it there (it checks the same rules the
       // preview shows).
       const click = input.takeClick();
+      // The vote up: a click (or tap) on a mode votes for it.
+      if (click && voteOpen()) castVote(renderer.voteHit(input.mouseX, input.mouseY));
       // Radio in hand: the selector (aim, wheel or hover) picks a line of
       // its menu; the trigger (a click, a tap, the fire pad) calls it.
       if (g.calling) {

@@ -1,5 +1,5 @@
 import { Reader, Writer } from '../shared/codec.ts';
-import { C_BUILD, C_CALL, C_CHAT, C_INPUT, C_PING, C_RESYNC, S_FRAME, S_PONG, S_REJECT, S_WELCOME } from '../shared/protocol.ts';
+import { C_BUILD, C_CALL, C_CHAT, C_VOTE, C_INPUT, C_PING, C_RESYNC, S_FRAME, S_PONG, S_REJECT, S_WELCOME } from '../shared/protocol.ts';
 
 export interface Welcome {
   id: number;
@@ -25,6 +25,8 @@ export interface Link {
   resync(chunks: number[]): void;
   build(piece: number, gx: number, gy: number): void;
   call(kind: number): void;
+  /** End of a wave: vote for the next wave's mode. */
+  vote(mode: number): void;
   chat(text: string): void;
   close(): void;
 }
@@ -127,6 +129,13 @@ export class Net implements Link {
     const w = this.w.reset();
     w.u8(C_CALL);
     w.u8(kind);
+    this.send();
+  }
+
+  vote(mode: number): void {
+    const w = this.w.reset();
+    w.u8(C_VOTE);
+    w.u8(mode);
     this.send();
   }
 

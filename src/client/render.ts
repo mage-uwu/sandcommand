@@ -1,6 +1,6 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, VOTE_MODES, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES, Biome } from '../shared/worldgen.ts';
@@ -378,6 +378,9 @@ const SHADE_DIRS: readonly [number, number, number][] = [
 /** Build menu buttons (Renderer.menuHit): turn the piece a quarter, mirror it. */
 export const MENU_ROTATE = -2;
 export const MENU_MIRROR = -3;
+
+/** Each mode as the vote shows it (by GameMode). */
+const VOTE_NAMES = ['LAST MAN', 'TEAMS', 'REGICIDE', 'EXTRACTION', 'PVP', 'SIEGE', 'EXTERMINATION'];
 
 export class Renderer {
   /** Scratch: the underground rects behind the terrain this frame (x, y, w, h). */
@@ -3335,6 +3338,8 @@ export class Renderer {
     // Last Man Standing: the round, and what's happening to us in it.
     const rs = game.roundState;
     if (rs) this.drawRound(game, rs, s, W, H);
+    this.voteRects.length = 0;
+    if (rs?.vote && rs.phase === Phase.Victory) this.drawVote(rs.vote, Math.ceil(rs.timer / TICK_RATE), input.touch, s, W, H);
 
     // Driving the watchdog by remote: the controls, and what's left of it.
     const dog = game.alive ? game.remoteDog() : null;
@@ -3412,7 +3417,9 @@ export class Renderer {
     // Dead, or between rounds: our K/D and the leaderboard.
     const between = !!rs && (rs.phase === Phase.Countdown || rs.phase === Phase.Victory);
     const piloting = game.ride?.passenger === game.myId;
-    if (!input.scoreboard && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
+    // (Not over the ballot while the vote's up: Tab still shows the scoreboard.)
+    const ballot = !!rs?.vote && rs.phase === Phase.Victory;
+    if (!input.scoreboard && !ballot && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
 
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);
   }
@@ -3694,6 +3701,72 @@ export class Renderer {
    * blinking cursor, and the hints in dim phosphor green, wrapped to fit
    * the screen. Everything is sized to fit; each new message slides in.
    */
+  /** Vote buttons (Renderer.voteHit), device px, by index into VOTE_MODES. */
+  private readonly voteRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
+
+  /** The vote button (an index into VOTE_MODES) under a CSS-pixel point, or -1. */
+  voteHit(cssX: number, cssY: number): number {
+    const dpr = this.canvas.width / innerWidth;
+    const x = cssX * dpr;
+    const y = cssY * dpr;
+    for (const r of this.voteRects) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.i;
+    return -1;
+  }
+
+  /**
+   * The vote on the next wave's mode, under the result: a button for each
+   * mode (its key, its name, its votes so far), ours lit gold, the
+   * leaders' bars filled; and how long until the count.
+   */
+  private drawVote(vote: { counts: number[]; mine: number }, secs: number, touch: boolean, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const MONO = 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+    const n = Math.min(vote.counts.length, VOTE_MODES.length);
+    const cols = W / s < 760 ? 3 : n;
+    const rows = Math.ceil(n / cols);
+    const gap = 8 * s;
+    const bw = Math.min(150 * s, (W * 0.92 - gap * (cols - 1)) / cols);
+    const bh = 46 * s;
+    const total = cols * bw + (cols - 1) * gap;
+    const x0 = (W - total) / 2;
+    const y0 = H * 0.6;
+    const top = Math.max(1, ...vote.counts);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x0 - 12 * s, y0 - 30 * s, total + 24 * s, rows * bh + (rows - 1) * gap + 42 * s);
+    ctx.font = `bold ${Math.round(13 * s)}px ${MONO}`;
+    ctx.fillStyle = '#ffd34a';
+    ctx.fillText(`VOTE: NEXT MODE · ${secs}s`, W / 2, y0 - 12 * s);
+    for (let i = 0; i < n; i++) {
+      const mode = VOTE_MODES[i];
+      const x = x0 + (i % cols) * (bw + gap);
+      const y = y0 + Math.floor(i / cols) * (bh + gap);
+      const votes = vote.counts[i];
+      const mine = vote.mine === mode;
+      ctx.fillStyle = mine ? 'rgba(255,211,74,0.28)' : 'rgba(255,255,255,0.08)';
+      ctx.fillRect(x, y, bw, bh);
+      // (Its share of the votes so far, along the bottom.)
+      if (votes > 0) {
+        ctx.fillStyle = votes === top ? '#ffd34a' : '#8a96a0';
+        ctx.fillRect(x, y + bh - 4 * s, (bw * votes) / top, 4 * s);
+      }
+      if (mine) {
+        ctx.strokeStyle = '#ffd34a';
+        ctx.lineWidth = Math.max(1, 2 * s);
+        ctx.strokeRect(x + s, y + s, bw - 2 * s, bh - 2 * s);
+      }
+      ctx.fillStyle = mine ? '#ffe9a0' : '#e8ecef';
+      ctx.font = `bold ${Math.round(11 * s)}px ${MONO}`;
+      ctx.fillText(`${touch ? '' : i + 1 + ' '}${VOTE_NAMES[mode]}`, x + bw / 2, y + 18 * s);
+      ctx.font = `${Math.round(11 * s)}px ${MONO}`;
+      ctx.fillStyle = '#b8c2ca';
+      ctx.fillText(`${votes} vote${votes === 1 ? '' : 's'}`, x + bw / 2, y + 34 * s);
+      this.voteRects.push({ x, y, w: bw, h: bh, i });
+    }
+    ctx.restore();
+  }
+
   private drawBanner(text: string, sub: string, color: string, s: number, W: number, H: number): void {
     const ctx = this.ctx;
     const now = performance.now();

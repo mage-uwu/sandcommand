@@ -511,7 +511,22 @@ which mode is coming.
 the `World` options): Regicide → PvP → Last Team Standing → Siege, then
 Regicide → PvP → Last Team Standing → Extraction → Extermination, and round again. Last Man Standing (one life each, every
 clone for itself) is out of the rotation, though a room can still be given
-it.
+it. A room starts the rotation somewhere new each time it's brought up
+(`rotationStart`), so a room that keeps restarting doesn't keep opening on
+Regicide.
+
+**The vote.** When a wave ends, the players vote on the next wave's mode.
+- **The ballot.** The result stays up for 15 seconds with a ballot under it:
+  Regicide, PvP, Last Team Standing, Siege, Extraction and Extermination
+  (`VOTE_MODES`). Each button shows its votes so far, and your own vote is
+  lit gold. Vote with keys 1 to 6, or click or tap a mode.
+- **Changing your vote.** You can change it until the count. Once every
+  human in the room has voted, the count comes two seconds later.
+- **The count.** The mode with the most votes plays next, and the map is
+  built for it. A tie is drawn by lot between the leaders. If nobody votes,
+  the rotation carries on.
+- **Who votes.** Only humans; bots don't vote. Rooms that play a single
+  mode (`?room=siege`, `?room=extermination`) have no vote.
 
 ## PvP
 

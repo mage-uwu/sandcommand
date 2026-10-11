@@ -5,7 +5,7 @@ import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import {
   C_CHAT,
   C_BUILD,
-  C_CALL,
+  C_CALL, C_VOTE,
   C_INPUT,
   C_PING,
   C_RESYNC,
@@ -37,6 +37,7 @@ function msgClass(type: number): MsgClass | null {
     case C_BUILD:
       return MsgClass.Build;
     case C_CALL:
+    case C_VOTE:
       return MsgClass.Call;
     case C_RESYNC:
       return MsgClass.Resync;
@@ -105,8 +106,9 @@ export class GameRoom extends DurableObject<Env> {
     if (admit === 'busy') return refuse('too many connections from your address', 1008);
 
     // Last Man Standing, with bots in every slot no human has.
-    // The siege room plays nothing but Siege; any other, the usual rotation.
-    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : this.roomName === 'extermination' ? [GameMode.Extermination] : undefined });
+    // The siege room plays nothing but Siege; any other, the usual rotation (from
+    // somewhere new each time the room's brought up), or whatever the players vote for.
+    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : this.roomName === 'extermination' ? [GameMode.Extermination] : undefined, rotationStart: Math.floor(Math.random() * 64) });
     const world = this.world;
     const player = world.addPlayer(name, {
       send(data) {
@@ -179,6 +181,9 @@ export class GameRoom extends DurableObject<Env> {
           break;
         case C_CALL:
           world.call(id, r.u8());
+          break;
+        case C_VOTE:
+          world.vote(id, r.u8());
           break;
       }
     } catch {

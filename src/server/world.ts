@@ -214,6 +214,7 @@ import {
   Evac,
   GameMode,
   TEAMS_IN_MODE,
+  VOTE_MODES,
   Team,
   R_ITEMS,
   R_ITEMS_GONE,
@@ -416,6 +417,8 @@ export class Player {
   waveKills = 0;
   /** Deaths this wave (PvP's tie-break: fewer wins). */
   waveDeaths = 0;
+  /** End of a wave: the mode this player voted for next (255: no vote yet). */
+  vote = 255;
   inWave = false;
   pendingSpawn = false;
   spectate = 255;
@@ -600,7 +603,7 @@ export class World {
 
   /** Game mode: 'sandbox' (respawn forever) or 'ffa' (one life per wave, last one standing wins). */
   readonly mode: 'sandbox' | 'ffa';
-  /** Wave modes the round room cycles through (wave 1 plays the first). */
+  /** Wave modes the round room cycles through when nobody votes (wave 1 plays the one at rotationStart). */
   readonly rotation: readonly number[];
   /** Bumped whenever the team table changes (clients are re-sent it). */
   teamsRev = 0;
@@ -680,11 +683,12 @@ export class World {
   dropZone?: (p: Player) => [number, number] | undefined;
   kitFor?: (p: Player) => InvItem[] | undefined;
 
-  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[]; tanks?: boolean } = {}) {
+  constructor(seed = 1337, opts: { mode?: 'sandbox' | 'ffa'; bots?: number; rotation?: number[]; rotationStart?: number; tanks?: boolean } = {}) {
     this.rng = new Rng(seed ^ 0x9e3779b9);
     this.mode = opts.mode ?? 'sandbox';
     this.tankDrops = opts.tanks ?? this.mode === 'ffa';
     this.rotation = opts.rotation?.length ? opts.rotation : DEFAULT_ROTATION;
+    this.rotationStart = Math.max(0, Math.floor(opts.rotationStart ?? 0));
     this.projectiles.seeker = (i, out) => this.heatTarget(i, out);
     this.botFill = Math.min(MAX_PLAYERS, opts.bots ?? 0);
     this.mapSeed = seed >>> 0;
@@ -906,10 +910,15 @@ export class World {
     return p.inWave && (p.alive || p.delivering >= 0 || p.pendingSpawn);
   }
 
-  /** Mode of wave `n` (1-based). */
+  /** Mode of wave `n` (1-based): what the players voted for it, or else the rotation's. */
   modeOfWave(n: number): number {
-    return this.rotation[(Math.max(1, n) - 1) % this.rotation.length];
+    if (this.votedMode?.wave === n) return this.votedMode.mode;
+    return this.rotation[(Math.max(1, n) - 1 + this.rotationStart) % this.rotation.length];
   }
+  /** Where in the rotation wave 1 falls (a room starts somewhere new each time it's brought up). */
+  private readonly rotationStart: number;
+  /** The mode the players voted for, and the wave it's for. */
+  private votedMode: { wave: number; mode: number } | null = null;
 
   /** Mode of the wave being played, or (between waves) of the next one. */
   get waveMode(): number {
@@ -975,12 +984,13 @@ export class World {
           }
           this.winner = best ? best.id : 255;
           if (best) best.wins++;
-          this.setPhase(Phase.Victory, VICTORY_TICKS);
+          this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
         }
         break;
       }
       case Phase.Victory:
         if (--this.phaseTimer <= 0) {
+          if (this.voting) this.countVotes();
           this.newMap();
           this.setPhase(this.playerCount >= 2 ? Phase.Countdown : Phase.Waiting, COUNTDOWN_TICKS);
         }
@@ -1006,7 +1016,7 @@ export class World {
     }
     this.winner = winner;
     if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
-    this.setPhase(Phase.Victory, VICTORY_TICKS);
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
   /**
@@ -1043,7 +1053,7 @@ export class World {
     }
     this.winner = winner;
     if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
-    this.setPhase(Phase.Victory, VICTORY_TICKS);
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
   /**
@@ -1065,7 +1075,7 @@ export class World {
     if (winner < 0) return;
     this.winner = winner;
     for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
-    this.setPhase(Phase.Victory, VICTORY_TICKS);
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
   /**
@@ -1084,7 +1094,7 @@ export class World {
     }
     this.winner = best && !tie && best.waveKills > 0 ? best.id : 255;
     if (this.winner !== 255) best!.wins++;
-    this.setPhase(Phase.Victory, VICTORY_TICKS);
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
   /**
@@ -1096,7 +1106,7 @@ export class World {
     if (left > 0 && !timeUp) return;
     this.winner = left === 0 ? Team.Red : 255;
     if (left === 0) for (const p of this.players) if (p && p.inWave) p.wins++;
-    this.setPhase(Phase.Victory, VICTORY_TICKS);
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
   /** Basilisks still alive (Extermination's quarry). */
@@ -1279,7 +1289,7 @@ export class World {
   private endExtraction(winner: number): void {
     this.winner = winner;
     if (winner !== 255) for (const p of this.players) if (p && p.inWave && p.team === winner) p.wins++;
-    this.setPhase(Phase.Victory, VICTORY_TICKS);
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
   /** Fly the extraction rocket (scripted, not physical: nothing stops it). */
@@ -2897,6 +2907,45 @@ export class World {
   resync(id: number, ci: number): void {
     const p = this.players[id];
     if (p && ci >= 0 && ci < CHUNK_COUNT) p.known[ci] = -1;
+  }
+
+  /**
+   * The vote for the next wave's mode: a player's own, while the wave's
+   * result is up (Phase.Victory), in a room with more than one mode. Bots
+   * don't vote. A player can change their vote until the count.
+   */
+  vote(id: number, mode: number): void {
+    const p = this.players[id];
+    if (!p || p.bot || !this.voting || !(VOTE_MODES as readonly number[]).includes(mode)) return;
+    p.vote = mode;
+    // Everyone's had their say: the count, in a couple of seconds.
+    if (this.players.every((o) => !o || o.bot || o.vote !== 255)) this.phaseTimer = Math.min(this.phaseTimer, VOTE_SETTLE);
+  }
+
+  /** The vote is open: the wave's result is up, and the room has modes to choose from. */
+  get voting(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Victory && this.rotation.length > 1;
+  }
+
+  /** Votes for each of VOTE_MODES. */
+  voteCounts(): number[] {
+    const n = VOTE_MODES.map(() => 0);
+    for (const p of this.players) if (p && !p.bot && p.vote !== 255) n[(VOTE_MODES as readonly number[]).indexOf(p.vote)]++;
+    return n;
+  }
+
+  /**
+   * The count: the mode with the most votes plays the next wave (a tie
+   * drawn by lot between the leaders). Nobody voted: the rotation's.
+   */
+  private countVotes(): void {
+    const n = this.voteCounts();
+    const top = Math.max(...n);
+    if (top > 0) {
+      const leaders = VOTE_MODES.filter((_, i) => n[i] === top);
+      this.votedMode = { wave: this.wave + 1, mode: leaders[this.rng.int(leaders.length)] };
+    }
+    for (const p of this.players) if (p) p.vote = 255;
   }
 
   chat(id: number, text: string): void {
@@ -6325,6 +6374,13 @@ export class World {
           w.u16(clampU16(this.evac.y + Y_BIAS));
           w.u16(this.evac.state === Evac.Inbound ? this.evac.eta : 0);
         }
+        // The result up: the vote on the next mode (how many modes, 0: no vote; each one's votes; ours).
+        if (this.phase === Phase.Victory) {
+          const counts = this.voting ? this.voteCounts() : [];
+          w.u8(counts.length);
+          for (const c of counts) w.u8(Math.min(255, c));
+          if (counts.length) w.u8(p.vote);
+        }
         if (this.waveMode === GameMode.Extermination) {
           // Extermination: how many it began with, then each basilisk left (its head, and whether it's awake).
           w.u8(this.lairBeasts);
@@ -6716,6 +6772,10 @@ export class World {
 const TICKS_PER_SCORE = 30;
 const COUNTDOWN_TICKS = 30 * 4;
 const VICTORY_TICKS = 30 * 7;
+/** With a vote on the next mode, the result stays up longer: time to vote. */
+const VOTE_TICKS = 30 * 15;
+/** Everyone's voted: the count this soon. */
+const VOTE_SETTLE = 30 * 2;
 /** A wave's time limit. */
 const WAVE_TICKS = 30 * 60 * 4;
 /** Regicide waves run longer: fortresses take a while to crack. */

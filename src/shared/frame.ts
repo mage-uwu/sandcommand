@@ -42,6 +42,7 @@ import {
   R_CORAL,
   BEAST_SCALE,
   GameMode,
+  Phase,
   R_SHIPS,
   R_SHIP_PART,
   R_SHIP_BOOM,
@@ -282,6 +283,8 @@ export interface RoundState {
   pvp?: { leader: number; leaderKills: number; kills: number; deaths: number };
   /** Extermination: how many basilisks the wave began with, and each one left (its head, and whether it's awake). */
   lair?: { total: number; beasts: { x: number; y: number; awake: boolean }[] };
+  /** The result up: the vote on the next wave's mode (votes for each of VOTE_MODES, and our own vote, 255 none). */
+  vote?: { counts: number[]; mine: number };
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -517,6 +520,14 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const ex = r.u16();
           const ey = r.u16() - Y_BIAS;
           s.evac = { state, x: ex, y: ey, eta: r.u16() };
+        }
+        if (phase === Phase.Victory) {
+          const n = r.u8();
+          if (n) {
+            const counts: number[] = [];
+            for (let i = 0; i < n; i++) counts.push(r.u8());
+            s.vote = { counts, mine: r.u8() };
+          }
         }
         if (mode === GameMode.Extermination) {
           const total = r.u8();
