@@ -22,7 +22,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { drawMillipede } from './beast-art.ts';
+import { drawMillipede, drawSegmentGib } from './beast-art.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -373,6 +373,22 @@ export class Renderer {
   private readonly backRects: number[] = [];
   readonly ctx: CanvasRenderingContext2D;
   private readonly beastPts: number[] = [];
+  /** The colour the ground at a cell is drawn in (for the millipede's dirt camouflage). */
+  private readonly groundColor = (x: number, y: number): number => PALETTE[this.groundTerrain!.get(x, y) * 8 + (hash2(x, y) & 3)];
+  private groundTerrain: Terrain | null = null;
+
+  /** The wildlife in view: the ones coiled round someone, or the rest. */
+  private drawBeasts(ctx: CanvasRenderingContext2D, game: Game, alpha: number, now: number, coiled: boolean, camX: number, camY: number, halfW: number, halfH: number): void {
+    this.groundTerrain = game.terrain;
+    for (const [, v] of game.beastViews) {
+      if (v.coiled !== coiled) continue;
+      const pts = this.beastPts;
+      pts.length = 0;
+      for (let i = 0; i < v.cur.length; i++) pts.push(v.prev[i] + (v.cur[i] - v.prev[i]) * alpha);
+      if (pts[0] < camX - halfW - 80 || pts[0] > camX + halfW + 80 || pts[1] < camY - halfH - 80 || pts[1] > camY + halfH + 80) continue;
+      drawMillipede(ctx, game.terrain, this.groundColor, pts, v.seed, v.prevLift + (v.lift - v.prevLift) * alpha, v.frozen, now);
+    }
+  }
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
   private chunkImage = new ImageData(CHUNK, CHUNK);
   private chunkPixels = new Uint32Array(this.chunkImage.data.buffer);
@@ -763,14 +779,8 @@ export class Renderer {
 
     // Dropships.
     for (const sh of game.shipViews()) this.drawShip(ctx, sh, game, now);
-    // Wildlife, drawn between the last two frames it was sent in.
-    for (const [, v] of game.beastViews) {
-      const pts = this.beastPts;
-      pts.length = 0;
-      for (let i = 0; i < v.cur.length; i++) pts.push(v.prev[i] + (v.cur[i] - v.prev[i]) * alpha);
-      if (pts[0] < camX - halfW - 80 || pts[0] > camX + halfW + 80 || pts[1] < camY - halfH - 80 || pts[1] > camY + halfH + 80) continue;
-      drawMillipede(ctx, game.terrain, pts, v.prevLift + (v.lift - v.prevLift) * alpha, now, v.hp < 0.35 ? 1 : 0);
-    }
+    // Wildlife, drawn between the last two frames it was sent in (a coiled one later, over its victim).
+    this.drawBeasts(ctx, game, alpha, now, false, camX, camY, halfW, halfH);
 
     // Remote clones (not those riding inside a tank).
     const views = game.remoteViews(alpha).filter((v) => !game.tankPilots.has(v.id));
@@ -820,6 +830,15 @@ export class Renderer {
     const ly = Math.floor(camY - halfH) - 1;
     this.particleLayer.render(game.particles, this.sprites, alpha, lx, ly, Math.ceil(halfW * 2) + 3, Math.ceil(halfH * 2) + 3);
     ctx.drawImage(this.particleLayer.canvas, lx, ly);
+
+    // A millipede coiled round its prey, over them; a dead one's segments tumbling.
+    this.drawBeasts(ctx, game, alpha, now, true, camX, camY, halfW, halfH);
+    for (const g of game.segmentGibs) {
+      if (g.x < camX - halfW - 10 || g.x > camX + halfW + 10 || g.y < camY - halfH - 10 || g.y > camY + halfH + 10) continue;
+      ctx.globalAlpha = Math.min(1, g.life / 30);
+      drawSegmentGib(ctx, game.terrain, this.groundColor, g.x, g.y, g.a, g.seed, g.i, now);
+    }
+    ctx.globalAlpha = 1;
 
     // What stands in front of the play: the forest's front roots, over whoever ducks behind them.
     for (let cy = vy0; cy <= vy1; cy++) {

@@ -4,7 +4,7 @@ import { ACTOR_H, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { MILLI_GAP, MILLI_HP, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -116,22 +116,64 @@ describe('millipedes in the world', () => {
     expect(a.hp).toBeGreaterThan(hp - 20); // (not all at once)
   });
 
-  it('it comes after a clone along the walls and roof, and bites', () => {
+  it('it comes after a clone along the walls and roof, coils round them like a rope and bites: dead', () => {
     const { world, a } = cave();
-    a.hp = 100;
     // Far down the tunnel, on the roof, going away from the clone.
     const b = put(world, 1240, 380, 1);
-    b.spitCd = 1e9; // (no spitting: it has to come and bite)
-    let bitten = false;
-    for (let k = 0; k < 30 * 20 && !bitten; k++) {
-      a.body.x = 960;
-      a.body.vx = 0;
-      const hp = a.hp;
+    b.spitCd = 1e9; // (no spitting: it has to come and get them)
+    let coiled = -1;
+    let heldAt = 0;
+    for (let k = 0; k < 30 * 12 && a.alive; k++) {
       world.step();
-      if (a.hp < hp - 5) bitten = true;
+      if (coiled < 0 && b.coil === a.id) {
+        coiled = k;
+        heldAt = a.body.x;
+      }
+      // Held fast while it's wound round them.
+      if (coiled >= 0 && b.coil === a.id) expect(Math.abs(a.body.x - heldAt)).toBeLessThan(0.5);
     }
-    expect(bitten).toBe(true);
-    expect(a.venom).toBeGreaterThan(0);
+    expect(coiled).toBeGreaterThanOrEqual(0);
+    expect(a.alive).toBe(false);
+  });
+
+  it('hurt hard enough while it holds someone, it lets them go', () => {
+    const { world, a } = cave();
+    const b = put(world, 1000, 440, -1);
+    b.spitCd = 1e9;
+    for (let k = 0; k < 30 * 5 && b.coil < 0; k++) world.step();
+    expect(b.coil).toBe(a.id);
+    world.hurtBeast(0, MILLI_COIL_BREAK + 1, a.id);
+    expect(b.coil).toBe(-1);
+    for (let k = 0; k < MILLI_COIL_TICKS + 5; k++) world.step();
+    expect(a.alive).toBe(true);
+  });
+
+  it('with nothing about it freezes still; prey in sight, it thaws and lunges very fast', () => {
+    const { world, a } = cave();
+    // The clone out of sight (walled off at the far end).
+    for (let y = 380; y <= 440; y++) for (let x = 1000; x < 1010; x++) world.terrain.set(x, y, Mat.Rock);
+    world.terrainReplaced();
+    const b = put(world, 1200, 440, -1);
+    b.spitCd = 1e9;
+    b.wander = 1;
+    world.step();
+    world.step();
+    expect(b.frozen).toBeGreaterThan(0);
+    const still = b.x;
+    for (let k = 0; k < 60; k++) world.step();
+    expect(b.x).toBe(still);
+    // The wall gone: it sees them, thaws, and comes at them fast.
+    for (let y = 380; y <= 440; y++) for (let x = 1000; x < 1010; x++) world.terrain.set(x, y, Mat.Air);
+    world.terrainReplaced();
+    let moved = 0;
+    for (let k = 0; k < 20; k++) {
+      const x0 = b.x;
+      world.step();
+      moved += Math.abs(b.x - x0);
+    }
+    expect(b.frozen).toBe(0);
+    expect(moved / 20).toBeGreaterThan(MILLI_HUNT / 30); // (faster than it hunts: a lunge)
+    void a;
   });
 
   it('a health wave washes the venom out', () => {
@@ -141,12 +183,13 @@ describe('millipedes in the world', () => {
     expect(a.venom).toBe(0);
   });
 
-  it('shot enough, it dies (and tells the clients)', () => {
+  it('armoured: it takes dozens of slugs to kill', () => {
     const { world, a } = cave();
     const b = put(world, 1180, 440, -1);
     b.spitCd = 1e9;
     let shots = 0;
     for (let k = 0; k < 400 && world.beasts[0]; k++) {
+      b.coilCd = 1e9; // (no coiling the shooter)
       const pts = world.beastPts[0];
       const sx = a.cx;
       const sy = a.cy - 4;
@@ -157,9 +200,10 @@ describe('millipedes in the world', () => {
       a.venom = 0;
       a.hp = 100;
     }
+    // Armoured like a spider mech: it takes dozens of sniper slugs.
     expect(world.beasts[0]).toBe(null);
-    expect(shots).toBeLessThan(12);
-    expect(MILLI_HP).toBeGreaterThan(PROJ[ProjKind.Slug].damage * 2);
+    expect(shots).toBeGreaterThan(20);
+    expect(shots).toBeLessThan(45);
   });
 
   it('clients see it crawl, see who is poisoned, and see it die', () => {

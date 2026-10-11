@@ -28,10 +28,22 @@ export const BeastKind = { Millipede: 0 } as const;
 export const MILLI_SEGS = 15;
 export const MILLI_GAP = 4;
 export const MILLI_R = 3.6;
-export const MILLI_HP = 240;
-/** Crawl speeds (cells/s): wandering, and hunting. */
+/**
+ * Armoured like a vehicle (a spider mech's kind of toughness): a round with
+ * the energy to get through its plates (World: TANK_INTEGRITY) does its full
+ * harm, anything weaker a fifth of it; blasts hurt it by distance.
+ */
+export const MILLI_HP = 2400;
+/** Crawl speeds (cells/s): wandering, hunting, and the lunge when it spots prey (very fast). */
 export const MILLI_CRAWL = 26;
-export const MILLI_HUNT = 46;
+export const MILLI_HUNT = 70;
+export const MILLI_LUNGE = 160;
+/** How long a lunge lasts (ticks). */
+export const MILLI_LUNGE_TICKS = 75;
+/** Freezing (its camouflage: still, it's hard to see): how long it holds still, the least and the most (ticks), and how long it wanders between. */
+export const MILLI_FREEZE_MIN = 30 * 6;
+export const MILLI_FREEZE_MAX = 30 * 18;
+export const MILLI_WANDER = 30 * 6;
 /** How far it senses prey (with a line on it), and how far it spits. */
 export const MILLI_SENSE = 280;
 export const MILLI_SPIT_RANGE = 210;
@@ -43,11 +55,20 @@ export const MILLI_SPIT_CD = 80;
 /** How far its reared head lifts off the ground (cells), and how many segments lift. */
 export const MILLI_LIFT = 13;
 export const MILLI_NECK = 5;
-/** Its bite: reach (cells), harm, venom, ticks between bites. */
-export const MILLI_BITE_R = 9;
-export const MILLI_BITE = 14;
-export const MILLI_BITE_VENOM = 20;
-export const MILLI_BITE_CD = 30;
+/**
+ * Its coil: a clone its head reaches (within MILLI_COIL_R) it wraps round
+ * like a rope, holding them fast, and after MILLI_COIL_TICKS bites: harm
+ * enough to kill most outright (a droid's frame takes less). Hurt hard
+ * enough while it holds them (MILLI_COIL_BREAK), it lets go.
+ */
+export const MILLI_COIL_R = 9;
+export const MILLI_COIL_TICKS = 18;
+export const MILLI_COIL_KILL = 150;
+export const MILLI_COIL_DROID = 70;
+export const MILLI_COIL_BREAK = MILLI_HP * 0.06;
+export const MILLI_COIL_SEGS = 8;
+/** After a coil (bitten or broken off): ticks before it can coil again. */
+export const MILLI_COIL_CD = 90;
 
 /** Venom: a dose (harm it does in all), the most the blood holds, the harm a tick. */
 export const VENOM_DOSE = 36;
@@ -72,9 +93,21 @@ export interface Beast {
   /** Rearing: ticks into it (0: down); and how far up the head is (0..1). */
   rear: number;
   lift: number;
-  /** Ticks to its next spit and bite. */
+  /** Ticks to its next spit and coil. */
   spitCd: number;
-  biteCd: number;
+  coilCd: number;
+  /** Frozen still (ticks left), wandering before it next freezes (ticks left), lunging (ticks left). */
+  frozen: number;
+  wander: number;
+  lunge: number;
+  /** Coiled round a clone (its id, or -1): ticks into it, where it holds them, the harm it's taken meanwhile. */
+  coil: number;
+  coilT: number;
+  coilX: number;
+  coilY: number;
+  coilHurt: number;
+  /** Its camouflage: which sections of it look like what (the client draws from it). */
+  seed: number;
   /** Fractional steps owed by its speed. */
   owed: number;
   /** Who it's after (a player id, or -1), and who hurt it last. */
@@ -103,7 +136,16 @@ export function newMillipede(t: Terrain, x: number, y: number, dir: number): Bea
     rear: 0,
     lift: 0,
     spitCd: 30,
-    biteCd: 0,
+    coilCd: 0,
+    frozen: 0,
+    wander: MILLI_WANDER,
+    lunge: 0,
+    coil: -1,
+    coilT: 0,
+    coilX: 0,
+    coilY: 0,
+    coilHurt: 0,
+    seed: (x * 7919 + y * 104729) & 255,
     owed: 0,
     target: -1,
     hurtBy: -1,
@@ -272,6 +314,23 @@ export function bodyPoints(t: Terrain, b: Beast, out: number[]): number[] {
       w++;
     }
     out.push(x / w + 0.5, y / w + 0.5);
+  }
+  if (b.coil >= 0) {
+    // Coiled round a clone (centred at coilX, coilY): the fore-body wound round them in a
+    // spiral from their feet up, the rest of it following its trail back from its head.
+    const K = MILLI_COIL_SEGS;
+    for (let s = MILLI_SEGS - 1; s >= K; s--) {
+      out[s * 2] = out[(s - K) * 2];
+      out[s * 2 + 1] = out[(s - K) * 2 + 1];
+    }
+    const spin = b.coilT * 0.35;
+    for (let s = 0; s < K; s++) {
+      const f = s / (K - 1);
+      const a = spin + f * Math.PI * 2.6;
+      out[s * 2] = b.coilX + Math.cos(a) * (4.8 + f * 1.2);
+      out[s * 2 + 1] = b.coilY - 7 + (1 - f) * 14 + Math.sin(a) * 1.6;
+    }
+    return out;
   }
   if (b.lift > 0) {
     const up = openWay(t, b.x, b.y);

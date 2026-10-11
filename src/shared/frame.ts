@@ -68,9 +68,14 @@ const BEAST_POINTS = [MILLI_SEGS];
 export interface BeastState {
   slot: number;
   kind: number;
+  /** Its camouflage (which sections of it look like what). */
+  seed: number;
   hp: number;
   lift: number;
   attached: boolean;
+  /** Frozen still (lying in wait), and coiled round a clone. */
+  frozen: boolean;
+  coiled: boolean;
   pts: number[];
 }
 
@@ -557,9 +562,11 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         for (let i = 0; i < n; i++) {
           const slot = r.u8();
           const kind = r.u8();
+          const seed = r.u8();
           const hp = r.u8() / 255;
           const lift = r.u8() / 255;
-          const attached = (r.u8() & 1) !== 0;
+          const f = r.u8();
+          const attached = (f & 1) !== 0;
           let x = r.u16() / 16;
           let y = r.u16() / 16 - Y_BIAS;
           const pts = [x, y];
@@ -568,7 +575,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             y += ((r.u8() << 24) >> 24) / BEAST_SCALE;
             pts.push(x, y);
           }
-          list.push({ slot, kind, hp, lift, attached, pts });
+          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, pts });
         }
         h.beasts(list);
         break;

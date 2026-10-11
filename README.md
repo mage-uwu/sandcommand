@@ -520,34 +520,54 @@ The planet's own creatures (`src/shared/wildlife.ts`). Nobody drives them,
 ever: the server thinks for them, and they fight everyone alike, bots
 included.
 
-**The millipede** lives in the caves: a long, many-legged crawler about
-four clones long, vibrant pink coral all over. Its plates are pored, with a
-coral polyp branching off every other one, and gems are grown into its back:
-faceted pink, turquoise and emerald crystals that glint as it moves. Its
-legs are pale pink, and it bursts into coral, legs and gem shards.
+**The millipede** lives in the caves: a long, many-legged ambush predator
+about four clones long, drawn in pixels like the ground and the plants (one
+terrain cell to a pixel).
+- **Camouflage.** Its body is in sections of two to four plates, each
+  mimicking something different: **rock** (speckled grey stone), **dirt**
+  (the colours of the very ground it's on), **gems** (GEMM crystals set in
+  rock like a deposit, glinting) or **fauna** (coral flesh in the plants'
+  palettes, pored, polyps glowing). Its head is coral, with feelers, fangs
+  and an eye.
+- **It freezes.** With nothing about, it wanders a while and then lies still
+  for 6 to 18 seconds. Frozen, it drops its dark plate rims, its legs stop
+  and its eye dims, so it melts into the cave and is hard to see. Hurt, it
+  thaws.
 - **It goes along any surface.** Floors, walls and ceilings alike, its body
   bending round every corner and lying along the ground under it. Its crawl
   follows the contour of the terrain grid: into a wall ahead it turns up
   it, and over an edge it turns down round it. The body follows the head's
   trail, a pair of legs stepping under each plate. Dig the ground out from
   under it and it falls until it lands, then takes hold again.
-- **It hunts.** It goes for whoever hurt it, or else the nearest clone it can
-  see within about 280 cells. To decide which way to crawl, it tries a few
-  dozen steps each way along the ground and takes the one that gets it
-  nearer. Otherwise it wanders, now and then turning round.
-- **It spits.** With its prey in sight and in reach, it stops and rears its
-  front up off the ground. A cobra's hood spreads either side of its neck,
-  magenta coral with turquoise gem eyespots and a pale rim, and it spits a glob of
-  venom on the arc that lands. It also bites whoever its head touches.
+- **It strikes very fast.** The moment it sees prey (whoever hurt it, or the
+  nearest clone in sight within about 280 cells) it thaws and lunges along
+  the surfaces at 160 cells a second for two and a half seconds, then hunts
+  at 70. It picks its way by trying a few dozen steps each way along the
+  ground and taking the one that gets it nearer.
+- **It coils and bites.** The clone its head reaches, it wraps round like a
+  rope, holding them fast where they stand. After just over half a second
+  it bites, for 150: an instant kill on most (a droid's frame takes 70).
+  Hurt hard enough while it holds someone (6% of its health), it lets go.
+  After a kill it lies still a while, sated.
+- **It spits.** With prey further off but in reach, it first rears its
+  front up off the ground. A hood spreads either side of its neck like a
+  pixel-art coral sea fan, ribbed, with glowing tips round its rim and a
+  turquoise gem eyespot each side. It spits a glob of blood-red venom on
+  the arc that lands.
 - **Venom lingers.** A glob does little harm on the hit. The venom it leaves
   in the blood does the real damage: 36 hit points a dose, a little each
-  tick for about six seconds. Doses stack (up to 110), and a bite adds
-  some too. A poisoned clone weeps blood, and your own HUD marks the harm
-  still to come on the health bar, pulsing, with the edges of the view
-  stained red. Only the repair kit's health wave washes the venom out.
-- **It can be killed.** It has 240 hit points, so three sniper slugs or about
-  fifteen rifle rounds. Explosions hurt it by distance, and a laser beam
-  hurts it as it passes through.
+  tick for about six seconds. Doses stack (up to 110), and the coil's bite
+  adds a dose too. A poisoned clone weeps blood, and your own HUD marks
+  the harm still to come on the health bar, pulsing, with the edges of the
+  view stained red. Only the repair kit's health wave washes the venom out.
+- **Armoured like a spider mech.** It has 2400 hit points. Like a vehicle's
+  armour, a round with the energy to get through its plates does its full
+  harm, and anything weaker a fifth. That's dozens of sniper slugs, so
+  explosions (1.5 times their blast, by distance), lasers and shaped
+  charges are the better bet.
+- **It gibs.** Killed, every segment flies off whole, in its own
+  camouflage, tumbling and bouncing until it comes to rest and fades, in a
+  spray of blood and gem shards.
 - **Where.** Up to five on a cave map and three on any other, each coming up
   out of the deep (on a cave floor, out of the water) well away from
   everyone. There are none in the labyrinth, the tutorial, or the Valley

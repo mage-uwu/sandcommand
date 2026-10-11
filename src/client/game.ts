@@ -1,7 +1,7 @@
 import { type Decor, placeDecor } from './decor.ts';
 import { BTN_FIRE, type Body, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
-import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
+import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, applyFrameRecords } from '../shared/frame.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
@@ -554,6 +554,28 @@ export class Game implements FrameHandler {
       if (last.parts !== ALL_PARTS && classOfFlags(last.flags) !== ClassId.Droid) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
     }
     if (this.alive && this.parts !== ALL_PARTS && this.body.cls !== ClassId.Droid) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
+    // A dead millipede's segments tumbling: gravity, a bounce off the ground, rest, fade.
+    for (let k = this.segmentGibs.length - 1; k >= 0; k--) {
+      const g = this.segmentGibs[k];
+      if (--g.life <= 0) {
+        this.segmentGibs.splice(k, 1);
+        continue;
+      }
+      g.vy += GRAVITY * DT;
+      const nx = g.x + g.vx * DT;
+      const ny = g.y + g.vy * DT;
+      if (this.terrain.isSolid(Math.floor(nx), Math.floor(ny))) {
+        if (this.terrain.isSolid(Math.floor(g.x), Math.floor(ny))) {
+          g.vy *= -0.35;
+          g.vx *= 0.6;
+        } else g.vx *= -0.4;
+        g.va *= 0.5;
+      } else {
+        g.x = nx;
+        g.y = ny;
+      }
+      g.a += g.va * DT;
+    }
     // Venom in the blood: it weeps out of them.
     for (const [id, amount] of this.venomIn) {
       if (id === this.myId) {
@@ -1067,20 +1089,28 @@ export class Game implements FrameHandler {
   private waterBodies: { x: number; y: number; level: number; volume: number }[] = [];
 
   /** Wildlife in view (R_BEASTS): each creature's body points as last sent and the frame before (to draw between them). */
-  readonly beastViews = new Map<number, { kind: number; hp: number; lift: number; prevLift: number; attached: boolean; prev: number[]; cur: number[] }>();
+  readonly beastViews = new Map<number, { kind: number; seed: number; hp: number; lift: number; prevLift: number; attached: boolean; frozen: boolean; coiled: boolean; prev: number[]; cur: number[] }>();
+  /**
+   * A dead millipede's segments, each flung off whole (its own camouflage
+   * and all), tumbling, bouncing, coming to rest and fading: where, how it's
+   * turned and spinning, which creature (seed) and segment it was, life left (ticks).
+   */
+  readonly segmentGibs: { x: number; y: number; vx: number; vy: number; a: number; va: number; seed: number; i: number; life: number }[] = [];
   beasts(list: BeastState[]): void {
     const seen = new Set<number>();
     for (const b of list) {
       seen.add(b.slot);
       const v = this.beastViews.get(b.slot);
-      if (v && v.kind === b.kind && v.cur.length === b.pts.length) {
+      if (v && v.kind === b.kind && v.seed === b.seed && v.cur.length === b.pts.length) {
         v.prev = v.cur;
         v.cur = b.pts;
         v.prevLift = v.lift;
         v.lift = b.lift;
         v.hp = b.hp;
         v.attached = b.attached;
-      } else this.beastViews.set(b.slot, { kind: b.kind, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, prev: b.pts, cur: b.pts });
+        v.frozen = b.frozen;
+        v.coiled = b.coiled;
+      } else this.beastViews.set(b.slot, { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, prev: b.pts, cur: b.pts });
     }
     for (const k of [...this.beastViews.keys()]) if (!seen.has(k)) this.beastViews.delete(k);
   }
@@ -1088,6 +1118,18 @@ export class Game implements FrameHandler {
     const v = this.beastViews.get(slot);
     if (!v) return;
     beastGibs(this.particles, v.cur);
+    // Every segment flung off whole.
+    const n = v.cur.length >> 1;
+    for (let i = 0; i < n; i++) {
+      const x = v.cur[i * 2];
+      const y = v.cur[i * 2 + 1];
+      const j = Math.min(n - 1, i + 1);
+      const a = Math.atan2(v.cur[Math.max(0, i - 1) * 2 + 1] - v.cur[j * 2 + 1], v.cur[Math.max(0, i - 1) * 2] - v.cur[j * 2]);
+      const out = Math.random() * Math.PI * 2;
+      const sp = 50 + Math.random() * 130;
+      this.segmentGibs.push({ x, y, vx: Math.cos(out) * sp, vy: Math.sin(out) * sp - 90, a, va: (Math.random() - 0.5) * 18, seed: v.seed, i, life: 30 * 6 + Math.floor(Math.random() * 60) });
+    }
+    if (this.segmentGibs.length > 120) this.segmentGibs.splice(0, this.segmentGibs.length - 120);
     this.sfx?.gib(v.cur[0], v.cur[1], 1.5, false);
     this.beastViews.delete(slot);
   }

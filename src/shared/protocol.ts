@@ -108,8 +108,9 @@ export const R_FLORA = 39;
 export const R_WATER = 40;
 /**
  * Wildlife in view (wildlife.ts): u8 count, then per creature u8 slot, u8
- * kind, u8 health (0..255 of its full), u8 how far up it's reared (0..255),
- * u8 flags (1: holding on), u16 head x, u16 head y (+Y_BIAS), both x
+ * kind, u8 camouflage seed, u8 health (0..255 of its full), u8 how far up
+ * it's reared (0..255), u8 flags (1: holding on, 2: frozen still, 4: coiled
+ * round a clone), u16 head x, u16 head y (+Y_BIAS), both x
  * POS_SCALE, then for each further body point i8 dx, i8 dy from the one
  * before (x BEAST_SCALE). An empty list once the last in view has gone.
  */
@@ -144,7 +145,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 59;
+export const PROTOCOL_VERSION = 60;
 
 /** Last Man Standing round phases. */
 export const Phase = {

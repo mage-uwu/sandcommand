@@ -242,10 +242,17 @@ import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlor
 import { ballisticAim } from '../shared/ballistics.ts';
 import {
   type Beast,
-  MILLI_BITE,
-  MILLI_BITE_CD,
-  MILLI_BITE_R,
-  MILLI_BITE_VENOM,
+  MILLI_COIL_BREAK,
+  MILLI_COIL_CD,
+  MILLI_COIL_DROID,
+  MILLI_COIL_KILL,
+  MILLI_COIL_R,
+  MILLI_COIL_TICKS,
+  MILLI_FREEZE_MAX,
+  MILLI_FREEZE_MIN,
+  MILLI_LUNGE,
+  MILLI_LUNGE_TICKS,
+  MILLI_WANDER,
   MILLI_CRAWL,
   MILLI_HP,
   MILLI_HUNT,
@@ -1573,10 +1580,13 @@ export class World {
   }
 
   /**
-   * One tick of a millipede. It hunts whoever it's after along the surfaces
-   * (trying both ways along the ground and taking the one that gets it
-   * nearer), wanders otherwise; with its prey in sight and in reach it
-   * stops, rears up and spits; it bites whoever its head touches.
+   * One tick of a millipede. It lies in wait, frozen still (its camouflage:
+   * still, it's hard to see), wanders a while, freezes again. When it has
+   * prey in sight it thaws at once and lunges, very fast, along the surfaces
+   * after them (trying both ways along the ground and taking the one that
+   * gets it nearer); in reach and with its spit ready, it rears up and spits
+   * first. The clone its head reaches it coils round like a rope, holds fast
+   * and bites (World: coilTick).
    */
   private stepMillipede(k: number, b: Beast): void {
     const t = this.terrain;
@@ -1584,14 +1594,29 @@ export class World {
     const pts = this.beastPts[k];
     const hx = pts.length ? pts[0] : b.x;
     const hy = pts.length ? pts[1] : b.y;
-    if ((this.tick + k) % 10 === 0) b.target = this.beastTarget(b, hx, hy);
+    if (b.spitCd > 0) b.spitCd--;
+    if (b.coilCd > 0) b.coilCd--;
+    if (b.coil >= 0) {
+      this.coilTick(k, b);
+      bodyPoints(t, b, pts);
+      return;
+    }
+    if ((this.tick + k) % 6 === 0) {
+      const before = b.target;
+      b.target = this.beastTarget(b, hx, hy);
+      // Prey spotted: thaw, and go for it, fast.
+      if (b.target >= 0 && before < 0) {
+        b.frozen = 0;
+        b.lunge = MILLI_LUNGE_TICKS;
+        b.turnAt = this.tick;
+      }
+    }
     let tgt = b.target >= 0 ? this.players[b.target] : null;
     if (tgt && (!tgt.alive || tgt.tank >= 0)) {
       tgt = null;
       b.target = -1;
     }
-    if (b.spitCd > 0) b.spitCd--;
-    if (b.biteCd > 0) b.biteCd--;
+    if (b.lunge > 0) b.lunge--;
     // Rearing, and spitting at the top of it.
     if (b.rear > 0) {
       if (++b.rear === MILLI_SPIT_AT && tgt) this.spit(b, hx, hy, tgt);
@@ -1599,9 +1624,17 @@ export class World {
         b.rear = 0;
         b.spitCd = MILLI_SPIT_CD + rng.int(30);
       }
-    } else if (tgt && b.attached && b.spitCd === 0 && Math.hypot(tgt.cx - hx, tgt.cy - hy) < MILLI_SPIT_RANGE && this.lineClear(hx, hy, tgt.cx, tgt.cy)) b.rear = 1;
+    } else if (tgt && b.attached && b.spitCd === 0 && Math.hypot(tgt.cx - hx, tgt.cy - hy) > MILLI_COIL_R * 4 && Math.hypot(tgt.cx - hx, tgt.cy - hy) < MILLI_SPIT_RANGE && this.lineClear(hx, hy, tgt.cx, tgt.cy)) b.rear = 1;
     b.lift += ((b.rear > 0 ? 1 : 0) - b.lift) * 0.3;
     if (b.lift < 0.01) b.lift = 0;
+    // Nothing about: wander a while, then freeze (and wait).
+    if (!tgt && b.attached && b.rear === 0) {
+      if (b.frozen > 0) b.frozen--;
+      else if (--b.wander <= 0) {
+        b.frozen = MILLI_FREEZE_MIN + rng.int(MILLI_FREEZE_MAX - MILLI_FREEZE_MIN);
+        b.wander = MILLI_WANDER + rng.int(MILLI_WANDER);
+      }
+    }
     if (!b.attached) {
       // Falling: its body follows its head down.
       const y0 = b.y;
@@ -1615,14 +1648,14 @@ export class World {
         this.beasts[k] = null;
         return;
       }
-    } else if (b.rear === 0) {
+    } else if (b.rear === 0 && b.frozen === 0) {
       if (this.tick >= b.turnAt) {
         if (tgt) {
           // Which way along the ground gets it nearer: a few dozen steps each way, tried.
           const ahead = this.probeCrawl(b, false, tgt.cx, tgt.cy);
           const back = this.probeCrawl(b, true, tgt.cx, tgt.cy);
           if (back < ahead - 10) turnRound(b);
-          b.turnAt = this.tick + 25;
+          b.turnAt = this.tick + 15;
         } else {
           if (rng.next() < 0.3) turnRound(b);
           b.turnAt = this.tick + 120 + rng.int(240);
@@ -1637,27 +1670,66 @@ export class World {
         turnRound(b);
         b.still = 0;
       }
-      b.owed += (tgt ? MILLI_HUNT : MILLI_CRAWL) * DT;
+      b.owed += (tgt ? (b.lunge > 0 ? MILLI_LUNGE : MILLI_HUNT) : MILLI_CRAWL) * DT;
       while (b.owed >= 1 && b.attached) {
         b.owed--;
         crawlStep(t, b);
         pushTrail(b);
+        // (At a lunge's speed it can reach them mid-tick.)
+        if (tgt && b.coilCd === 0 && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < MILLI_COIL_R) break;
       }
     }
     bodyPoints(t, b, pts);
-    // A bite, for whoever its head is on.
-    if (b.biteCd === 0) {
+    // Its head on a clone: coil round them.
+    if (b.coilCd === 0 && b.rear === 0) {
       for (const p of this.players) {
-        if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
-        if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > MILLI_BITE_R + 4) continue;
-        this.damage(p, MILLI_BITE, NO_OWNER, W_VENOM);
-        p.venom = Math.min(VENOM_MAX, p.venom + MILLI_BITE_VENOM);
-        p.body.vx += Math.sign(p.cx - pts[0]) * 60;
-        p.body.vy -= 40;
-        b.biteCd = MILLI_BITE_CD;
+        if (!p || !p.alive || p.tank >= 0 || this.shielded(p) || p.surf >= 0 || p.surfShip >= 0) continue;
+        if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > MILLI_COIL_R + 3) continue;
+        b.coil = p.id;
+        b.coilT = 0;
+        b.coilX = p.cx;
+        b.coilY = p.cy;
+        b.coilHurt = 0;
+        b.frozen = 0;
+        bodyPoints(t, b, pts);
         break;
       }
     }
+  }
+
+  /**
+   * Coiled round a clone: it holds them fast where they stand (they can't
+   * move, nor anyone pull them free), and at the end of it bites: enough to
+   * kill most outright. (Hurt hard enough meanwhile, it lets go: hurtBeast.)
+   */
+  private coilTick(k: number, b: Beast): void {
+    const v = this.players[b.coil];
+    if (!v || !v.alive || v.tank >= 0) {
+      this.uncoil(b);
+      return;
+    }
+    b.coilT++;
+    // Held: right where it caught them.
+    v.body.x = b.coilX - ACTOR_W / 2;
+    v.body.y = b.coilY - (v.cy - v.body.y);
+    v.body.vx = 0;
+    v.body.vy = 0;
+    if (b.coilT < MILLI_COIL_TICKS) return;
+    const droid = v.parts.cls === ClassId.Droid;
+    this.damage(v, droid ? MILLI_COIL_DROID : MILLI_COIL_KILL, NO_OWNER, W_VENOM);
+    if (v.alive) v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
+    this.uncoil(b);
+    // Sated: it lies still a while.
+    b.frozen = MILLI_FREEZE_MIN;
+    b.target = -1;
+    b.hurtBy = -1;
+    void k;
+  }
+
+  private uncoil(b: Beast): void {
+    b.coil = -1;
+    b.coilT = 0;
+    b.coilCd = MILLI_COIL_CD;
   }
 
   /** How near (x, y) a creature would get going `back` (round) or on, a few dozen steps along the ground. */
@@ -1687,6 +1759,9 @@ export class World {
     if (!b || dmg <= 0) return;
     b.hp -= dmg;
     if (by < MAX_PLAYERS && this.players[by]) b.hurtBy = by;
+    // Hurt, it thaws; hurt hard enough while it holds someone, it lets them go.
+    b.frozen = 0;
+    if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
     if (b.hp > 0) return;
     this.beasts[k] = null;
     const w = this.broadcast;
@@ -1701,7 +1776,7 @@ export class World {
     for (let k = 0; k < MAX_BEASTS; k++) {
       if (!this.beasts[k]) continue;
       const { d } = nearestPoint(this.beastPts[k], x, y);
-      if (d < r) this.hurtBeast(k, dmg * (1 - d / r), by);
+      if (d < r) this.hurtBeast(k, dmg * 1.5 * (1 - d / r), by);
     }
   }
 
@@ -2385,7 +2460,9 @@ export class World {
     const owner = pr.owner[i];
     const def = PROJ[kind];
     if (actor >= BEAST_ID_BASE) {
-      this.hurtBeast(actor - BEAST_ID_BASE, def.damage * (def.ballistic ? 1 : 1.5), owner);
+      // Armoured like a vehicle: a round with the energy to get through does its full harm, a weaker one a fifth; a shaped charge a share of the whole.
+      const energy = def.mass * def.sharp * Math.hypot(pr.vx[i], pr.vy[i]);
+      this.hurtBeast(actor - BEAST_ID_BASE, (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0), owner);
     } else if (actor >= SHIP_ID_BASE) {
       const sh = this.ships[actor - SHIP_ID_BASE];
       if (sh) {
@@ -5503,9 +5580,10 @@ export class World {
           if (!b || !pts || !pts.length || pts[0] < vx0 - 60 || pts[0] > vx1 + 60 || pts[1] < vy0 - 60 || pts[1] > vy1 + 60) continue;
           w.u8(k);
           w.u8(b.kind);
+          w.u8(b.seed);
           w.u8(Math.max(0, Math.min(255, Math.round((b.hp / MILLI_HP) * 255))));
           w.u8(Math.round(b.lift * 255));
-          w.u8(b.attached ? 1 : 0);
+          w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0));
           w.u16(clampU16(pts[0] * POS_SCALE));
           w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
           for (let i = 2; i < pts.length; i += 2) {
