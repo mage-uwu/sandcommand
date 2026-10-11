@@ -27,8 +27,8 @@ import type { WaterBody } from './water.ts';
  * Seeded and deterministic like the rest of worldgen.
  */
 
-/** The valley's own back walls (after structures.ts Backdrop and the labyrinth's 3 and 4): the dome's rotunda, the shaft's ashlar, the forest's roots where a pass runs through them. */
-export const VBack = { Rotunda: 5, Ashlar: 6, Roots: 7 } as const;
+/** The valley's own back walls (after structures.ts Backdrop and the labyrinth's 3 and 4): the dome's rotunda, the shaft's ashlar, the forest's roots where a pass runs through them (and those of them that stand in front: no wall, but drawn over the play). */
+export const VBack = { Rotunda: 5, Ashlar: 6, Roots: 7, RootsFront: 8 } as const;
 
 export type RoomKind = 'maw' | 'sargasso' | 'basin' | 'forest' | 'cistern' | 'gems' | 'nest';
 
@@ -55,6 +55,8 @@ export interface Valley {
   waters: WaterBody[];
   /** The pool's seed on the canyon floor. */
   pool: { x: number; y: number; w: number };
+  /** The cells of the passes under the trees (carveValley): kept open whatever else grows in later. */
+  passes: number[];
 }
 
 const at = (x: number, y: number) => y * WORLD_W + x;
@@ -164,6 +166,7 @@ export function valleyHeights(heights: Int32Array, seed: number): Valley {
     calm: { x0: cx0, x1: cx1, y0: floor + 40 },
     waters: [],
     pool,
+    passes: [],
   };
 }
 
@@ -457,12 +460,22 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
       }
     }
   };
-  /** A disc of petrified wood (radius `r`; under a half, one cell). */
-  const disc = (x: number, y: number, r: number) => {
+  /** A disc of petrified wood (radius `r`; under a half, one cell); `mark`, if given, collects its cells. */
+  const disc = (x: number, y: number, r: number, mark?: Set<number>) => {
     const rr = Math.max(0, r);
     const ir = Math.ceil(rr);
-    for (let dy = -ir; dy <= ir; dy++) for (let dx = -ir; dx <= ir; dx++) if (dx * dx + dy * dy <= rr * rr + 0.5) set(Math.round(x) + dx, Math.round(y) + dy, Mat.Petrified);
+    for (let dy = -ir; dy <= ir; dy++) {
+      for (let dx = -ir; dx <= ir; dx++) {
+        if (dx * dx + dy * dy > rr * rr + 0.5) continue;
+        const cx = Math.round(x) + dx;
+        const cy = Math.round(y) + dy;
+        set(cx, cy, Mat.Petrified);
+        if (mark && inside(cx, cy)) mark.add(at(cx, cy));
+      }
+    }
   };
+  /** The roots that stand in front, where a pass runs through them: you duck behind them, not into them. */
+  const fronted = new Set<number>();
   const trunks = 6 + rng.int(3);
   const feet: { tx: number; fy: number; half: number }[] = [];
   const span = forest.rx * 1.7;
@@ -518,6 +531,8 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
       const r0 = Math.max(1.6, (w * 1.7) / n + 0.6);
       const own = 0.75 + rng.next() * 0.6; // (how far it reaches, against its neighbours)
       const wob = rng.range(0, Math.PI * 2);
+      // (Now and then an outer one stands in front of the pass through its foot.)
+      const front = Math.abs(o) > 0.35 && (hash2(k, i, seed ^ 0xf407) >>> 0) / 4294967296 < 0.45;
       const xAt = (y: number) => {
         const f = flare(y);
         return tx + o * (w - r0 * 0.6 + (f.b * foot + f.t * reach) * own) + Math.sin(y * 0.09 + wob) * (f.b + f.t) * 1.5;
@@ -548,7 +563,7 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
           const r = rAt(Math.max(cy, Math.min(fy, y))) - shrink;
           if (inRock > 9 || r < 0.4) break;
           const steps = Math.max(1, Math.ceil(Math.abs(x - px)));
-          for (let s2 = 1; s2 <= steps; s2++) disc(px + ((x - px) * s2) / steps, y - dir + (dir * s2) / steps, r);
+          for (let s2 = 1; s2 <= steps; s2++) disc(px + ((x - px) * s2) / steps, y - dir + (dir * s2) / steps, r, front && dir > 0 ? fronted : undefined);
           px = x;
         }
       }
@@ -577,7 +592,8 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
   }
   // A pass through each one's foot (once they're all grown: the roots cross): the root flare
   // there set back (a back wall drawn as the roots), so you can walk through under the trunk
-  // without cutting it. An arch over clone height across the middle of the flare, closing
+  // without cutting it; a root or two of it standing in front instead (drawn over whoever's
+  // behind it, never solid), to duck behind. An arch over clone height across the middle of the flare, closing
   // down toward its edges.
   for (const { tx, fy, half } of feet) {
     for (let x = Math.round(tx - half); x <= Math.round(tx + half); x++) {
@@ -589,7 +605,9 @@ export function carveValley(m: Uint8Array, v: Valley, seed: number, backdrop?: U
       for (let y = g - clear; y < g; y++) {
         if (m[at(x, y)] !== Mat.Petrified) continue;
         set(x, y, Mat.Air);
-        wall(x, y, VBack.Roots);
+        if (inside(x, y)) v.passes.push(at(x, y));
+        // (Away from the trunk's heart: right under it, it'd hide the whole pass.)
+        wall(x, y, fronted.has(at(x, y)) && Math.abs(x - tx) > half * 0.3 ? VBack.RootsFront : VBack.Roots);
       }
     }
   }

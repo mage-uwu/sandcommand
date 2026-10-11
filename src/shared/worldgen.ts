@@ -457,6 +457,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   if (!dungeon) placeGemCrystals(m, heights, seed);
   frost(m, biome, seed);
   relineCraters(m, lastCraters);
+  // (The passes under the valley's trees stay open: no dripstone or crystal grown into them.)
+  if (valley) for (const i of valley.passes) m[i] = Mat.Air;
   // (The flora last: it grows on the ground as it ends up, frosting and all.)
   lastFlora = placeFlora(m, seed, biome, lastGeysers, ground);
   if (valley) {

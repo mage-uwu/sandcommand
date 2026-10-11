@@ -1393,7 +1393,8 @@ what it is hiding: a tranquil oasis (`src/shared/valley.ts`).
     Under each trunk a low arch runs through the roots at its foot, set
     back (drawn darker, as a back wall), so you can walk through under the
     tree without cutting it; the trunk above and the rest of its roots are
-    solid. Stumps (some snapped off at a slant) and a fallen
+    solid. A root or two crossing each pass stands in front instead: drawn
+    over the play (over you), never solid, so you can duck behind it. Stumps (some snapped off at a slant) and a fallen
     log or two lie on the floor. The trunks' roots trail down through the
     rock into the cistern below and hang in its water, as if they draw the
     poison out of the world.

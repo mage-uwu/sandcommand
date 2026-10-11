@@ -208,8 +208,30 @@ function rotundaColor(t: Terrain, x: number, y: number, d: { x: number; y: numbe
  * back behind the play (a back wall): the same pale stone, shaded round across
  * each root, but dimmed and cooled, so you see it's behind you.
  */
+const isRoot = (backdrop: Uint8Array, x: number, y: number) => x >= 0 && x < WORLD_W && y >= 0 && y < WORLD_H && (backdrop[y * WORLD_W + x] === VBack.Roots || backdrop[y * WORLD_W + x] === VBack.RootsFront);
+
+/**
+ * A root standing in front of the play (where a pass runs under a trunk): the
+ * trunk's own pale stone, shaded round across it, a touch darker than the
+ * solid wood (a hint it isn't there to stand on), outlined against what's behind.
+ */
+function rootsFrontColor(backdrop: Uint8Array, x: number, y: number): number {
+  const is = (xx: number, yy: number) => xx >= 0 && xx < WORLD_W && yy >= 0 && yy < WORLD_H && backdrop[yy * WORLD_W + xx] === VBack.RootsFront;
+  let l = 0;
+  while (l < 12 && is(x - l - 1, y)) l++;
+  let r = 0;
+  while (r < 12 && is(x + r + 1, y)) r++;
+  const u = (l + 0.5) / (l + r + 1);
+  let k = 0.55 + 0.6 * Math.sin(Math.PI * Math.min(1, u * 1.2)) * (1.2 - u * 0.75);
+  if (!is(x, y - 1)) k *= 1.1;
+  if (!is(x, y + 1)) k *= 0.75;
+  if (!is(x - 1, y) || !is(x + 1, y)) k *= 0.7;
+  k *= 0.88;
+  return gemRgb(128 * k, 146 * k, 160 * k);
+}
+
 function rootsBackColor(backdrop: Uint8Array, x: number, y: number): number {
-  const is = (xx: number, yy: number) => xx >= 0 && xx < WORLD_W && yy >= 0 && yy < WORLD_H && backdrop[yy * WORLD_W + xx] === VBack.Roots;
+  const is = (xx: number, yy: number) => isRoot(backdrop, xx, yy);
   let l = 0;
   while (l < 20 && is(x - l - 1, y)) l++;
   let r = 0;
@@ -352,6 +374,10 @@ export class Renderer {
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
   private chunkImage = new ImageData(CHUNK, CHUNK);
   private chunkPixels = new Uint32Array(this.chunkImage.data.buffer);
+  /** What stands in front of the play in each chunk (the forest's front roots), drawn over the actors; null where there's none. */
+  private frontCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
+  private frontImage = new ImageData(CHUNK, CHUNK);
+  private frontPixels = new Uint32Array(this.frontImage.data.buffer);
   private mini: HTMLCanvasElement;
   private miniCtx: CanvasRenderingContext2D;
   private miniImage: ImageData;
@@ -424,6 +450,9 @@ export class Renderer {
     const ox = (ci % CHUNKS_X) << CHUNK_SHIFT;
     const oy = Math.floor(ci / CHUNKS_X) << CHUNK_SHIFT;
     const px = this.chunkPixels;
+    const fpx = this.frontPixels;
+    fpx.fill(0);
+    let fronts = 0;
     const stain = game.stain;
     const backdrop = game.backdrop;
     const skyline = game.skyline;
@@ -439,6 +468,12 @@ export class Renderer {
           if (bd === VBack.Rotunda && game.valley) c = rotundaColor(t, ox + x, wy, game.valley.dome);
           else if (bd === VBack.Ashlar) c = ashlarColor(t, ox + x, wy);
           else if (bd === VBack.Roots) c = rootsBackColor(backdrop, ox + x, wy);
+          else if (bd === VBack.RootsFront) {
+            // A root in front: the pass's roots behind it, and it, over whoever walks through.
+            c = rootsBackColor(backdrop, ox + x, wy);
+            fpx[y * CHUNK + x] = rootsFrontColor(backdrop, ox + x, wy);
+            fronts++;
+          }
           else if (bd) c = backWallColor(t, bd, ox + x, wy);
           else if (wy > skyline[ox + x] + 3) c = caveShade(t, ox + x, wy);
           else c = grassBlade(t, ox + x, wy);
@@ -478,6 +513,15 @@ export class Renderer {
       this.chunkCanvas[ci] = c;
     }
     c.getContext('2d')!.putImageData(this.chunkImage, 0, 0);
+    if (fronts) {
+      let f = this.frontCanvas[ci];
+      if (!f) {
+        f = document.createElement('canvas');
+        f.width = f.height = CHUNK;
+        this.frontCanvas[ci] = f;
+      }
+      f.getContext('2d')!.putImageData(this.frontImage, 0, 0);
+    } else this.frontCanvas[ci] = null;
 
     // Minimap: one pixel per 8x8 block, colored by the block's dominant material.
     const mx0 = ox / MINI_SCALE;
@@ -766,6 +810,14 @@ export class Renderer {
     const ly = Math.floor(camY - halfH) - 1;
     this.particleLayer.render(game.particles, this.sprites, alpha, lx, ly, Math.ceil(halfW * 2) + 3, Math.ceil(halfH * 2) + 3);
     ctx.drawImage(this.particleLayer.canvas, lx, ly);
+
+    // What stands in front of the play: the forest's front roots, over whoever ducks behind them.
+    for (let cy = vy0; cy <= vy1; cy++) {
+      for (let cx = vx0; cx <= vx1; cx++) {
+        const f = this.frontCanvas[cy * CHUNKS_X + cx];
+        if (f && game.loaded[cy * CHUNKS_X + cx]) ctx.drawImage(f, cx * CHUNK, cy * CHUNK);
+      }
+    }
 
     // Geysers: their glowing mouths.
     if (game.geyserList.length) drawGeysers(ctx, game.geyserList, camX - halfW, camY - halfH, camX + halfW, camY + halfH, now);

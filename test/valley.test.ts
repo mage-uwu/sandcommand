@@ -7,6 +7,7 @@ import { Mat, isDeadGround } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { Biome, MapKind, biomeOf, generateWorld, lastComplexes, lastFlora, lastValley, lastWater } from '../src/shared/worldgen.ts';
 import { floodWater, paintWater, solveLevel } from '../src/shared/water.ts';
+import { VBack } from '../src/shared/valley.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 
@@ -108,6 +109,22 @@ describe('the Valley of Souls', () => {
     // No blister coral anywhere in the calm.
     const c = v.calm;
     expect(flora.some((f) => f.kind === FloraKind.Blister && f.x > c.x0 && f.x < c.x1 && f.y > c.y0)).toBe(false);
+  });
+
+  it('in the passes under the trees, a root or two stands in front: drawn over the play, never solid', () => {
+    const tt = new Terrain();
+    const bd = new Uint8Array(WORLD_W * WORLD_H);
+    generateWorld(tt, valleySeed(), MapKind.Plain, bd);
+    let front = 0;
+    let back = 0;
+    for (let i = 0; i < bd.length; i++) {
+      if (bd[i] === VBack.RootsFront) {
+        front++;
+        expect(tt.mat[i]).toBe(Mat.Air);
+      } else if (bd[i] === VBack.Roots) back++;
+    }
+    expect(front).toBeGreaterThan(200);
+    expect(back).toBeGreaterThan(front); // (most of the pass is set back)
   });
 
   it('the nest at the bottom: spectacularly rich in GEMMs, giant crystals and coral', () => {
