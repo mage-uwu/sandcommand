@@ -168,7 +168,7 @@ export const GameMode = {
   Regicide: 2, // two fortresses, a king in each: kill theirs, keep yours (everyone else respawns)
   Extraction: 3, // four teams race down a labyrinth for the golden idol and out on the extraction rocket (everyone respawns)
   Pvp: 4, // all against all for five minutes with respawns: most kills wins
-  Siege: 5, // red holds a massive fortress for ten minutes, its king inside; green has 300 lives to kill him
+  Siege: 5, // red holds a massive fortress for twenty minutes, its king inside; green has 300 lives to kill him
   Extermination: 6, // everyone together against four basilisks hibernating in a lair: kill them all (everyone respawns)
 } as const;
 

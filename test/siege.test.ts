@@ -137,7 +137,7 @@ describe('siege', () => {
     expect(world.winner).toBe(ATTACKERS);
   });
 
-  it('ten minutes with the king standing: red holds', () => {
+  it('twenty minutes with the king standing: red holds', () => {
     const world = siegeWorld(25);
     expect(world.phaseTimer).toBeGreaterThan(SIEGE_TICKS - 30 * 5);
     world.phaseTimer = 1;

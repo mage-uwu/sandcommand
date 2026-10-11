@@ -3486,7 +3486,7 @@ export class Renderer {
         (exterm
           ? 'extermination · everyone together · four basilisks hibernate in the lair below · kill them all · respawns'
           : siege
-          ? 'siege · red holds the fortress and its king for 10 minutes · green has 300 lives to kill him'
+          ? 'siege · red holds the fortress and its king for 20 minutes · green has 300 lives to kill him'
           : extraction
           ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
           : regicide
@@ -3579,7 +3579,7 @@ export class Renderer {
         const lives = rs.lives ?? 0;
         parts.push({ t: `♛ ${who}${game.myTeam === Team.Red && id !== game.myId ? ' (yours)' : ''}`, c: teamCss(Team.Red) }, { t: '  v  ', c: '#999' }, { t: `GREEN ${lives} LIVES`, c: lives <= 30 ? '#ff8070' : teamCss(Team.Green) });
         extra = { t: game.myTeam === Team.Red ? 'DEFEND · keep the king alive until the clock runs out' : game.myTeam === Team.Green ? 'ATTACK · cross the gap, break in, kill the king' : 'SIEGE', c: game.myTeam === Team.Green ? teamCss(Team.Green) : teamCss(Team.Red) };
-        if (game.alive && game.isKing(game.myId) && secs > 10 * 60 - 5) big('YOU ARE KING', 'hold the vault · ten minutes · if you fall, the fortress falls', teamCss(Team.Red));
+        if (game.alive && game.isKing(game.myId) && secs > 20 * 60 - 5) big('YOU ARE KING', 'hold the vault · twenty minutes · if you fall, the fortress falls', teamCss(Team.Red));
       } else if (regicide) {
         modeName = 'REGICIDE';
         const king = (t: number) => {
@@ -3588,7 +3588,7 @@ export class Renderer {
           return `♛ ${who}${game.myTeam === t && id !== game.myId ? ' (yours)' : ''}`;
         };
         parts.push({ t: king(Team.Red), c: teamCss(Team.Red) }, { t: '  v  ', c: '#999' }, { t: king(Team.Green), c: teamCss(Team.Green) });
-        if (game.alive && game.isKing(game.myId) && secs > 6 * 60 - 5) big('YOU ARE KING', 'stay alive · if you fall, your side loses', teamCss(game.myTeam));
+        if (game.alive && game.isKing(game.myId) && secs > 12 * 60 - 5) big('YOU ARE KING', 'stay alive · if you fall, your side loses', teamCss(game.myTeam));
       } else if (teams) {
         modeName = 'TEAMS';
         const you = (t: number) => (game.myTeam === t ? '*' : '');

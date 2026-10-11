@@ -111,6 +111,18 @@ describe('Regicide', () => {
     expect(redKing.pendingSpawn).toBe(false); // no coming back
   });
 
+  it('runs twelve minutes; time up with both kings standing is a stalemate, whatever the kills', () => {
+    const { world, ps } = regicide(45, 6);
+    const w = world as unknown as { phaseTimer: number };
+    expect(w.phaseTimer).toBeGreaterThan(30 * 60 * 12 - 30 * 30);
+    for (const p of ps) p.waveKills = p.team === Team.Red ? 9 : 0;
+    w.phaseTimer = 1;
+    world.step();
+    expect(world.phase).toBe(Phase.Victory);
+    expect(world.winner).toBe(255);
+    for (const p of ps) expect(p.wins).toBe(0);
+  });
+
   it('a king who leaves the game hands the crown on instead of losing it', () => {
     const { world } = regicide(44, 6);
     const old = world.kings[Team.Red];

@@ -30,8 +30,8 @@ export const SIEGE_LIVES = 300;
 /** How often each side starts with a tarantula as well (rolled apart: some sieges both do, some neither). */
 export const SIEGE_ATK_TARANTULA = 0.5;
 export const SIEGE_DEF_TARANTULA = 0.2;
-/** How long the defenders have to hold (ticks: ten minutes). */
-export const SIEGE_TICKS = 30 * 60 * 10;
+/** How long the defenders have to hold (ticks: twenty minutes). */
+export const SIEGE_TICKS = 30 * 60 * 20;
 
 const MARGIN = 96;
 /** The fortress: its first module (from its own end), storeys and basements outward from that end; the king's vault module. */

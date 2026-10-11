@@ -1012,7 +1012,8 @@ export class World {
   /**
    * Regicide: a king falls, the other side wins (every member scores). A
    * king who leaves the game hands the crown to a living teammate. When time
-   * runs out, the side with more kills this wave takes it.
+   * runs out with both kings standing, it's a stalemate (kills don't decide it).
+   * Both kings falling together goes to the side with more kills this wave.
    */
   private stepRegicide(timeUp: boolean): void {
     for (const team of [Team.Red, Team.Green]) {
@@ -1034,7 +1035,8 @@ export class World {
       }
     }
     if (!fallen && !timeUp) return;
-    if (!fallen || (!this.kingAlive(Team.Red) && !this.kingAlive(Team.Green))) {
+    if (!fallen) winner = 255; // (time's up, both kings standing: a stalemate)
+    else if (!this.kingAlive(Team.Red) && !this.kingAlive(Team.Green)) {
       const kills = [0, 0];
       for (const p of this.players) if (p && p.inWave && p.team !== Team.None) kills[p.team] += p.waveKills;
       winner = kills[0] === kills[1] ? 255 : kills[0] > kills[1] ? Team.Red : Team.Green;
@@ -1046,7 +1048,7 @@ export class World {
 
   /**
    * Siege: the defenders' king falls, the attackers win; the attackers run
-   * out of lives (and of clones still fighting) or the ten minutes run out
+   * out of lives (and of clones still fighting) or the twenty minutes run out
    * with the king standing, the defenders do. A king who leaves hands the
    * crown on, as in Regicide.
    */
@@ -6712,7 +6714,7 @@ const VICTORY_TICKS = 30 * 7;
 /** A wave's time limit. */
 const WAVE_TICKS = 30 * 60 * 4;
 /** Regicide waves run longer: fortresses take a while to crack. */
-const REGICIDE_TICKS = 30 * 60 * 6;
+const REGICIDE_TICKS = 30 * 60 * 12;
 /** Regicide reinforcements: dead soldiers drop back in after this long. */
 const REGICIDE_RESPAWN_TICKS = 30 * 10;
 /** PvP waves run five minutes, and the dead are back in five seconds. */
@@ -6726,8 +6728,8 @@ const PVP_RESPAWN_TICKS = 30 * 5;
 const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction, GameMode.Extermination];
 /** Siege attackers come back faster than anyone (their lives are what's counted). */
 const SIEGE_RESPAWN_TICKS = 30 * 6;
-/** Extermination waves run twelve minutes too. */
-const EXTERMINATION_TICKS = 30 * 60 * 12;
+/** Extermination waves run twenty-four minutes. */
+const EXTERMINATION_TICKS = 30 * 60 * 24;
 /** The lair's basilisks: a quarter of a wild one's hit points (four to kill, not one), still a long fight each. */
 const LAIR_HP = 0.25;
 /** What lies by each tunnel mouth in the lair, just clear of the hole. */

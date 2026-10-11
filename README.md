@@ -957,15 +957,15 @@ A team mode, and a favourite of the rotation (see above).
   same way.
 - **Winning.** The king never respawns. When a king dies, the other team
   wins the wave, and every member scores. A king who leaves the game hands
-  the crown to a living teammate. Waves run six minutes; if both kings are
-  still alive at the end, the side with more kills takes it.
+  the crown to a living teammate. Waves run twelve minutes; if both kings are
+  still alive at the end, it's a stalemate.
 - **Bots.** About half the bots assault: they go straight for the enemy king
   and dig through whatever is in the way. The rest fight whoever is
   nearest. A bot king holds his vault and shoots whatever comes into view.
 
 ## Siege
 
-Red holds a fortress for ten minutes and green tries to take it. Two
+Red holds a fortress for twenty minutes and green tries to take it. Two
 teams play, and the map is built for the mode (`MapKind.Siege`,
 `src/shared/siege.ts`). It's in the rotation. **`?room=siege`** joins a
 second match that plays nothing but Siege.
@@ -1020,7 +1020,7 @@ from the first second.
 
 **Winning.**
 - **Green wins** the moment the king dies.
-- **Red wins** if he is still alive after ten minutes, or once the
+- **Red wins** if he is still alive after twenty minutes, or once the
   attackers are out of lives with no clone still fighting.
 - **Abdication.** A king who leaves hands the crown to a living defender.
 
@@ -1048,7 +1048,7 @@ to reach, and so easy to disturb:
 - A worm-track passage joins each den to the next, deep under everything.
 
 Kill all four and everyone wins together, the fallen included. When the
-twelve minutes run out with any still alive, the basilisks win. The dead
+twenty-four minutes run out with any still alive, the basilisks win. The dead
 come back by drop rocket, as in Regicide.
 - **Waking them.** They sleep the whole wave unless something wakes them,
   and anything coming near does. Woken, a basilisk bores for the surface
@@ -1073,8 +1073,8 @@ match that plays nothing else.
   leave sleeping basilisks alone in any other mode).
 - They dig through to one sleeping out of sight in the rock.
 
-In headless 8-bot waves the bots kill one or two of the four in the twelve
-minutes. Humans with the anti-tank cannons make the difference.
+In headless 8-bot waves the bots kill one or two of the four in twelve
+minutes (the wave runs twenty-four). Humans with the anti-tank cannons make the difference.
 
 ## Extraction
 
