@@ -571,15 +571,17 @@ export function venomDrip(p: Particles, x: number, y: number, amount: number): v
   if (Math.random() < Math.min(0.5, 0.08 + amount / 250)) p.spawn(PK.Blood, x + rnd(-3, 3), y + rnd(-6, 4), rnd(-8, 8), rnd(-10, 10), 40);
 }
 
-/** A millipede killed: its plates and legs flung off along its whole body, and its blood. */
+/** A millipede killed: its pink coral plates, legs and gems flung off along its whole body, and its blood. */
 export function beastGibs(p: Particles, pts: readonly number[]): void {
+  const gems = [0xff2a8a, 0x18c8c0, 0x22b85a];
   for (let i = 0; i < pts.length; i += 2) {
     const x = pts[i];
     const y = pts[i + 1];
     const a = Math.random() * Math.PI * 2;
     const s = 40 + Math.random() * 110;
-    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 70, rnd(500, 700), GIB_PLATE | GIB_INORGANIC, i === 0 ? 0x3a1410 : (i >> 1) % 2 ? 0x5a2418 : 0x6e3020);
-    if (Math.random() < 0.5) p.spawn(PK.Gib, x, y, rnd(-80, 80), rnd(-120, -20), rnd(400, 600), GIB_STALK | GIB_INORGANIC, 0xc89070);
+    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 70, rnd(500, 700), GIB_PLATE | GIB_INORGANIC, (i >> 1) % 2 ? 0xff4f8b : 0xff6a9c);
+    if (Math.random() < 0.5) p.spawn(PK.Gib, x, y, rnd(-80, 80), rnd(-120, -20), rnd(400, 600), GIB_STALK | GIB_INORGANIC, 0xffa0c0);
+    if (Math.random() < 0.6) p.spawn(PK.Gib, x, y, rnd(-110, 110), rnd(-150, -40), rnd(500, 700), GIB_SAC | GIB_INORGANIC, gems[Math.floor(Math.random() * gems.length)]);
     bloodSplat(p, x, y, 4, 90);
   }
 }

@@ -520,8 +520,11 @@ The planet's own creatures (`src/shared/wildlife.ts`). Nobody drives them,
 ever: the server thinks for them, and they fight everyone alike, bots
 included.
 
-**The millipede** lives in the caves: a long, many-legged crawler of dark,
-glossy plates, about four clones long.
+**The millipede** lives in the caves: a long, many-legged crawler about
+four clones long, vibrant pink coral all over. Its plates are pored, with a
+coral polyp branching off every other one, and gems are grown into its back:
+faceted pink, turquoise and emerald crystals that glint as it moves. Its
+legs are pale pink, and it bursts into coral, legs and gem shards.
 - **It goes along any surface.** Floors, walls and ceilings alike, its body
   bending round every corner and lying along the ground under it. Its crawl
   follows the contour of the terrain grid: into a wall ahead it turns up
@@ -534,7 +537,7 @@ glossy plates, about four clones long.
   nearer. Otherwise it wanders, now and then turning round.
 - **It spits.** With its prey in sight and in reach, it stops and rears its
   front up off the ground. A cobra's hood spreads either side of its neck,
-  blood-red with dark eyespots and a pale rim, and it spits a glob of
+  magenta coral with turquoise gem eyespots and a pale rim, and it spits a glob of
   venom on the arc that lands. It also bites whoever its head touches.
 - **Venom lingers.** A glob does little harm on the hit. The venom it leaves
   in the blood does the real damage: 36 hit points a dose, a little each
@@ -544,7 +547,7 @@ glossy plates, about four clones long.
   stained red. Only the repair kit's health wave washes the venom out.
 - **It can be killed.** It has 240 hit points, so three sniper slugs or about
   fifteen rifle rounds. Explosions hurt it by distance, and a laser beam
-  hurts it as it passes through. It bursts into plates, legs and blood.
+  hurts it as it passes through.
 - **Where.** Up to five on a cave map and three on any other, each coming up
   out of the deep (on a cave floor, out of the water) well away from
   everyone. There are none in the labyrinth, the tutorial, or the Valley

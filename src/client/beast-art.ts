@@ -2,15 +2,29 @@ import type { Terrain } from '../shared/terrain.ts';
 import { openWay } from '../shared/wildlife.ts';
 
 /**
- * The wildlife, drawn. The millipede: a chain of dark, glossy chitin plates
- * (a ridge of rust-red along each back, a pale belly edge), every one with
- * a pair of thin legs stepping on the ground under it, its body lying along
- * whatever surface it's on; a broad head with feelers and mandibles. Reared
- * up to spit, its hood spreads either side of its neck like a cobra's,
- * blood-red with dark eyespots and a pale rim.
+ * The wildlife, drawn. The millipede: a chain of vibrant pink coral plates
+ * (pored, a pale sheen along each back, a coral polyp branching off every
+ * other one), gems grown into them (faceted pink, turquoise and emerald
+ * crystals, glinting), every plate with a pair of thin pink legs stepping
+ * on the ground under it, its body lying along whatever surface it's on; a
+ * broad head with feelers and mandibles. Reared up to spit, its hood
+ * spreads either side of its neck like a cobra's, magenta coral with
+ * turquoise gem eyespots and a pale rim. (Its venom stays blood-red.)
  */
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+/** A fixed hash in [0, 1) per (plate, salt): where its pores and gem sit, and which gem. */
+const gemHash = (i: number, k: number) => {
+  let h = (i * 374761393 + k * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+};
+/** The GEMMs it grows: each a body colour and a facet's brighter one (pink, turquoise, emerald). */
+const GEM_LOOKS = [
+  ['#ff2a8a', '#ffa0d0'],
+  ['#18c8c0', '#90fff4'],
+  ['#22b85a', '#9cffb8'],
+] as const;
 
 /**
  * Draw a millipede from its body points (head first, flat x, y pairs), how
@@ -60,7 +74,7 @@ export function drawMillipede(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
       const ky = by - s.ny * reach * 0.55 + s.ty * (swing * 0.5 + side * 1.4);
       const fx = bx - s.nx * reach + s.tx * (swing + side * 0.8);
       const fy = by - s.ny * reach + s.ty * (swing + side * 0.8);
-      ctx.strokeStyle = side > 0 ? '#9a6a50' : '#c89878';
+      ctx.strokeStyle = side > 0 ? '#e05a8a' : '#ffa0c0';
       ctx.lineWidth = 0.7;
       ctx.beginPath();
       ctx.moveTo(bx, by);
@@ -77,21 +91,21 @@ export function drawMillipede(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
     ctx.save();
     ctx.translate(h.x + h.tx * 0.5, h.y + h.ty * 0.5);
     ctx.rotate(a);
-    ctx.fillStyle = '#e8c4a0';
+    ctx.fillStyle = '#ffd0e0';
     ctx.beginPath();
     ctx.ellipse(0, 0, 3.6 + lift, spread + 0.7, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#7a1210';
+    ctx.fillStyle = '#c0105a';
     ctx.beginPath();
     ctx.ellipse(0, 0, 3.2 + lift, spread, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#b8261a';
+    ctx.fillStyle = '#ff4f9b';
     ctx.beginPath();
     ctx.ellipse(0.4, 0, 2.2 + lift * 0.6, spread * 0.72, 0, 0, Math.PI * 2);
     ctx.fill();
     // Eyespots, one each side, and the dark ribs fanning out to the rim.
     if (lift > 0.4) {
-      ctx.strokeStyle = 'rgba(40,6,6,0.7)';
+      ctx.strokeStyle = 'rgba(120,0,50,0.7)';
       ctx.lineWidth = 0.4;
       for (let r = -3; r <= 3; r++) {
         if (r === 0) continue;
@@ -101,14 +115,17 @@ export function drawMillipede(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
         ctx.stroke();
       }
       for (const sd of [-1, 1]) {
-        ctx.fillStyle = '#f0d070';
+        // (Eyespots: turquoise gems in pale rings.)
+        ctx.fillStyle = '#fff0f6';
         ctx.beginPath();
-        ctx.arc(0, sd * spread * 0.55, 1.1, 0, Math.PI * 2);
+        ctx.arc(0, sd * spread * 0.55, 1.2, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#1a0606';
+        ctx.fillStyle = '#1fb8b0';
         ctx.beginPath();
-        ctx.arc(0, sd * spread * 0.55, 0.6, 0, Math.PI * 2);
+        ctx.arc(0, sd * spread * 0.55, 0.8, 0, Math.PI * 2);
         ctx.fill();
+        ctx.fillStyle = '#9ffff4';
+        ctx.fillRect(-0.4, sd * spread * 0.55 - 0.5, 0.45, 0.45);
       }
     }
     ctx.restore();
@@ -123,25 +140,74 @@ export function drawMillipede(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
     // (Up, in this frame: +y or -y, whichever the open side is.)
     const upY = s.nx * -Math.sin(a) + s.ny * Math.cos(a) > 0 ? 1 : -1;
     const len = i === 0 ? 3.4 : 2.7;
-    ctx.fillStyle = hurt > 0 ? '#5a1a14' : '#2a100c';
+    // Coral flesh: a deep rose under-shadow, the hot-pink plate, a pale coral sheen on the open side.
+    ctx.fillStyle = hurt > 0 ? '#7a0e3a' : '#a8104a';
     ctx.beginPath();
     ctx.ellipse(0, 0, len, s.w, 0, 0, Math.PI * 2);
     ctx.fill();
-    // The glossy back: a rust ridge and a highlight on the open side; a pale belly edge under.
-    ctx.fillStyle = i % 2 ? '#6e2a1a' : '#7e3220';
+    ctx.fillStyle = i % 2 ? '#ff4f8b' : '#ff6a9c';
     ctx.beginPath();
-    ctx.ellipse(-0.2, upY * s.w * 0.35, len * 0.82, s.w * 0.55, 0, 0, Math.PI * 2);
+    ctx.ellipse(-0.2, upY * s.w * 0.25, len * 0.86, s.w * 0.68, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,200,170,0.35)';
-    ctx.fillRect(-len * 0.5, upY * s.w * 0.62 - 0.3, len * 0.9, 0.6);
-    ctx.fillStyle = '#b07a5a';
+    ctx.fillStyle = '#ffb0c8';
+    ctx.beginPath();
+    ctx.ellipse(-0.4, upY * s.w * 0.55, len * 0.55, s.w * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Coral pores, a few to a plate (fixed for each, so they don't crawl over it).
+    ctx.fillStyle = 'rgba(140,10,60,0.55)';
+    for (let k = 0; k < 3; k++) {
+      const h = gemHash(i, k + 7);
+      ctx.fillRect((h - 0.5) * len * 1.3, upY * (0.1 + gemHash(i, k + 11) * 0.5) * s.w - 0.25, 0.5, 0.5);
+    }
+    // The belly edge: pale coral pink.
+    ctx.fillStyle = '#ffc8d8';
     ctx.fillRect(-len * 0.7, -upY * s.w * 0.8 - 0.3, len * 1.3, 0.6);
+    // A coral polyp branching up off every other plate.
+    if (i > 0 && i % 2 === 0) {
+      ctx.strokeStyle = '#ff8ab4';
+      ctx.lineWidth = 0.6;
+      const sway = Math.sin(now / 300 + i) * 0.4;
+      ctx.beginPath();
+      ctx.moveTo(-0.3, upY * s.w * 0.8);
+      ctx.lineTo(-0.6 + sway, upY * (s.w + 1.6));
+      ctx.moveTo(-0.5 + sway * 0.6, upY * (s.w + 0.7));
+      ctx.lineTo(0.6 + sway, upY * (s.w + 1.4));
+      ctx.stroke();
+      ctx.fillStyle = '#ffe0ec';
+      ctx.fillRect(-0.9 + sway, upY * (s.w + 1.6) - 0.35, 0.7, 0.7);
+      ctx.fillRect(0.3 + sway, upY * (s.w + 1.4) - 0.35, 0.7, 0.7);
+    }
+    // Gems grown into its back: a faceted crystal on most plates, pink, turquoise or emerald, glinting.
+    if (gemHash(i, 1) < 0.8 || i === 1) {
+      const g = GEM_LOOKS[Math.floor(gemHash(i, 2) * GEM_LOOKS.length)];
+      const gx = (gemHash(i, 3) - 0.5) * len * 0.8;
+      const gy = upY * s.w * 0.45;
+      const r = 0.9 + gemHash(i, 4) * 0.7 + (i < 4 ? 0.3 : 0);
+      ctx.fillStyle = g[0];
+      ctx.beginPath();
+      ctx.moveTo(gx, gy + upY * r * 1.3);
+      ctx.lineTo(gx + r, gy);
+      ctx.lineTo(gx, gy - upY * r * 0.7);
+      ctx.lineTo(gx - r, gy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = g[1];
+      ctx.beginPath();
+      ctx.moveTo(gx, gy + upY * r * 1.3);
+      ctx.lineTo(gx + r, gy);
+      ctx.lineTo(gx, gy);
+      ctx.closePath();
+      ctx.fill();
+      const tw = (Math.sin(now / 240 + i * 1.7) + 1) / 2;
+      ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.65 * tw * tw})`;
+      ctx.fillRect(gx - r * 0.45, gy + upY * r * 0.45 - 0.25, 0.5, 0.5);
+    }
     // The joint behind each plate.
-    ctx.fillStyle = '#140604';
+    ctx.fillStyle = '#6a0830';
     ctx.fillRect(-len - 0.2, -s.w * 0.7, 0.6, s.w * 1.4);
     if (i === 0) {
       // The head: feelers out ahead, curling; mandibles; a pale eye.
-      ctx.strokeStyle = '#c89878';
+      ctx.strokeStyle = '#ffb0c8';
       ctx.lineWidth = 0.5;
       const wave = Math.sin(now / 160) * 0.8;
       for (const sd of [-1, 1]) {
@@ -150,10 +216,10 @@ export function drawMillipede(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
         ctx.quadraticCurveTo(len + 2, upY * (1.4 + 0.5 * sd), len + 5, upY * (1.2 + 1.1 * sd + wave * 0.4 * sd));
         ctx.stroke();
       }
-      ctx.fillStyle = '#d8a070';
+      ctx.fillStyle = '#ffe0ec';
       ctx.fillRect(len - 0.6, -upY * 1.6 - 0.5, 1.8, 0.9);
       ctx.fillRect(len - 0.6, -upY * 0.4 - 0.5, 1.8, 0.9);
-      ctx.fillStyle = lift > 0.3 ? '#ff4a30' : '#e8d8a0';
+      ctx.fillStyle = lift > 0.3 ? '#3fe8d8' : '#c8fff8';
       ctx.fillRect(len * 0.2, upY * 1.2 - 0.5, 1, 1);
     }
     ctx.restore();
