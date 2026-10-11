@@ -197,6 +197,19 @@ targets takes a deliberate act:
 Lose sight of them and it moves on to the next at once. This is what makes
 scoping easy: lock on and stay focused on your mark.
 
+**Locked shots fly true.** What a client sees of everyone else is a moment
+old: smoothed between frames, then the trip to the server and back. Aimed
+where a running target is seen, a fast shot lands behind it. The bots,
+thinking on the server, never had that problem. So a shot fired locked on
+(by the assist or the scope) is set true by the server (`World.lockedAim`).
+It takes the target the aim was on: the nearest head or body by angle,
+within 36 cells of the aim at its range, or 3 degrees, whichever allows
+more. Then it aims at where that target really is now, leading it by the
+shot's flight the way a bot does. This covers rifles, snipers and every
+other gun a clone carries, and the laser's beam, which is aimed straight
+at the target, instant. With nothing near enough the aim, the shot goes
+where it was aimed.
+
 **Lock first, then fire.** A thumb coming down on the fire pad locks on
 before a round goes. A target not already locked waits a moment (~0.1 s)
 for the lock to settle and the scope to arrive, so a snap shot with a

@@ -3429,7 +3429,10 @@ export class World {
   private readonly muzzleAt = { x: 0, y: 0 };
 
   private fire(p: Player, def: (typeof WEAPONS)[number]): void {
-    const aim = dequantizeAim(p.aimQ);
+    let aim = dequantizeAim(p.aimQ);
+    // Locked on: true to where the target really is (see lockedAim).
+    const pd = def.proj !== PROJ_DIG ? PROJ[def.proj] : undefined;
+    if (p.buttons & BTN_LOCK && pd) aim = this.lockedAim(p, aim, def.speed, GRAVITY * pd.gravity, def.muzzle);
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
@@ -3509,7 +3512,9 @@ export class World {
    */
   private fireLaser(p: Player, power: number): void {
     const def = WEAPONS[WeaponId.Laser];
-    const aim = dequantizeAim(p.aimQ);
+    let aim = dequantizeAim(p.aimQ);
+    // Locked on: the beam goes to where the target really is, now (see lockedAim).
+    if (p.buttons & BTN_LOCK) aim = this.lockedAim(p, aim, 0, 0, def.muzzle);
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
@@ -3518,6 +3523,51 @@ export class World {
     const brace = RECOIL_BRACE[p.body.stance] ?? 1;
     p.body.vx -= cos * (10 + 110 * power) * brace;
     p.body.vy -= sin * (10 + 110 * power) * brace * 0.6;
+  }
+
+  /**
+   * A locked-on shot (BTN_LOCK: the aim assist or the scope has the target).
+   * The client aimed at the target where it saw it, and what it sees is a
+   * moment old (smoothed between frames, then the trip here and back), so
+   * on a moving target the shot would land behind it. The server knows
+   * where everyone really is now: it takes the target the aim was on (the
+   * nearest by angle, within LOCK_SLACK cells of it at its range) and aims
+   * at it as it is, leading it by the shot's flight (`speed` 0: a beam,
+   * instant) as a bot would. Nothing near enough the aim: the aim as sent.
+   */
+  private lockedAim(p: Player, aim: number, speed: number, gravity: number, muzzle: number): number {
+    const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, Math.cos(aim) < 0, this.shoulderPt);
+    const ox = sh.x;
+    const oy = sh.y;
+    const own = { vx: p.body.vx * 0.25, vy: p.body.vy * 0.25 };
+    let best = aim;
+    let bestD = Infinity;
+    const consider = (x: number, y: number, vx: number, vy: number) => {
+      const dist = Math.hypot(x - ox, y - oy);
+      if (dist < 6) return;
+      const b = speed > 0 ? ballisticAim(ox, oy, { x, y, vx, vy }, speed, gravity, own, muzzle) : null;
+      const a = b ? b.aim : Math.atan2(y - oy, x - ox);
+      const d = Math.abs(((a - aim + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (d < bestD && d < Math.max(LOCK_SLACK_MIN, Math.atan2(LOCK_SLACK, dist)) && this.lineClear(ox, oy, x, y)) {
+        bestD = d;
+        best = a;
+      }
+    };
+    for (const q of this.players) {
+      if (!q || q === p || !q.alive || q.tank >= 0 || q.pilot >= 0 || this.friendly(p.id, q)) continue;
+      // Its head, and centre mass (whichever the aim was on is the nearer).
+      consider(q.cx, q.top + 1.5, q.body.vx, q.body.vy);
+      consider(q.cx, q.cy, q.body.vx, q.body.vy);
+    }
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const b = this.beasts[k];
+      if (!b || (b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp) || b.frozen > 0 || b.gem) continue;
+      const pts = this.beastPts[k];
+      const m = (pts.length >> 2) << 1;
+      consider(pts[0], pts[1], 0, 0);
+      consider(pts[m], pts[m + 1], 0, 0);
+    }
+    return best;
   }
 
   /** A tarantula's laser: a thin beam out of its head, at whatever it's aimed at. */
@@ -6337,6 +6387,14 @@ const TANK_MASS = 200;
 const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
 /** The digger's bite (radius and core) when it reaches cement: a core this wide takes cement two cells round (MAT_ADAMANT: a quarter of it). */
 const DIGGER_ADAMANT = 8;
+/**
+ * A locked-on shot is set true on its target (World.lockedAim) if the aim
+ * was within this many cells of it at its range (what a target moving at a
+ * run covers in the lag between the client's view and the server), or this
+ * angle (radians), whichever allows more.
+ */
+const LOCK_SLACK = 36;
+const LOCK_SLACK_MIN = 0.05;
 /** Ids for wildlife (wildlife.ts), above every dropship's. */
 const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
 /** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */
