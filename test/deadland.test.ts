@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { ACTOR_H, ACTOR_W, WORLD_W } from '../src/shared/constants.ts';
 import { rubbleOf } from '../src/shared/particles.ts';
 import { MAT_ADAMANT, MAT_COLOR, MAT_HARD, MAT_LOOSE, MAT_NAME, Mat, isDeadGround } from '../src/shared/materials.ts';
-import { GameMode, Phase, Team } from '../src/shared/protocol.ts';
+import { GameMode, Phase, Team, quantizeAim } from '../src/shared/protocol.ts';
+import { BTN_FIRE, BTN_RIGHT } from '../src/shared/actor.ts';
+import { invByte } from '../src/shared/items.ts';
+import { WeaponId } from '../src/shared/weapons.ts';
+import { deliverAll } from './helpers.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { Biome, MapKind, biomeOf, generateWorld, lastBiome, lastBuried, lastComplexes, lastFlora, lastMonuments } from '../src/shared/worldgen.ts';
 import { World } from '../src/server/world.ts';
@@ -127,6 +131,34 @@ describe('the deadland', () => {
     expect(dig(Mat.Cement)).toBeLessThanOrEqual(1);
     expect(dig(Mat.Concrete)).toBeGreaterThan(8);
     expect(dig(Mat.Pour)).toBeGreaterThan(40); // soft
+  });
+
+  it('but a digger does get through it, a cell at a time: the crust\'s cement paving and slabs, the caltrops too', () => {
+    const world = new World(5);
+    const a = world.addPlayer('a', { send() {} })!;
+    deliverAll(world, [a]);
+    const t = world.terrain;
+    // A flat floor, and a cement wall in front of the clone.
+    for (let y = 300; y < 460; y++) for (let x = 900; x < 1100; x++) t.set(x, y, y >= 440 ? Mat.Bedrock : x >= 1000 && x < 1030 ? Mat.Cement : Mat.Air);
+    world.terrainReplaced();
+    a.body.x = 1000 - ACTOR_W - 6;
+    a.body.y = 440 - ACTOR_H;
+    a.body.vx = a.body.vy = 0;
+    world.equip(a, WeaponId.Digger);
+    const cement = () => {
+      let n = 0;
+      for (let y = 300; y < 440; y++) for (let x = 1000; x < 1030; x++) if (t.get(x, y) === Mat.Cement) n++;
+      return n;
+    };
+    const before = cement();
+    const x0 = a.body.x;
+    // Digging in, walking into the hole as it opens, the beam swept up and down (down to its feet).
+    for (let k = 0; k < 30 * 6; k++) {
+      world.input(a.id, { seq: k + 1, buttons: BTN_FIRE | BTN_RIGHT, aim: quantizeAim(0.25 + Math.sin(k * 0.3) * 0.85), inv: invByte(a.slot, a.invVersion) });
+      world.step();
+    }
+    expect(before - cement()).toBeGreaterThan(150);
+    expect(a.body.x - x0).toBeGreaterThan(12); // (into the wall)
   });
 
   it('nothing grows on it: no grass, no flora on the crust', () => {

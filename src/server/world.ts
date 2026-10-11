@@ -160,7 +160,7 @@ import {
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
 import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
-import { Mat, digValue } from '../shared/materials.ts';
+import { MAT_ADAMANT, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
   F_FACE_LEFT,
@@ -3080,7 +3080,18 @@ export class World {
       // pressed against gets dug), up to its reach.
       let d = DIGGER_REACH;
       for (let r = 2; r < DIGGER_REACH; r++) {
-        if (this.terrain.isSolid(Math.floor(ox + cos * r), Math.floor(oy + sin * r))) {
+        const hx = Math.floor(ox + cos * r);
+        const hy = Math.floor(oy + sin * r);
+        if (this.terrain.isSolid(hx, hy)) {
+          // Adamant (the deadland's cement): only the very centre of a bite's core takes it (a
+          // quarter of its radius). So the bite is centred on the cell it reached, not past it, and
+          // its core widened (DIGGER_ADAMANT), the cement within two cells of it ground away each
+          // time: slower than soil, but a way through, not a pinhole.
+          if (MAT_ADAMANT[this.terrain.get(hx, hy)]) {
+            this.carve(hx, hy, DIGGER_ADAMANT, DIGGER_ADAMANT, 0, p.id);
+            p.gold += digValue(this.terrain.removedByMat);
+            return;
+          }
           d = Math.min(DIGGER_REACH, r + 1); // the core (radius DIGGER_CORE) still covers that cell
           break;
         }
@@ -5956,6 +5967,8 @@ const TANK_ID_BASE = CRAFT_ID_BASE + MAX_CRAFTS;
 const TANK_MASS = 200;
 /** Actor-field ids for dropships, above every tank's. */
 const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
+/** The digger's bite (radius and core) when it reaches cement: a core this wide takes cement two cells round (MAT_ADAMANT: a quarter of it). */
+const DIGGER_ADAMANT = 8;
 /** Ids for wildlife (wildlife.ts), above every dropship's. */
 const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
 /** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */

@@ -1529,7 +1529,7 @@ A hostile brutalist architect's wet dream, left to rot for eons
   - **Gravel**: loose, with light and dark pebbles.
   - **Ash**: loose drifts of soot-black and bone-white ash, flecked with each other.
   - **Char**: burnt fill, with the odd long-cold cinder. It crumbles to ash.
-  - **Cement**: the Progenitors' cement, the monuments' stuff. It is hard and *adamant*: a blast core bites it only within a quarter of its radius (a sixteenth of the area), and a digger shaves it a cell at a time (`MAT_ADAMANT`).
+  - **Cement**: the Progenitors' cement, the monuments' stuff. It is hard and *adamant*: a blast core bites it only within a quarter of its radius (a sixteenth of the area) (`MAT_ADAMANT`). A digger reaching it bites right on the cell it touches with a wider core, grinding away the cement within two cells each time. That's much slower than soil, but a way through the crust's paving and slabs (and a caltrop), not a pinhole.
   - **Pour**: rough poured concrete, soft enough to dig. It forms the monuments' footings and the seals over the dust.
   - **Old concrete** and **rusted steel**: what is left of the city that stood here before the fires.
 - **The crust.** Some 45–155 cells deep (20–200 ft), over the marslike ground:
