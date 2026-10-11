@@ -678,6 +678,8 @@ const CILIA = ['#c8b4a8', '#e0d0c4'];
 /** Its flytrap jaws: grey flaps, veined, rimmed with long teeth. */
 const FLAP = ['#5e5e66', '#76767e', '#8e8e96', '#aeaeb6'];
 const TOOTH = ['#d8d0bc', '#f4ecd8'];
+/** Plain cave stone (its head, at rest): mottled greys and a fleck of light. */
+const STONE = ['#46424c', '#56525c', '#66626c', '#76727c', '#9a96a0'];
 
 /**
  * A basilisk, in pixels: three times a millipede. Its body is in long
@@ -813,8 +815,15 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
   const back = 8; // (its skull, behind the hinge)
   const L = 20; // (the flaps' length, hinge to tip)
   const gape = frenzy ? 0.3 + 0.16 * Math.sin(now / 70) : 0;
-  // At rest, its head is dressed as the section behind it: the shut flytrap a spur of the same rock (or vein, or coral), its teeth and cilia drawn in.
-  const restCamo = frozen ? basCamoOf(seed, 1) : -1;
+  // At rest, its head is plain stone: the shut flytrap a boulder of mottled grey, cracked, flecked, its teeth and cilia drawn in.
+  const stone = (px: number, py: number): string => {
+    const blot = hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 21);
+    const h = hsh(px, py, seed + 4);
+    // Hairline cracks: a couple of wandering lines through it.
+    if (Math.abs(((px * 0.9 + py * 1.7 + Math.sin(py * 0.4 + seed) * 3) % 17) - 8.5) < 0.45 && h > 0.25) return '#2e2a32';
+    if (h > 0.94) return STONE[4];
+    return STONE[Math.min(3, Math.floor(blot * 3) + (h > 0.7 ? 1 : 0))];
+  };
   const local = (u: number, v: number) => ({ x: x + tx * u + nx * v, y: y + ty * u + ny * v });
   const span = L + W + 4;
   for (let py = Math.floor(y - span); py <= Math.ceil(y + span); py++) {
@@ -841,7 +850,7 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
         const rim = fv > half - 1.1;
         const vein = Math.abs(((fu * 0.7 + fv * 1.3) % 4) - 2) < 0.35;
         const hh = hsh(px, py, seed + side);
-        c = frozen ? camoPixel(restCamo, px, py, u, v, W, 1) : rim ? '#36363e' : fv < 1.4 ? FLAP[3] : vein ? FLAP[0] : FLAP[1 + (hh > 0.62 ? 1 : 0)];
+        c = frozen ? stone(px, py) : rim ? '#36363e' : fv < 1.4 ? FLAP[3] : vein ? FLAP[0] : FLAP[1 + (hh > 0.62 ? 1 : 0)];
         break;
       }
       if (!c && gape > 0 && u > 0 && u < L && Math.abs(v) < Math.tan(gape) * u) {
@@ -851,7 +860,7 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
       if (!c && u <= 0.5 && u >= -back) {
         // Its skull: the back of the wedge, dark plate, a lighter crest.
         const half = W * (1 - Math.max(0, -u - back * 0.45) / back);
-        if (Math.abs(v) <= half) c = frozen ? camoPixel(restCamo, px, py, u, v, W, 1) : Math.abs(v) > half - 1.1 ? '#120e14' : Math.abs(v) < 2 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(hsh(px, py, seed) * 2)];
+        if (Math.abs(v) <= half) c = frozen ? stone(px, py) : Math.abs(v) > half - 1.1 ? '#120e14' : Math.abs(v) < 2 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(hsh(px, py, seed) * 2)];
       }
       if (c) {
         ctx.fillStyle = c;
