@@ -106,6 +106,22 @@ export const R_FLORA = 39;
  * from it. Sent on join and whenever a level changes.
  */
 export const R_WATER = 40;
+/**
+ * Wildlife in view (wildlife.ts): u8 count, then per creature u8 slot, u8
+ * kind, u8 health (0..255 of its full), u8 how far up it's reared (0..255),
+ * u8 flags (1: holding on), u16 head x, u16 head y (+Y_BIAS), both x
+ * POS_SCALE, then for each further body point i8 dx, i8 dy from the one
+ * before (x BEAST_SCALE). An empty list once the last in view has gone.
+ */
+export const R_BEASTS = 41;
+export const BEAST_SCALE = 8;
+/** A creature killed: u8 slot, u8 kind, u32 seed (its gibs, from where the client last saw it). */
+export const R_BEAST_DIE = 42;
+/**
+ * Who has venom in their blood: u8 count, then per clone u8 id, u8 how much
+ * (harm still to come). Sent when the list changes and now and then while it's not empty.
+ */
+export const R_VENOM = 43;
 /** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
 export const GF_CAVE = 1;
 export const GF_RUMBLE = 2;
@@ -128,7 +144,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 58;
+export const PROTOCOL_VERSION = 59;
 
 /** Last Man Standing round phases. */
 export const Phase = {

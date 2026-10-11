@@ -514,6 +514,44 @@ lattice-corner hashes along a row, and each cell stops at the first material
 that applies (caves, then GEMM deposits, rock, sand lenses), which gives bit-identical
 terrain in less than half the time.
 
+## Wildlife
+
+The planet's own creatures (`src/shared/wildlife.ts`). Nobody drives them,
+ever: the server thinks for them, and they fight everyone alike, bots
+included.
+
+**The millipede** lives in the caves: a long, many-legged crawler of dark,
+glossy plates, about four clones long.
+- **It goes along any surface.** Floors, walls and ceilings alike, its body
+  bending round every corner and lying along the ground under it. Its crawl
+  follows the contour of the terrain grid: into a wall ahead it turns up
+  it, and over an edge it turns down round it. The body follows the head's
+  trail, a pair of legs stepping under each plate. Dig the ground out from
+  under it and it falls until it lands, then takes hold again.
+- **It hunts.** It goes for whoever hurt it, or else the nearest clone it can
+  see within about 280 cells. To decide which way to crawl, it tries a few
+  dozen steps each way along the ground and takes the one that gets it
+  nearer. Otherwise it wanders, now and then turning round.
+- **It spits.** With its prey in sight and in reach, it stops and rears its
+  front up off the ground. A cobra's hood spreads either side of its neck,
+  blood-red with dark eyespots and a pale rim, and it spits a glob of
+  venom on the arc that lands. It also bites whoever its head touches.
+- **Venom lingers.** A glob does little harm on the hit. The venom it leaves
+  in the blood does the real damage: 36 hit points a dose, a little each
+  tick for about six seconds. Doses stack (up to 110), and a bite adds
+  some too. A poisoned clone weeps blood, and your own HUD marks the harm
+  still to come on the health bar, pulsing, with the edges of the view
+  stained red. Only the repair kit's health wave washes the venom out.
+- **It can be killed.** It has 240 hit points, so three sniper slugs or about
+  fifteen rifle rounds. Explosions hurt it by distance, and a laser beam
+  hurts it as it passes through. It bursts into plates, legs and blood.
+- **Where.** Up to five on a cave map and three on any other, each coming up
+  out of the deep (on a cave floor, out of the water) well away from
+  everyone. There are none in the labyrinth, the tutorial, or the Valley
+  of Souls' calm.
+- **Bots** turn their guns on a creature coming at them that's nearer than
+  whoever they're fighting.
+
 ## Frosting: craters, gem caverns, geysers and flora
 
 Each map is grown with some extra frosting after its bunkers and caves.

@@ -159,7 +159,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -183,6 +183,10 @@ import {
   R_GEYSER_BLOW,
   R_FLORA,
   R_WATER,
+  R_BEASTS,
+  R_BEAST_DIE,
+  R_VENOM,
+  BEAST_SCALE,
   GF_CAVE,
   GF_RUMBLE,
   GF_TOXIC,
@@ -234,7 +238,36 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege, lastWater } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
+import { ballisticAim } from '../shared/ballistics.ts';
+import {
+  type Beast,
+  MILLI_BITE,
+  MILLI_BITE_CD,
+  MILLI_BITE_R,
+  MILLI_BITE_VENOM,
+  MILLI_CRAWL,
+  MILLI_HP,
+  MILLI_HUNT,
+  MILLI_R,
+  MILLI_REAR,
+  MILLI_SENSE,
+  MILLI_SPIT_AT,
+  MILLI_SPIT_CD,
+  MILLI_SPIT_RANGE,
+  MILLI_SPIT_SPEED,
+  VENOM_DOSE,
+  VENOM_MAX,
+  VENOM_RATE,
+  bodyPoints,
+  crawlStep,
+  fallStep,
+  nearestPoint,
+  newMillipede,
+  pushTrail,
+  segmentCircle,
+  turnRound,
+} from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
 import { ATTACKERS, DEFENDERS, SIEGE_ATK_TARANTULA, SIEGE_DEF_TARANTULA, SIEGE_LIVES, SIEGE_TICKS, type SiegeMap } from '../shared/siege.ts';
@@ -313,6 +346,10 @@ export class Player {
   surfShip = -1;
   /** Nanobot work done toward regrowing this clone's next missing limb (repair kit). */
   regrow = 0;
+  /** Venom in the blood (a millipede's): the harm still to come, a little each tick (VENOM_RATE). */
+  venom = 0;
+  /** Wildlife was in this client's view last frame (so an empty R_BEASTS tells it they've gone). */
+  beastsSent = false;
   /** A bot's skill, 1 (beginner) to 5 (expert): dealt out by World.dealSkills. */
   skill = 3;
   /** Ticks of mending left from a health wave it was caught in, and the last wave that caught it. */
@@ -410,6 +447,16 @@ export class World {
   readonly crafts: (Craft | null)[] = new Array(MAX_CRAFTS).fill(null);
   /** Tanks: dropped by parachute, driven by whoever climbs in. */
   readonly tanks: (Tank | null)[] = new Array(MAX_TANKS).fill(null);
+  /** Wildlife (wildlife.ts): the creatures in the caves, by slot, and each one's body points this tick (for hits, and to send). */
+  readonly beasts: (Beast | null)[] = new Array(MAX_BEASTS).fill(null);
+  readonly beastPts: number[][] = Array.from({ length: MAX_BEASTS }, () => []);
+  /** Is there wildlife on this world at all (the tutorial has none). */
+  wildlife = true;
+  private beastSpawnAt = 90;
+  private readonly beastRng = new Rng(0xbea57);
+  /** The valley's calm (no wildlife there: it's quiet, for now), and the venom list as last sent. */
+  private calm: { x0: number; x1: number; y0: number } | null = null;
+  private venomSent = '';
   /** Dropships: aerial support, called in by radio. */
   readonly ships: (Ship | null)[] = new Array(MAX_SHIPS).fill(null);
   /** Enemies spotted from the air, per side (spotKey): clone id -> the tick the sighting goes stale. */
@@ -609,6 +656,9 @@ export class World {
     this.trapCd.fill(0);
     this.trapsRev++;
     this.evac.state = Evac.None;
+    this.calm = lastValley?.calm ?? null;
+    this.beasts.fill(null);
+    this.beastSpawnAt = this.tick + 90;
   }
 
   /** Remember the freshly generated map, so newcomers can make it themselves instead of downloading it. */
@@ -1458,6 +1508,219 @@ export class World {
   }
 
   /** A blister coral bursts: a spray of caustic sap that scalds everyone close (sealed in a vehicle, they're safe). */
+  /**
+   * Wildlife (wildlife.ts): keep up their numbers (now and then a new one
+   * comes up out of the deep, well away from everyone), and let each one
+   * think and crawl. Not in the labyrinth, nor in the tutorial.
+   */
+  private stepBeasts(): void {
+    if (!this.wildlife || this.dungeon) return;
+    if (this.tick >= this.beastSpawnAt) {
+      this.beastSpawnAt = this.tick + BEAST_RESPAWN;
+      const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
+      if (this.beasts.filter(Boolean).length < want) this.spawnBeast();
+    }
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const b = this.beasts[k];
+      if (b) this.stepMillipede(k, b);
+    }
+    this.sendVenom();
+  }
+
+  /** A millipede, somewhere down in the caves: on a floor with room over it, deep, out of the water, far from any clone. */
+  private spawnBeast(): boolean {
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return false;
+    const t = this.terrain;
+    const rng = this.beastRng;
+    for (let n = 0; n < 80; n++) {
+      const x = 60 + rng.int(WORLD_W - 120);
+      const surf = t.surfaceY(x);
+      let y = surf + 60 + rng.int(Math.max(1, WORLD_H - surf - 100));
+      if (t.isSolid(x, y)) continue;
+      while (y < WORLD_H - 14 && !t.isSolid(x, y + 1)) y++;
+      if (y >= WORLD_H - 14 || y < surf + 50 || t.wet(x, y)) continue;
+      let room = 0;
+      while (room < 10 && !t.isSolid(x, y - room - 1)) room++;
+      if (room < 10) continue;
+      const c = this.calm;
+      if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
+      if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 420)) continue;
+      const b = newMillipede(t, x, y, rng.next() < 0.5 ? -1 : 1);
+      b.turnAt = this.tick + 60;
+      this.beasts[slot] = b;
+      bodyPoints(t, b, this.beastPts[slot]);
+      return true;
+    }
+    return false;
+  }
+
+  /** Who a creature goes for: whoever hurt it (not too far off), else the nearest clone it can see. */
+  private beastTarget(b: Beast, hx: number, hy: number): number {
+    const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
+    if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
+    let best = MILLI_SENSE;
+    let id = -1;
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
+      const d = Math.hypot(p.cx - hx, p.cy - hy);
+      if (d < best && this.lineClear(hx, hy, p.cx, p.cy)) {
+        best = d;
+        id = p.id;
+      }
+    }
+    return id;
+  }
+
+  /**
+   * One tick of a millipede. It hunts whoever it's after along the surfaces
+   * (trying both ways along the ground and taking the one that gets it
+   * nearer), wanders otherwise; with its prey in sight and in reach it
+   * stops, rears up and spits; it bites whoever its head touches.
+   */
+  private stepMillipede(k: number, b: Beast): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const pts = this.beastPts[k];
+    const hx = pts.length ? pts[0] : b.x;
+    const hy = pts.length ? pts[1] : b.y;
+    if ((this.tick + k) % 10 === 0) b.target = this.beastTarget(b, hx, hy);
+    let tgt = b.target >= 0 ? this.players[b.target] : null;
+    if (tgt && (!tgt.alive || tgt.tank >= 0)) {
+      tgt = null;
+      b.target = -1;
+    }
+    if (b.spitCd > 0) b.spitCd--;
+    if (b.biteCd > 0) b.biteCd--;
+    // Rearing, and spitting at the top of it.
+    if (b.rear > 0) {
+      if (++b.rear === MILLI_SPIT_AT && tgt) this.spit(b, hx, hy, tgt);
+      if (b.rear >= MILLI_REAR) {
+        b.rear = 0;
+        b.spitCd = MILLI_SPIT_CD + rng.int(30);
+      }
+    } else if (tgt && b.attached && b.spitCd === 0 && Math.hypot(tgt.cx - hx, tgt.cy - hy) < MILLI_SPIT_RANGE && this.lineClear(hx, hy, tgt.cx, tgt.cy)) b.rear = 1;
+    b.lift += ((b.rear > 0 ? 1 : 0) - b.lift) * 0.3;
+    if (b.lift < 0.01) b.lift = 0;
+    if (!b.attached) {
+      // Falling: its body follows its head down.
+      const y0 = b.y;
+      fallStep(t, b, DT, GRAVITY);
+      const y1 = b.y;
+      for (let y = y0 + 1; y <= y1; y++) {
+        b.y = y;
+        pushTrail(b);
+      }
+      if (b.y >= WORLD_H - 14) {
+        this.beasts[k] = null;
+        return;
+      }
+    } else if (b.rear === 0) {
+      if (this.tick >= b.turnAt) {
+        if (tgt) {
+          // Which way along the ground gets it nearer: a few dozen steps each way, tried.
+          const ahead = this.probeCrawl(b, false, tgt.cx, tgt.cy);
+          const back = this.probeCrawl(b, true, tgt.cx, tgt.cy);
+          if (back < ahead - 10) turnRound(b);
+          b.turnAt = this.tick + 25;
+        } else {
+          if (rng.next() < 0.3) turnRound(b);
+          b.turnAt = this.tick + 120 + rng.int(240);
+        }
+      }
+      // Getting nowhere (boxed in): turn round.
+      if (Math.abs(b.x - b.lastX) + Math.abs(b.y - b.lastY) > 6) {
+        b.lastX = b.x;
+        b.lastY = b.y;
+        b.still = 0;
+      } else if (++b.still > 60) {
+        turnRound(b);
+        b.still = 0;
+      }
+      b.owed += (tgt ? MILLI_HUNT : MILLI_CRAWL) * DT;
+      while (b.owed >= 1 && b.attached) {
+        b.owed--;
+        crawlStep(t, b);
+        pushTrail(b);
+      }
+    }
+    bodyPoints(t, b, pts);
+    // A bite, for whoever its head is on.
+    if (b.biteCd === 0) {
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
+        if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > MILLI_BITE_R + 4) continue;
+        this.damage(p, MILLI_BITE, NO_OWNER, W_VENOM);
+        p.venom = Math.min(VENOM_MAX, p.venom + MILLI_BITE_VENOM);
+        p.body.vx += Math.sign(p.cx - pts[0]) * 60;
+        p.body.vy -= 40;
+        b.biteCd = MILLI_BITE_CD;
+        break;
+      }
+    }
+  }
+
+  /** How near (x, y) a creature would get going `back` (round) or on, a few dozen steps along the ground. */
+  private probeCrawl(b: Beast, back: boolean, x: number, y: number): number {
+    const g = { ...b, trail: [] };
+    if (back) turnRound(g);
+    let best = Infinity;
+    for (let n = 0; n < 36 && g.attached; n++) {
+      crawlStep(this.terrain, g);
+      best = Math.min(best, Math.hypot(g.x - x, g.y - y));
+    }
+    return best;
+  }
+
+  /** A glob of venom from its reared head at a clone, on the arc that lands (leading it a little). */
+  private spit(b: Beast, hx: number, hy: number, tgt: Player): void {
+    const g = GRAVITY * PROJ[ProjKind.Venom].gravity;
+    const sol = ballisticAim(hx, hy, { x: tgt.cx, y: tgt.cy, vx: tgt.body.vx, vy: tgt.body.vy }, MILLI_SPIT_SPEED, g);
+    const a = (sol ? sol.aim : Math.atan2(tgt.cy - hy, tgt.cx - hx) - 0.3) + this.beastRng.range(-0.04, 0.04);
+    this.spawnProj(this.nextProjId++, ProjKind.Venom, NO_OWNER, hx, hy, Math.cos(a) * MILLI_SPIT_SPEED, Math.sin(a) * MILLI_SPIT_SPEED);
+    void b;
+  }
+
+  /** A creature hurt: it turns on whoever did it; at no health left it dies. */
+  hurtBeast(k: number, dmg: number, by: number): void {
+    const b = this.beasts[k];
+    if (!b || dmg <= 0) return;
+    b.hp -= dmg;
+    if (by < MAX_PLAYERS && this.players[by]) b.hurtBy = by;
+    if (b.hp > 0) return;
+    this.beasts[k] = null;
+    const w = this.broadcast;
+    w.u8(R_BEAST_DIE);
+    w.u8(k);
+    w.u8(b.kind);
+    w.u32(this.rng.nextU32());
+  }
+
+  /** A blast's overpressure on every creature in reach (from its nearest body point). */
+  private splashBeasts(x: number, y: number, r: number, dmg: number, by: number): void {
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      if (!this.beasts[k]) continue;
+      const { d } = nearestPoint(this.beastPts[k], x, y);
+      if (d < r) this.hurtBeast(k, dmg * (1 - d / r), by);
+    }
+  }
+
+  /** Who has venom in them (for clients to show it): when that changes, and now and then while anyone does. */
+  private sendVenom(): void {
+    let key = '';
+    for (const p of this.players) if (p && p.alive && p.venom > 0) key += `${p.id},`;
+    if (key === this.venomSent && (key === '' || this.tick % 10 !== 0)) return;
+    this.venomSent = key;
+    const sick = this.players.filter((p): p is Player => !!p && p.alive && p.venom > 0);
+    const w = this.broadcast;
+    w.u8(R_VENOM);
+    w.u8(sick.length);
+    for (const p of sick) {
+      w.u8(p.id);
+      w.u8(Math.min(255, Math.ceil(p.venom)));
+    }
+  }
+
   private burstBlister(i: number, by: number): void {
     const f = this.flora[i];
     this.floraDead[i] = 1;
@@ -1963,6 +2226,24 @@ export class World {
         best = SHIP_ID_BASE + k;
       }
     }
+    // Wildlife: a circle round each body point. (A creature's own venom never hits its kind; a laser
+    // goes through them, beam() hurts every one along it.)
+    if (kind !== ProjKind.Venom && kind !== LASER_VEHICLES_ONLY) {
+      const len = Math.hypot(dx, dy);
+      for (let k = 0; k < MAX_BEASTS; k++) {
+        const pts = this.beasts[k] ? this.beastPts[k] : null;
+        if (!pts || !pts.length) continue;
+        // (Too far off to touch it, from its head: its body's no longer than this.)
+        if (Math.hypot(pts[0] - x0, pts[1] - y0) > len + 90) continue;
+        for (let i = 0; i < pts.length; i += 2) {
+          const t = segmentCircle(x0, y0, dx, dy, pts[i], pts[i + 1], MILLI_R);
+          if (t >= 0 && t < bestT) {
+            bestT = t;
+            best = BEAST_ID_BASE + k;
+          }
+        }
+      }
+    }
     out.t = bestT;
     return best;
   };
@@ -2103,7 +2384,9 @@ export class World {
     const kind = pr.kind[i];
     const owner = pr.owner[i];
     const def = PROJ[kind];
-    if (actor >= SHIP_ID_BASE) {
+    if (actor >= BEAST_ID_BASE) {
+      this.hurtBeast(actor - BEAST_ID_BASE, def.damage * (def.ballistic ? 1 : 1.5), owner);
+    } else if (actor >= SHIP_ID_BASE) {
       const sh = this.ships[actor - SHIP_ID_BASE];
       if (sh) {
         const rvx = pr.vx[i] - sh.vx;
@@ -2154,6 +2437,8 @@ export class World {
       v.body.vx += rvx * knock;
       v.body.vy += rvy * knock;
       this.applyStrike(v, res, owner, kind, x, y);
+      // Venom: into the blood, to burn on.
+      if (kind === ProjKind.Venom && v.alive) v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
     }
     if (actor < 0) {
       // Into a door: as into a tank's hull (a round that can't punch through barely scratches it; a shaped charge takes a share of the whole).
@@ -2181,6 +2466,7 @@ export class World {
         this.splashTanks(x, y, def.splashR, def.splashDamage, owner);
         this.splashDoors(x, y, def.splashR, def.splashDamage, owner);
         this.splashShips(x, y, def.splashR, def.splashDamage, owner);
+        this.splashBeasts(x, y, def.splashR, def.splashDamage, owner);
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
           if (!p || !p.alive || this.shielded(p) || this.friendly(owner, p)) continue;
@@ -2668,6 +2954,17 @@ export class World {
       b.vy += sin * 70 * power - 20 * power;
       this.applyStrike(v, res, by, W_LASER, hx, hy);
     }
+    // Every creature along it too.
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const pts = this.beasts[k] ? this.beastPts[k] : null;
+      if (!pts) continue;
+      for (let i = 0; i < pts.length; i += 2) {
+        if (segmentCircle(x0, y0, x1 - x0, y1 - y0, pts[i], pts[i + 1], MILLI_R + w) >= 0) {
+          this.hurtBeast(k, wound, by);
+          break;
+        }
+      }
+    }
     if (vehicle >= SHIP_ID_BASE) this.hitShip(vehicle - SHIP_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
     else if (vehicle >= TANK_ID_BASE) this.hitTank(vehicle - TANK_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
     else if (vehicle >= CRAFT_ID_BASE) this.hitCraft(vehicle - CRAFT_ID_BASE, x1, y1, cos, sin, energy, wound * 2, by);
@@ -2746,6 +3043,7 @@ export class World {
    */
   private mendTick(t: Player): void {
     t.hp = Math.min(ACTOR_MAX_HP, t.hp + REPAIR_HP);
+    t.venom = 0; // (the nanobots wash the venom out)
     const parts = t.parts;
     for (let part = 0; part < PART_COUNT; part++) if (has(parts.mask, part)) parts.wounds[part] = Math.max(0, parts.wounds[part] - REPAIR_WOUND);
     const missing = (parts.cls === ClassId.Droid ? DROID_REGROWABLE : REGROWABLE).find((part) => !has(parts.mask, part));
@@ -2788,6 +3086,7 @@ export class World {
     b.vx = vx;
     b.vy = vy;
     b.fuel = 100;
+    p.venom = 0;
     // Every clone rolls a class (scout, medium or heavy) and the mercenary
     // vendor that supplied it (Guild-Tech, Rust Nomads, Synth Legion).
     resetBody(p.parts, rollClass(this.rng.next()), rollFaction(this.rng.next()));
@@ -4673,6 +4972,13 @@ export class World {
       const n = FACTIONS[p.parts.faction].bleeds ? stumps(p.parts.mask, p.parts.cls) : 0;
       if (n > 0) this.damage(p, n * BLEED_PER_STUMP * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
+      // Venom burns on in the blood, a little each tick.
+      if (p.venom > 0) {
+        const v = Math.min(p.venom, VENOM_RATE);
+        p.venom -= v;
+        this.damage(p, v, NO_OWNER, W_VENOM, true);
+        if (!p.alive) continue;
+      }
       if (p.pilot >= 0) {
         // Flying the dropship: the clone stands inert; the view (and interest) is the ship's.
         const sh = this.ships[p.pilot]!;
@@ -4713,6 +5019,7 @@ export class World {
     this.stepDoors();
     this.stepGeysers();
     this.stepFlora();
+    this.stepBeasts();
     if (this.water.length && this.tick % WATER_TICKS === 0) this.settleWater();
     this.stepWaves();
     this.stepShips();
@@ -5181,6 +5488,34 @@ export class World {
         }
       }
 
+      // Wildlife in view, every frame (and an empty list once the last has gone, so the client drops them).
+      let nBeast = 0;
+      for (let k = 0; k < MAX_BEASTS; k++) {
+        const pts = this.beasts[k] ? this.beastPts[k] : null;
+        if (pts && pts.length && pts[0] >= vx0 - 60 && pts[0] <= vx1 + 60 && pts[1] >= vy0 - 60 && pts[1] <= vy1 + 60) nBeast++;
+      }
+      if (nBeast > 0 || p.beastsSent) {
+        w.u8(R_BEASTS);
+        w.u8(nBeast);
+        for (let k = 0; k < MAX_BEASTS && nBeast > 0; k++) {
+          const b = this.beasts[k];
+          const pts = b ? this.beastPts[k] : null;
+          if (!b || !pts || !pts.length || pts[0] < vx0 - 60 || pts[0] > vx1 + 60 || pts[1] < vy0 - 60 || pts[1] > vy1 + 60) continue;
+          w.u8(k);
+          w.u8(b.kind);
+          w.u8(Math.max(0, Math.min(255, Math.round((b.hp / MILLI_HP) * 255))));
+          w.u8(Math.round(b.lift * 255));
+          w.u8(b.attached ? 1 : 0);
+          w.u16(clampU16(pts[0] * POS_SCALE));
+          w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
+          for (let i = 2; i < pts.length; i += 2) {
+            w.u8(Math.max(-127, Math.min(127, Math.round((pts[i] - pts[i - 2]) * BEAST_SCALE))) & 255);
+            w.u8(Math.max(-127, Math.min(127, Math.round((pts[i + 1] - pts[i - 1]) * BEAST_SCALE))) & 255);
+          }
+        }
+        p.beastsSent = nBeast > 0;
+      }
+
       // Dropships: all of them, every frame (there are only a few).
       let nShip = 0;
       for (const sh of this.ships) if (sh) nShip++;
@@ -5380,6 +5715,13 @@ const TANK_ID_BASE = CRAFT_ID_BASE + MAX_CRAFTS;
 const TANK_MASS = 200;
 /** Actor-field ids for dropships, above every tank's. */
 const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
+/** Ids for wildlife (wildlife.ts), above every dropship's. */
+const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
+/** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */
+const MAX_BEASTS = 6;
+const BEASTS_CAVES = 5;
+const BEASTS_PLAIN = 3;
+const BEAST_RESPAWN = 30 * 25;
 const SHIP_MASS = 120;
 /** Station altitude over the ground, turret reach, how long a radio waits between calls. */
 const SHIP_ALT = 80;

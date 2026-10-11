@@ -36,6 +36,10 @@ import {
   R_GEYSER_BLOW,
   R_FLORA,
   R_WATER,
+  R_BEASTS,
+  R_BEAST_DIE,
+  R_VENOM,
+  BEAST_SCALE,
   GameMode,
   R_SHIPS,
   R_SHIP_PART,
@@ -55,6 +59,20 @@ import {
   FACTION_SHIFT,
 } from './protocol.ts';
 import type { Terrain } from './terrain.ts';
+import { MILLI_SEGS } from './wildlife.ts';
+
+/** Body points per creature kind (wildlife.ts BeastKind). */
+const BEAST_POINTS = [MILLI_SEGS];
+
+/** A creature in view (R_BEASTS): its kind, health (0..1), how far up it's reared (0..1), whether it's holding on, and its body points (head first, x, y pairs). */
+export interface BeastState {
+  slot: number;
+  kind: number;
+  hp: number;
+  lift: number;
+  attached: boolean;
+  pts: number[];
+}
 
 export interface SelfState {
   flags: number;
@@ -300,6 +318,12 @@ export interface FrameHandler {
   water(bodies: { x: number; y: number; level: number; volume: number }[]): void;
   /** Every slot's team (Team.*), whenever it changes. */
   teams(teams: Uint8Array): void;
+  /** The wildlife in view (R_BEASTS): every one of them, every frame they're there (an empty list when they've gone). */
+  beasts(list: BeastState[]): void;
+  /** A creature killed (R_BEAST_DIE). */
+  beastDie(slot: number, kind: number, seed: number): void;
+  /** Who has venom in their blood, and how much harm it has still to do (R_VENOM). */
+  venom(list: { id: number; amount: number }[]): void;
   /** A (new) map: regenerate the terrain from `seed` now; `hashes` are the server's per-chunk hashes of it. */
   /** A new map: its seed, kind (worldgen MapKind) and every chunk's hash as generated. */
   wave(seed: number, hashes: Uint32Array, kind: number): void;
@@ -525,6 +549,41 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const swelling: number[] = [];
         for (let k = r.u16(); k > 0; k--) swelling.push(r.u16());
         h.floraState(dead, swelling);
+        break;
+      }
+      case R_BEASTS: {
+        const n = r.u8();
+        const list: BeastState[] = [];
+        for (let i = 0; i < n; i++) {
+          const slot = r.u8();
+          const kind = r.u8();
+          const hp = r.u8() / 255;
+          const lift = r.u8() / 255;
+          const attached = (r.u8() & 1) !== 0;
+          let x = r.u16() / 16;
+          let y = r.u16() / 16 - Y_BIAS;
+          const pts = [x, y];
+          for (let k = 1; k < BEAST_POINTS[kind]; k++) {
+            x += ((r.u8() << 24) >> 24) / BEAST_SCALE;
+            y += ((r.u8() << 24) >> 24) / BEAST_SCALE;
+            pts.push(x, y);
+          }
+          list.push({ slot, kind, hp, lift, attached, pts });
+        }
+        h.beasts(list);
+        break;
+      }
+      case R_BEAST_DIE: {
+        const slot = r.u8();
+        const kind = r.u8();
+        h.beastDie(slot, kind, r.u32());
+        break;
+      }
+      case R_VENOM: {
+        const n = r.u8();
+        const list: { id: number; amount: number }[] = [];
+        for (let i = 0; i < n; i++) list.push({ id: r.u8(), amount: r.u8() });
+        h.venom(list);
         break;
       }
       case R_WATER: {
@@ -830,6 +889,9 @@ export const nullHandler: FrameHandler = {
   geyserBlow() {},
   floraState() {},
   water() {},
+  beasts() {},
+  beastDie() {},
+  venom() {},
   beam() {},
   heal() {},
   teams() {},

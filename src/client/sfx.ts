@@ -218,6 +218,15 @@ export class Sfx {
         this.burst(v, 0, 0.05, 'bandpass', 1800, 2, 0.4);
         return;
       }
+      case ProjKind.Venom: {
+        // A millipede spitting: a wet hiss, then a throaty "khh" as the glob leaves.
+        const v = this.voice(x, y, 0.4, 0.3);
+        if (!v) return;
+        this.burst(v, 0, 0.22, 'bandpass', 2400, 3, 0.6, 900);
+        this.burst(v, 0.12, 0.1, 'lowpass', 700, 1, 0.8, 200);
+        this.tone(v, 0.12, 0.08, 'sawtooth', 120, 60, 0.2);
+        return;
+      }
       case ProjKind.Dart: {
         // A blowpipe "fft" out of the wall.
         const v = this.voice(x, y, 0.35, 0.15);

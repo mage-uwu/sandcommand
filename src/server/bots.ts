@@ -97,6 +97,8 @@ export function wishOdds(skill: number): [number, number][] {
 }
 
 /** What a cell's worth to a bot digging for gold (rare earth ten times gold). */
+/** How near a creature has to come (from the shoulder) for a bot to turn its gun on it. */
+const BEAST_REACT = 240;
 const oreWorth = (m: number) => (m === Mat.Gold ? 1 : m === Mat.GemCrystal ? GEM_CRYSTAL_VALUE : m === Mat.RareEarth ? RARE_EARTH_VALUE : 0);
 
 export class BotBrain {
@@ -184,6 +186,8 @@ export class BotBrain {
   private readonly badGold: { x: number; y: number }[] = [];
   /** Anti-air: the enemy dropship point it's shooting at (re-picked a few times a second), and its velocity. */
   private air: { x: number; y: number; vx: number; vy: number } | null = null;
+  /** A creature coming at it (wildlife.ts), nearer than whoever it's fighting: the body point to shoot at. */
+  private beast: { x: number; y: number } | null = null;
   private readonly airPt = { x: 0, y: 0 };
 
   constructor(seed: number) {
@@ -273,6 +277,24 @@ export class BotBrain {
       if (cy < p.cy && Math.hypot(cx - p.cx, cy - p.cy) < AA_RANGE) return true;
     }
     return false;
+  }
+
+  /** The nearest creature it can see within reach, if nearer than the fight it's in (from the shoulder at sx, sy). */
+  private beastTarget(world: World, sx: number, sy: number, fight: number): { x: number; y: number } | null {
+    let best = Math.min(fight, BEAST_REACT);
+    let at: { x: number; y: number } | null = null;
+    for (let k = 0; k < world.beasts.length; k++) {
+      if (!world.beasts[k]) continue;
+      const pts = world.beastPts[k];
+      for (let i = 0; i < pts.length; i += 4) {
+        const d = Math.hypot(pts[i] - sx, pts[i + 1] - sy);
+        if (d < best && clearLine(world, sx, sy, pts[i], pts[i + 1])) {
+          best = d;
+          at = { x: pts[i], y: pts[i + 1] };
+        }
+      }
+    }
+    return at;
   }
 
   private airTarget(world: World, p: Player, sx: number, sy: number, fight: number): { x: number; y: number; vx: number; vy: number } | null {
@@ -665,6 +687,18 @@ export class BotBrain {
     if (!antiAir) this.air = null;
     else if ((t + this.phase) % 6 === 0) this.air = this.airTarget(world, p, sx, sy, tgt && this.seeTarget ? dist : Infinity);
     const air = this.air;
+    // Wildlife coming at it, nearer than whoever it's fighting: that first (any gun will do).
+    const armed = !digging && !healing && !calling && !!def && (def.proj >= 0 || weapon === WeaponId.Laser) && weapon !== WeaponId.Mine;
+    if (!armed || air) this.beast = null;
+    else if ((t + this.phase) % 5 === 0) this.beast = this.beastTarget(world, sx, sy, tgt && this.seeTarget ? dist : Infinity);
+    const beast = this.beast;
+    if (beast && def && !air) {
+      const lead = Math.hypot(beast.x - sx, beast.y - sy) / (def.speed || 400);
+      ax = beast.x;
+      ay = beast.y;
+      if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
+      sweep = 0;
+    }
     if (air && def) {
       const lead = Math.hypot(air.x - sx, air.y - sy) / (def.speed || 400);
       ax = air.x + air.vx * lead;
@@ -678,7 +712,7 @@ export class BotBrain {
     // Fire: with a clear line (or digging), in range; semi-auto weapons get a fresh press each shot.
     // No point-blank blasts, unless cornered with nothing else.
     const minRange = this.stuck > 30 ? 0 : weapon === WeaponId.Bazooka ? 70 : weapon === WeaponId.Grenade || weapon === WeaponId.GrenadeLauncher ? 50 : 0;
-    const shoot = air
+    const shoot = air || beast
       ? t >= this.holdFire
       : weapon === WeaponId.Mine
         ? t < this.mineUntil && t > this.mineUntil - 8

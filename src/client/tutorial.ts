@@ -89,6 +89,7 @@ export class Tutorial {
 
   constructor(name: string, link: ClientLink) {
     const world = (this.world = new World(TUTORIAL_SEED, { mode: 'sandbox', bots: 0 }));
+    world.wildlife = false; // (no wildlife in the lessons)
     this.arena = this.stage();
     const a = this.arena;
     // Everyone comes down where the script says: the player at the start, the mob far ahead.

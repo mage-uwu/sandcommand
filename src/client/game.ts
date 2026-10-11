@@ -2,13 +2,13 @@ import { type Decor, placeDecor } from './decor.ts';
 import { BTN_FIRE, type Body, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, applyFrameRecords } from '../shared/frame.ts';
+import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, applyFrameRecords } from '../shared/frame.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -24,7 +24,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs } from './effects.ts';
+import { droidHit, droidPartOff, droidWreck, smokeTrail, plasmaTrail, bloodSplat, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -508,7 +508,8 @@ export class Game implements FrameHandler {
     // Field first: chunk snapshots and ops applied since the last tick.
     this.field.update();
     this.projectiles.step(this.collider, DT, null, (i, x, y, _a, _d) => {
-      if (PROJ[this.projectiles.kind[i]].ballistic) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
+      if (this.projectiles.kind[i] === ProjKind.Venom) venomSplash(this.particles, x, y);
+      else if (PROJ[this.projectiles.kind[i]].ballistic) bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
     });
     const pr = this.projectiles;
     for (let i = 0; i < pr.n; i++) {
@@ -516,6 +517,7 @@ export class Game implements FrameHandler {
       if (k === ProjKind.Rocket || k === ProjKind.Shell || k === ProjKind.Missile || k === ProjKind.SpiderMissile) rocketTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.AutoShell) smokeTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.Plasma) plasmaTrail(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i]);
+      else if (k === ProjKind.Venom) venomTrail(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i]);
       else if (k === ProjKind.Engine) {
         // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
         const burning = PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0);
@@ -552,6 +554,16 @@ export class Game implements FrameHandler {
       if (last.parts !== ALL_PARTS && classOfFlags(last.flags) !== ClassId.Droid) stumpDrip(this.particles, last.x, last.y, last.parts, FACTIONS[last.faction]?.synthetic);
     }
     if (this.alive && this.parts !== ALL_PARTS && this.body.cls !== ClassId.Droid) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
+    // Venom in the blood: it weeps out of them.
+    for (const [id, amount] of this.venomIn) {
+      if (id === this.myId) {
+        if (this.alive) venomDrip(this.particles, this.body.x + 4, this.body.y + 7, amount);
+        continue;
+      }
+      const s = this.snaps.get(id);
+      const last = s?.[s.length - 1];
+      if (last && last.flags & F_ALIVE) venomDrip(this.particles, last.x + 4, last.y + 7, amount);
+    }
     if (this.sfx) this.soundBeds(this.sfx);
     // Bodies in the engine so shrapnel stops in them and grains bounce off
     // them on screen too; only the server's results (damage, knockback) count.
@@ -1054,6 +1066,42 @@ export class Game implements FrameHandler {
   }
   private waterBodies: { x: number; y: number; level: number; volume: number }[] = [];
 
+  /** Wildlife in view (R_BEASTS): each creature's body points as last sent and the frame before (to draw between them). */
+  readonly beastViews = new Map<number, { kind: number; hp: number; lift: number; prevLift: number; attached: boolean; prev: number[]; cur: number[] }>();
+  beasts(list: BeastState[]): void {
+    const seen = new Set<number>();
+    for (const b of list) {
+      seen.add(b.slot);
+      const v = this.beastViews.get(b.slot);
+      if (v && v.kind === b.kind && v.cur.length === b.pts.length) {
+        v.prev = v.cur;
+        v.cur = b.pts;
+        v.prevLift = v.lift;
+        v.lift = b.lift;
+        v.hp = b.hp;
+        v.attached = b.attached;
+      } else this.beastViews.set(b.slot, { kind: b.kind, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, prev: b.pts, cur: b.pts });
+    }
+    for (const k of [...this.beastViews.keys()]) if (!seen.has(k)) this.beastViews.delete(k);
+  }
+  beastDie(slot: number, _kind: number, _seed: number): void {
+    const v = this.beastViews.get(slot);
+    if (!v) return;
+    beastGibs(this.particles, v.cur);
+    this.sfx?.gib(v.cur[0], v.cur[1], 1.5, false);
+    this.beastViews.delete(slot);
+  }
+  /** Venom in clones' blood (R_VENOM): id -> the harm it still has to do. */
+  readonly venomIn = new Map<number, number>();
+  venom(list: { id: number; amount: number }[]): void {
+    this.venomIn.clear();
+    for (const v of list) this.venomIn.set(v.id, v.amount);
+  }
+  /** Ours, for the HUD (0: none). */
+  get myVenom(): number {
+    return this.alive ? (this.venomIn.get(this.myId) ?? 0) : 0;
+  }
+
   /** Down in the valley's caves, where it's calm (the sound changes there). */
   inCalm(): boolean {
     const c = this.valley?.calm;
@@ -1433,6 +1481,8 @@ export class Game implements FrameHandler {
       heavyMuzzle(this.particles, fx, fy, vx / sp, vy / sp);
     } else if (kind === ProjKind.Bolt) {
       // (A blaster just flashes.)
+    } else if (kind === ProjKind.Venom) {
+      venomSplash(this.particles, x, y, vx * 0.2, vy * 0.2, 6); // (spat: a spray out of the mouth)
     } else muzzle(this.particles, fx, fy, vx / sp, vy / sp, kind === ProjKind.Rocket || kind === ProjKind.Shell || kind === ProjKind.Missile || kind === ProjKind.SpiderMissile || kind === ProjKind.AutoShell);
     this.sfx?.shot(kind, x, y, owner);
     // Recoil: the shooter's gun kicks back (drawn), and our own shots jolt the view.
@@ -1510,6 +1560,10 @@ export class Game implements FrameHandler {
       laserHit(this.particles, x, y, this.lastVx / (Math.hypot(this.lastVx, this.lastVy) || 1), this.lastVy / (Math.hypot(this.lastVx, this.lastVy) || 1), 0.08);
       return;
     }
+    if (kind === ProjKind.Venom) {
+      venomSplash(this.particles, x, y);
+      return;
+    }
     if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
       return;
@@ -1549,6 +1603,7 @@ export class Game implements FrameHandler {
     else if (weapon === W_LASER && killer !== victim) text = `${kn} [Laser] ${vn}`;
     else if (killer === 255 && weapon === W_TRAP) text = `${vn} was impaled on the spikes`;
     else if (killer === 255 && weapon === ProjKind.Dart) text = `${vn} took a poisoned dart`;
+    else if (killer === 255 && (weapon === W_VENOM || weapon === ProjKind.Venom)) text = `${vn} was poisoned by a millipede`;
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
@@ -1911,6 +1966,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (weapon === 255) return 'fell to your death';
   if (weapon === W_TRAP) return 'impaled on the spikes';
   if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
+  if (killer === 255 && (weapon === W_VENOM || weapon === ProjKind.Venom)) return "poisoned by a millipede's venom";
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';
   if (weapon === W_GEYSER) return by ? `caught in a geyser's blast [${by} set it off]` : "caught in a geyser's blast";
   if (weapon === W_BLISTER) return by ? `scalded by a bursting blister coral [${by} burst it]` : 'scalded by a bursting blister coral';

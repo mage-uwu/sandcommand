@@ -46,6 +46,8 @@ export const ProjKind = {
   Plasma: 21,
   /** A mole's SMG round: heavier than a tank's. */
   MoleRound: 22,
+  /** A millipede's spit: a glob of blood-red venom on an arc. Little harm on the hit; the venom burns on after (wildlife.ts). */
+  Venom: 23,
 } as const;
 
 export interface ProjDef {
@@ -128,6 +130,9 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: -0.05, life: 9, damage: 10, mass: 0.35, sharp: 0.8, carveR: 5, coreR: 3, splashR: 0, splashDamage: 0, debris: 0, bounce: 0, ballistic: false, knock: 0.2 },
   // Mole SMG round: heavier than a tank's (22 a layer, a vest's worth of punch).
   { gravity: 0.12, life: 40, damage: 22, mass: 0.65, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1 },
+  // Millipede venom: a wet glob lobbed on an arc; it splashes on whatever it hits (no hole), the
+  // harm's mostly in the venom it leaves in the blood (World: Player.venom).
+  { gravity: 0.6, life: 75, damage: 6, mass: 0.25, sharp: 0.4, carveR: 0, coreR: 0, splashR: 0, splashDamage: 0, debris: 0, bounce: 0, ballistic: true, knock: 0.3 },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -280,6 +285,7 @@ export function projName(kind: number): string {
   if (kind === ProjKind.Bomb) return 'Dropship Bomb';
   if (kind === ProjKind.Engine) return 'Runaway Engine';
   if (kind === ProjKind.Dart) return 'Dart Trap';
+  if (kind === ProjKind.Venom) return 'Millipede';
   if (kind === ProjKind.Mine) return 'Booby Trap';
   if (kind === ProjKind.Bomblet) return 'GL';
   if (kind === ProjKind.Landmine) return 'Mine';

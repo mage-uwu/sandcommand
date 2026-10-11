@@ -555,3 +555,31 @@ export function blisterBurst(p: Particles, x: number, y: number, glow: number): 
     p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 60, 300 + Math.random() * 200, GIB_SAC | GIB_INORGANIC, glow);
   }
 }
+
+/** A glob of venom in flight: now and then a drop of it falls away. */
+export function venomTrail(p: Particles, x: number, y: number, vx: number, vy: number): void {
+  if (Math.random() < 0.45) p.spawn(PK.Blood, x, y, vx * 0.1 + rnd(-10, 10), vy * 0.1 + rnd(-10, 10), 40);
+}
+
+/** Venom spat (out of the mouth) or splashing where it lands: a burst of blood-red drops. */
+export function venomSplash(p: Particles, x: number, y: number, vx = 0, vy = 0, n = 10): void {
+  bloodSplat(p, x, y, n, 70, vx, vy);
+}
+
+/** Venom in a clone's blood: it weeps from them, a drop now and then (more, the more there is). */
+export function venomDrip(p: Particles, x: number, y: number, amount: number): void {
+  if (Math.random() < Math.min(0.5, 0.08 + amount / 250)) p.spawn(PK.Blood, x + rnd(-3, 3), y + rnd(-6, 4), rnd(-8, 8), rnd(-10, 10), 40);
+}
+
+/** A millipede killed: its plates and legs flung off along its whole body, and its blood. */
+export function beastGibs(p: Particles, pts: readonly number[]): void {
+  for (let i = 0; i < pts.length; i += 2) {
+    const x = pts[i];
+    const y = pts[i + 1];
+    const a = Math.random() * Math.PI * 2;
+    const s = 40 + Math.random() * 110;
+    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 70, rnd(500, 700), GIB_PLATE | GIB_INORGANIC, i === 0 ? 0x3a1410 : (i >> 1) % 2 ? 0x5a2418 : 0x6e3020);
+    if (Math.random() < 0.5) p.spawn(PK.Gib, x, y, rnd(-80, 80), rnd(-120, -20), rnd(400, 600), GIB_STALK | GIB_INORGANIC, 0xc89070);
+    bloodSplat(p, x, y, 4, 90);
+  }
+}

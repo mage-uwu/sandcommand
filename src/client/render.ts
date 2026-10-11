@@ -22,6 +22,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
+import { drawMillipede } from './beast-art.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -371,6 +372,7 @@ export class Renderer {
   /** Scratch: the underground rects behind the terrain this frame (x, y, w, h). */
   private readonly backRects: number[] = [];
   readonly ctx: CanvasRenderingContext2D;
+  private readonly beastPts: number[] = [];
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
   private chunkImage = new ImageData(CHUNK, CHUNK);
   private chunkPixels = new Uint32Array(this.chunkImage.data.buffer);
@@ -761,6 +763,14 @@ export class Renderer {
 
     // Dropships.
     for (const sh of game.shipViews()) this.drawShip(ctx, sh, game, now);
+    // Wildlife, drawn between the last two frames it was sent in.
+    for (const [, v] of game.beastViews) {
+      const pts = this.beastPts;
+      pts.length = 0;
+      for (let i = 0; i < v.cur.length; i++) pts.push(v.prev[i] + (v.cur[i] - v.prev[i]) * alpha);
+      if (pts[0] < camX - halfW - 80 || pts[0] > camX + halfW + 80 || pts[1] < camY - halfH - 80 || pts[1] > camY + halfH + 80) continue;
+      drawMillipede(ctx, game.terrain, pts, v.prevLift + (v.lift - v.prevLift) * alpha, now, v.hp < 0.35 ? 1 : 0);
+    }
 
     // Remote clones (not those riding inside a tank).
     const views = game.remoteViews(alpha).filter((v) => !game.tankPilots.has(v.id));
@@ -950,6 +960,22 @@ export class Renderer {
         ctx.fillRect(-5, -2.5, 2, 5);
         ctx.fillStyle = (now / 90) % 2 < 1 ? '#ff3030' : '#a01010';
         ctx.fillRect(3, -1, 2, 2);
+        ctx.restore();
+      } else if (k === ProjKind.Venom) {
+        // Millipede venom: a wet, dark-red glob, a bright glint on it, drawn out a little along its flight.
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.atan2(p.vy[i], p.vx[i]));
+        ctx.fillStyle = '#5a0606';
+        ctx.beginPath();
+        ctx.ellipse(-0.5, 0, 2.6, 1.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#b01010';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 1.8, 1.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ff9a8a';
+        ctx.fillRect(0.3, -0.8, 0.8, 0.6);
         ctx.restore();
       } else if (k === ProjKind.Plasma) {
         // Mole plasma: a white-hot core in a blue glow, swelling and fading as it burns out.
@@ -2993,6 +3019,21 @@ export class Renderer {
       ctx.fillText(label, 20 * s, yy + 11 * s);
     };
     bar(14 * s, game.hp, ACTOR_MAX_HP, '#d23c3c', `HP ${game.hp}`);
+    // Venom in our blood: the harm it has still to do, marked over the end of the health bar, pulsing, and the edges of the view stained red.
+    const venom = game.myVenom;
+    if (venom > 0) {
+      const left = Math.min(venom, game.hp);
+      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 160);
+      ctx.fillStyle = `rgba(120,0,40,${0.55 + 0.35 * pulse})`;
+      ctx.fillRect(16 * s + (176 * s * Math.max(0, game.hp - left)) / ACTOR_MAX_HP, 16 * s, (176 * s * left) / ACTOR_MAX_HP, 10 * s);
+      ctx.fillStyle = '#ff7a8a';
+      ctx.fillText('VENOM', 200 * s, 25 * s);
+      const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7);
+      g.addColorStop(0, 'rgba(120,0,20,0)');
+      g.addColorStop(1, `rgba(120,0,20,${Math.min(0.4, 0.1 + venom / 300) * pulse})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
     if (game.drive) bar(32 * s, game.drive.fuel, TANK_MAX_FUEL, '#3c8cd2', `TANK JET ${Math.round(game.drive.fuel)}`);
     else bar(32 * s, game.body.fuel, ACTOR_MAX_FUEL, '#3c8cd2', `JET ${Math.round(game.body.fuel)}`);
     if (game.drive && game.myTankState) this.drawTankHud(game, input, s, W, H);
