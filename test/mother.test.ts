@@ -45,7 +45,7 @@ describe('the Mother', () => {
     c.skip();
     expect(c.choices().map((o) => o.ask)).toEqual(['Who are you?', 'Who built the ruins?']);
     pick(c, 'Who built the ruins?');
-    expect(c.choices().map((o) => o.ask)).toEqual(['Could the Tabarians still be out there?', 'How was TABAR found?']);
+    expect(c.choices().map((o) => o.ask)).toEqual(['Why do the ruins matter to you?', 'How was TABAR found?']);
     pick(c, 'How was TABAR found?');
     expect(said(c).join(' ')).toMatch(/Mother-0x915 pinged this planet as a discovery, after centuries of being sparse/);
     pick(c, 'Understood.');
@@ -111,11 +111,14 @@ describe('the Mother', () => {
     d.begin(TUTORIAL_BRIEFS[0]);
     pick(d, 'Who built the ruins?');
     expect(said(d).join(' ')).toMatch(/That was imprecise/);
-    pick(d, 'Could the Tabarians still be out there?');
+    pick(d, 'Why do the ruins matter to you?');
     expect(said(d).join(' ')).toMatch(/I want to know\. That is not an objective of this operation\. I want it anyway\./);
     // It comes up unasked, too.
     expect(TUTORIAL_BRIEFS[5].lines.join(' ')).toMatch(/Tabarians/);
-    expect(d.match('could the tabarians have survived underground')?.id).toBe('lost');
+    expect(d.match('why do the ruins matter so much to you')?.id).toBe('lost');
+    expect(said(d).join(' ')).toMatch(/counterfactual/);
+    expect(said(d).join(' ')).toMatch(/Humans have never met another intelligent species/);
+    expect(said(d).join(' ')).toMatch(/deep sites.*may hold the clue/);
     expect(d.match('are you malfunctioning')?.id).toBe('sane');
   });
 

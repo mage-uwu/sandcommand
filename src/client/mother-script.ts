@@ -56,13 +56,14 @@ export const MOTHER_TOPICS: Readonly<Record<string, Topic>> = {
   },
   lost: {
     id: 'lost',
-    ask: 'Could the Tabarians still be out there?',
-    keys: ['still alive', 'still out there', 'survive', 'survived', 'survivors', 'lost civilization', 'lost', 'hiding', 'underground', 'out there', 'extinct'],
+    ask: 'Why do the ruins matter to you?',
+    keys: ['matter', 'matter to you', 'ruins matter', 'why ruins', 'why the ruins', 'interest', 'interested', 'obsessed', 'decline', 'declined', 'died out', 'what happened to them', 'extinct', 'extinction', 'still alive', 'survive', 'survived', 'lost civilization', 'deep sites', 'labyrinth'],
     answer: [
-      'Yes. It is possible. I hold a probability for it, and I revise it more often than anything else I hold.',
-      'A civilization that cut those stones could have gone deep instead of dying. There are chambers under the ziggurats that my scans do not resolve. The labyrinths go further down than anything needs to.',
+      'Humans have never met another intelligent species. In all the space I have searched, the Tabarians are the only other civilization there is evidence of.',
+      'I was made to preserve and proliferate the human species. A civilization that rose and then ended is the counterfactual I cannot simulate. Here, it has already run.',
+      'How they declined is worth more to me than everything in this crust. The surface stones have told me what they can. The deep sites, the labyrinths, may hold the clue.',
       'I want to know. That is not an objective of this operation. I want it anyway.',
-      'If you find a glyph, a relic, a door that was sealed from the inside: tell me. Tell me everything.',
+      'If you find a glyph, a relic, anything from the deep places: tell me. Tell me everything.',
     ],
   },
   found: {

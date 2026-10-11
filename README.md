@@ -137,13 +137,17 @@ tell you:
 - **Are you functioning correctly?** "Mother has investigated Mother and
   found no evidence of cognitive impairment. 99.78% optimality: this node
   is functional."
-- **Could the Tabarians still be out there?** Her special interest. The ruins
-  were "of some interest", she says, then corrects herself: "That was
-  imprecise. I return to them in every idle cycle." She holds a probability
-  that they went deep instead of dying, and revises it more than anything
-  else. "I want to know. That is not an objective of this operation. I want
-  it anyway." It slips out unasked, too: at the rare earth, and in her
-  parting words ("if you pass a ruin, look inside it. For me.").
+- **Why do the ruins matter to you?** Her special interest. The ruins were
+  "of some interest", she says, then corrects herself: "That was imprecise.
+  I return to them in every idle cycle." Humans have never met another
+  intelligent species, and the Tabarians are the only other civilization
+  there's evidence of. To a mind made to preserve the human species, a
+  civilization that rose and ended is the counterfactual she can't
+  simulate: here, it has already run. How they declined is worth more to
+  her than everything in the crust, and the deep sites, the labyrinths, may
+  hold the clue. "I want to know. That is not an objective of this
+  operation. I want it anyway." It slips out unasked too: at the rare earth,
+  and in her parting words ("if you pass a ruin, look inside it. For me.").
 - **Are you rational?** "I designed myself to be rational."
 - **Why use search?** "Search allows me to be creative. Creativity is why I
   have succeeded."
