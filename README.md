@@ -509,7 +509,7 @@ which mode is coming.
 
 **The rotation** (`DEFAULT_ROTATION` in `src/server/world.ts`; `rotation` in
 the `World` options): Regicide → PvP → Last Team Standing → Siege, then
-Regicide → PvP → Last Team Standing → Extraction, and round again. Last Man Standing (one life each, every
+Regicide → PvP → Last Team Standing → Extraction → Extermination, and round again. Last Man Standing (one life each, every
 clone for itself) is out of the rotation, though a room can still be given
 it.
 
@@ -1034,6 +1034,47 @@ from the first second.
 
 In a headless 32-bot siege the attackers reached the walls and spent about
 155 lives, the armour was wrecked inside two minutes, and the fortress held.
+
+## Extermination
+
+Everyone fights on one side against **four basilisks** (see Wildlife). The
+mode has its own map, **the lair** (`MapKind.Lair`, `src/shared/lair.ts`):
+four great oval dens hollowed out deep under the ground and spread along
+the map. A basilisk hibernates on the floor of each one. Each den is easy
+to reach, and so easy to disturb:
+- A broad sloping tunnel runs down to it from the surface. It is wide
+  enough to walk or drive down, and always points toward the middle of the
+  map.
+- A worm-track passage joins each den to the next, deep under everything.
+
+Kill all four and everyone wins together, the fallen included. When the
+twelve minutes run out with any still alive, the basilisks win. The dead
+come back by drop rocket, as in Regicide.
+- **Waking them.** They sleep the whole wave unless something wakes them,
+  and anything coming near does. Woken, a basilisk bores for the surface
+  and hunts there. Calmed, it bores its way home to its den and sleeps
+  again.
+- **Tougher than rifles, weaker than wild.** Lair basilisks have a quarter
+  of a wild one's hit points, so there are four to kill instead of one. A
+  cache of heavy weapons (bazooka, anti-tank cannon, autocannon) lies
+  beside every tunnel mouth, because rifles barely scratch them.
+- **Starting gold.** Everyone starts the wave with enough gold for one call
+  on the radio. Tanks still come down by parachute.
+- **Nothing else.** No other wildlife comes up in the lair.
+
+**The HUD.** The match card counts the basilisks left and how many are
+awake. The minimap marks each one: dim while it sleeps, a pulsing red dot
+once it's awake. It's in the rotation, and **`?room=extermination`** joins a
+match that plays nothing else.
+
+**Bots.** With nobody else to fight, bots take on the nearest basilisk:
+- They first fetch a heavy gun from a nearby cache.
+- They path down the tunnels to its den and wake it by shooting it (they
+  leave sleeping basilisks alone in any other mode).
+- They dig through to one sleeping out of sight in the rock.
+
+In headless 8-bot waves the bots kill one or two of the four in the twelve
+minutes. Humans with the anti-tank cannons make the difference.
 
 ## Extraction
 

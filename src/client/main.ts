@@ -178,8 +178,9 @@ async function join(tutorial = false): Promise<void> {
   storageSet('sc.name', name);
   playBtn.disabled = true;
   tutorialBtn.disabled = true;
-  // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one).
-  const room = new URLSearchParams(location.search).get('room') === 'siege' ? 'siege' : 'main';
+  // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one; ?room=extermination, all Extermination).
+  const asked = new URLSearchParams(location.search).get('room');
+  const room = asked === 'siege' || asked === 'extermination' ? asked : 'main';
   statusEl.textContent = 'Connecting…';
   const g = new Game();
   g.sfx = sfx;

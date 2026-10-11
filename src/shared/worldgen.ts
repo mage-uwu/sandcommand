@@ -1,3 +1,4 @@
+import { type Lair, carveLair } from './lair.ts';
 import { WORLD_H, WORLD_W } from './constants.ts';
 import { MAT_LOOSE, Mat, isSoil } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
@@ -21,6 +22,8 @@ export let lastDungeon: Dungeon | null = null;
 export let lastCaves: CaveNet | null = null;
 /** The last siege map's layout (its fortress's end, outposts, landing zone, vehicle spots), or null. */
 export let lastSiege: SiegeMap | null = null;
+/** Extermination's lair (its dens and the tunnels down to them), or null. */
+export let lastLair: Lair | null = null;
 
 /**
  * Is this a cave map (caves.ts: a tunnel highway under the bunkers, with
@@ -28,7 +31,7 @@ export let lastSiege: SiegeMap | null = null;
  * Regicide's; never the labyrinth (it's underground already).
  */
 export function cavesOf(seed: number, kind: number): boolean {
-  if (kind === MapKind.Dungeon || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
+  if (kind === MapKind.Dungeon || kind === MapKind.Lair || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
   return hash2(seed & 0xffff, seed >>> 16, 0xca7e) % 100 < 40;
 }
 
@@ -70,7 +73,7 @@ export function biomeOf(seed: number, kind: number): number {
   // marslike maps keep their seeds; Siege's megafortress wants marslike ground.
   const dead = (hash2(seed & 0xffff, seed >>> 16, 0xdead) >>> 0) / 4294967296;
   if (kind === MapKind.Fortress && dead < 0.2) return Biome.Deadland;
-  if (kind === MapKind.Fortress || kind === MapKind.Siege) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
+  if (kind === MapKind.Fortress || kind === MapKind.Siege || kind === MapKind.Lair) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
   if (dead < 0.25) return Biome.Deadland;
   // About one ordinary map in seven is the Valley of Souls (its own roll, too).
   if ((hash2(seed & 0xffff, seed >>> 16, 0x5011) >>> 0) / 4294967296 < 0.14) return Biome.Valley;
@@ -84,6 +87,8 @@ export const MapKind = {
   Dungeon: 2,
   /** Siege: one massive fortress and its outposts at one end, the attackers' landing zone at the other (siege.ts). */
   Siege: 3,
+  /** Extermination: the lair, four great dens under open ground, a basilisk asleep in each (lair.ts). */
+  Lair: 4,
 } as const;
 
 /** Level each span to its median height (by `k`), easing back into the land over 160 cells either side. */
@@ -394,8 +399,14 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // Bunker complexes on a modular grid across part of the surface.
   backdrop?.fill(0);
   lastSiege = null;
+  lastLair = null;
   lastBuried = [];
-  if (dungeon) {
+  if (mapKind === MapKind.Lair) {
+    // The lair: no bunkers, just open ground over the dens and the tunnels down to them.
+    lastComplexes = [];
+    lastDungeon = null;
+    lastLair = carveLair(m, heights, seed);
+  } else if (dungeon) {
     lastComplexes = [];
     lastDungeon = generateDungeon(m, heights, seed, backdrop);
   } else if (mapKind === MapKind.Siege) {
@@ -436,6 +447,9 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // labyrinth), clear of every bunker and the siege works.
   const spans: { x0: number; x1: number }[] = lastComplexes.map((c) => ({ x0: c.x0, x1: c.x1 }));
   if (lastSiege) spans.push({ x0: lastSiege.lz[0], x1: lastSiege.lz[1] });
+  // (The lair's dens and tunnel mouths clear of the frosting too.)
+  if (lastLair) for (const d of lastLair.dens) spans.push({ x0: d.x - d.rx - 20, x1: d.x + d.rx + 20 });
+  if (lastLair) for (const x of lastLair.mouths) spans.push({ x0: x - 40, x1: x + 40 });
   // (And the works dug in round the bunkers: trenches, teeth, sandbags, iron blocks.)
   if (!dungeon) for (const list of [lastWorks.trenches, lastWorks.teeth, lastWorks.sandbags, lastWorks.cubes]) for (const w of list) spans.push({ x0: w.x0, x1: w.x1 });
   // The deadland's monuments, clear of the bunkers (and the frosting clear of them).

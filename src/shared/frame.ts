@@ -280,6 +280,8 @@ export interface RoundState {
   lives?: number;
   /** PvP: the leader (player id, 255 none) and their kills; our own kills and deaths this wave. */
   pvp?: { leader: number; leaderKills: number; kills: number; deaths: number };
+  /** Extermination: how many basilisks the wave began with, and each one left (its head, and whether it's awake). */
+  lair?: { total: number; beasts: { x: number; y: number; awake: boolean }[] };
 }
 
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
@@ -515,6 +517,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           const ex = r.u16();
           const ey = r.u16() - Y_BIAS;
           s.evac = { state, x: ex, y: ey, eta: r.u16() };
+        }
+        if (mode === GameMode.Extermination) {
+          const total = r.u8();
+          const n = r.u8();
+          const beasts: { x: number; y: number; awake: boolean }[] = [];
+          for (let i = 0; i < n; i++) beasts.push({ x: r.u16(), y: r.u16() - Y_BIAS, awake: r.u8() !== 0 });
+          s.lair = { total, beasts };
         }
         h.round(s);
         break;

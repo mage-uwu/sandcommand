@@ -151,7 +151,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 63;
+export const PROTOCOL_VERSION = 64;
 
 /** Last Man Standing round phases. */
 export const Phase = {
@@ -169,6 +169,7 @@ export const GameMode = {
   Extraction: 3, // four teams race down a labyrinth for the golden idol and out on the extraction rocket (everyone respawns)
   Pvp: 4, // all against all for five minutes with respawns: most kills wins
   Siege: 5, // red holds a massive fortress for ten minutes, its king inside; green has 300 lives to kill him
+  Extermination: 6, // everyone together against four basilisks hibernating in a lair: kill them all (everyone respawns)
 } as const;
 
 export const Team = {
@@ -180,7 +181,7 @@ export const Team = {
 } as const;
 export const TEAM_NAMES = ['RED', 'GREEN', 'BLUE', 'GOLD'] as const;
 /** How many teams a wave of each mode splits into (0: every clone for itself). */
-export const TEAMS_IN_MODE = [0, 2, 2, 4, 0, 2] as const;
+export const TEAMS_IN_MODE = [0, 2, 2, 4, 0, 2, 1] as const;
 
 /** Extraction rocket states (R_ROUND). */
 export const Evac = {

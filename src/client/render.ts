@@ -3287,6 +3287,16 @@ export class Renderer {
       for (const bl of game.radar) if (game.isKing(bl.id)) ctx.strokeRect(mx + bl.x * k - 3 * s, my + bl.y * k - 3 * s, 6 * s, 6 * s);
       for (const v of views) if (v.flags & F_ALIVE && game.isKing(v.id)) ctx.strokeRect(mx + v.x * k - 3 * s, my + v.y * k - 3 * s, 6 * s, 6 * s);
     }
+    // Extermination: the basilisks (red when awake, dim asleep), for everyone to hunt.
+    if (rs0?.lair && rs0.mode === GameMode.Extermination) {
+      const pulse = 3.5 + Math.sin(performance.now() / 160);
+      for (const b of rs0.lair.beasts) {
+        ctx.fillStyle = b.awake ? '#ff4d3d' : 'rgba(200,190,170,0.85)';
+        ctx.beginPath();
+        ctx.arc(mx + b.x * k, my + Math.max(0, b.y) * k, (b.awake ? pulse : 3) * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     // Extraction: the idol (a pulsing gold diamond) and the extraction rocket, for everyone to race to.
     if (rs0?.idol && rs0.mode === GameMode.Extraction) {
       const ix = mx + rs0.idol.x * k;
@@ -3465,14 +3475,17 @@ export class Renderer {
     const extraction = rs.mode === GameMode.Extraction;
     const pvp = rs.mode === GameMode.Pvp;
     const siege = rs.mode === GameMode.Siege;
+    const exterm = rs.mode === GameMode.Extermination;
     const teams = rs.mode === GameMode.Lts || regicide || extraction || siege;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(siege ? 'SIEGE' : extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
+    if (rs.phase === Phase.Waiting) big(exterm ? 'EXTERMINATION' : siege ? 'SIEGE' : extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
         // (The mode is the headline; the map's biome goes with the hints.)
-        (siege
+        (exterm
+          ? 'extermination · everyone together · four basilisks hibernate in the lair below · kill them all · respawns'
+          : siege
           ? 'siege · red holds the fortress and its king for 10 minutes · green has 300 lives to kill him'
           : extraction
           ? 'extraction · four teams · bring the golden idol up from the bottom of the labyrinth'
@@ -3490,6 +3503,9 @@ export class Renderer {
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
       if (rs.winner === 255) big('NOBODY GOT OUT', `the idol stays buried · wave ${rs.wave} · next wave in ${secs}`);
       else big(`${TEAM_NAMES[rs.winner]} EXTRACTED`, `${mine ? 'your team got' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' got'} the golden idol out · next wave in ${secs}`, teamCss(rs.winner));
+    } else if (rs.phase === Phase.Victory && exterm) {
+      if (rs.winner === 255) big('THE BASILISKS WIN', `${rs.lair?.beasts.length ?? '?'} still alive · wave ${rs.wave} · next wave in ${secs}`, '#ff8070');
+      else big('LAIR CLEARED', `every basilisk is dead · wave ${rs.wave} · next wave in ${secs}`, '#80ff80');
     } else if (rs.phase === Phase.Victory && pvp) {
       const won = rs.winner === game.myId;
       const who = (game.players.get(rs.winner)?.name ?? '').replace(/^BOT /, '');
@@ -3541,6 +3557,13 @@ export class Renderer {
         else if (evac?.state === Evac.Landed) line += ' · EXTRACTION WAITING';
         else if (evac?.state === Evac.Moving) line += ' · EXTRACTION MOVING';
         extra = { t: line, c: color };
+      } else if (exterm) {
+        modeName = 'EXTERMINATION';
+        const lair = rs.lair;
+        const left = lair?.beasts.length ?? 0;
+        const awake = lair?.beasts.filter((b) => b.awake).length ?? 0;
+        parts.push({ t: `BASILISKS ${left}/${lair?.total ?? 4}`, c: left <= 1 ? '#80ff80' : '#ffd34a' }, gap, { t: `${awake} AWAKE`, c: awake > 0 ? '#ff8070' : '#9aa4ad' });
+        extra = { t: awake > 0 ? 'KILL THEM · they hunt anything they see up top' : 'down the tunnels to the dens · wake them, then kill them', c: awake > 0 ? '#ff8070' : '#c8d0d8' };
       } else if (pvp) {
         modeName = 'PVP';
         const st = rs.pvp;
@@ -3582,7 +3605,7 @@ export class Renderer {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           const side = teams && game.myTeam !== Team.None ? `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · ` : '';
           big('LOADING OUT', `${side}${back > 1 ? `deploying in ${back}s` : 'drop rocket on its way'}`, teams && game.myTeam !== Team.None ? teamCss(game.myTeam) : '#ffd34a');
-        } else if ((regicide || extraction || pvp || siege) && rs.inWave) {
+        } else if ((regicide || extraction || pvp || siege || exterm) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           big('FRAGGED', back > 0 ? `${cause}redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · ${watching}` : `${cause}drop rocket inbound · ${watching}`, '#ff4d3d');
         }

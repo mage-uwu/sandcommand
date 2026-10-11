@@ -1,0 +1,126 @@
+import { describe, expect, it } from 'vitest';
+import { Reader } from '../src/shared/codec.ts';
+import { GameMode, Phase, TEAMS_IN_MODE, Team } from '../src/shared/protocol.ts';
+import { MapKind } from '../src/shared/worldgen.ts';
+import { LAIR_DENS } from '../src/shared/lair.ts';
+import { BASILISK_HP, BeastKind } from '../src/shared/wildlife.ts';
+import { WeaponId } from '../src/shared/weapons.ts';
+import { type Player, World } from '../src/server/world.ts';
+import { Game } from '../src/client/game.ts';
+
+type Internals = { damage: (p: Player, n: number, by: number, w: number) => void; phaseTimer: number };
+function until(world: World, cond: () => boolean, max = 3000): void {
+  for (let t = 0; t < max && !cond(); t++) world.step();
+}
+const basilisks = (world: World) => world.beasts.map((b, k) => ({ b, k })).filter((o) => o.b?.kind === BeastKind.Basilisk);
+const exterm = (seed: number, n: number, send?: (d: Uint8Array) => void, bots = 0) => {
+  const world = new World(seed, { mode: 'ffa', rotation: [GameMode.Extermination], tanks: false, bots });
+  const ps = Array.from({ length: n }, (_, i) => world.addPlayer(`p${i}`, { send: i === 0 && send ? send : () => {} })!);
+  until(world, () => world.phase === Phase.Live);
+  until(world, () => ps.every((p) => p.alive), 1200);
+  return { world, ps };
+};
+
+describe('Extermination', () => {
+  it('is fought in the lair: four basilisks, one hibernating on the floor of each den, and everyone on one side', () => {
+    const { world, ps } = exterm(301, 3);
+    expect(TEAMS_IN_MODE[GameMode.Extermination]).toBe(1);
+    expect(world.mapKind).toBe(MapKind.Lair);
+    expect(world.lair?.dens.length).toBe(LAIR_DENS);
+    const bs = basilisks(world);
+    expect(bs.length).toBe(LAIR_DENS);
+    for (const { b } of bs) {
+      expect(b!.frozen).toBeGreaterThan(30 * 60 * 10); // (asleep the whole wave, unless woken)
+      expect(world.lair!.dens.some((d) => Math.abs(b!.x - d.floorX) < 8 && Math.abs(b!.y - d.floorY) < 16)).toBe(true);
+    }
+    for (const p of ps) expect(p.team).toBe(Team.Red);
+    expect(world.friendly(ps[0].id, ps[1])).toBe(true);
+  });
+
+  it('a cache of heavy weapons lies by every tunnel mouth, and the basilisks are a quarter as tough as a wild one', () => {
+    const { world } = exterm(308, 2);
+    for (const mx of world.lair!.mouths) {
+      const near = world.items.filter((it) => Math.abs(it.x - mx) < 60);
+      for (const w of [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon]) expect(near.map((it) => it.weapon)).toContain(w);
+    }
+    for (const { b } of basilisks(world)) expect(b!.hp).toBe(BASILISK_HP / 4);
+  });
+
+  it('nothing else comes up in the lair', () => {
+    const { world } = exterm(302, 2);
+    for (let t = 0; t < 30 * 40; t++) world.step();
+    expect(world.beasts.every((b) => !b || b.kind === BeastKind.Basilisk)).toBe(true);
+  });
+
+  it('the fallen come back by drop rocket', () => {
+    const { world, ps } = exterm(303, 2);
+    const [a] = ps;
+    (world as unknown as Internals).damage(a, 999, 255, 0);
+    expect(a.alive).toBe(false);
+    expect(a.pendingSpawn).toBe(true);
+    until(world, () => a.alive, 30 * 30);
+    expect(a.alive).toBe(true);
+    expect(world.phase).toBe(Phase.Live);
+  });
+
+  it('kill all four and everyone wins (the fallen too)', () => {
+    const { world, ps } = exterm(304, 2);
+    const bs = basilisks(world);
+    for (const { k } of bs.slice(0, 3)) world.hurtBeast(k, 1e9, ps[0].id);
+    world.step();
+    expect(world.phase).toBe(Phase.Live); // (one still alive)
+    world.hurtBeast(bs[3].k, 1e9, ps[1].id);
+    world.step();
+    expect(world.phase).toBe(Phase.Victory);
+    expect(world.winner).toBe(Team.Red);
+    for (const p of ps) expect(p.wins).toBe(1);
+  });
+
+  it('time runs out with any alive: the basilisks win', () => {
+    const { world, ps } = exterm(305, 2);
+    world.hurtBeast(basilisks(world)[0].k, 1e9, ps[0].id);
+    (world as unknown as Internals).phaseTimer = 1;
+    world.step();
+    expect(world.phase).toBe(Phase.Victory);
+    expect(world.winner).toBe(255);
+    for (const p of ps) expect(p.wins).toBe(0);
+  });
+
+  it('clients see how many are left, where, and which are awake', () => {
+    const frames: Uint8Array[] = [];
+    const { world, ps } = exterm(306, 2, (d) => frames.push(d));
+    const bs = basilisks(world);
+    world.hurtBeast(bs[0].k, 1e9, ps[0].id);
+    world.hurtBeast(bs[1].k, 1, ps[0].id); // (woken)
+    for (let k = 0; k < 3; k++) world.step();
+    const game = new Game();
+    game.myId = ps[0].id;
+    for (const f of frames) {
+      const r = new Reader(f);
+      r.u8();
+      const tick = r.u32();
+      const ack = r.u16();
+      game.applyFrame(tick, ack, r);
+    }
+    const lair = game.roundState?.lair;
+    expect(game.roundState?.mode).toBe(GameMode.Extermination);
+    expect(lair?.total).toBe(4);
+    expect(lair?.beasts.length).toBe(3);
+    expect(lair?.beasts.filter((b) => b.awake).length).toBe(1);
+    const b1 = world.beasts[bs[1].k]!;
+    expect(lair?.beasts.some((b) => b.awake && Math.abs(b.x - b1.fx) < 40 && Math.abs(b.y - b1.fy) < 40)).toBe(true);
+  });
+
+  it('bots go down into the lair and take the fight to the basilisks', () => {
+    const { world } = exterm(307, 1, undefined, 6);
+    until(world, () => world.players.filter((p) => p?.bot && p.alive).length >= 4, 30 * 20);
+    const hp0 = basilisks(world).map(({ b }) => b!.hp);
+    let woke = false;
+    for (let t = 0; t < 30 * 90 && !woke; t++) {
+      world.step();
+      woke = basilisks(world).some(({ b }) => b!.frozen === 0) || basilisks(world).length < 4;
+    }
+    expect(woke).toBe(true);
+    void hp0;
+  });
+});

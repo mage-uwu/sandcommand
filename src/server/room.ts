@@ -106,7 +106,7 @@ export class GameRoom extends DurableObject<Env> {
 
     // Last Man Standing, with bots in every slot no human has.
     // The siege room plays nothing but Siege; any other, the usual rotation.
-    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : undefined });
+    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : this.roomName === 'extermination' ? [GameMode.Extermination] : undefined });
     const world = this.world;
     const player = world.addPlayer(name, {
       send(data) {

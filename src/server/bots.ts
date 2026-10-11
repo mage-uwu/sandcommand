@@ -97,9 +97,11 @@ export function wishOdds(skill: number): [number, number][] {
   ];
 }
 
-/** What a cell's worth to a bot digging for gold (rare earth ten times gold). */
 /** How near a creature has to come (from the shoulder) for a bot to turn its gun on it. */
 const BEAST_REACT = 240;
+/** Extermination: what it goes and gets to fight a basilisk with (its rifle barely scratches one). */
+const HEAVY: number[] = [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon];
+/** What a cell's worth to a bot digging for gold (rare earth ten times gold). */
 const oreWorth = (m: number) => (m === Mat.Gold ? 1 : m === Mat.GemCrystal ? GEM_CRYSTAL_VALUE : m === Mat.RareEarth ? RARE_EARTH_VALUE : 0);
 
 export class BotBrain {
@@ -134,6 +136,9 @@ export class BotBrain {
   private surfStill = 0;
   /** Ticks a nearby target has been out of sight (a floor or wall between us). */
   private blind = 0;
+  /** Extermination: can it see the basilisk it's after, and how long it's been close by with no line on it (in the rock: dig to it). */
+  private seeQuarry = false;
+  private quarryBlind = 0;
   private lastX = 0;
   private trigger = false;
   private seq = 0;
@@ -286,8 +291,8 @@ export class BotBrain {
     let at: { x: number; y: number } | null = null;
     for (let k = 0; k < world.beasts.length; k++) {
       const b = world.beasts[k];
-      // (Not a basilisk asleep: they don't know it's there, and they'd only wake it.)
-      if (!b || (b.kind === BeastKind.Basilisk && b.frozen > 0)) continue;
+      // (Not a basilisk asleep: they don't know it's there, and they'd only wake it. Unless that's the job: Extermination.)
+      if (!b || (b.kind === BeastKind.Basilisk && b.frozen > 0 && !world.exterminationLive)) continue;
       const pts = world.beastPts[k];
       for (let i = 0; i < pts.length; i += 4) {
         const d = Math.hypot(pts[i] - sx, pts[i + 1] - sy);
@@ -295,6 +300,22 @@ export class BotBrain {
           best = d;
           at = { x: pts[i], y: pts[i + 1] };
         }
+      }
+    }
+    return at;
+  }
+
+  /** Extermination: the nearest basilisk left (its head), to go and kill. */
+  private quarry(world: World, p: Player): { x: number; y: number } | null {
+    let best = Infinity;
+    let at: { x: number; y: number } | null = null;
+    for (let k = 0; k < world.beasts.length; k++) {
+      if (world.beasts[k]?.kind !== BeastKind.Basilisk) continue;
+      const pts = world.beastPts[k];
+      const d = Math.hypot(pts[0] - p.cx, pts[1] - p.cy);
+      if (d < best) {
+        best = d;
+        at = { x: pts[0], y: pts[1] };
       }
     }
     return at;
@@ -451,6 +472,27 @@ export class BotBrain {
       goalX = nav.goalX;
       if (nav.pickup) pickup = (t & 1) === 0;
     }
+    // Extermination: nobody to fight but the basilisks: off to the nearest one (down the tunnels to its den, asleep).
+    const quarry = !tgt && world.exterminationLive ? this.quarry(world, p) : null;
+    if (quarry) goalX = quarry.x;
+    if (quarry && (t + this.phase) % 4 === 0) this.seeQuarry = clearLine(world, sx, sy, quarry.x, quarry.y);
+    const quarryD = quarry ? Math.hypot(quarry.x - p.cx, quarry.y - p.cy) : Infinity;
+    this.quarryBlind = quarry && !this.seeQuarry && quarryD < 140 ? this.quarryBlind + 1 : 0;
+    const dugIn = this.quarryBlind > 30;
+    // (Rifles barely scratch one: first, a heavy gun from the cache by the tunnel mouth, if it's not far.)
+    const heavySlot = world.exterminationLive ? p.inv.findIndex((it) => HEAVY.includes(it.weapon) && it.ammo > 0) : -1;
+    if (quarry && heavySlot < 0 && !this.seeQuarry) {
+      let best = 420 * 420;
+      for (const it of world.items) {
+        if (!HEAVY.includes(it.weapon)) continue;
+        const d = (it.x - p.cx) ** 2 + (it.y - p.cy) ** 2;
+        if (d < best) {
+          best = d;
+          goalX = it.x;
+          pickup = d < PICKUP_R * PICKUP_R && (t & 3) === 0;
+        }
+      }
+    }
 
     // Saving up for a dropship: with the fighting elsewhere, go and dig gold;
     // with enough banked, get on the radio (for itself, or its whole team).
@@ -491,7 +533,12 @@ export class BotBrain {
     // what does.
     // (An enemy craft overhead it has no line on comes first: it pops up for a shot instead.)
     const skyThreat = this.airThreat(world, p);
-    const route = !nav && !goldAt && !calling && !cave && !skyThreat && tgt && (!this.seeTarget || Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) > 160) ? this.pathNav(world, p, tgt.cx, tgt.body.y + ACTOR_H) : null;
+    const route =
+      !nav && !goldAt && !calling && !cave && !skyThreat && tgt && (!this.seeTarget || Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy) > 160)
+        ? this.pathNav(world, p, tgt.cx, tgt.body.y + ACTOR_H)
+        : quarry && !calling && !skyThreat && goalX === quarry.x && quarryD > 90
+          ? this.pathNav(world, p, quarry.x, quarry.y + 12)
+          : null;
     if (route) goalX = route.goalX;
     else this.path = null;
     // Siege defenders hold their ground: the fortress and the ground in front
@@ -521,6 +568,8 @@ export class BotBrain {
     if (mineSlot >= 0 && p.body.onGround && (!tgt || (!this.seeTarget && dist > 200)) && t > this.mineUntil + 300 && rng.next() < 0.004) this.mineUntil = t + 12;
     if (t < this.mineUntil && mineSlot >= 0) want = mineSlot;
     // Up close with a launcher: a gun that won't blow us up too, if we carry one.
+    // A basilisk in its sights (and not right on top of it): the heavy gun.
+    if (heavySlot >= 0 && !tgt && this.beast && Math.hypot(this.beast.x - sx, this.beast.y - sy) > 60 && t >= this.nadeUntil) want = heavySlot;
     const splashy = p.inv[want]?.weapon === WeaponId.Bazooka || p.inv[want]?.weapon === WeaponId.GrenadeLauncher;
     if (dist < 70 && splashy) {
       const safe: number[] = [WeaponId.Shotgun, WeaponId.Smg, WeaponId.Gatling, WeaponId.Rifle, WeaponId.LightRifle, WeaponId.Blaster, WeaponId.Laser, WeaponId.Sniper];
@@ -555,9 +604,9 @@ export class BotBrain {
       this.goldGainAt = t;
     }
     // (Never at what won't yield: the caltrops' cement, the ruins' masonry, pig iron. It goes round those.)
-    const toward = this.blind > 60 && tgt ? { x: tgt.cx, y: tgt.cy } : { x: p.cx + (Math.sign(goalX - p.cx) || 1) * 24, y: p.cy };
+    const toward = this.blind > 60 && tgt ? { x: tgt.cx, y: tgt.cy } : dugIn && quarry ? quarry : { x: p.cx + (Math.sign(goalX - p.cx) || 1) * 24, y: p.cy };
     const hardWay = hardBetween(world, sx, sy, toward.x, toward.y);
-    const digging = !world.extractionLive && digSlot >= 0 && (mining || !!route?.dig || (!this.seeTarget && !hardWay && (this.stuck > 75 || this.blind > 60)));
+    const digging = !world.extractionLive && digSlot >= 0 && (mining || !!route?.dig || (!this.seeTarget && !hardWay && (this.stuck > 75 || this.blind > 60)) || (dugIn && !hardWay));
     if (digging) want = digSlot;
     if (calling) want = radioSlot;
     if (want < 0) want = digSlot >= 0 ? digSlot : p.slot;
@@ -656,13 +705,13 @@ export class BotBrain {
     } else if (weapon === WeaponId.Digger) {
       // Dig at the target when it's just the other side of a floor or wall;
       // otherwise through the obstacle in the way.
-      let tx = (tgt ? tgt.cx : goalX) - p.cx;
-      let ty = (tgt ? tgt.cy : p.cy) - p.cy;
+      let tx = (tgt ? tgt.cx : dugIn && quarry ? quarry.x : goalX) - p.cx;
+      let ty = (tgt ? tgt.cy : dugIn && quarry ? quarry.y : p.cy) - p.cy;
       if (route?.dig) {
         // On its path: through the soft ground the path runs into.
         tx = route.digX - p.cx;
         ty = route.digY - p.cy;
-      } else if (this.blind <= 60) {
+      } else if (this.blind <= 60 && !dugIn) {
         // Blocked on the way somewhere: straight through whatever is ahead.
         tx = Math.sign(tx) || 1;
         ty = 0;

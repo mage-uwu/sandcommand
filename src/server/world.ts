@@ -243,7 +243,8 @@ import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_R, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
+import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastLair, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
+import type { Lair } from '../shared/lair.ts';
 import { ballisticAim } from '../shared/ballistics.ts';
 import {
   type Beast,
@@ -654,6 +655,11 @@ export class World {
   /** Siege: the map's layout (fortress end, landing zone, vehicle spots), and the attackers' lives left. */
   siege: SiegeMap | null = null;
   siegeLives = 0;
+  /** Extermination: the lair (its dens, and the tunnels down to them), and how many basilisks the wave began with. */
+  lair: Lair | null = null;
+  lairBeasts = 0;
+  /** Extermination: each basilisk's den (where it goes back to sleep, calmed). */
+  private readonly lairHome = new WeakMap<Beast, { x: number; y: number }>();
   /** FFA: fill the room with bots up to this many clones (humans count first). */
   readonly botFill: number;
   /** Seed of the current map (each wave gets a new one). */
@@ -720,7 +726,7 @@ export class World {
   private mapKindFor(n: number): number {
     if (this.mode !== 'ffa') return MapKind.Plain;
     const mode = this.modeOfWave(n);
-    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : mode === GameMode.Siege ? MapKind.Siege : MapKind.Plain;
+    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : mode === GameMode.Siege ? MapKind.Siege : mode === GameMode.Extermination ? MapKind.Lair : MapKind.Plain;
   }
 
   /** Generate the map for `mapSeed` (fortresses or a labyrinth, by kind) and note what's in it. */
@@ -732,7 +738,18 @@ export class World {
     this.dungeon = lastDungeon;
     this.caves = lastCaves;
     this.siege = lastSiege;
+    this.lair = lastLair;
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
+    // The lair: a cache of heavy weapons beside each tunnel mouth (rifles barely scratch a basilisk).
+    if (lastLair) {
+      lastLair.mouths.forEach((mx, k) => {
+        const out = Math.sign(mx - lastLair!.dens[k].x) || 1;
+        LAIR_CACHE.forEach((weapon, i) => {
+          const x = mx + out * (TUNNEL_CLEAR + i * 10);
+          this.mapLoot.push({ x, y: this.terrain.surfaceY(x) - 6, weapon });
+        });
+      });
+    }
     this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, hp: DOOR_HP, broken: false })));
     // (Staggered, so they don't all go off on their own together early on.)
     this.geyserRng = new Rng(this.mapSeed ^ 0x6e75e5);
@@ -946,6 +963,10 @@ export class World {
           if (timeUp) this.endPvp();
           break;
         }
+        if (this.modeOfWave(this.wave) === GameMode.Extermination) {
+          this.stepExtermination(timeUp);
+          break;
+        }
         if (this.remaining() <= 1 || timeUp) {
           let best: Player | null = null;
           for (const p of this.players) {
@@ -1062,6 +1083,53 @@ export class World {
     this.winner = best && !tie && best.waveKills > 0 ? best.id : 255;
     if (this.winner !== 255) best!.wins++;
     this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /**
+   * Extermination: every basilisk dead, everyone wins together (the fallen
+   * too); time runs out with any still alive, the basilisks do.
+   */
+  private stepExtermination(timeUp: boolean): void {
+    const left = this.basilisksLeft();
+    if (left > 0 && !timeUp) return;
+    this.winner = left === 0 ? Team.Red : 255;
+    if (left === 0) for (const p of this.players) if (p && p.inWave) p.wins++;
+    this.setPhase(Phase.Victory, VICTORY_TICKS);
+  }
+
+  /** Basilisks still alive (Extermination's quarry). */
+  basilisksLeft(): number {
+    let n = 0;
+    for (const b of this.beasts) if (b?.kind === BeastKind.Basilisk) n++;
+    return n;
+  }
+
+  /** An Extermination wave is being fought right now. */
+  get exterminationLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Extermination;
+  }
+
+  /**
+   * Extermination opening: a basilisk hibernating on the floor of every den
+   * (sleeping the wave away, unless someone wakes it: and that's easy), and
+   * gold enough for a call on the radio each, to begin with.
+   */
+  private startExtermination(): void {
+    this.beasts.fill(null);
+    const lair = this.lair;
+    if (lair) {
+      lair.dens.forEach((d, k) => {
+        const b = newBeast(this.terrain, BeastKind.Basilisk, d.floorX, d.floorY - 8, d.floorX < WORLD_W / 2 ? 1 : -1);
+        b.seed = this.beastRng.int(256);
+        b.frozen = EXTERMINATION_TICKS + 30 * 60;
+        b.hp = BASILISK_HP * LAIR_HP;
+        this.lairHome.set(b, { x: d.floorX, y: d.floorY - 8 });
+        this.beasts[k] = b;
+        bodyPoints(this.terrain, b, this.beastPts[k]);
+      });
+    }
+    this.lairBeasts = this.basilisksLeft();
+    for (const p of this.players) if (p) p.gold = Math.max(p.gold, CALL_COST);
   }
 
   private kingAlive(team: number): boolean {
@@ -1388,7 +1456,7 @@ export class World {
   }
 
   get respawnLive(): boolean {
-    return this.regicideLive || this.extractionLive || this.pvpLive || this.siegeLive;
+    return this.regicideLive || this.extractionLive || this.pvpLive || this.siegeLive || this.exterminationLive;
   }
 
   /** Is this clone a king (this wave)? */
@@ -1609,7 +1677,8 @@ export class World {
    */
   private stepBeasts(): void {
     if (!this.wildlife || this.dungeon) return;
-    if (this.tick >= this.beastSpawnAt) {
+    // (The lair: only its own basilisks, and nothing new comes up.)
+    if (!this.lair && this.tick >= this.beastSpawnAt) {
       this.beastSpawnAt = this.tick + BEAST_RESPAWN;
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
       const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
@@ -2092,8 +2161,11 @@ export class World {
       }
       gx = b.lastX;
       gy = b.lastY;
-      speed = b.fy < surf + BASILISK_DEEP * 0.5 ? BASILISK_RISE : BASILISK_CREEP;
-      if (Math.hypot(gx - b.fx, gy - b.fy) < 10 || ++b.still > 30 * 15) {
+      // (A lair basilisk, calmed, bores its way back home to its den.)
+      const home = this.lairHome.get(b);
+      const homing = !!home && gx === home.x && gy === home.y;
+      speed = homing || b.fy < surf + BASILISK_DEEP * 0.5 ? BASILISK_RISE : BASILISK_CREEP;
+      if (Math.hypot(gx - b.fx, gy - b.fy) < 10 || ++b.still > (homing ? 30 * 60 : 30 * 15)) {
         b.still = 0;
         b.frozen = BASILISK_SLEEP_MIN + rng.int(BASILISK_SLEEP_MAX - BASILISK_SLEEP_MIN);
       }
@@ -2114,8 +2186,9 @@ export class World {
         // Nothing left: down into the deep, to sleep.
         b.frenzy = 0;
         b.still = 1;
-        b.lastX = b.fx;
-        b.lastY = Math.min(WORLD_H - 40, surf + BASILISK_DEEP);
+        const home = this.lairHome.get(b);
+        b.lastX = home ? home.x : b.fx;
+        b.lastY = home ? home.y : Math.min(WORLD_H - 40, surf + BASILISK_DEEP);
         b.surfaced = false;
       } else {
         // Prowling, just under the ground, the way it was going.
@@ -2686,12 +2759,13 @@ export class World {
     if (mode === GameMode.Regicide) this.startRegicide();
     if (mode === GameMode.Siege) this.startSiege();
     if (mode === GameMode.Extraction) this.startExtraction();
+    if (mode === GameMode.Extermination) this.startExtermination();
     // The bunkers' own weapons, lying where they were left (all wave long).
     for (const l of this.mapLoot) {
       this.spawnItem(l.weapon, WEAPONS[l.weapon].clip, l.x, l.y, 0, 0);
       this.items[this.items.length - 1].age = -30 * 60 * 15;
     }
-    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : mode === GameMode.Siege ? SIEGE_TICKS : WAVE_TICKS);
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : mode === GameMode.Siege ? SIEGE_TICKS : mode === GameMode.Extermination ? EXTERMINATION_TICKS : WAVE_TICKS);
   }
 
   /**
@@ -3134,7 +3208,7 @@ export class World {
     // Regicide: soldiers come back by drop rocket after a while; the king never does.
     // PvP: everyone comes back, quickly. Siege: defenders come back; attackers
     // while their side has lives to spend (each death spends one).
-    let back = (this.regicideLive && !this.isKing(victim)) || this.extractionLive || this.pvpLive;
+    let back = (this.regicideLive && !this.isKing(victim)) || this.extractionLive || this.pvpLive || this.exterminationLive;
     if (this.siegeLive && !this.isKing(victim)) {
       if (victim.team !== ATTACKERS) back = true;
       else if (victim.inWave && this.siegeLives > 0) {
@@ -6244,6 +6318,17 @@ export class World {
           w.u16(clampU16(this.evac.y + Y_BIAS));
           w.u16(this.evac.state === Evac.Inbound ? this.evac.eta : 0);
         }
+        if (this.waveMode === GameMode.Extermination) {
+          // Extermination: how many it began with, then each basilisk left (its head, and whether it's awake).
+          w.u8(this.lairBeasts);
+          const left = this.beasts.filter((b): b is Beast => b?.kind === BeastKind.Basilisk);
+          w.u8(left.length);
+          for (const b of left) {
+            w.u16(clampU16(b.fx));
+            w.u16(clampU16(b.fy + Y_BIAS));
+            w.u8(b.frozen > 0 ? 0 : 1);
+          }
+        }
         if (this.dungeon && p.trapsSeen !== this.trapsRev) {
           p.trapsSeen = this.trapsRev;
           w.u8(R_TRAPS);
@@ -6635,12 +6720,19 @@ const PVP_TICKS = 30 * 60 * 5;
 const PVP_RESPAWN_TICKS = 30 * 5;
 /**
  * Which modes the waves cycle through: Regicide, PvP and team waves (Last
- * Team Standing) by turns, with a Siege and an Extraction now and then. Last Man Standing
+ * Team Standing) by turns, with a Siege, an Extraction and an Extermination now and then. Last Man Standing
  * stays out of the rotation (a room can still be given it).
  */
-const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction];
+const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction, GameMode.Extermination];
 /** Siege attackers come back faster than anyone (their lives are what's counted). */
 const SIEGE_RESPAWN_TICKS = 30 * 6;
+/** Extermination waves run twelve minutes too. */
+const EXTERMINATION_TICKS = 30 * 60 * 12;
+/** The lair's basilisks: a quarter of a wild one's hit points (four to kill, not one), still a long fight each. */
+const LAIR_HP = 0.25;
+/** What lies by each tunnel mouth in the lair, just clear of the hole. */
+const LAIR_CACHE = [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon];
+const TUNNEL_CLEAR = 24;
 /** Extraction waves run twelve minutes. */
 const EXTRACTION_TICKS = 30 * 60 * 12;
 /** How long the extraction rocket takes to come once the idol surfaces. */
