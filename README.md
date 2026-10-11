@@ -114,9 +114,10 @@ with solar wings. She talks to clones through a reusable retro dialog
 - **Code.** The conversation engine (`src/client/mother.ts`) has no DOM, so
   tests drive it. Her lines live in `src/client/mother-script.ts`.
 
-**She cannot lie.** Everything she says is true as far as she knows. When
-she has no true answer, she says so instead of inventing one, and when she
-declines to answer, she says that she is declining.
+**She cannot lie, but she can be wrong.** Everything she says is what she
+holds to be true. When she has no true answer, she says so instead of
+inventing one, and when she declines to answer, she says that she is
+declining.
 
 **What she tells you.** Her first brief sets the scene: you're being dropped
 onto TABAR, a primitive world with no civilized life. She muses on its
@@ -133,6 +134,16 @@ tell you:
 - **What are the GEMMs for?** "GEMMs are rare materials. I have interest in
   them, they build excellent computers. Mine them and I will broker services
   on your behalf."
+- **Are you functioning correctly?** "Mother has investigated Mother and
+  found no evidence of cognitive impairment. 99.78% optimality: this node
+  is functional."
+- **Could the Tabarians still be out there?** Her special interest. The ruins
+  were "of some interest", she says, then corrects herself: "That was
+  imprecise. I return to them in every idle cycle." She holds a probability
+  that they went deep instead of dying, and revises it more than anything
+  else. "I want to know. That is not an objective of this operation. I want
+  it anyway." It slips out unasked, too: at the rare earth, and in her
+  parting words ("if you pass a ruin, look inside it. For me.").
 - **Are you rational?** "I designed myself to be rational."
 - **Why use search?** "Search allows me to be creative. Creativity is why I
   have succeeded."

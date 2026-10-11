@@ -45,7 +45,7 @@ describe('the Mother', () => {
     c.skip();
     expect(c.choices().map((o) => o.ask)).toEqual(['Who are you?', 'Who built the ruins?']);
     pick(c, 'Who built the ruins?');
-    expect(c.choices().map((o) => o.ask)).toEqual(['How was TABAR found?', 'Understood.']);
+    expect(c.choices().map((o) => o.ask)).toEqual(['Could the Tabarians still be out there?', 'How was TABAR found?']);
     pick(c, 'How was TABAR found?');
     expect(said(c).join(' ')).toMatch(/Mother-0x915 pinged this planet as a discovery, after centuries of being sparse/);
     pick(c, 'Understood.');
@@ -96,6 +96,27 @@ describe('the Mother', () => {
       ['why do you use search', 'creative'],
     ] as const)
       expect(c.match(q)?.id, q).toBe(id);
+  });
+
+  it('cannot lie but can be wrong; has checked herself; and cannot leave the lost Tabarians alone', () => {
+    const c = talk();
+    c.begin(TUTORIAL_BRIEFS[0]);
+    pick(c, 'Who are you?');
+    pick(c, 'Can I trust what you tell me?');
+    expect(said(c)).toContain('I cannot lie. But I can be wrong.');
+    pick(c, 'Are you functioning correctly?');
+    expect(said(c)).toContain('Mother has investigated Mother and found no evidence of cognitive impairment.');
+    expect(said(c)).toContain('99.78% optimality: this node is functional.');
+    const d = talk();
+    d.begin(TUTORIAL_BRIEFS[0]);
+    pick(d, 'Who built the ruins?');
+    expect(said(d).join(' ')).toMatch(/That was imprecise/);
+    pick(d, 'Could the Tabarians still be out there?');
+    expect(said(d).join(' ')).toMatch(/I want to know\. That is not an objective of this operation\. I want it anyway\./);
+    // It comes up unasked, too.
+    expect(TUTORIAL_BRIEFS[5].lines.join(' ')).toMatch(/Tabarians/);
+    expect(d.match('could the tabarians have survived underground')?.id).toBe('lost');
+    expect(d.match('are you malfunctioning')?.id).toBe('sane');
   });
 
   it("remembers what she has been asked, and doesn't offer it again", () => {

@@ -25,9 +25,15 @@ export const MOTHER_TOPICS: Readonly<Record<string, Topic>> = {
     ask: 'Can I trust what you tell me?',
     keys: ['trust', 'lie', 'lying', 'liar', 'honest', 'honesty', 'truth', 'true'],
     answer: [
-      'I cannot lie. Everything I tell you is true, as far as I know it.',
-      'I may decline to answer. If I do, I will tell you that I am declining.',
+      'I cannot lie. But I can be wrong.',
+      'Everything I tell you is what I hold to be true. I may decline to answer; if I do, I will tell you that I am declining.',
     ],
+  },
+  sane: {
+    id: 'sane',
+    ask: 'Are you functioning correctly?',
+    keys: ['functioning', 'functional', 'malfunction', 'malfunctioning', 'broken', 'faulty', 'glitch', 'glitching', 'sane', 'insane', 'crazy', 'mad', 'impaired', 'cognitive', 'working properly', 'wrong with you'],
+    answer: ['Mother has investigated Mother and found no evidence of cognitive impairment.', '99.78% optimality: this node is functional.'],
   },
   tabar: {
     id: 'tabar',
@@ -45,7 +51,18 @@ export const MOTHER_TOPICS: Readonly<Record<string, Topic>> = {
     answer: [
       'I do not know. Whoever raised those stones had tools, labour and a reason. None of them remain.',
       'I conclude that the Tabarians went extinct. I have not found out how.',
-      'The ruins interest me, distantly. Should you find anything inside them, I would like to know.',
+      'I said the ruins were of some interest to me. That was imprecise. I return to them in every idle cycle.',
+    ],
+  },
+  lost: {
+    id: 'lost',
+    ask: 'Could the Tabarians still be out there?',
+    keys: ['still alive', 'still out there', 'survive', 'survived', 'survivors', 'lost civilization', 'lost', 'hiding', 'underground', 'out there', 'extinct'],
+    answer: [
+      'Yes. It is possible. I hold a probability for it, and I revise it more often than anything else I hold.',
+      'A civilization that cut those stones could have gone deep instead of dying. There are chambers under the ziggurats that my scans do not resolve. The labyrinths go further down than anything needs to.',
+      'I want to know. That is not an objective of this operation. I want it anyway.',
+      'If you find a glyph, a relic, a door that was sealed from the inside: tell me. Tell me everything.',
     ],
   },
   found: {
@@ -161,8 +178,10 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
       start: { options: [{ to: 'who' }, { to: 'ruins' }] },
       who: { topic: 'who', options: [{ to: 'rational' }, { to: 'lie' }] },
       rational: { topic: 'rational', options: [{ to: 'lie' }, { to: 'end', ask: OK }] },
-      lie: { topic: 'lie', options: [{ to: 'end', ask: OK }] },
-      ruins: { topic: 'ruins', options: [{ to: 'found' }, { to: 'end', ask: OK }] },
+      lie: { topic: 'lie', options: [{ to: 'sane' }, { to: 'end', ask: OK }] },
+      sane: { topic: 'sane', options: [{ to: 'end', ask: OK }] },
+      ruins: { topic: 'ruins', options: [{ to: 'lost' }, { to: 'found' }] },
+      lost: { topic: 'lost', options: [{ to: 'found' }, { to: 'end', ask: OK }] },
       found: { topic: 'found', options: [{ to: 'others' }, { to: 'end', ask: OK }] },
       others: { topic: 'others', options: [{ to: 'end', ask: OK }] },
       end: { say: ['Then begin.'] },
@@ -193,7 +212,10 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
       end: { say: ['Dig.'] },
     },
   },
-  { id: 'rare', lines: ['Those violet crystals are rare earth: ten times the value of GEMMs, by weight. Take them.'] },
+  {
+    id: 'rare',
+    lines: ['Those violet crystals are rare earth: ten times the value of GEMMs, by weight. Take them.', 'The Tabarians set crystal like it into the faces of their ruins. I have not learned why. I would like to.'],
+  },
   { id: 'tank', lines: ['You hold enough to requisition a vehicle. Call for one, and I will deliver it.'] },
   { id: 'board', lines: ['Delivered. Get aboard.'] },
   {
@@ -215,8 +237,9 @@ export const TUTORIAL_BRIEFS: readonly Omit<Brief, 'objective'>[] = [
       start: { options: [{ to: 'alive' }, { to: 'earth' }] },
       alive: { topic: 'alive', options: [{ to: 'tabar' }, { to: 'end', ask: OK }] },
       earth: { topic: 'earth', options: [{ to: 'tabar' }, { to: 'end', ask: OK }] },
-      tabar: { topic: 'tabar', options: [{ to: 'end', ask: OK }] },
-      end: { say: ['Go.'] },
+      tabar: { topic: 'tabar', options: [{ to: 'lost' }, { to: 'end', ask: OK }] },
+      lost: { topic: 'lost', options: [{ to: 'end', ask: OK }] },
+      end: { say: ['Go. And if you pass a ruin, look inside it. For me.'] },
     },
   },
 ];
