@@ -22,7 +22,7 @@ import type { Terrain } from './terrain.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -81,6 +81,45 @@ export const MILLI_COIL_SEGS = 8;
 /** After a coil (bitten or broken off): ticks before it can coil again. */
 export const MILLI_COIL_CD = 90;
 
+/**
+ * The **gem asp**, the millipede's small cousin: about a clone's size, slim
+ * and snakelike, a fringe of tiny legs. It crawls the same surfaces. With
+ * nobody about it curls up on a floor into a gem: a cluster of faceted
+ * crystals just like a GEMM formation's, and holds it for minutes. Whoever
+ * comes near it (in sight, within ASP_TRIGGER) it uncoils on, rears up
+ * hissing, and strikes: very fast, a bite and a dose of venom. Not armoured:
+ * a few rounds kill it.
+ */
+export const ASP_SEGS = 8;
+export const ASP_GAP = 2;
+export const ASP_R = 2.2;
+export const ASP_HP = 110;
+export const ASP_CRAWL = 30;
+export const ASP_HUNT = 60;
+/** Its strike: speed (cells/s) and how long it lasts (ticks). */
+export const ASP_STRIKE = 230;
+export const ASP_STRIKE_TICKS = 14;
+/** How far it sees prey, and how near they have to come before a disguised one gives itself away. */
+export const ASP_SENSE = 220;
+export const ASP_TRIGGER = 80;
+/** Rearing up hissing before it strikes (ticks). */
+export const ASP_HISS = 14;
+/** Its bite: reach (cells), harm, venom, ticks between bites. */
+export const ASP_BITE_R = 7;
+export const ASP_BITE = 30;
+export const ASP_BITE_VENOM = 24;
+export const ASP_BITE_CD = 24;
+/** Its disguise: how long it holds it, the least and the most (ticks: one to four minutes), and how long it wanders between. */
+export const ASP_DISGUISE_MIN = 30 * 60;
+export const ASP_DISGUISE_MAX = 30 * 240;
+export const ASP_WANDER = 30 * 5;
+
+/** Each kind's build: body points, trail cells between them, hit radius, full health. */
+export const BEAST_BUILD = [
+  { segs: MILLI_SEGS, gap: MILLI_GAP, r: MILLI_R, hp: MILLI_HP },
+  { segs: ASP_SEGS, gap: ASP_GAP, r: ASP_R, hp: ASP_HP },
+] as const;
+
 /** Venom: a dose (harm it does in all), the most the blood holds, the harm a tick. */
 export const VENOM_DOSE = 36;
 export const VENOM_MAX = 110;
@@ -98,7 +137,7 @@ export interface Beast {
   /** Holding on to a surface (otherwise falling, at `vy` cells/s). */
   attached: boolean;
   vy: number;
-  /** The head's trail, newest first: x, y pairs, one a step (MILLI_SEGS * MILLI_GAP of them). */
+  /** The head's trail, newest first: x, y pairs, one a step (its kind's segs * gap of them). */
   trail: number[];
   hp: number;
   /** Rearing: ticks into it (0: down); and how far up the head is (0..1). */
@@ -113,6 +152,8 @@ export interface Beast {
   pounce: boolean;
   /** This time round, it wants to rest on a ceiling (it wanders on until it's on one, for a while). */
   roost: boolean;
+  /** An asp curled up as a gem (its disguise; `frozen` is how long it holds it). */
+  gem: boolean;
   wander: number;
   lunge: number;
   /** Coiled round a clone (its id, or -1): ticks into it, where it holds them, the harm it's taken meanwhile. */
@@ -136,9 +177,13 @@ export interface Beast {
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
-export function newMillipede(t: Terrain, x: number, y: number, dir: number): Beast {
+export const newMillipede = (t: Terrain, x: number, y: number, dir: number) => newBeast(t, BeastKind.Millipede, x, y, dir);
+
+/** A creature of a kind taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
+export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: number): Beast {
+  const build = BEAST_BUILD[kind];
   const b: Beast = {
-    kind: BeastKind.Millipede,
+    kind,
     x,
     y,
     hx: dir,
@@ -147,7 +192,7 @@ export function newMillipede(t: Terrain, x: number, y: number, dir: number): Bea
     attached: true,
     vy: 0,
     trail: [],
-    hp: MILLI_HP,
+    hp: build.hp,
     rear: 0,
     lift: 0,
     spitCd: 30,
@@ -155,6 +200,7 @@ export function newMillipede(t: Terrain, x: number, y: number, dir: number): Bea
     frozen: 0,
     pounce: false,
     roost: false,
+    gem: false,
     wander: MILLI_WANDER,
     lunge: 0,
     coil: -1,
@@ -176,7 +222,7 @@ export function newMillipede(t: Terrain, x: number, y: number, dir: number): Bea
   const ghost = { ...b, trail: [] };
   turnRound(ghost);
   b.trail = [b.x, b.y];
-  for (let k = 0; k < MILLI_SEGS * MILLI_GAP; k++) {
+  for (let k = 0; k < build.segs * build.gap; k++) {
     crawlStep(t, ghost);
     b.trail.push(ghost.x, ghost.y);
   }
@@ -264,6 +310,11 @@ export function crawlStep(t: Terrain, b: Beast): void {
   }
 }
 
+/** Is it on a floor (rock under its head, open over it)? */
+export function onFloor(t: Terrain, b: Beast): boolean {
+  return b.attached && solidAt(t, b.x, b.y + 1) && !solidAt(t, b.x, b.y - 1);
+}
+
 /** Is it hanging from a ceiling (rock over its head, open under it)? */
 export function onCeiling(t: Terrain, b: Beast): boolean {
   return b.attached && solidAt(t, b.x, b.y - 1) && !solidAt(t, b.x, b.y + 1);
@@ -290,7 +341,7 @@ export function fallStep(t: Terrain, b: Beast, dt: number, gravity: number): voi
 /** Push the head's new cell onto the trail (the oldest falls off the end). */
 export function pushTrail(b: Beast): void {
   b.trail.unshift(b.x, b.y);
-  const n = MILLI_SEGS * MILLI_GAP * 2 + 2;
+  const n = BEAST_BUILD[b.kind].segs * BEAST_BUILD[b.kind].gap * 2 + 2;
   if (b.trail.length > n) b.trail.length = n;
 }
 
@@ -316,17 +367,30 @@ export function openWay(t: Terrain, x: number, y: number): { x: number; y: numbe
 }
 
 /**
- * Its body: MILLI_SEGS points (head first), along its trail every MILLI_GAP
- * steps, smoothed (the grid's stairsteps rounded off), centred half a cell
- * into the open; the neck lifted off the ground along its normal as it
+ * Its body: its kind's points (head first), along its trail every few
+ * steps, smoothed (the grid's stairsteps rounded off), up off the ground
+ * by its girth; the neck lifted off the ground along its normal as it
  * rears. Flat: x, y pairs into `out`.
  */
 export function bodyPoints(t: Terrain, b: Beast, out: number[]): number[] {
   out.length = 0;
   const tr = b.trail;
   const n = tr.length >> 1;
-  for (let s = 0; s < MILLI_SEGS; s++) {
-    const k = Math.min(n - 1, s * MILLI_GAP);
+  const { segs, gap } = BEAST_BUILD[b.kind];
+  if (b.gem) {
+    // Curled up as a gem: wound tight in a spiral, sitting on the floor over its head's cell.
+    const up = openWay(t, b.x, b.y);
+    const cx = b.x + 0.5 + up.x * 3;
+    const cy = b.y + 0.5 + up.y * 3;
+    for (let s = 0; s < segs; s++) {
+      const a = s * 1.25;
+      const r = 3.2 - s * 0.35;
+      out.push(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.8);
+    }
+    return out;
+  }
+  for (let s = 0; s < segs; s++) {
+    const k = Math.min(n - 1, s * gap);
     let x = 0;
     let y = 0;
     let w = 0;
@@ -335,13 +399,18 @@ export function bodyPoints(t: Terrain, b: Beast, out: number[]): number[] {
       y += tr[j * 2 + 1];
       w++;
     }
-    out.push(x / w + 0.5, y / w + 0.5);
+    // Centred in its body: up off the ground by its girth (as it's drawn, and so where it's hit).
+    const px = x / w + 0.5;
+    const py = y / w + 0.5;
+    const up = openWay(t, px, py);
+    const r = BEAST_BUILD[b.kind].r;
+    out.push(px + up.x * r, py + up.y * r);
   }
   if (b.coil >= 0) {
     // Coiled round a clone (centred at coilX, coilY): the fore-body wound round them in a
     // spiral from their feet up, the rest of it following its trail back from its head.
     const K = MILLI_COIL_SEGS;
-    for (let s = MILLI_SEGS - 1; s >= K; s--) {
+    for (let s = segs - 1; s >= K; s--) {
       out[s * 2] = out[(s - K) * 2];
       out[s * 2 + 1] = out[(s - K) * 2 + 1];
     }
@@ -356,8 +425,11 @@ export function bodyPoints(t: Terrain, b: Beast, out: number[]): number[] {
   }
   if (b.lift > 0) {
     const up = openWay(t, b.x, b.y);
-    for (let s = 0; s < MILLI_NECK; s++) {
-      const f = b.lift * MILLI_LIFT * (1 - s / MILLI_NECK) ** 1.6;
+    // (An asp rears up less far, by fewer segments: it's a quarter the size.)
+    const neck = b.kind === BeastKind.Asp ? 4 : MILLI_NECK;
+    const high = b.kind === BeastKind.Asp ? 6 : MILLI_LIFT;
+    for (let s = 0; s < neck; s++) {
+      const f = b.lift * high * (1 - s / neck) ** 1.6;
       out[s * 2] += up.x * f;
       out[s * 2 + 1] += up.y * f;
     }

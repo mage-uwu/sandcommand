@@ -1,6 +1,6 @@
 import { CORAL_PALS } from './flora-palette.ts';
 import type { Terrain } from '../shared/terrain.ts';
-import { openWay } from '../shared/wildlife.ts';
+import { ASP_R, MILLI_R, openWay } from '../shared/wildlife.ts';
 
 /**
  * The wildlife, drawn in pixels: one terrain cell to a pixel, snapped to the
@@ -149,12 +149,18 @@ function segments(t: Terrain, pts: readonly number[], seed: number): Seg[] {
   for (let i = 0; i < n; i++) {
     let tx = pts[P(i - 1) * 2] - pts[P(i + 1) * 2];
     let ty = pts[P(i - 1) * 2 + 1] - pts[P(i + 1) * 2 + 1];
-    const l = Math.hypot(tx, ty) || 1;
-    tx /= l;
-    ty /= l;
     const x = pts[i * 2];
     const y = pts[i * 2 + 1];
     const up = openWay(t, x, y);
+    const l = Math.hypot(tx, ty);
+    if (l < 0.01) {
+      // (Its points all in one spot (it's been stuck): lie along the ground.)
+      tx = -up.y;
+      ty = up.x;
+    } else {
+      tx /= l;
+      ty /= l;
+    }
     let nx = -ty;
     let ny = tx;
     if (nx * up.x + ny * up.y < 0) {
@@ -162,8 +168,9 @@ function segments(t: Terrain, pts: readonly number[], seed: number): Seg[] {
       ny = -ny;
     }
     const w = i === 0 ? 3.9 : 3.8 - (1.6 * i) / (n - 1);
-    // (Its belly just over the ground, not sunk into it: up off it by its girth, its legs standing it there.)
-    const lift = Math.max(0, w + 0.6);
+    // (Its belly just over the ground, not sunk into it: its points are already up off it by its
+    // hit radius; the rest of its girth, and its legs standing it there.)
+    const lift = Math.max(0, w + 0.6 - MILLI_R);
     out.push({ x: x + nx * lift, y: y + ny * lift, tx, ty, nx, ny, w, len: i === 0 ? 3.4 : 2.9, camo: camoOf(seed, i) });
   }
   return out;
@@ -262,9 +269,182 @@ function hood(ctx: CanvasRenderingContext2D, s: Seg, seed: number, lift: number,
 }
 
 /** One segment of a dead millipede, flung off whole: at (x, y), turned to angle `a`. */
-export function drawSegmentGib(ctx: CanvasRenderingContext2D, t: Terrain, ground: GroundColor, x: number, y: number, a: number, seed: number, i: number, now: number): void {
+export function drawSegmentGib(ctx: CanvasRenderingContext2D, t: Terrain, ground: GroundColor, x: number, y: number, a: number, kind: number, seed: number, i: number, now: number): void {
   const tx = Math.cos(a);
   const ty = Math.sin(a);
-  const w = i === 0 ? 3.9 : 3.8 - (1.6 * i) / 14;
-  plate(ctx, t, ground, { x, y, tx, ty, nx: -ty, ny: tx, w, len: i === 0 ? 3.4 : 2.9, camo: camoOf(seed, i) }, seed, i, true, now);
+  // (An asp's segments: small, gem or rock.)
+  const asp = kind === 1;
+  const w = asp ? (i === 0 ? 2.1 : 1.9 - i / 7) : i === 0 ? 3.9 : 3.8 - (1.6 * i) / 14;
+  plate(ctx, t, ground, { x, y, tx, ty, nx: -ty, ny: tx, w, len: asp ? 1.9 : i === 0 ? 3.4 : 2.9, camo: asp ? (Math.floor((i + (seed & 1)) / 2) % 2 === 0 ? Camo.Gem : Camo.Rock) : camoOf(seed, i) }, seed, asp ? 1 : i, true, now);
+}
+
+/** The colour of the GEMM veins round a cell (the renderer's own: a disguise has to match), as [r, g, b]. */
+export type GemTint = (x: number, y: number) => readonly [number, number, number];
+
+/**
+ * A gem asp, up and about: a slim, snakelike little cousin of the
+ * millipede, banded in jewel-bright gem scales and rock, a fringe of tiny
+ * legs under it; a gem-scaled head with fangs. Reared up hissing, a small
+ * hood spreads and its forked tongue flickers.
+ */
+export function drawAsp(ctx: CanvasRenderingContext2D, t: Terrain, pts: readonly number[], seed: number, lift: number, now: number): void {
+  const n = pts.length >> 1;
+  if (n < 2) return;
+  const P = (i: number) => Math.max(0, Math.min(n - 1, i));
+  const gem = GEMS[seed % 3];
+  const seg: Seg[] = [];
+  for (let i = 0; i < n; i++) {
+    let tx = pts[P(i - 1) * 2] - pts[P(i + 1) * 2];
+    let ty = pts[P(i - 1) * 2 + 1] - pts[P(i + 1) * 2 + 1];
+    const up = openWay(t, pts[i * 2], pts[i * 2 + 1]);
+    const l = Math.hypot(tx, ty);
+    if (l < 0.01) {
+      // (Its points all in one spot (it's been stuck): lie along the ground.)
+      tx = -up.y;
+      ty = up.x;
+    } else {
+      tx /= l;
+      ty /= l;
+    }
+    let nx = -ty;
+    let ny = tx;
+    if (nx * up.x + ny * up.y < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    const w = i === 0 ? 2.1 : 1.9 - (1.0 * i) / (n - 1);
+    const lift = w + 0.4 - ASP_R; // (its points are already up off the ground by its hit radius)
+    seg.push({ x: pts[i * 2] + nx * lift, y: pts[i * 2 + 1] + ny * lift, tx, ty, nx, ny, w, len: i === 0 ? 2.4 : 1.9, camo: 0 });
+  }
+  // The leg fringe: one cell under each segment, flickering as it goes.
+  for (let i = 1; i < n; i++) {
+    const s = seg[i];
+    ctx.fillStyle = '#2a2230';
+    const sw = Math.round(Math.sin(now / 40 + i * 1.3));
+    ctx.fillRect(Math.round(s.x - s.nx * (s.w + 0.6) + s.tx * sw), Math.round(s.y - s.ny * (s.w + 0.6) + s.ty * sw), 1, 1);
+  }
+  if (lift > 0.05) hoodSmall(ctx, seg[1], gem, lift);
+  for (let i = n - 1; i >= 0; i--) {
+    const s = seg[i];
+    const band = i === 0 || Math.floor((i + (seed & 1)) / 2) % 2 === 0; // (bands: gem scales, rock)
+    const R = Math.ceil(Math.max(s.len, s.w)) + 1;
+    for (let py = Math.floor(s.y - R); py <= Math.ceil(s.y + R); py++) {
+      for (let px = Math.floor(s.x - R); px <= Math.ceil(s.x + R); px++) {
+        const dx = px + 0.5 - s.x;
+        const dy = py + 0.5 - s.y;
+        const u = dx * s.tx + dy * s.ty;
+        const v = dx * s.nx + dy * s.ny;
+        const e = (u / s.len) ** 2 + (v / s.w) ** 2;
+        if (e > 1) continue;
+        const h = hsh(px, py, seed);
+        const top = v / s.w;
+        let c: string;
+        if (e > 0.7) c = '#120c16';
+        else if (band) c = top > 0.3 ? (h > 0.85 ? gem[2] : gem[1]) : gem[0];
+        else c = top > 0.3 ? ROCK[2] : ROCK[Math.floor(h * 2)];
+        ctx.fillStyle = c;
+        ctx.fillRect(px, py, 1, 1);
+      }
+    }
+  }
+  // Fangs, an eye, and (hissing) a forked tongue flickering out.
+  const h = seg[0];
+  ctx.fillStyle = '#f4ecd8';
+  ctx.fillRect(Math.round(h.x + h.tx * 2.4 - h.nx * 0.8), Math.round(h.y + h.ty * 2.4 - h.ny * 0.8), 1, 1);
+  ctx.fillStyle = lift > 0.3 ? '#ff4a6a' : '#fff8d0';
+  ctx.fillRect(Math.round(h.x + h.tx * 0.9 + h.nx * 0.8), Math.round(h.y + h.ty * 0.9 + h.ny * 0.8), 1, 1);
+  if (lift > 0.3 && Math.floor(now / 90) % 2 === 0) {
+    ctx.fillStyle = '#e0204a';
+    pixLine(ctx, h.x + h.tx * 2.6, h.y + h.ty * 2.6, h.x + h.tx * 4.6, h.y + h.ty * 4.6);
+    ctx.fillRect(Math.round(h.x + h.tx * 5.4 + h.nx), Math.round(h.y + h.ty * 5.4 + h.ny), 1, 1);
+    ctx.fillRect(Math.round(h.x + h.tx * 5.4 - h.nx), Math.round(h.y + h.ty * 5.4 - h.ny), 1, 1);
+  }
+}
+
+/** An asp's small hood, flared as it hisses: gem-bright, a dark rim. */
+function hoodSmall(ctx: CanvasRenderingContext2D, s: Seg, gem: readonly string[], lift: number): void {
+  const spread = 1.5 + lift * 3.2;
+  const deep = 1.6;
+  const ax = -s.ty;
+  const ay = s.tx;
+  const R = Math.ceil(spread) + 1;
+  for (let py = Math.floor(s.y - R); py <= Math.ceil(s.y + R); py++) {
+    for (let px = Math.floor(s.x - R); px <= Math.ceil(s.x + R); px++) {
+      const dx = px + 0.5 - s.x;
+      const dy = py + 0.5 - s.y;
+      const e = ((dx * s.tx + dy * s.ty) / deep) ** 2 + ((dx * ax + dy * ay) / spread) ** 2;
+      if (e > 1) continue;
+      ctx.fillStyle = e > 0.6 ? '#120c16' : e > 0.3 ? gem[0] : gem[1];
+      ctx.fillRect(px, py, 1, 1);
+    }
+  }
+}
+
+/**
+ * An asp curled up as a gem: a cluster of pointed crystal prisms standing
+ * up off the floor, shaded exactly as the GEMM crystals in the ground are
+ * (the veins' own colour there, the same facets, edges and glints), so it
+ * passes for one. Its one tell: now and then, for a moment, a flick of red
+ * tongue at its foot.
+ */
+export function drawAspGem(ctx: CanvasRenderingContext2D, t: Terrain, tint: GemTint, pts: readonly number[], seed: number, now: number): void {
+  const n = pts.length >> 1;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < n; i++) {
+    cx += pts[i * 2];
+    cy += pts[i * 2 + 1];
+  }
+  cx /= n;
+  cy /= n;
+  const up = openWay(t, cx, cy);
+  // Its foot: down on the floor under it.
+  let bx = cx;
+  let by = cy;
+  for (let k = 0; k < 6 && !t.isSolid(Math.floor(bx - up.x), Math.floor(by - up.y)); k++) {
+    bx -= up.x;
+    by -= up.y;
+  }
+  const upA = Math.atan2(up.y, up.x);
+  const prisms: { a: number; len: number; half: number }[] = [];
+  const count = 2 + Math.floor(hsh(seed, 1, 3) * 2);
+  for (let k = 0; k < count; k++) prisms.push({ a: upA + (k - (count - 1) / 2) * (0.4 + hsh(seed, k, 4) * 0.3), len: 7 + hsh(seed, k, 5) * 4, half: 1.6 + hsh(seed, k, 6) * 0.6 });
+  const inside = (x: number, y: number) => {
+    for (const p of prisms) {
+      const dx = x + 0.5 - bx;
+      const dy = y + 0.5 - by;
+      const c = Math.cos(p.a);
+      const s = Math.sin(p.a);
+      const along = dx * c + dy * s;
+      const across = Math.abs(-dx * s + dy * c);
+      if (along < -1 || along > p.len) continue;
+      const tip = p.len - 3;
+      const w = along > tip ? p.half * (1 - (along - tip) / 3) : p.half;
+      if (across <= w) return true;
+    }
+    return false;
+  };
+  const [r, g, b] = tint(Math.round(bx), Math.round(by));
+  const R = 13;
+  for (let y = Math.floor(by - R); y <= Math.ceil(by + R); y++) {
+    for (let x = Math.floor(bx - R); x <= Math.ceil(bx + R); x++) {
+      if (!inside(x, y)) continue;
+      // (gemCrystalColor's own shading: facets in diagonal bands, lit upper-left edges, dark lower-right, a glint now and then.)
+      let k = [1.18, 1.0, 0.88, 1.36][((x - y) >> 1) & 3];
+      if (!inside(x, y - 1) || !inside(x - 1, y)) k = 1.5;
+      else if (!inside(x, y + 1) || !inside(x + 1, y)) k = 0.6;
+      const h = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) >>> 0;
+      const c = (h & 15) === 0 ? [255, 255, 255] : [(r * 0.8 + 50) * k, (g * 0.8 + 50) * k, (b * 0.8 + 50) * k];
+      ctx.fillStyle = `rgb(${Math.min(255, Math.round(c[0]))},${Math.min(255, Math.round(c[1]))},${Math.min(255, Math.round(c[2]))})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  // The tell.
+  if (Math.floor(now / 150 + seed * 7) % 28 === 0) {
+    ctx.fillStyle = '#e0204a';
+    const s = Math.cos(upA + Math.PI / 2);
+    const c2 = Math.sin(upA + Math.PI / 2);
+    ctx.fillRect(Math.round(bx + up.x + s * 3), Math.round(by + up.y + c2 * 3), 1, 1);
+    ctx.fillRect(Math.round(bx + up.x + s * 4), Math.round(by + up.y + c2 * 4), 1, 1);
+  }
 }

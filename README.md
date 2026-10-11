@@ -575,12 +575,30 @@ terrain cell to a pixel).
 - **It gibs.** Killed, every segment flies off whole, in its own
   camouflage, tumbling and bouncing until it comes to rest and fades, in a
   spray of blood and gem shards.
-- **Where.** Up to five on a cave map and three on any other, each coming up
-  out of the deep (on a cave floor, out of the water) well away from
+- **Where.** Creatures come up out of the deep (on a cave floor, out of the water) well away from
   everyone. There are none in the labyrinth, the tutorial, or the Valley
   of Souls' calm.
 - **Bots** turn their guns on a creature coming at them that's nearer than
   whoever they're fighting.
+
+**The gem asp** is the millipede's close cousin, about a clone's size:
+slim and snakelike, banded in jewel-bright gem scales and rock, with a
+fringe of tiny legs. It crawls the same surfaces.
+- **Its disguise.** With nobody about, it wanders a while, then curls up on
+  a floor into a gem: a cluster of pointed crystal prisms shaded exactly as
+  the GEMM crystals in the ground are (the local veins' colour, the same
+  facets, edges and glints). It holds the disguise for one to four
+  minutes, perfectly still. Its one tell: now and then, for a moment, a
+  flick of red tongue at its foot.
+- **Hiss and bite.** A clone in sight but well off, it holds. One who comes
+  within 80 cells, it uncoils on: it rears up in an S, a small hood flared,
+  forked tongue flickering, and hisses. Then it strikes, very fast (230
+  cells a second), and bites: 30 harm and a dose of venom. It hunts on at
+  60 cells a second, biting again when it can.
+- **Fragile.** 110 hit points and no armour, so a few rounds kill it.
+  Shooting a suspicious gem is fair: hurt, it wakes.
+- Over half the creatures that come up are asps (the rest millipedes): up
+  to seven at once on a cave map and four on any other.
 
 ## Frosting: craters, gem caverns, geysers and flora
 

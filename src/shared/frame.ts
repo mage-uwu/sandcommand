@@ -59,10 +59,10 @@ import {
   FACTION_SHIFT,
 } from './protocol.ts';
 import type { Terrain } from './terrain.ts';
-import { MILLI_SEGS } from './wildlife.ts';
+import { BEAST_BUILD } from './wildlife.ts';
 
 /** Body points per creature kind (wildlife.ts BeastKind). */
-const BEAST_POINTS = [MILLI_SEGS];
+const BEAST_POINTS = BEAST_BUILD.map((b) => b.segs);
 
 /** A creature in view (R_BEASTS): its kind, health (0..1), how far up it's reared (0..1), whether it's holding on, and its body points (head first, x, y pairs). */
 export interface BeastState {
@@ -73,9 +73,10 @@ export interface BeastState {
   hp: number;
   lift: number;
   attached: boolean;
-  /** Frozen still (lying in wait), and coiled round a clone. */
+  /** Frozen still (lying in wait), coiled round a clone, curled up as a gem (an asp's disguise). */
   frozen: boolean;
   coiled: boolean;
+  gem: boolean;
   pts: number[];
 }
 
@@ -575,7 +576,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             y += ((r.u8() << 24) >> 24) / BEAST_SCALE;
             pts.push(x, y);
           }
-          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, pts });
+          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, gem: (f & 8) !== 0, pts });
         }
         h.beasts(list);
         break;

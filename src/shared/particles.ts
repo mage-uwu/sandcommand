@@ -137,6 +137,8 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_COIL = 241; // a millipede's coil and bite
+export const W_ASP = 242; // a gem asp's bite
 export const W_VENOM = 243; // the wildlife's venom and bites
 export const W_BLISTER = 244; // a blister coral's caustic burst
 export const W_GEYSER = 245; // geyser blasts and their smoke

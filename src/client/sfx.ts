@@ -237,6 +237,14 @@ export class Sfx {
     }
   }
 
+  /** A creature rearing up, hissing: a breathy rush of noise (a millipede's deeper and longer, an asp's sharp). */
+  hiss(x: number, y: number, big: boolean): void {
+    const v = this.voice(x, y, big ? 0.5 : 0.4, big ? 0.8 : 0.5);
+    if (!v) return;
+    this.burst(v, 0, big ? 0.7 : 0.45, 'bandpass', big ? 2600 : 4800, big ? 1.5 : 2.5, 0.9, big ? 1600 : 3600);
+    this.burst(v, 0.05, big ? 0.5 : 0.3, 'highpass', big ? 3500 : 6000, 0.8, 0.5);
+  }
+
   /** A blast; `radius` sizes it (a bomblet pops, a dropship bomb shakes the ground). */
   explode(x: number, y: number, radius: number): void {
     const s = clamp(radius / 40, 0.4, 2.5);

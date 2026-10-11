@@ -159,7 +159,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -276,6 +276,24 @@ import {
   fallStep,
   nearestPoint,
   newMillipede,
+  newBeast,
+  onFloor,
+  BeastKind,
+  BEAST_BUILD,
+  ASP_BITE,
+  ASP_BITE_CD,
+  ASP_BITE_R,
+  ASP_BITE_VENOM,
+  ASP_CRAWL,
+  ASP_DISGUISE_MAX,
+  ASP_DISGUISE_MIN,
+  ASP_HISS,
+  ASP_HUNT,
+  ASP_SENSE,
+  ASP_STRIKE,
+  ASP_STRIKE_TICKS,
+  ASP_TRIGGER,
+  ASP_WANDER,
   pushTrail,
   segmentCircle,
   turnRound,
@@ -1534,7 +1552,10 @@ export class World {
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
-      if (b) this.stepMillipede(k, b);
+      if (b) {
+        if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
+        else this.stepMillipede(k, b);
+      }
     }
     this.sendVenom();
   }
@@ -1558,7 +1579,7 @@ export class World {
       const c = this.calm;
       if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
       if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 420)) continue;
-      const b = newMillipede(t, x, y, rng.next() < 0.5 ? -1 : 1);
+      const b = newBeast(t, rng.next() < ASP_SHARE ? BeastKind.Asp : BeastKind.Millipede, x, y, rng.next() < 0.5 ? -1 : 1);
       b.turnAt = this.tick + 60;
       this.beasts[slot] = b;
       bodyPoints(t, b, this.beastPts[slot]);
@@ -1572,7 +1593,7 @@ export class World {
     const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
     if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
     // (Lying in wait, it sees further: a line on anyone in that reach wakes it.)
-    let best = b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
+    let best = b.kind === BeastKind.Asp ? ASP_SENSE : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
     let id = -1;
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
@@ -1742,7 +1763,7 @@ export class World {
     v.body.vy = 0;
     if (b.coilT < MILLI_COIL_TICKS) return;
     const droid = v.parts.cls === ClassId.Droid;
-    this.damage(v, droid ? MILLI_COIL_DROID : MILLI_COIL_KILL, NO_OWNER, W_VENOM);
+    this.damage(v, droid ? MILLI_COIL_DROID : MILLI_COIL_KILL, NO_OWNER, W_COIL);
     if (v.alive) v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
     this.uncoil(b);
     // Sated: it lies still a while.
@@ -1756,6 +1777,119 @@ export class World {
     b.coil = -1;
     b.coilT = 0;
     b.coilCd = MILLI_COIL_CD;
+  }
+
+  /**
+   * One tick of a gem asp. With nobody about it wanders a while, then curls
+   * up on a floor as a gem and holds it for minutes. Prey in sight: curled
+   * up, it waits until they come near (ASP_TRIGGER), then uncoils; up and
+   * about, it goes after them. Near enough, it rears up hissing, then
+   * strikes, very fast, and bites whoever its head reaches.
+   */
+  private stepAsp(k: number, b: Beast): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const pts = this.beastPts[k];
+    const hx = pts.length ? pts[0] : b.x;
+    const hy = pts.length ? pts[1] : b.y;
+    if (b.coilCd > 0) b.coilCd--; // (its bite's cooldown)
+    if ((this.tick + k) % 6 === 0) {
+      const before = b.target;
+      b.target = this.beastTarget(b, hx, hy);
+      if (b.target >= 0 && before < 0) b.turnAt = this.tick; // (prey: which way to it, now)
+    }
+    let tgt = b.target >= 0 ? this.players[b.target] : null;
+    if (tgt && (!tgt.alive || tgt.tank >= 0)) {
+      tgt = null;
+      b.target = -1;
+    }
+    const dist = tgt ? Math.hypot(tgt.cx - hx, tgt.cy - hy) : Infinity;
+    // Curled up as a gem: it holds it until someone comes near (or its time is up).
+    if (b.gem) {
+      if (tgt && dist < ASP_TRIGGER) {
+        b.gem = false;
+        b.frozen = 0;
+        b.rear = 1; // (up, hissing)
+      } else if (--b.frozen <= 0) {
+        b.gem = false;
+        b.frozen = 0;
+      }
+      bodyPoints(t, b, pts);
+      return;
+    }
+    // Rearing up hissing, then the strike.
+    if (b.rear > 0) {
+      if (++b.rear >= ASP_HISS) {
+        b.rear = 0;
+        b.lunge = ASP_STRIKE_TICKS;
+        b.turnAt = this.tick;
+      }
+    } else if (tgt && b.attached && b.lunge === 0 && b.coilCd === 0 && dist < ASP_TRIGGER) b.rear = 1;
+    b.lift += ((b.rear > 0 ? 1 : 0) - b.lift) * 0.4;
+    if (b.lift < 0.01) b.lift = 0;
+    if (b.lunge > 0) b.lunge--;
+    // Nothing about: wander a while, then curl up as a gem (on a floor: it goes on until it's on one).
+    if (!tgt && b.attached && b.rear === 0 && --b.wander <= 0 && onFloor(t, b)) {
+      b.gem = true;
+      b.frozen = ASP_DISGUISE_MIN + rng.int(ASP_DISGUISE_MAX - ASP_DISGUISE_MIN);
+      b.wander = ASP_WANDER + rng.int(ASP_WANDER);
+      bodyPoints(t, b, pts);
+      return;
+    }
+    if (!b.attached) {
+      const y0 = b.y;
+      fallStep(t, b, DT, GRAVITY);
+      const y1 = b.y;
+      for (let y = y0 + 1; y <= y1; y++) {
+        b.y = y;
+        pushTrail(b);
+      }
+      if (b.y >= WORLD_H - 14) {
+        this.beasts[k] = null;
+        return;
+      }
+    } else if (b.rear === 0) {
+      if (this.tick >= b.turnAt) {
+        if (tgt) {
+          const ahead = this.probeCrawl(b, false, tgt.cx, tgt.cy);
+          const back = this.probeCrawl(b, true, tgt.cx, tgt.cy);
+          if (back < ahead - 4) turnRound(b);
+          b.turnAt = this.tick + 10;
+        } else {
+          if (rng.next() < 0.3) turnRound(b);
+          b.turnAt = this.tick + 90 + rng.int(150);
+        }
+      }
+      if (Math.abs(b.x - b.lastX) + Math.abs(b.y - b.lastY) > 4) {
+        b.lastX = b.x;
+        b.lastY = b.y;
+        b.still = 0;
+      } else if (++b.still > 45) {
+        turnRound(b);
+        b.still = 0;
+      }
+      b.owed += (b.lunge > 0 ? ASP_STRIKE : tgt ? ASP_HUNT : ASP_CRAWL) * DT;
+      while (b.owed >= 1 && b.attached) {
+        b.owed--;
+        crawlStep(t, b);
+        pushTrail(b);
+        if (tgt && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < ASP_BITE_R) break;
+      }
+    }
+    bodyPoints(t, b, pts);
+    // The bite, for whoever its head is on.
+    if (b.coilCd === 0) {
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
+        if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > ASP_BITE_R + 4) continue;
+        this.damage(p, ASP_BITE, NO_OWNER, W_ASP);
+        if (p.alive) p.venom = Math.min(VENOM_MAX, p.venom + ASP_BITE_VENOM);
+        p.body.vx += Math.sign(p.cx - pts[0]) * 50;
+        b.coilCd = ASP_BITE_CD;
+        b.lunge = 0;
+        break;
+      }
+    }
   }
 
   /** How near (x, y) a creature would get going `back` (round) or on, a few dozen steps along the ground. */
@@ -1787,6 +1921,7 @@ export class World {
     if (by < MAX_PLAYERS && this.players[by]) b.hurtBy = by;
     // Hurt, it thaws; hurt hard enough while it holds someone, it lets them go.
     b.frozen = 0;
+    b.gem = false;
     if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
     if (b.hp > 0) return;
     this.beasts[k] = null;
@@ -1802,7 +1937,7 @@ export class World {
     for (let k = 0; k < MAX_BEASTS; k++) {
       if (!this.beasts[k]) continue;
       const { d } = nearestPoint(this.beastPts[k], x, y);
-      if (d < r) this.hurtBeast(k, dmg * 1.5 * (1 - d / r), by);
+      if (d < r) this.hurtBeast(k, dmg * (this.beasts[k]!.kind === BeastKind.Millipede ? 1.5 : 1) * (1 - d / r), by);
     }
   }
 
@@ -2337,7 +2472,7 @@ export class World {
         // (Too far off to touch it, from its head: its body's no longer than this.)
         if (Math.hypot(pts[0] - x0, pts[1] - y0) > len + 90) continue;
         for (let i = 0; i < pts.length; i += 2) {
-          const t = segmentCircle(x0, y0, dx, dy, pts[i], pts[i + 1], MILLI_R);
+          const t = segmentCircle(x0, y0, dx, dy, pts[i], pts[i + 1], BEAST_BUILD[this.beasts[k]!.kind].r);
           if (t >= 0 && t < bestT) {
             bestT = t;
             best = BEAST_ID_BASE + k;
@@ -2487,8 +2622,10 @@ export class World {
     const def = PROJ[kind];
     if (actor >= BEAST_ID_BASE) {
       // Armoured like a vehicle: a round with the energy to get through does its full harm, a weaker one a fifth; a shaped charge a share of the whole.
+      // (An asp has no armour: the round's full harm, always.)
       const energy = def.mass * def.sharp * Math.hypot(pr.vx[i], pr.vy[i]);
-      this.hurtBeast(actor - BEAST_ID_BASE, (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0), owner);
+      const armoured = this.beasts[actor - BEAST_ID_BASE]?.kind === BeastKind.Millipede;
+      this.hurtBeast(actor - BEAST_ID_BASE, armoured ? (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0) : def.damage, owner);
     } else if (actor >= SHIP_ID_BASE) {
       const sh = this.ships[actor - SHIP_ID_BASE];
       if (sh) {
@@ -3062,7 +3199,7 @@ export class World {
       const pts = this.beasts[k] ? this.beastPts[k] : null;
       if (!pts) continue;
       for (let i = 0; i < pts.length; i += 2) {
-        if (segmentCircle(x0, y0, x1 - x0, y1 - y0, pts[i], pts[i + 1], MILLI_R + w) >= 0) {
+        if (segmentCircle(x0, y0, x1 - x0, y1 - y0, pts[i], pts[i + 1], BEAST_BUILD[this.beasts[k]!.kind].r + w) >= 0) {
           this.hurtBeast(k, wound, by);
           break;
         }
@@ -5607,9 +5744,9 @@ export class World {
           w.u8(k);
           w.u8(b.kind);
           w.u8(b.seed);
-          w.u8(Math.max(0, Math.min(255, Math.round((b.hp / MILLI_HP) * 255))));
+          w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
           w.u8(Math.round(b.lift * 255));
-          w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0));
+          w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0));
           w.u16(clampU16(pts[0] * POS_SCALE));
           w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
           for (let i = 2; i < pts.length; i += 2) {
@@ -5822,9 +5959,11 @@ const SHIP_ID_BASE = TANK_ID_BASE + MAX_TANKS;
 /** Ids for wildlife (wildlife.ts), above every dropship's. */
 const BEAST_ID_BASE = SHIP_ID_BASE + MAX_SHIPS;
 /** How many creatures a world holds at most, the most out at once on a cave map and on any other, and how often one more comes up. */
-const MAX_BEASTS = 6;
-const BEASTS_CAVES = 5;
-const BEASTS_PLAIN = 3;
+const MAX_BEASTS = 8;
+const BEASTS_CAVES = 7;
+const BEASTS_PLAIN = 4;
+/** Of the creatures that come up, how many are asps (the rest millipedes). */
+const ASP_SHARE = 0.55;
 const BEAST_RESPAWN = 30 * 25;
 const SHIP_MASS = 120;
 /** Station altitude over the ground, turret reach, how long a radio waits between calls. */

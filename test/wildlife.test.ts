@@ -4,7 +4,7 @@ import { ACTOR_H, GRAVITY, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { Terrain } from '../src/shared/terrain.ts';
 import { PROJ, ProjKind, WeaponId } from '../src/shared/weapons.ts';
-import { MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
+import { ASP_DISGUISE_MIN, BeastKind, newBeast, MILLI_FREEZE_MAX, onCeiling, MILLI_COIL_BREAK, MILLI_COIL_TICKS, MILLI_GAP, MILLI_HP, MILLI_HUNT, MILLI_R, MILLI_SEGS, bodyPoints, crawlStep, fallStep, newMillipede, pushTrail } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { Reader } from '../src/shared/codec.ts';
@@ -48,9 +48,10 @@ describe('the millipede crawls any surface', () => {
     }
     // Head up the right wall, tail still on the floor.
     const pts = bodyPoints(t, b, []);
-    expect(pts[0]).toBeGreaterThan(1099);
+    // (Its points are centred in its body, up off the surface by its girth.)
+    expect(pts[0]).toBeGreaterThan(1100 - MILLI_R - 1.5);
     expect(pts[1]).toBeLessThan(450);
-    expect(pts[pts.length - 1]).toBeGreaterThan(459);
+    expect(pts[pts.length - 1]).toBeGreaterThan(460 - MILLI_R - 1.5);
   });
 
   it('dug out from under, it falls, and takes hold where it lands', () => {
@@ -299,6 +300,90 @@ describe('millipedes in the world', () => {
       if (!world.beasts[0] || world.beasts[0].hp < MILLI_HP) hurt = true;
     }
     expect(hurt).toBe(true);
+  });
+
+  describe('the gem asp', () => {
+    const putAsp = (world: World, x: number, y: number, dir: number) => {
+      const b = newBeast(world.terrain, BeastKind.Asp, x, y, dir);
+      world.beasts[1] = b;
+      bodyPoints(world.terrain, b, world.beastPts[1]);
+      return b;
+    };
+
+    it('about a clone in size; with nobody about it curls up on the floor as a gem, and holds it for minutes', () => {
+      const { world, a } = cave();
+      // The clone walled off (out of sight).
+      for (let y = 380; y <= 440; y++) for (let x = 1000; x < 1010; x++) world.terrain.set(x, y, Mat.Rock);
+      world.terrainReplaced();
+      const b = putAsp(world, 1150, 440, 1);
+      const pts = world.beastPts[1];
+      expect(Math.hypot(pts[0] - pts[pts.length - 2], pts[1] - pts[pts.length - 1])).toBeLessThan(ACTOR_H * 1.4);
+      b.wander = 1;
+      for (let k = 0; k < 60 && !b.gem; k++) world.step();
+      expect(b.gem).toBe(true);
+      expect(b.frozen).toBeGreaterThanOrEqual(ASP_DISGUISE_MIN - 60);
+      const at = [...world.beastPts[1]];
+      for (let k = 0; k < 30 * 20; k++) world.step();
+      expect(b.gem).toBe(true);
+      expect(world.beastPts[1]).toEqual(at); // (not a twitch)
+      void a;
+    });
+
+    it('a clone in sight but well off, it holds; near, it uncoils, hisses and strikes: a bite and venom', () => {
+      const { world, a } = cave();
+      const b = putAsp(world, 1150, 440, -1);
+      b.gem = true;
+      b.frozen = 30 * 200;
+      bodyPoints(world.terrain, b, world.beastPts[1]);
+      // Well off (190 cells), in plain sight: it stays a gem.
+      for (let k = 0; k < 60; k++) world.step();
+      expect(b.gem).toBe(true);
+      // The clone walks up to it.
+      a.body.x = 1100;
+      let hissed = false;
+      let bitten = false;
+      for (let k = 0; k < 30 * 4 && !bitten; k++) {
+        const hp = a.hp;
+        world.step();
+        if (b.lift > 0.5) hissed = true;
+        if (a.hp < hp - 10) bitten = true;
+      }
+      expect(b.gem).toBe(false);
+      expect(hissed).toBe(true);
+      expect(bitten).toBe(true);
+      expect(a.venom).toBeGreaterThan(0);
+    });
+
+    it('no armour: a few rounds kill it', () => {
+      const { world, a } = cave();
+      putAsp(world, 1100, 440, -1);
+      let shots = 0;
+      for (let k = 0; k < 60 && world.beasts[1]; k++) {
+        const pts = world.beastPts[1];
+        const sx = a.cx;
+        const sy = a.cy;
+        const ang = Math.atan2(pts[3] - sy, pts[2] - sx);
+        (world as unknown as { spawnProj(id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number): void }).spawnProj(80000 + k, ProjKind.Bullet, a.id, sx, sy, Math.cos(ang) * 900, Math.sin(ang) * 900);
+        shots++;
+        world.step();
+        a.hp = 100;
+        a.venom = 0;
+      }
+      expect(world.beasts[1]).toBe(null);
+      expect(shots).toBeLessThan(15);
+    });
+  });
+
+  it('both kinds come up in the caves', () => {
+    const world = new World(12);
+    world.beasts.fill(null);
+    const kinds = new Set<number>();
+    for (let k = 0; k < 8; k++) {
+      (world as unknown as { spawnBeast(): boolean }).spawnBeast();
+    }
+    for (const b of world.beasts) if (b) kinds.add(b.kind);
+    expect(kinds.has(BeastKind.Millipede)).toBe(true);
+    expect(kinds.has(BeastKind.Asp)).toBe(true);
   });
 
   it('on a real map they turn up in the caves, holding on to the rock', () => {
