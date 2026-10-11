@@ -1079,25 +1079,38 @@ In a headless 32-bot siege the attackers reached the walls and spent about
 
 Everyone fights on one side against **four basilisks** (see Wildlife). The
 mode has its own map, **the lair** (`MapKind.Lair`, `src/shared/lair.ts`):
-four great oval dens hollowed out deep under the ground and spread along
-the map. A basilisk hibernates on the floor of each one. Each den is easy
-to reach, and so easy to disturb:
-- A broad sloping tunnel runs down to it from the surface. It is wide
-  enough to walk or drive down, and always points toward the middle of the
-  map.
-- A worm-track passage joins each den to the next, deep under everything.
+**one giant cave** hollowed out deep under the map, nearly its whole width,
+about 250 cells tall. Players pour down into it to fight the basilisks on
+their own ground.
+- **Chambers.** Rock partitions split it into four chambers. By turns they
+  rise from the floor (a gap left under the roof) or hang from the roof (a
+  gap left over the floor).
+- **Inside.** Each chamber has a ledge or two up its walls, dripstone
+  hanging from its roof, and a basilisk hibernating on its floor.
+- **Chutes.** Two or three broad chutes drop into it from the surface, each
+  into a chamber and off to one side of its den. They're the way in.
 
 Kill all four and everyone wins together, the fallen included. When the
 twenty-four minutes run out with any still alive, the basilisks win. The dead
 come back by drop rocket, as in Regicide.
 - **Waking them.** They sleep the whole wave unless something wakes them,
-  and anything coming near does. Woken, a basilisk bores for the surface
-  and hunts there. Calmed, it bores its way home to its den and sleeps
-  again.
+  and anything coming near does.
+- **The hunt.** Woken, a lair basilisk doesn't rush for the surface: it
+  hunts in its cave.
+  - **Hearing.** It hears anyone within 1400 cells, seen or not.
+  - **Pathing.** It finds its way to them through the cave
+    (`basiliskRoute`). That's a search on an 8-cell grid through open
+    cells it can crawl (walls, floor and roof, never the open middle of
+    the hall), replanned every 12 ticks. It bores straight there only when
+    there's no way through.
+  - **Killing.** It kills as many as it can, crossing a chamber in about
+    10 seconds.
+  - **Going home.** With nobody left to hear, it makes its way back to its
+    den and sleeps.
 - **Tougher than rifles, weaker than wild.** Lair basilisks have a quarter
   of a wild one's hit points, so there are four to kill instead of one. A
   cache of heavy weapons (bazooka, anti-tank cannon, autocannon) lies
-  beside every tunnel mouth, because rifles barely scratch them.
+  beside every chute's mouth, because rifles barely scratch them.
 - **Starting gold.** Everyone starts the wave with enough gold for one call
   on the radio. Tanks still come down by parachute.
 - **Nothing else.** No other wildlife comes up in the lair.
@@ -1109,7 +1122,7 @@ match that plays nothing else.
 
 **Bots.** With nobody else to fight, bots take on the nearest basilisk:
 - They first fetch a heavy gun from a nearby cache.
-- They path down the tunnels to its den and wake it by shooting it (they
+- They path down the chutes and through the cave to it and wake it by shooting it (they
   leave sleeping basilisks alone in any other mode).
 - They dig through to one sleeping out of sight in the rock.
 

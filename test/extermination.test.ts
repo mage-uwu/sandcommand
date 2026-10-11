@@ -4,6 +4,8 @@ import { GameMode, Phase, TEAMS_IN_MODE, Team } from '../src/shared/protocol.ts'
 import { MapKind } from '../src/shared/worldgen.ts';
 import { LAIR_DENS } from '../src/shared/lair.ts';
 import { BASILISK_HP, BeastKind } from '../src/shared/wildlife.ts';
+import { ACTOR_H, ACTOR_W, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
+import { W_BASILISK } from '../src/shared/particles.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
@@ -44,6 +46,35 @@ describe('Extermination', () => {
       for (const w of [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon]) expect(near.map((it) => it.weapon)).toContain(w);
     }
     for (const { b } of basilisks(world)) expect(b!.hp).toBe(BASILISK_HP / 4);
+  });
+
+  it('woken, a basilisk stays on its own ground: it finds its way through the cave to a clone and kills it', () => {
+    const { world, ps } = exterm(309, 2);
+    const [a, other] = ps;
+    // (The other far off, up top over the far end.)
+    other.body.x = WORLD_W - 100;
+    other.body.y = world.terrain.surfaceY(WORLD_W - 100) - ACTOR_H;
+    const lair = world.lair!;
+    // A clone on the floor of the first chamber, well along from its den (the others asleep far off).
+    const d = lair.dens[0];
+    const x = d.floorX + 160;
+    let y = d.floorY - 30;
+    while (!world.terrain.isSolid(Math.round(x), y + 1) && y < WORLD_H - 20) y++;
+    a.body.x = x - ACTOR_W / 2;
+    a.body.y = y + 1 - ACTOR_H;
+    a.body.vx = a.body.vy = 0;
+    const { b, k } = basilisks(world).sort((p0, q) => Math.abs(p0.b!.fx - d.floorX) - Math.abs(q.b!.fx - d.floorX))[0];
+    world.hurtBeast(k, 1, a.id);
+    let highest = Infinity;
+    for (let t = 0; t < 30 * 40 && a.alive; t++) {
+      a.hp = Math.min(a.hp, 100);
+      world.step();
+      if (b!.frenzy > 0) highest = Math.min(highest, b!.fy);
+    }
+    expect(a.alive).toBe(false);
+    expect(a.lastWeapon).toBe(W_BASILISK);
+    // It never went for the surface.
+    expect(highest).toBeGreaterThan(world.terrain.surfaceY(Math.round(d.floorX)) + 60);
   });
 
   it('nothing else comes up in the lair', () => {

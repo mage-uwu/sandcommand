@@ -756,10 +756,9 @@ export class World {
     this.mapLoot = lastComplexes.flatMap((c) => c.loot ?? []);
     // The lair: a cache of heavy weapons beside each tunnel mouth (rifles barely scratch a basilisk).
     if (lastLair) {
-      lastLair.mouths.forEach((mx, k) => {
-        const out = Math.sign(mx - lastLair!.dens[k].x) || 1;
+      lastLair.mouths.forEach((mx) => {
         LAIR_CACHE.forEach((weapon, i) => {
-          const x = mx + out * (TUNNEL_CLEAR + i * 10);
+          const x = mx + TUNNEL_CLEAR + i * 10;
           this.mapLoot.push({ x, y: this.terrain.surfaceY(x) - 6, weapon });
         });
       });
@@ -2112,10 +2111,113 @@ export class World {
     return false;
   }
 
+  /** A lair basilisk's prey: the nearest clone (or vehicle) within LAIR_HEAR of it, seen or not (it hears them in its cave). */
+  private lairPrey(hx: number, hy: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = LAIR_HEAR;
+    for (const p of this.players) {
+      if (!p || !p.alive || p.pilot >= 0) continue;
+      const tk = p.tank >= 0 ? this.tanks[p.tank] : null;
+      const x = tk ? tk.x + tankW(tk) / 2 : p.cx;
+      const y = tk ? tankCoreY(tk) : p.cy;
+      const d = Math.hypot(x - hx, y - hy);
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+    return best;
+  }
+
+  /** basiliskRoute's last plan for each basilisk: when made, toward where, and the waypoint it gave. */
+  private readonly basRoutes = new WeakMap<Beast, { at: number; tx: number; ty: number; x: number; y: number } | null>();
+  private readonly navSeen = new Int32Array((WORLD_W >> 3) * (WORLD_H >> 3));
+  private readonly navPrev = new Int32Array((WORLD_W >> 3) * (WORLD_H >> 3));
+  private readonly navQueue = new Int32Array((WORLD_W >> 3) * (WORLD_H >> 3));
+  private navStamp = 0;
+
+  /**
+   * The way for a basilisk to (tx, ty) through its cave: a search over the
+   * cave on an 8-cell grid, through open cells it can crawl (rock within its
+   * reach to hold to: walls, floor, roof; the open middle of a hall it would
+   * only fall through), replanned every few ticks. The waypoint a few cells
+   * on along it, or null with no way found (then it bores straight there).
+   */
+  private basiliskRoute(b: Beast, tx: number, ty: number): { x: number; y: number } | null {
+    const last = this.basRoutes.get(b);
+    if (last !== undefined && this.tick - (last?.at ?? -1e9) < BAS_REPLAN && (!last || Math.hypot(last.tx - tx, last.ty - ty) < 24)) {
+      if (!last || Math.hypot(last.x - b.fx, last.y - b.fy) > 10) return last ? { x: last.x, y: last.y } : null;
+    }
+    const t = this.terrain;
+    const GW = WORLD_W >> 3;
+    const GH = WORLD_H >> 3;
+    const free = (x: number, y: number) => !t.isSolid(x, y);
+    const open = (cx: number, cy: number) => {
+      const x = cx * 8 + 4;
+      const y = cy * 8 + 4;
+      return free(x, y) && free(x - 3, y) && free(x + 3, y) && free(x, y - 3) && free(x, y + 3);
+    };
+    const crawl = (cx: number, cy: number) => {
+      const x = cx * 8 + 4;
+      const y = cy * 8 + 4;
+      return !free(x, y + 10) || !free(x, y - 10) || !free(x + 10, y) || !free(x - 10, y) || !free(x + 7, y + 7) || !free(x - 7, y + 7) || !free(x + 7, y - 7) || !free(x - 7, y - 7);
+    };
+    const clampC = (v: number, n: number) => Math.max(0, Math.min(n - 1, v));
+    const sx = clampC(Math.floor(b.fx / 8), GW);
+    const sy = clampC(Math.floor(b.fy / 8), GH);
+    const gx = clampC(Math.floor(tx / 8), GW);
+    const gy = clampC(Math.floor(ty / 8), GH);
+    const start = sy * GW + sx;
+    const goal = gy * GW + gx;
+    const stamp = ++this.navStamp;
+    const seen = this.navSeen;
+    const prev = this.navPrev;
+    const q = this.navQueue;
+    // From the prey back to the basilisk: then each cell's `prev` is the step on toward the prey.
+    let head = 0;
+    let tail = 0;
+    seen[goal] = stamp;
+    prev[goal] = -1;
+    q[tail++] = goal;
+    let found = false;
+    while (head < tail && tail < BAS_SEARCH) {
+      const c = q[head++];
+      if (Math.abs((c % GW) - sx) <= 1 && Math.abs(((c / GW) | 0) - sy) <= 1) {
+        prev[start] = c === start ? prev[c] : c;
+        found = true;
+        break;
+      }
+      const cx = c % GW;
+      const cy = (c / GW) | 0;
+      for (let d = 0; d < 8; d++) {
+        const nx = cx + NAV_DX[d];
+        const ny = cy + NAV_DY[d];
+        if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+        const n = ny * GW + nx;
+        if (seen[n] === stamp) continue;
+        seen[n] = stamp;
+        if (n !== start && (!open(nx, ny) || !crawl(nx, ny))) continue;
+        prev[n] = c;
+        q[tail++] = n;
+      }
+    }
+    let plan: { at: number; tx: number; ty: number; x: number; y: number } | null = null;
+    if (found) {
+      // A few cells on along the way (smoother than the very next one).
+      let c = prev[start];
+      for (let k = 0; k < 3 && c >= 0 && prev[c] >= 0; k++) c = prev[c];
+      if (c >= 0) plan = { at: this.tick, tx, ty, x: (c % GW) * 8 + 4, y: ((c / GW) | 0) * 8 + 4 };
+    }
+    this.basRoutes.set(b, plan ?? null);
+    if (!plan) this.basRoutes.set(b, { at: this.tick, tx, ty, x: tx, y: ty });
+    return plan ? { x: plan.x, y: plan.y } : null;
+  }
+
   /** Disturbed: a basilisk wakes in a killing frenzy (up top already, it hunts at once). */
   private enrage(b: Beast): void {
     if (b.kind !== BeastKind.Basilisk) return;
-    if (b.frenzy === 0) b.surfaced = b.fy <= this.terrain.surfaceY(Math.round(b.fx)) + 4;
+    // (A lair basilisk is on its own ground already: it hunts where it is, no rush for the surface.)
+    if (b.frenzy === 0) b.surfaced = this.lairHome.has(b) || b.fy <= this.terrain.surfaceY(Math.round(b.fx)) + 4;
     b.frozen = 0;
     b.frenzy = BASILISK_CALM;
     b.still = 0;
@@ -2198,12 +2300,16 @@ export class World {
       speed = BASILISK_RISE;
       if (b.fy <= surf + 3) b.surfaced = true;
     } else {
-      const prey = this.basiliskPrey(b.fx, b.fy);
+      // In the lair: it hunts by ear, anyone anywhere in its cave, finding its way to them along
+      // the cave's walls, floor and roof (basiliskRoute). Wild, it hunts what it sees up top.
+      const lair = this.lairHome.has(b);
+      const prey = lair ? this.lairPrey(b.fx, b.fy) : this.basiliskPrey(b.fx, b.fy);
       speed = BASILISK_HUNT;
       if (prey) {
         b.frenzy = BASILISK_CALM;
-        gx = prey.x;
-        gy = prey.y;
+        const via = lair ? this.basiliskRoute(b, prey.x, prey.y) : null;
+        gx = via ? via.x : prey.x;
+        gy = via ? via.y : prey.y;
       } else if (--b.frenzy <= 0) {
         // Nothing left: down into the deep, to sleep.
         b.frenzy = 0;
@@ -2212,6 +2318,12 @@ export class World {
         b.lastX = home ? home.x : b.fx;
         b.lastY = home ? home.y : Math.min(WORLD_H - 40, surf + BASILISK_DEEP);
         b.surfaced = false;
+      } else if (lair) {
+        // Nobody about: back toward its den, the way it knows.
+        const home = this.lairHome.get(b)!;
+        const via = this.basiliskRoute(b, home.x, home.y);
+        gx = via ? via.x : home.x;
+        gy = via ? via.y : home.y;
       } else {
         // Prowling, just under the ground, the way it was going.
         gx = b.fx + (Math.cos(b.ang) >= 0 ? 60 : -60);
@@ -6970,6 +7082,12 @@ const TANK_SPECK = 12;
 const TANK_PERCH = 4;
 /** Extermination waves run twenty-four minutes. */
 const EXTERMINATION_TICKS = 30 * 60 * 24;
+/** A lair basilisk hears anyone this near (cells), replans its way every so many ticks, and searches so many grid cells for it at most. */
+const LAIR_HEAR = 1400;
+const BAS_REPLAN = 12;
+const BAS_SEARCH = 24000;
+const NAV_DX = [1, -1, 0, 0, 1, 1, -1, -1];
+const NAV_DY = [0, 0, 1, -1, 1, -1, 1, -1];
 /** The lair's basilisks: a quarter of a wild one's hit points (four to kill, not one), still a long fight each. */
 const LAIR_HP = 0.25;
 /** What lies by each tunnel mouth in the lair, just clear of the hole. */

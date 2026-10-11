@@ -447,8 +447,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // labyrinth), clear of every bunker and the siege works.
   const spans: { x0: number; x1: number }[] = lastComplexes.map((c) => ({ x0: c.x0, x1: c.x1 }));
   if (lastSiege) spans.push({ x0: lastSiege.lz[0], x1: lastSiege.lz[1] });
-  // (The lair's dens and tunnel mouths clear of the frosting too.)
-  if (lastLair) for (const d of lastLair.dens) spans.push({ x0: d.x - d.rx - 20, x1: d.x + d.rx + 20 });
+  // (The lair's chute mouths clear of the frosting too.)
   if (lastLair) for (const x of lastLair.mouths) spans.push({ x0: x - 40, x1: x + 40 });
   // (And the works dug in round the bunkers: trenches, teeth, sandbags, iron blocks.)
   if (!dungeon) for (const list of [lastWorks.trenches, lastWorks.teeth, lastWorks.sandbags, lastWorks.cubes]) for (const w of list) spans.push({ x0: w.x0, x1: w.x1 });
@@ -473,6 +472,15 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   relineCraters(m, lastCraters);
   // (The passes under the valley's trees stay open: no dripstone or crystal grown into them.)
   if (valley) for (const i of valley.passes) m[i] = Mat.Air;
+  // (The lair's dens stay clear: no dripstone or loose stuff on a basilisk's bed.)
+  if (lastLair) {
+    for (const d of lastLair.dens) {
+      for (let x = d.floorX - 40; x <= d.floorX + 40; x++) {
+        for (let y = d.floorY - 40; y <= d.floorY; y++) m[y * WORLD_W + x] = Mat.Air;
+        for (let y = d.floorY + 1; y <= d.floorY + 3; y++) m[y * WORLD_W + x] = Mat.Rock;
+      }
+    }
+  }
   // (The flora last: it grows on the ground as it ends up, frosting and all.)
   lastFlora = placeFlora(m, seed, biome, lastGeysers, ground);
   if (valley) {

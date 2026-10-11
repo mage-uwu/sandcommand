@@ -3503,7 +3503,7 @@ export class Renderer {
         `WAVE ${rs.wave + 1} IN ${secs}`,
         // (The mode is the headline; the map's biome goes with the hints.)
         (exterm
-          ? 'extermination · everyone together · four basilisks hibernate in the lair below · kill them all · respawns'
+          ? 'extermination · everyone together · four basilisks hibernate in the giant cave below · kill them all · respawns'
           : siege
           ? 'siege · red holds the fortress and its king for 20 minutes · green has 300 lives to kill him'
           : extraction
@@ -3582,7 +3582,7 @@ export class Renderer {
         const left = lair?.beasts.length ?? 0;
         const awake = lair?.beasts.filter((b) => b.awake).length ?? 0;
         parts.push({ t: `BASILISKS ${left}/${lair?.total ?? 4}`, c: left <= 1 ? '#80ff80' : '#ffd34a' }, gap, { t: `${awake} AWAKE`, c: awake > 0 ? '#ff8070' : '#9aa4ad' });
-        extra = { t: awake > 0 ? 'KILL THEM · they hunt anything they see up top' : 'down the tunnels to the dens · wake them, then kill them', c: awake > 0 ? '#ff8070' : '#c8d0d8' };
+        extra = { t: awake > 0 ? 'KILL THEM · they hunt anything they see up top' : 'down the chutes into the lair · wake them, then kill them', c: awake > 0 ? '#ff8070' : '#c8d0d8' };
       } else if (pvp) {
         modeName = 'PVP';
         const st = rs.pvp;

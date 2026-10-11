@@ -30,20 +30,41 @@ function reachable(t: Terrain): Uint8Array {
 }
 
 describe('the lair (Extermination)', () => {
-  it('four great dens deep under open ground, each reached by a broad tunnel from the surface', () => {
+  it('one giant cave deep under open ground, in chambers (a den on each floor), two or three chutes down into it', () => {
     for (const seed of [101, 202, 303]) {
       const t = new Terrain();
       generateWorld(t, seed, MapKind.Lair);
       const lair = lastLair!;
       expect(lair.dens.length).toBe(LAIR_DENS);
+      expect(lair.mouths.length).toBeGreaterThanOrEqual(2);
+      expect(lair.mouths.length).toBeLessThanOrEqual(3);
+      // Most of the map's width.
+      expect(lair.x1 - lair.x0).toBeGreaterThan(WORLD_W * 0.8);
       const open = reachable(t);
       for (const d of lair.dens) {
         expect(d.floorY).toBeGreaterThan(t.surfaceY(d.x) + 150);
-        // Its floor: open, rock under it, room over it (a basilisk lies there), and reachable from the sky.
+        // Its floor: open, rock under it, room over it (a basilisk lies there), and reachable from the sky (down a chute, through the cave).
         expect(t.isSolid(d.floorX, d.floorY)).toBe(false);
         expect(t.isSolid(d.floorX, d.floorY + 1)).toBe(true);
         for (let k = 1; k < 30; k++) expect(t.isSolid(d.floorX, d.floorY - k)).toBe(false);
         expect(open[d.floorY * WORLD_W + d.floorX], `seed ${seed} den at ${d.x}`).toBe(1);
+      }
+      // A big open hall: most of the columns across it are open over 120 cells tall at the middle.
+      let tall = 0;
+      for (let x = lair.x0 + 200; x < lair.x1 - 200; x += 20) {
+        let run = 0;
+        let best = 0;
+        for (let y = lair.roof[x]; y <= lair.floor[x]; y++) {
+          run = t.isSolid(x, y) ? 0 : run + 1;
+          best = Math.max(best, run);
+        }
+        if (best > 120) tall++;
+      }
+      expect(tall).toBeGreaterThan(((lair.x1 - lair.x0 - 400) / 20) * 0.6);
+      // Each chute: open from the surface down into the cave's roof.
+      for (const mx of lair.mouths) {
+        let y = t.surfaceY(mx - 40) - 2;
+        expect(open[(y + 20) * WORLD_W + mx]).toBe(1);
       }
     }
   });
