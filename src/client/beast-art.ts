@@ -672,16 +672,29 @@ const BAS_ROCK = ['#2e2a34', '#3a3540', '#46404c', '#524a56'];
 const DRIP = ['#6e6658', '#827a6a', '#988e7c', '#ada290'];
 const BAS_CORAL = ['#c83c6c', '#e8507e', '#ff7aa0', '#ffb0c8'];
 
+/** Its flesh where plate gives way: membranes, blotches, pores; its cilia. */
+const BAS_FLESH = ['#4a3440', '#6a4652', '#8a5a66', '#a87482'];
+const CILIA = ['#c8b4a8', '#e0d0c4'];
+/** Its flytrap jaws: grey flaps, veined, rimmed with long teeth. */
+const FLAP = ['#5e5e66', '#76767e', '#8e8e96', '#aeaeb6'];
+const TOOTH = ['#d8d0bc', '#f4ecd8'];
+
 /**
- * A basilisk, in pixels: three times a millipede, its plated body in long
- * sections, each dressed as something the caves are made of: a great
- * **GEMM vein** (crystal bands of pink, turquoise or emerald through dark
- * rock, glinting), **dripstone** (layered pale stone, stalactite spikes
- * hanging off its underside) or **coral** grown over it (lumpy, pored, its
- * polyps glowing). Its head is a blunt wedge of plate. Asleep (`frozen`)
- * it has no outline and no eye: a seam in the cave wall. Awake, a dim
- * amber eye; in its frenzy its eyes burn red and its maw gapes, ringed
- * with fangs, the way it's going.
+ * A basilisk, in pixels: three times a millipede. Its body is in long
+ * sections of lumpy plate, each dressed as something the caves are made of:
+ * a great **GEMM vein** (seams of pink, turquoise or emerald crystal
+ * wandering through dark rock), **dripstone** (layered pale stone,
+ * stalactites hanging off its underside) or **coral** grown over it. But
+ * it's alive under it: fleshy membrane shows round the plates' rims,
+ * blotched and pored, and fringes of **cilia** wave along its underside
+ * (and over the coral's back), stirring as it moves.
+ *
+ * Its head is a pointed wedge, and its front a **flytrap**: two grey flaps,
+ * veined, hinged at the back, their rims set with long teeth. Shut (asleep,
+ * or calm), the teeth interlock along the seam. In its frenzy the flaps
+ * gape open, working, over a red maw, and its eyes burn. Asleep
+ * (`frozen`) it has no outline, no eye, and its cilia hang still: a seam
+ * in the cave wall.
  */
 export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number[], seed: number, frozen: boolean, frenzy: boolean, now: number): void {
   const n = pts.length >> 1;
@@ -689,7 +702,12 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
   const P = (i: number) => Math.max(0, Math.min(n - 1, i));
   const gem = GEMS[seed % 3];
   const R0 = 11;
-  for (let i = n - 1; i >= 0; i--) {
+  const put = (x: number, y: number, c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+  };
+  // Each segment's frame: centre, along (t), across (n: toward its back, up the screen where it can).
+  const seg = (i: number) => {
     const x = pts[i * 2];
     const y = pts[i * 2 + 1];
     let tx = pts[P(i - 1) * 2] - pts[P(i + 1) * 2];
@@ -697,26 +715,54 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
     const l = Math.hypot(tx, ty) || 1;
     tx /= l;
     ty /= l;
-    const nx = -ty;
-    const ny = tx;
-    const w = R0 * (i === 0 ? 1.0 : 1 - (0.4 * i) / (n - 1));
-    const len = i === 0 ? 12 : 10;
-    const camo = i === 0 ? -1 : basCamoOf(seed, i);
-    const R = Math.ceil(Math.max(w, len)) + 1;
+    let nx = -ty;
+    let ny = tx;
+    if (ny > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    return { x, y, tx, ty, nx, ny };
+  };
+  const sway = (k: number) => (frozen ? 0 : Math.sin(now / 180 + k * 0.9) * 1.2);
+
+  for (let i = n - 1; i >= 1; i--) {
+    const { x, y, tx, ty, nx, ny } = seg(i);
+    const w = R0 * (1 - (0.42 * i) / (n - 1));
+    const len = 10;
+    const camo = basCamoOf(seed, i);
+    // Cilia in places (under the coral, and every third section): fine fleshy hairs out from its body, waving.
+    if (camo === BasCamo.Coral || i % 3 === 1) {
+      for (let k = -2; k <= 2; k++) {
+        const bx = x + tx * k * 3.2;
+        const by = y + ty * k * 3.2;
+        const reach = w * 0.9;
+        for (const side of camo === BasCamo.Coral ? [1, -1] : [1]) {
+          const ox = bx - nx * side * reach;
+          const oy = by - ny * side * reach;
+          const hl = 2 + ((i + k) & 1);
+          for (let s = 0; s < hl; s++) put(ox - nx * side * s + tx * sway(i * 7 + k) * (s / hl), oy - ny * side * s + ty * sway(i * 7 + k) * (s / hl), s === hl - 1 ? CILIA[0] : BAS_FLESH[3]);
+        }
+      }
+    }
+    const R = Math.ceil(Math.max(w, len)) + 2;
     for (let py = Math.floor(y - R); py <= Math.ceil(y + R); py++) {
       for (let px = Math.floor(x - R); px <= Math.ceil(x + R); px++) {
         const dx = px + 0.5 - x;
         const dy = py + 0.5 - y;
         const u = dx * tx + dy * ty;
         const v = dx * nx + dy * ny;
-        // The head a blunt wedge; the body plates ovals.
-        const e = i === 0 ? (Math.max(0, u) / len) ** 2 * 0.8 + (Math.min(0, u) / len) ** 2 + (v / (w * (1 - Math.max(0, u) / (len * 1.6)))) ** 2 : (u / len) ** 2 + (v / w) ** 2;
+        // A lumpy plate, not a clean oval.
+        const th = Math.atan2(v, u);
+        const lump = 1 + 0.09 * Math.sin(th * 5 + i * 1.3 + seed) + 0.05 * Math.sin(th * 9 + seed);
+        const e = ((u / len) ** 2 + (v / w) ** 2) / (lump * lump);
         if (e > 1) continue;
         const h = hsh(px, py, seed);
         let c: string;
-        if (e > 0.82 && !frozen) c = '#120e14';
-        else if (camo === BasCamo.Vein) {
-          // A seam of crystal wandering through dark rock, a second thinner one, and clusters of facets along them.
+        if (e > 0.86 && !frozen) c = '#120e14';
+        else if (e > 0.62 && hsh(Math.floor(px / 2), Math.floor(py / 2), seed + i * 3) > 0.45) {
+          // Round the rim, where plate gives way: fleshy membrane, blotched, pored.
+          c = h < 0.08 ? '#2a1820' : BAS_FLESH[Math.floor(hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 9) * 4)];
+        } else if (camo === BasCamo.Vein) {
           const seam = Math.abs(v - w * 0.35 * Math.sin(u * 0.28 + seed + i * 1.7));
           const seam2 = Math.abs(v + w * 0.45 - w * 0.2 * Math.sin(u * 0.5 + seed * 2));
           const cluster = hsh(Math.floor(px / 3), Math.floor(py / 3), seed + 11) > 0.82 && seam < w * 0.55;
@@ -725,18 +771,14 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
         } else if (camo === BasCamo.Drip) {
           const layer = Math.floor((py + Math.sin(px * 0.3 + seed) * 1.5) / 2) % 4;
           c = DRIP[(layer + (h > 0.85 ? 1 : 0)) % 4];
-        } else if (camo === BasCamo.Coral) {
-          c = h > 0.88 ? BAS_CORAL[3] : BAS_CORAL[Math.floor(hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 5) * 3)];
-          if (h < 0.07) c = '#5a1830'; // (pores)
         } else {
-          // The head: dark plate, lighter along its crest.
-          c = v < -w * 0.35 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(h * 2)];
+          c = h > 0.88 ? BAS_CORAL[3] : BAS_CORAL[Math.floor(hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 5) * 3)];
+          if (h < 0.07) c = '#5a1830';
         }
         ctx.fillStyle = c;
         ctx.fillRect(px, py, 1, 1);
       }
     }
-    // Dripstone: stalactites hanging from its underside (straight down, whichever way it lies).
     if (camo === BasCamo.Drip) {
       for (let s = 0; s < 3; s++) {
         const ox = x + tx * (s - 1) * len * 0.6;
@@ -748,47 +790,91 @@ export function drawBasilisk(ctx: CanvasRenderingContext2D, pts: readonly number
         ctx.fillRect(Math.round(ox), Math.round(by), 1, 1);
       }
     }
-    // Coral: polyps on its back, glowing at the tips.
     if (camo === BasCamo.Coral) {
       for (let s = 0; s < 3; s++) {
-        const ox = x + tx * (s - 1) * len * 0.55 - nx * w * 0.85;
-        const oy = y + ty * (s - 1) * len * 0.55 - ny * w * 0.85;
-        ctx.fillStyle = BAS_CORAL[1];
-        ctx.fillRect(Math.round(ox), Math.round(oy) - 1, 1, 2);
-        ctx.fillStyle = frozen ? BAS_CORAL[2] : (Math.floor(now / 300) + s + i) % 3 === 0 ? '#fff4b0' : BAS_CORAL[3];
-        ctx.fillRect(Math.round(ox), Math.round(oy) - 2, 1, 1);
+        const ox = x + tx * (s - 1) * len * 0.55 + nx * w * 0.6;
+        const oy = y + ty * (s - 1) * len * 0.55 + ny * w * 0.6;
+        put(ox, oy, frozen ? BAS_CORAL[2] : (Math.floor(now / 300) + s + i) % 3 === 0 ? '#fff4b0' : BAS_CORAL[3]);
       }
     }
-    if (i === 0 && !frozen) {
-      // Eyes, either side of its crest; in its frenzy, red and burning, and its maw open, fangs round it.
+  }
+
+  // The head: a pointed wedge, its front a flytrap of two grey flaps (rasterised a pixel at a time through each flap's own frame).
+  const { x, y, tx, ty } = seg(0);
+  // (Across, signed the head's own way, so the flaps open either side of its line.)
+  const nx = -ty;
+  const ny = tx;
+  const W = 13;
+  const back = 8; // (its skull, behind the hinge)
+  const L = 20; // (the flaps' length, hinge to tip)
+  const gape = frenzy ? 0.3 + 0.16 * Math.sin(now / 70) : 0;
+  const local = (u: number, v: number) => ({ x: x + tx * u + nx * v, y: y + ty * u + ny * v });
+  const span = L + W + 4;
+  for (let py = Math.floor(y - span); py <= Math.ceil(y + span); py++) {
+    for (let px = Math.floor(x - span); px <= Math.ceil(x + span); px++) {
+      const dx = px + 0.5 - x;
+      const dy = py + 0.5 - y;
+      const u = dx * tx + dy * ty;
+      const v = dx * nx + dy * ny;
+      let c: string | null = null;
+      // A flap (or its teeth): into each flap's frame, unswung.
       for (const side of [-1, 1]) {
-        const ex = Math.round(x + tx * 3 + nx * side * w * 0.45);
-        const ey = Math.round(y + ty * 3 + ny * side * w * 0.45);
-        if (frenzy) {
-          ctx.fillStyle = `rgba(255,40,30,${0.3 + 0.2 * Math.sin(now / 80)})`;
-          ctx.fillRect(ex - 2, ey - 2, 5, 5);
-          ctx.fillStyle = '#ff3a2a';
-          ctx.fillRect(ex, ey, 2, 2);
-          ctx.fillStyle = '#ffe0a0';
-          ctx.fillRect(ex, ey, 1, 1);
-        } else {
-          ctx.fillStyle = '#c08030';
-          ctx.fillRect(ex, ey, 1, 1);
+        const a = side * gape;
+        const fu = u * Math.cos(a) + v * Math.sin(a);
+        const fv = (-u * Math.sin(a) + v * Math.cos(a)) * side; // (0 at its inner rim, out toward its outer edge)
+        if (fu < 0 || fu > L) continue;
+        const half = W * (1 - fu / L);
+        // Teeth: long pale spikes off its inner rim, across the seam (shut, they interlock with the other's).
+        const tu = (fu - 2 + (side > 0 ? 1.25 : 0)) % 2.5;
+        if (fv < 0 && fv > -3.6 && fu > 2 && fu < L - 2 && Math.abs(tu - 1.25) < 0.55 - (-fv / 3.6) * 0.3) {
+          c = fv < -2.6 ? TOOTH[1] : TOOTH[0];
+          break;
         }
+        if (fv < 0 || fv > half) continue;
+        const rim = fv > half - 1.1;
+        const vein = Math.abs(((fu * 0.7 + fv * 1.3) % 4) - 2) < 0.35;
+        const hh = hsh(px, py, seed + side);
+        c = rim && !frozen ? '#36363e' : fv < 1.4 ? FLAP[3] : vein ? FLAP[0] : FLAP[1 + (hh > 0.62 ? 1 : 0)];
+        break;
       }
+      if (!c && gape > 0 && u > 0 && u < L && Math.abs(v) < Math.tan(gape) * u) {
+        // The maw between them: dark red, deep.
+        c = u > L * 0.55 ? '#1a0406' : Math.abs(v) > Math.tan(gape) * u - 1.3 ? '#7a1418' : '#3a0608';
+      }
+      if (!c && u <= 0.5 && u >= -back) {
+        // Its skull: the back of the wedge, dark plate, a lighter crest.
+        const half = W * (1 - Math.max(0, -u - back * 0.45) / back);
+        if (Math.abs(v) <= half) c = Math.abs(v) > half - 1.1 && !frozen ? '#120e14' : Math.abs(v) < 2 ? BAS_ROCK[3] : BAS_ROCK[1 + Math.floor(hsh(px, py, seed) * 2)];
+      }
+      if (c) {
+        ctx.fillStyle = c;
+        ctx.fillRect(px, py, 1, 1);
+      }
+    }
+  }
+  // Cilia along the flaps' outer edges: fine hairs, waving.
+  for (const side of [-1, 1]) {
+    const a = side * gape;
+    for (let fu = 2; fu < L - 3; fu += 3) {
+      const half = W * (1 - fu / L);
+      for (let s = 1; s <= 2; s++) {
+        const fv = side * (half + s);
+        const p = local(fu * Math.cos(a) - fv * Math.sin(a), fu * Math.sin(a) + fv * Math.cos(a));
+        put(p.x + (s === 2 ? sway(fu + side * 5) * 0.6 : 0), p.y, s === 2 ? CILIA[1] : CILIA[0]);
+      }
+    }
+  }
+  // Its eyes, on the skull either side; in its frenzy, red and burning.
+  if (!frozen) {
+    for (const side of [-1, 1]) {
+      const e = local(-2, side * W * 0.5);
       if (frenzy) {
-        const mx = x + tx * (len - 2);
-        const my = y + ty * (len - 2);
-        const gape = 3 + Math.sin(now / 60) * 1.2;
-        for (let py = Math.floor(my - gape - 1); py <= Math.ceil(my + gape + 1); py++) {
-          for (let px = Math.floor(mx - gape - 1); px <= Math.ceil(mx + gape + 1); px++) {
-            const d = Math.hypot(px + 0.5 - mx, py + 0.5 - my);
-            if (d > gape + 0.5) continue;
-            ctx.fillStyle = d > gape - 1 ? '#f4ecd8' : d > gape - 2 ? '#5a1010' : '#1a0406';
-            ctx.fillRect(px, py, 1, 1);
-          }
-        }
-      }
+        ctx.fillStyle = `rgba(255,40,30,${0.3 + 0.2 * Math.sin(now / 80)})`;
+        ctx.fillRect(Math.round(e.x) - 2, Math.round(e.y) - 2, 5, 5);
+        put(e.x, e.y, '#ff3a2a');
+        put(e.x + 1, e.y, '#ff3a2a');
+        put(e.x, e.y, '#ffe0a0');
+      } else put(e.x, e.y, '#c08030');
     }
   }
 }

@@ -763,7 +763,14 @@ and very hard to kill.
   something the caves are made of: a great **GEMM vein** (wandering seams
   of pink, turquoise or emerald crystal through dark rock), **dripstone**
   (layered pale stone with stalactites hanging off its underside) or
-  **coral** grown over it (pored, its polyps glowing).
+  **coral** grown over it (pored, its polyps glowing). But it's alive
+  under the plates, which are lumpy, not clean ovals. Fleshy membrane shows
+  round their rims, blotched and pored, and in places (under the coral,
+  and every third section) fringes of cilia wave off its body.
+- **Its head** is a pointed, triangular wedge whose front is a **flytrap**:
+  two grey, veined flaps hinged at its skull, rimmed with long pale teeth
+  and fringed with cilia. Shut, the teeth interlock along the seam. In its
+  frenzy the flaps gape open, working, over a deep red maw.
 - **It doesn't crawl, it bores.** It goes through the rock wherever it
   means to go, leaving a tunnel behind it, but never through what won't
   yield (bedrock, cement, iron). Its jaws never so much as chip cement.
@@ -775,7 +782,7 @@ and very hard to kill.
 - **Disturb it and it wakes in a killing frenzy.** A clone with a line on
   its head within 110 cells, or within 40 of any part of it, wakes it. So
   does anything that hurts it, a blast included. It wakes with a grinding
-  roar that carries far, its eyes burning red, its fanged maw gaping.
+  roar that carries far, its eyes burning red, its flytrap jaws gaping.
 - **Its first instinct is the surface.** It bores straight up through the
   rock to reach it.
 - **Then it kills anything it sees.** Up top it prowls just under the
