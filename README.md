@@ -2551,23 +2551,37 @@ for the story mode too.
     seconds;
   - everyone's view shakes (hardest near it), and a long rumble follows;
   - the boom reaches everyone, later the further off they are;
-  - a **mushroom cloud** climbs over the site for 70 s. The fireball lifts
-    off the ground and rolls over into a wide cap on its stem, glowing from
-    within, then cools to a dark, sooty, ragged mushroom that drifts and
-    thins out. A skirt of dust rolls out along the ground at its foot.
-    It's a WebGL2 fragment shader (`src/client/stone-cloud.ts`) that only
-    runs while a cloud is alive:
-    - **The density field:** the cloud's shape (the fireball, then the
-      stem, the cap and the skirt) eaten into and frayed by domain-warped
-      fractal noise. The noise boils up the stem and rolls round the cap.
-      Ridged detail makes the billows read as cauliflower folds.
-    - **Lighting:** a few steps toward the light give deep self-shadowing,
-      and a short step gives each billow's sunlit face. The fire inside
-      lights it white, then orange, then a dull red on the cap's underside
-      as it cools.
-    - **Grit:** per-cell grain, a coarse colour ramp and stepped alpha.
-    - **Resolution:** one texel per world cell, so it sits in the game's
-      pixels, drawn behind the ground like a sprite.
+  - a **mushroom cloud** towers over the site for 70 s. First a blinding
+    white fireball swells off the ground. Then comes a glowing, smoking
+    pillar, white-hot up its core, pouring into a wide cap. Inside the cap
+    the rolling vortex ring burns orange through the soot, and the cap's
+    belly glows from below. It cools slowly, still glowing half a minute
+    on, to embers in a dark, ragged cloud that drifts and thins. A skirt of
+    dust rolls out along the ground at its foot. It's a WebGL2 fragment
+    shader (`src/client/stone-cloud.ts`) that only runs while a cloud is
+    alive:
+    - **The smoke:** a density field, the cloud's shape (fireball, pillar,
+      cap, skirt) eaten into and frayed by domain-warped fractal noise. The
+      noise boils up the pillar and rolls round the cap. Ridged detail
+      makes the billows read as cauliflower folds. A few steps toward the
+      light give it self-shadowing, and a short step gives each billow's
+      sunlit face.
+    - **The heat:** a temperature field with these sources:
+      - the fireball;
+      - the vortex ring inside the cap, the hottest part;
+      - the cap's belly;
+      - the pillar's core;
+      - the burning crater.
+
+      It flickers with the turbulence and cools slowly (`hotness`). The
+      fire shows through where the smoke thins and lights the soot around
+      it orange.
+    - **The light:** a halo bleeds into the sky behind the cap, pillar and
+      crater (`drawCloudHalo`). A warm wash over everything in view fades
+      as it cools (`drawCloudWash`). Both are drawn additively.
+    - **Grit:** per-cell grain, a coarse colour ramp and stepped alpha. It
+      renders at one texel per world cell, so it sits in the game's pixels,
+      drawn behind the ground like a sprite.
     - **Cost:** only the part of it in view is computed.
     - **No WebGL2:** no cloud. Everything else still plays out.
 - **On the wire.** Beacons and cores go out every frame while any exist

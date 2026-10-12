@@ -21,7 +21,7 @@ import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '.
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { CLOUD_MS } from '../shared/stoneburner.ts';
 import { drawBeacons, drawFeet, drawStoneFlash } from './stoneburner-art.ts';
-import { StoneCloud } from './stone-cloud.ts';
+import { StoneCloud, drawCloudWash } from './stone-cloud.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
@@ -1263,6 +1263,9 @@ export class Renderer {
       }
       ctx.lineCap = 'butt';
     }
+
+    // A Stoneburner strike's light over everything in view, warm, fading as the cloud cools.
+    for (const sb of game.stoneBurns) drawCloudWash(ctx, sb.x, sb.y, (now - sb.at) / 1000, { x0: camX - halfW, y0: camY - halfH, x1: camX + halfW, y1: camY + halfH });
 
     // Explosion flashes.
     for (let i = game.flashes.length - 1; i >= 0; i--) {
