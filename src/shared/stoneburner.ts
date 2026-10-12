@@ -32,20 +32,27 @@ export const STRIKE_HEIGHT = 2400;
 /** Thrown: how hard (cells/s), and how far its sticky face reaches (cells). */
 export const BURNER_THROW = 300;
 export const BURNER_STICK_R = 2;
-/** Certain death out to here (cells); heat and blast falling off out to STONE_HEAT_R. */
-export const STONE_KILL_R = 150;
-export const STONE_HEAT_R = 420;
-/** Behind solid ground, this share of the heat gets through (and inside the crater's own reach, cover is no help). */
+/**
+ * The initial flash: certain death out to here (cells), for everyone, any
+ * side, the thrower too (only deep behind solid ground in the outer part of
+ * it is there a chance). Then the heat and blast falling off out to
+ * STONE_HEAT_R.
+ */
+export const STONE_KILL_R = 340;
+export const STONE_HEAT_R = 700;
+/** Behind solid ground, this share of the heat gets through (and in the inner part of the kill zone, cover is no help at all). */
 export const STONE_COVER = 0.3;
+/** Within this share of STONE_KILL_R, nothing shields you. */
+export const STONE_NO_COVER = 0.6;
 /** The blast's shove on clones (cells/s at ground zero, falling off out to STONE_PUSH_R). */
 export const STONE_PUSH = 1100;
-export const STONE_PUSH_R = 520;
+export const STONE_PUSH_R = 800;
 /** The crater (cells), and the core of it that takes even bedrock-hard material. */
 export const STONE_CRATER_R = 105;
 export const STONE_CORE_R = 72;
-/** Damage dealt at ground zero to creatures and vehicles (falling off with range). */
-export const STONE_HARM = 6000;
-export const STONE_HARM_R = 360;
+/** Damage dealt at ground zero to creatures and vehicles (falling off with range: still enough to wreck a tank most of the way out). */
+export const STONE_HARM = 40000;
+export const STONE_HARM_R = 560;
 /** The molten core: how long it burns (40 s), its bite (cells), and how fast it sinks at first (cells per tick). */
 export const FOOT_LIFE = 40 * TICK_RATE;
 export const FOOT_R = 9;

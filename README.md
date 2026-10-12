@@ -2528,15 +2528,17 @@ for the story mode too.
 - **The strike.** A missile drops out of orbit onto the beacon in a third
   of a second (a white-hot streak and a falling scream), and the world goes
   white.
-  - **Close in** (150 cells): nobody lives, the thrower included. The kill
-    feed calls it the Stoneburner.
-  - **Out to 420 cells:** the heat and blast fall off with range. Solid
-    ground between you and the blast lets through only 30% of the heat,
-    except inside the crater's own reach.
-  - **Everyone within 520 cells** is thrown away from ground zero and up,
+  - **The initial flash** (340 cells): everyone in it dies, whatever side
+    they're on, the thrower included. It's a nuke. Only someone deep
+    behind solid ground in the outer 40% of that range has a chance, and
+    they still burn badly. The kill feed calls it the Stoneburner.
+  - **Out to 700 cells:** the heat and blast fall off with range. Solid
+    ground between you and the blast lets through only 30% of the heat.
+  - **Everyone within 800 cells** is thrown away from ground zero and up,
     cover or not.
   - **Creatures, vehicles, dropships, drop rockets and doors** take
-    6000 damage at ground zero, falling off out to 360 cells.
+    40,000 damage at ground zero, falling off out to 560 cells, enough to
+    wreck a tank most of the way out.
   - **The ground:** a crater 105 cells across, the hardest rock included
     out to 72. Burning debris is thrown out over everything.
 - **The molten core.** A core of molten rock is left at the crater's
@@ -2549,11 +2551,25 @@ for the story mode too.
     seconds;
   - everyone's view shakes (hardest near it), and a long rumble follows;
   - the boom reaches everyone, later the further off they are;
-  - a **mushroom cloud** climbs over the site for 70 s: the fireball lifts
-    off the ground, rolls over into a wide cap on its stem with its
-    underside lit by the fire inside, and cools to a dirty grey-brown
-    column that drifts and thins out. A skirt of dust rolls out along the
-    ground at its foot. It's drawn in `src/client/stoneburner-art.ts`.
+  - a **mushroom cloud** climbs over the site for 70 s. The fireball lifts
+    off the ground and rolls over into a wide cap on its stem, glowing from
+    within, then cools to a dark, sooty, ragged mushroom that drifts and
+    thins out. A skirt of dust rolls out along the ground at its foot.
+    It's a WebGL2 fragment shader (`src/client/stone-cloud.ts`) that only
+    runs while a cloud is alive:
+    - **The density field:** the cloud's shape (the fireball, then the
+      stem, the cap and the skirt) eaten into and frayed by domain-warped
+      fractal noise. The noise boils up the stem and rolls round the cap.
+      Ridged detail makes the billows read as cauliflower folds.
+    - **Lighting:** a few steps toward the light give deep self-shadowing,
+      and a short step gives each billow's sunlit face. The fire inside
+      lights it white, then orange, then a dull red on the cap's underside
+      as it cools.
+    - **Grit:** per-cell grain, a coarse colour ramp and stepped alpha.
+    - **Resolution:** one texel per world cell, so it sits in the game's
+      pixels, drawn behind the ground like a sprite.
+    - **Cost:** only the part of it in view is computed.
+    - **No WebGL2:** no cloud. Everything else still plays out.
 - **On the wire.** Beacons and cores go out every frame while any exist
   (`R_BURNERS`), then once more when they're gone.
 

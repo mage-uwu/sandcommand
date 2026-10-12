@@ -245,7 +245,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, FOOT_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_PUSH, STONE_PUSH_R, footSink } from '../shared/stoneburner.ts';
+import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, FOOT_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R, footSink } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
@@ -3069,13 +3069,14 @@ export class World {
       p.body.vx += ((p.cx - x) / l) * STONE_PUSH * f;
       p.body.vy += ((p.cy - y) / l) * STONE_PUSH * f * 0.6 - STONE_PUSH * 0.45 * f;
       p.body.onGround = false;
-      if (d < STONE_KILL_R && (open || d < STONE_CRATER_R + 20)) {
+      // The flash: no sides, no mercy (the thrower too). Only deep behind solid ground, out in the outer part of it, is there a chance.
+      if (d < STONE_KILL_R * STONE_NO_COVER || (d < STONE_KILL_R && open)) {
         this.damage(p, 9999, by, W_STONEBURNER, false, true);
         continue;
       }
       if (d >= STONE_HEAT_R) continue;
-      const heat = 260 * (1 - (d - STONE_KILL_R) / (STONE_HEAT_R - STONE_KILL_R)) * (open ? 1 : STONE_COVER);
-      this.damage(p, Math.min(9999, d < STONE_KILL_R ? heat * 2.2 : heat), by, W_STONEBURNER);
+      const heat = d < STONE_KILL_R ? 180 : 260 * (1 - (d - STONE_KILL_R) / (STONE_HEAT_R - STONE_KILL_R)) * (open ? 1 : STONE_COVER);
+      this.damage(p, Math.min(9999, heat), by, W_STONEBURNER);
     }
     // The molten core, left at the bottom of the crater.
     let fy = Math.floor(y + STONE_CRATER_R - 4);

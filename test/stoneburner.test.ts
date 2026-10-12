@@ -8,6 +8,7 @@ import { quantizeAim } from '../src/shared/protocol.ts';
 import { W_STONEBURNER } from '../src/shared/particles.ts';
 import { BURNER_FUSE, BURNER_STRIKE, BurnerPhase, FOOT_LIFE, STONE_CRATER_R, blinkOn, blinkPeriod } from '../src/shared/stoneburner.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
+import { newTank } from '../src/shared/tank.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { deliverAll } from './helpers.ts';
@@ -101,16 +102,17 @@ describe('the Stoneburner', () => {
   });
 
   it('the strike: everyone close in dies (its thrower too), further out it burns and shoves, the far side of the map feels nothing; a great crater; and every client sees it', () => {
-    const { world, ps, frames, place } = range(5);
-    const [a, near, mid, behind, far] = ps;
+    const { world, ps, frames, place } = range(6);
+    const [a, near, mid, behind, far, open300] = ps;
     const gz = 1500;
     place(a, gz - 60);
     place(near, gz + 100);
-    place(mid, gz + 330);
+    place(mid, gz + 500);
+    place(open300, gz - 300);
     // (Down a hole of its own, deep under the ground: the heat goes over it.)
-    for (let y = FLOOR; y < FLOOR + 260; y++) for (let x = gz - 330 - 8; x < gz - 330 + 8; x++) world.terrain.set(x, y, Mat.Air);
+    for (let y = FLOOR; y < FLOOR + 260; y++) for (let x = gz + 520 - 8; x < gz + 520 + 8; x++) world.terrain.set(x, y, Mat.Air);
     world.terrainReplaced();
-    place(behind, gz - 330, FLOOR + 260);
+    place(behind, gz + 520, FLOOR + 260);
     place(far, 3800);
     world.burners.push({ x: gz, y: FLOOR - 1, vx: 0, vy: 0, phase: BurnerPhase.Stuck, fuse: 2, owner: a.id, onPlayer: 255, onTank: -1, ox: 0, oy: 0, age: 0 } as never);
     const hp = () => ps.map((p) => (p.alive ? p.hp : 0));
@@ -119,8 +121,10 @@ describe('the Stoneburner', () => {
       world.step();
     }
     const after = hp();
+    // The flash: everyone near is dead, whoever's side they're on, its thrower too; 300 cells off in the open, still dead.
     expect(a.alive).toBe(false);
     expect(near.alive).toBe(false);
+    expect(open300.alive).toBe(false);
     expect(a.lastWeapon).toBe(W_STONEBURNER);
     expect(near.lastHitBy).toBe(a.id);
     // Further out: hurt, badly, and thrown.
@@ -138,6 +142,18 @@ describe('the Stoneburner', () => {
     pump(game, frames);
     expect(game.stoneBurns.length).toBe(1);
     expect(Math.abs(game.stoneBurns[0].x - gz)).toBeLessThan(2);
+  });
+
+  it('a tank within the flash is wrecked', () => {
+    const { world, ps, place } = range(2);
+    place(ps[0], 300);
+    place(ps[1], 3800);
+    const k = newTank(2000 + 280, FLOOR - 24);
+    k.chute = false;
+    world.tanks[0] = k;
+    world.stoneBurn(2000, FLOOR - 1, 255);
+    world.step();
+    expect(world.tanks[0]).toBe(null);
   });
 
   it("the molten core burns its way down for 40 s, slower as it goes, and smoulders out", () => {

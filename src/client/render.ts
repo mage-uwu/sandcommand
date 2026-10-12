@@ -20,7 +20,8 @@ import { drawFlora, drawGeysers } from './flora-art.ts';
 import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { CLOUD_MS } from '../shared/stoneburner.ts';
-import { drawBeacons, drawFeet, drawMushroom, drawStoneFlash } from './stoneburner-art.ts';
+import { drawBeacons, drawFeet, drawStoneFlash } from './stoneburner-art.ts';
+import { StoneCloud } from './stone-cloud.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
@@ -478,6 +479,8 @@ export class Renderer {
   private assistSight = false;
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
+  /** The Stoneburner's mushroom cloud (a shader, set up the first time one's drawn). */
+  private readonly stoneCloud = new StoneCloud();
   camX = WORLD_W / 2;
   /** Debug only (?debug, window.sc): pin the view to a world point. */
   lookAt: { x: number; y: number } | null = null;
@@ -765,7 +768,7 @@ export class Renderer {
     // Now and then, on a cave's back wall: a trace of whoever was here first.
     if (game.relics.length) drawRelics(ctx, game.relics, camX - halfW, camY - halfH, camX + halfW, camY + halfH);
 
-    // A Stoneburner strike's mushroom cloud, over the site (behind the ground: it rises out of the crater).
+    // A Stoneburner strike's mushroom cloud, over the site (behind the ground: it rises out of the crater; stone-cloud.ts).
     for (let i = game.stoneBurns.length - 1; i >= 0; i--) {
       const sb = game.stoneBurns[i];
       const t = (now - sb.at) / 1000;
@@ -773,7 +776,7 @@ export class Renderer {
         game.stoneBurns.splice(i, 1);
         continue;
       }
-      drawMushroom(ctx, sb.x, sb.y, t, sb.seed);
+      this.stoneCloud.draw(ctx, sb.x, sb.y, t, sb.seed, { x0: camX - halfW, y0: camY - halfH, x1: camX + halfW, y1: camY + halfH });
     }
 
     // Terrain chunks in view.
