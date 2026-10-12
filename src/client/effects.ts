@@ -572,11 +572,23 @@ export function blisterBurst(p: Particles, x: number, y: number, glow: number): 
 /** A glob of venom in flight: now and then a drop of it falls away. */
 export function venomTrail(p: Particles, x: number, y: number, vx: number, vy: number): void {
   if (Math.random() < 0.45) p.spawn(PK.Blood, x, y, vx * 0.1 + rnd(-10, 10), vy * 0.1 + rnd(-10, 10), 40);
+  // (Glinting in it: specks of crystal.)
+  if (Math.random() < 0.15) p.spawn(PK.Blood, x, y, vx * 0.1 + rnd(-10, 10), vy * 0.1 + rnd(-10, 10), 40, 0, VENOM_CRYSTAL[Math.floor(Math.random() * VENOM_CRYSTAL.length)]);
 }
 
-/** Venom spat (out of the mouth) or splashing where it lands: a burst of blood-red drops. */
+/** The crystal in a millipede's venom: the GEMM colours (pink, turquoise, emerald) and their glints. */
+const VENOM_CRYSTAL = [0xff2a8a, 0x18c8c0, 0x22b85a, 0xffc0e0, 0xb0fff4];
+
+/** Venom spat (out of the mouth) or splashing where it lands: a burst of blood-red drops, and shards of crystal flung out of it. */
 export function venomSplash(p: Particles, x: number, y: number, vx = 0, vy = 0, n = 10): void {
   bloodSplat(p, x, y, n, 70, vx, vy);
+  const shards = Math.max(2, Math.round(n / 3));
+  for (let k = 0; k < shards; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 40 + Math.random() * 90;
+    const i = p.n;
+    if (p.spawn(PK.Gib, x, y, vx + Math.cos(a) * s, vy + Math.sin(a) * s - 50, rnd(300, 500), (k % 2 ? GIB_SAC : GIB_BUD) | GIB_INORGANIC, VENOM_CRYSTAL[k % 3])) p.spin[i] = Math.floor(Math.random() * 4);
+  }
 }
 
 /** Venom in a clone's blood: it weeps from them, a drop now and then (more, the more there is). */

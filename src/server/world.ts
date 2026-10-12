@@ -2431,7 +2431,37 @@ export class World {
         b.coilCd = BASILISK_BITE_CD;
       }
     }
+    // Its body: awake, and moving, the great plated length of it batters whoever it rolls
+    // into (each clone struck at most every BAS_BODY_CD ticks), and knocks them away.
+    if (b.frenzy > 0 && Math.hypot(b.vx, b.vy) > 10) {
+      const r = BASILISK_R + 2;
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || this.tick < this.basBodyAt[p.id]) continue;
+        // (Its head is its jaws' business; from the second segment back.)
+        const { d, i } = nearestPoint(pts, p.cx, p.cy);
+        if (i < 1 || d > r) continue;
+        this.damage(p, BAS_BODY_HARM, NO_OWNER, W_BASILISK);
+        this.basBodyAt[p.id] = this.tick + BAS_BODY_CD;
+        const dx = p.cx - pts[i * 2];
+        const dy = p.cy - pts[i * 2 + 1];
+        const l = Math.hypot(dx, dy) || 1;
+        p.body.vx += (dx / l) * 140;
+        p.body.vy += (dy / l) * 140 - 60;
+      }
+      for (let s = 0; s < this.tanks.length; s++) {
+        const tk = this.tanks[s];
+        if (!tk || this.tick < this.basBodyAtTank[s]) continue;
+        const { d } = nearestPoint(pts, tk.x + tankW(tk) / 2, tk.y + tankH(tk) / 2);
+        if (d > r + tankW(tk) / 2) continue;
+        this.hurtTankPart(s, TankPart.Hull, TANK_HP * BAS_BODY_CRUSH, NO_OWNER);
+        this.basBodyAtTank[s] = this.tick + BAS_BODY_CD;
+      }
+    }
   }
+
+  /** When each clone (by id) and each vehicle (by slot) can next be battered by a basilisk's body. */
+  private readonly basBodyAt = new Int32Array(MAX_PLAYERS);
+  private readonly basBodyAtTank = new Int32Array(MAX_TANKS);
 
   /** A coral nest, grown on a cave roof (or a wall) down in the caves, with room under it, far from any clone. */
   private spawnNest(): boolean {
@@ -7145,6 +7175,10 @@ const TANK_PERCH = 4;
 const EXTERMINATION_TICKS = 30 * 60 * 24;
 /** A lair basilisk hears anyone this near (cells), replans its way every so many ticks, and searches so many grid cells for it at most. */
 const LAIR_HEAR = 1400;
+/** A basilisk's body battering whoever it rolls into, awake and moving: harm a blow (and a vehicle's share of hull), and how often the same one can be struck. */
+const BAS_BODY_HARM = 22;
+const BAS_BODY_CRUSH = 0.08;
+const BAS_BODY_CD = 18;
 const BAS_REPLAN = 12;
 const BAS_SEARCH = 24000;
 const NAV_DX = [1, -1, 0, 0, 1, 1, -1, -1];

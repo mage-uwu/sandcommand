@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClassId, resetBody } from '../src/shared/body.ts';
-import { ACTOR_H, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
+import { ACTOR_H, ACTOR_W, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { W_BASILISK } from '../src/shared/particles.ts';
 import { PROJ, ProjKind } from '../src/shared/weapons.ts';
@@ -183,6 +183,27 @@ describe('the basilisk', () => {
     }
     expect(flew || !a.alive).toBe(true);
     expect(sprinted).toBe(true);
+  });
+
+  it('its body batters whoever it rolls into, awake and moving (not just its jaws)', () => {
+    const { world, a, b } = deep();
+    world.hurtBeast(0, 1, 255);
+    for (let k = 0; k < 30 * 20 && !b.surfaced; k++) world.step();
+    // Moving: let it go a few ticks, then stand a clone right on its body, well back from the head.
+    for (let k = 0; k < 10; k++) world.step();
+    const pts = world.beastPts[0];
+    const i = 8;
+    a.body.x = pts[i * 2] - ACTOR_W / 2;
+    a.body.y = pts[i * 2 + 1] - ACTOR_H / 2;
+    a.body.vx = a.body.vy = 0;
+    a.hp = 100;
+    b.coilCd = 1e9; // (no bite: the body only)
+    b.vx = 60;
+    const hp = a.hp;
+    world.step();
+    expect(Math.hypot(a.cx - pts[0], a.cy - pts[1])).toBeGreaterThan(BASILISK_R + 6);
+    expect(a.hp).toBeLessThan(hp);
+    expect(a.lastWeapon).toBe(W_BASILISK);
   });
 
   it('clients see it asleep in the rock, then in its frenzy', () => {

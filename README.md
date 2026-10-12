@@ -695,7 +695,9 @@ terrain cell to a pixel).
   front up off the ground. A hood spreads either side of its neck like a
   pixel-art coral sea fan, ribbed, with glowing tips round its rim and a
   turquoise gem eyespot each side. It spits a glob of blood-red venom on
-  the arc that lands.
+  the arc that lands. The venom glints with specks of crystal, and where it
+  splashes, shards of crystal in the GEMM colours (pink, turquoise,
+  emerald) fly out of the blood.
 - **Venom lingers.** A glob does little harm on the hit. The venom it leaves
   in the blood does the real damage: 36 hit points a dose, a little each
   tick for about six seconds. Doses stack (up to 110), and the coil's bite
@@ -852,6 +854,9 @@ and very hard to kill.
   ground within 220. It surges through the earth at 115 cells a second and
   leaps out of it after prey, arcing back down. Its jaws kill a clone
   outright and crush 30% off a vehicle's hull a bite.
+- **Its body batters too.** Awake and moving, its plated length hits
+  whoever it rolls into for 22 harm (8% of a vehicle's hull), knocking them
+  away. The same victim can be hit again every 0.6 seconds.
 - **Then it sleeps again.** With nothing in sight for 25 seconds, it dives
   160 cells down into the deep and hibernates.
 - **Very hard to kill.** It has 15,000 hit points behind armour:
