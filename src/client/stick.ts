@@ -32,8 +32,9 @@ export function touchPulses(def: { auto: boolean; proj: number } | undefined): b
 
 /**
  * Weapons the touch fire pad fires without a lock: grenades (thrown or
- * launched at ground and cover), the digger, and the tools (aimed at walls,
- * the ground or friends). Every other gun fires only locked onto someone.
+ * launched at ground and cover), the digger, the tools (aimed at walls,
+ * the ground or friends), and the laser (its charge builds with no one in
+ * sight). Every other gun fires only locked onto someone.
  */
 export const WHEEL_FREE: ReadonlySet<number> = new Set<number>([
   WeaponId.Grenade,
@@ -44,6 +45,9 @@ export const WHEEL_FREE: ReadonlySet<number> = new Set<number>([
   WeaponId.RepairKit,
   WeaponId.Idol,
   WeaponId.Mine,
+  // (The laser charges as long as it's held, target or none: a thumb can't
+  // otherwise get a charge going before a target turns up.)
+  WeaponId.Laser,
 ]);
 
 /**

@@ -856,7 +856,7 @@ export class Renderer {
       const info = game.players.get(v.id);
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
-      this.drawActor(ctx, v.x, v.y, aimR, v.flags, info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id);
+      this.drawActor(ctx, v.x, v.y, aimR, this.fireFlags(game, v.flags, v.weapon, v.id, now), info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id);
       const coral = game.coralIn.get(v.id);
       if (coral) this.drawCoral(ctx, v.x, v.y, aimR, v.stance, v.parts, coral, v.id, now);
       // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
@@ -882,7 +882,8 @@ export class Renderer {
         F_ALIVE |
         (b.onGround ? F_GROUND : 0) |
         (b.jetting ? F_JET : 0) |
-        (input.buttons() & BTN_FIRE && !reloading && !dry ? F_FIRING : 0) |
+        (input.buttons() & BTN_FIRE && !reloading && !dry && game.weapon === WeaponId.Digger ? F_FIRING : 0) |
+        (game.weapon !== WeaponId.Digger && game.shotFlash(game.myId, now) ? F_FIRING : 0) |
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
@@ -2078,6 +2079,17 @@ export class Renderer {
         ctx.fillRect(mx, my, 1, 1);
       }
     }
+  }
+
+  /**
+   * The firing flag as the muzzle flash reads it: only a shot actually gone
+   * out (a round or a beam), never just the trigger down (a gun cycling, a
+   * gatling spinning up, a laser charging: its glow shows that). The digger
+   * sprays as long as it's held.
+   */
+  private fireFlags(game: Game, flags: number, weapon: number, id: number, now: number): number {
+    if (weapon === WeaponId.Digger) return flags;
+    return (flags & ~F_FIRING) | (game.shotFlash(id, now) ? F_FIRING : 0);
   }
 
   /**

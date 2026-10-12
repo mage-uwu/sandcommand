@@ -248,7 +248,17 @@ exceptions, which fire wherever the pad points:
 - grenades (thrown, or from the GL);
 - the digger;
 - the tools (aimed at walls, the ground or friends);
+- the laser, which starts charging as soon as your thumb is down, target
+  or none, and is never held back by the lock-first beat (letting go of
+  its trigger, even for a tick, fires it);
 - a tank's guns.
+
+**Muzzle flash means a shot.** A gun's flash shows only when a round or a
+beam actually leaves it (the same moment its recoil kicks), never just
+because the trigger is down: not while it cycles between shots, not while
+a gatling spins up, not on a click that fires nothing. The laser's charge
+shows as its glow from the moment you press. The digger sprays as long as
+it's held.
 
 The mouse and keyboard fire on the click as ever (`wheelMayFire`).
 

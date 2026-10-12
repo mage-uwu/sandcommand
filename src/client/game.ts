@@ -109,6 +109,9 @@ export interface FeedItem {
   kill?: boolean;
 }
 
+/** How long a muzzle flash shows after a shot (ms): two frames or so. */
+export const SHOT_FLASH_MS = 70;
+
 export interface Flash {
   x: number;
   y: number;
@@ -417,6 +420,14 @@ export class Game implements FrameHandler {
   /** Recent shots by clone id (when, how hard), for the gun kicking back in their hands. */
   readonly kicks = new Map<number, { at: number; k: number }>();
   /** How far a clone's gun is kicked back right now (0..1). */
+  /**
+   * Did clone `id`'s gun just go off (a round or a beam out of it, not just
+   * the trigger down)? The muzzle flash shows only then.
+   */
+  shotFlash(id: number, now: number): boolean {
+    const r = this.kicks.get(id);
+    return !!r && now - r.at < SHOT_FLASH_MS;
+  }
   kickOf(id: number, now: number): number {
     const r = this.kicks.get(id);
     if (!r) return 0;

@@ -614,7 +614,8 @@ function frame(now: number): void {
       // mode or before, fires at once). A quick tap's shot waits with it.
       // The same when a held thumb sweeps (or swipes) onto someone new.
       stickWas = !!st;
-      if (st && mark.on && mark.g !== heldG) lockGate = LOCK_TICKS;
+      // (Not the laser: the trigger is its charge, and letting go of it, even for a tick, fires.)
+      if (st && mark.on && mark.g !== heldG && g.weapon !== WeaponId.Laser) lockGate = LOCK_TICKS;
       const gated = lockGate > 0;
       if (gated) {
         lockGate--;
