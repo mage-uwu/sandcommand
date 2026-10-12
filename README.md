@@ -184,6 +184,11 @@ low for the body. On a dropship, nudge between its hull and pods.
 Wildlife on the move counts too. A millipede or a gem asp locks by its head
 (the millipede's weak spot) or its mid-body. One lying in wait, frozen or
 curled up as a gem, is left alone: the assist never gives camouflage away.
+Wasps (seeders) lock by their body and a wasps' nest by its middle. All of
+it works the same from a vehicle's guns, and touch auto mode keeps working
+while you drive, pilot or steer a watchdog. Locked on, the server leads a
+moving creature by how far its head went last tick, so a wasp on the wing
+or a basilisk in full sprint is hit where it really is.
 
 **Locked on, it stays on.** Once the aim has locked onto someone it stays
 on them while they're in sight, whoever else comes into view. Changing
@@ -1111,7 +1116,8 @@ their own ground.
 - **Inside.** Each chamber has a ledge or two up its walls, dripstone
   hanging from its roof, and a basilisk hibernating on its floor.
 - **Chutes.** Two or three broad chutes drop into it from the surface, each
-  into a chamber and off to one side of its den. They're the way in.
+  into a chamber and off to one side of its den, 44 cells across (wide
+  enough for a tank to drop down). They're the way in.
 
 Kill all four and everyone wins together, the fallen included. When the
 twenty-four minutes run out with any still alive, the basilisks win. The dead
@@ -1293,8 +1299,16 @@ is a mole, below).
   landing on a clone crushes it, and it shoves clones out of its way.
 - **Bots.** About half the bots go for a nearby empty tank. They drive at
   cannon range, hose targets with the vulcan, and shell their way through
-  walls, or through floors when the target is hidden. A tank that stays
-  stuck gets abandoned.
+  walls, or through floors when the target is hidden. With no one to fight
+  (Extermination) a bot drives for the nearest basilisk instead.
+  A target out of sight or far off is reached by a path planned for the
+  vehicle's own size (`findPath` with a `NavBody`, `src/server/nav.ts`):
+  it drives away from the target to reach a shaft or chute, drops down it
+  (falling costs nothing; hovering does), jets up where the treads can't
+  climb, and shells through soft ground only where that beats going round
+  (a mole burns through it cheaply). A vehicle counts as arrived within a
+  couple of nodes of the goal, so a target standing on bedrock doesn't send
+  the search off exhausting itself. A tank that stays stuck gets abandoned.
 - **Networking.** Tanks go out every frame (`R_TANKS`; there are only a
   few). The driver's client predicts its own tank from a full-precision
   `R_TANK_SELF`, the same way it predicts its clone and its drop rocket.

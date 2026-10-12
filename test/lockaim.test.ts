@@ -9,6 +9,7 @@ import { type Player, World } from '../src/server/world.ts';
 import { gunPivotY, newTank, newTarantula, tankW } from '../src/shared/tank.ts';
 import { SHIP_H, SHIP_W, newShip } from '../src/shared/dropship.ts';
 import { deliverAll } from './helpers.ts';
+import { type Beast, BeastKind, newBeast, newSeeder } from '../src/shared/wildlife.ts';
 
 /**
  * A player's client sees everyone a moment late (smoothed between frames,
@@ -181,4 +182,55 @@ describe('a locked-on shot goes where the target really is', () => {
     expect(free).toBeLessThanOrEqual(1);
     expect(locked).toBe(3);
   });
+});
+
+describe('locked on to wildlife', () => {
+  /** The duel's shooter on its pillar and a creature out on the flat (the runner sent off); one locked (or not) sniper shot at where a lagging client saw it. */
+  function shootBeast(make: (w: World) => Beast, lock: boolean, seed: number): boolean {
+    const { world, p, q } = duel(seed);
+    q.body.x = 40;
+    world.wildlife = true;
+    (world as unknown as { beastSpawnAt: number; basiliskAt: number }).beastSpawnAt = 1e9;
+    (world as unknown as { basiliskAt: number }).basiliskAt = Infinity;
+    for (let i = 0; i < world.beasts.length; i++) world.beasts[i] = null;
+    const b = make(world);
+    world.beasts[0] = b;
+    b.flingCd = 1e9;
+    const hp = b.hp;
+    const inv = world.equip(p, WeaponId.Sniper);
+    const seen: { x: number; y: number }[] = [];
+    const pts = (world as unknown as { beastPts: number[][] }).beastPts;
+    const sh = { x: 0, y: 0 };
+    let seq = 0;
+    for (let k = 0; k < 60 && world.beasts[0] === b; k++) {
+      if (pts[0].length) seen.push({ x: pts[0][0], y: pts[0][1] });
+      const view = seen[Math.max(0, seen.length - 1 - LAG)] ?? { x: b.fx, y: b.fy };
+      const s = shoulderAt(p.body.x, p.body.y, p.body.stance, false, sh);
+      const aim = Math.atan2(view.y - s.y, view.x - s.x);
+      world.input(p.id, { seq: ++seq, buttons: (k === 40 ? BTN_FIRE : 0) | (lock ? BTN_LOCK : 0), aim: quantizeAim(aim), inv });
+      world.step();
+    }
+    return world.beasts[0] !== b || b.hp < hp;
+  }
+  const wasp = (w: World) => {
+    const s = newSeeder(w.terrain, 1250, 330, -1);
+    s.vx = 160;
+    return s;
+  };
+  const millipede = (w: World) => {
+    const m = newBeast(w.terrain, BeastKind.Millipede, 1250, 396, 1);
+    m.frozen = 0;
+    m.frenzy = 30 * 20; // (on the move)
+    return m;
+  };
+  for (const [name, make] of [
+    ['a wasp', wasp],
+    ['a millipede', millipede],
+  ] as const) {
+    it(`${name}: locked on, the shot finds it`, () => {
+      let locked = 0;
+      for (const seed of [3, 5, 9]) if (shootBeast(make, true, seed)) locked++;
+      expect(locked).toBe(3);
+    });
+  }
 });

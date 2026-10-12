@@ -8,13 +8,13 @@ import { CallKind, Evac, Phase, Team, callCost, quantizeAim } from '../shared/pr
 import { MAT_HARD, Mat, GEM_CRYSTAL_VALUE, RARE_EARTH_VALUE } from '../shared/materials.ts';
 import { Rng } from '../shared/rng.ts';
 import { DIGGER_REACH, LASER_MAX, PROJ, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
-import { CANNON_SPEED, SMG_SPEED, TANK_H, TANK_W, isDog, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
+import { CANNON_SPEED, SMG_SPEED, TANK_STEP_UP, type Tank, isDog, isPet, isSpider, surfCapacity, tankH, tankW, isMole } from '../shared/tank.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import type { InputCmd, Player, World } from './world.ts';
 import { COLS, SHAFT_HALF } from '../shared/dungeon.ts';
 import { cellCentreX, cellOfFeet, inShaftUnder, mazeDistances, nextHop } from './maze.ts';
 import { type Ramp, caveLevel, onPassage } from '../shared/caves.ts';
-import { type NavPath, findPath, navBudget, undiggable } from './nav.ts';
+import { NAV_CELL, type NavBody, type NavPath, findPath, navBudget, undiggable } from './nav.ts';
 
 /** Names for bots (shown with a BOT tag). */
 const NAMES = [
@@ -140,6 +140,7 @@ export class BotBrain {
   private seeQuarry = false;
   private quarryBlind = 0;
   private lastX = 0;
+  private lastY = 0;
   private trigger = false;
   private seq = 0;
   private nadeUntil = 0;
@@ -195,6 +196,8 @@ export class BotBrain {
   /** A creature coming at it (wildlife.ts), nearer than whoever it's fighting: the body point to shoot at. */
   private beast: { x: number; y: number } | null = null;
   private readonly airPt = { x: 0, y: 0 };
+  /** Is the path it's on planned for a vehicle (else for itself on foot)? */
+  private pathVeh = false;
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -929,21 +932,30 @@ export class BotBrain {
    * and a half or so, or when the target has moved off. The way on is a few waypoints
    * ahead; up there means the jetpack; soft ground on it means the digger.
    */
-  private pathNav(world: World, p: Player, tx: number, ty: number): { goalX: number; up: boolean; dig: boolean; digX: number; digY: number } | null {
+  private pathNav(world: World, p: Player, tx: number, ty: number, veh?: Tank): { goalX: number; up: boolean; dig: boolean; digX: number; digY: number } | null {
     const t = world.tick;
-    const feet = p.body.y + ACTOR_H;
+    // (Driving, the vehicle is what goes: its size, its jets' fuel.)
+    const at = veh ? { cx: veh.x + tankW(veh) / 2, cy: veh.y + tankH(veh) / 2 } : p;
+    const feet = veh ? veh.y + tankH(veh) : p.body.y + ACTOR_H;
+    const fuel = veh ? veh.fuel : p.body.fuel;
+    const body = veh ? vehicleBody(veh) : undefined;
+    if (!!veh !== this.pathVeh) {
+      this.path = null;
+      this.pathVeh = !!veh;
+    }
+    const half = veh ? tankW(veh) / 2 : 0;
     // Stuck on its path (wedged in a notch the plan didn't see): off it a moment (the stuck-detour takes over), then plan afresh.
     if (t < this.offRouteUntil) return null;
-    if (Math.abs(p.cx - this.routeX) > 6 || Math.abs(p.cy - this.routeY) > 6) {
-      if (this.avoid && Math.hypot(p.cx - this.avoid.x, p.cy - this.avoid.y) > 60) this.stalls = 0; // (well clear of it: unstuck)
-      this.routeX = p.cx;
-      this.routeY = p.cy;
+    if (Math.abs(at.cx - this.routeX) > 6 || Math.abs(at.cy - this.routeY) > 6) {
+      if (this.avoid && Math.hypot(at.cx - this.avoid.x, at.cy - this.avoid.y) > 60) this.stalls = 0; // (well clear of it: unstuck)
+      this.routeX = at.cx;
+      this.routeY = at.cy;
       this.routeAt = t;
     } else if (t - this.routeAt > 90) {
       // Stuck: plan again round this spot; stuck again, off the path a moment first.
       const pts = this.path?.pts;
       const nxt = pts ? pts[Math.min(pts.length - 1, this.pathIdx + 1)] : null;
-      this.avoid = { x: nxt ? nxt.x : p.cx, y: nxt ? nxt.y - 7 : p.cy, r: 20 };
+      this.avoid = { x: nxt ? nxt.x : at.cx, y: nxt ? nxt.y - 7 : at.cy, r: 20 };
       this.path = null;
       this.routeAt = t;
       if (++this.stalls >= 2) {
@@ -955,7 +967,7 @@ export class BotBrain {
     const stale = !this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2;
     // (The planning is shared out: a few searches a tick across all the bots; the rest keep to their old paths a moment longer.)
     if (stale && (navBudget(world) || !this.path)) {
-      this.path = findPath(world.terrain, p.cx, feet, tx, ty, undefined, this.avoid);
+      this.path = findPath(world.terrain, at.cx, feet, tx, ty, veh ? 6000 : undefined, this.avoid, body);
       this.pathAt = t + (this.phase % 15); // (staggered: the bots don't all plan on one tick)
       this.pathIdx = 0;
       this.pathTo = { x: tx, y: ty };
@@ -966,20 +978,20 @@ export class BotBrain {
     // Along it as far as it has come: the nearest waypoint over the next few.
     let bestD = Infinity;
     for (let k = this.pathIdx; k < Math.min(pts.length, this.pathIdx + 8); k++) {
-      const d = Math.abs(pts[k].x - p.cx) + Math.abs(pts[k].y - feet) * 0.7;
+      const d = Math.max(0, Math.abs(pts[k].x - at.cx) - half) + Math.abs(pts[k].y - feet) * 0.7;
       if (d <= bestD) {
         bestD = d;
         this.pathIdx = k;
       }
     }
     // The jetpack, in bursts: let it refill when it runs dry.
-    if (this.resting && p.body.fuel > 60) this.resting = false;
-    if (!this.resting && p.body.fuel < 6) this.resting = true;
+    if (this.resting && fuel > 60) this.resting = false;
+    if (!this.resting && fuel < 6) this.resting = true;
     const next = pts[Math.min(pts.length - 1, this.pathIdx + 1)];
     const ahead = pts[Math.min(pts.length - 1, this.pathIdx + 3)];
     return {
       goalX: ahead.x,
-      up: !this.resting && Math.min(next.y, ahead.y) < feet - 4,
+      up: !this.resting && Math.min(next.y, ahead.y) < feet - (veh ? TANK_STEP_UP : 4),
       dig: next.dig || ahead.dig,
       digX: next.dig ? next.x : ahead.x,
       digY: (next.dig ? next.y : ahead.y) - 7,
@@ -1037,69 +1049,115 @@ export class BotBrain {
     return best;
   }
 
+  /**
+   * At the controls of a tank or a mole. What it goes for: whoever it's
+   * fighting; with nobody (Extermination), the nearest basilisk. Out of
+   * sight or a long way off, it follows a path planned for the vehicle's
+   * own size (nav.ts): down chutes and tunnels, up on its jets where the
+   * treads can't climb, shelling (a mole: burning) through soft ground where
+   * that's shorter than the way round. In sight and in range, it stands off
+   * and fights. Stuck for good, it shells a way through; still stuck, it
+   * bails out.
+   */
   private driveTank(world: World, p: Player, tgt: Player | null, cmd: InputCmd): InputCmd {
     const t = world.tick;
     const k = world.tanks[p.tank];
     if (!k) return cmd;
-    const cx = k.x + TANK_W / 2;
+    const w = tankW(k);
+    const cx = k.x + w / 2;
     const cy = k.y + 6;
-    const moved = Math.abs(k.x - this.lastX);
+    const bottom = k.y + tankH(k);
+    const moved = Math.abs(k.x - this.lastX) + Math.abs(k.y - this.lastY) * 0.5;
     this.lastX = k.x;
+    this.lastY = k.y;
     let buttons = 0;
-    if (tgt) {
-      const dx = tgt.cx - cx;
-      const dist = Math.hypot(dx, tgt.cy - cy);
-      if ((t + this.phase) % 4 === 0) this.seeTarget = clearLine(world, cx, cy - 4, tgt.cx, tgt.cy);
-      const dir = !this.seeTarget || Math.abs(dx) > 220 ? Math.sign(dx) : Math.abs(dx) < 90 ? -Math.sign(dx) : 0;
-      if (dir > 0) buttons |= BTN_RIGHT;
-      if (dir < 0) buttons |= BTN_LEFT;
-      // Stuck means no progress toward the target over a couple of seconds
-      // (rocking against a face it can't climb still counts as stuck).
-      if (dir === 0) this.tankStuck = 0;
-      else if (moved < 0.3) this.tankStuck++;
-      if ((t + this.phase) % 60 === 0) {
-        const d = Math.abs(dx);
-        if (dir !== 0 && d > this.progD - 10) this.tankStuck = Math.max(this.tankStuck, 60) + 30;
-        else if (d < this.progD - 10) this.tankStuck = 0;
-        this.progD = d;
-      }
-      if ((this.tankStuck > 8 || tgt.cy < cy - 60) && k.fuel > 20) buttons |= BTN_UP;
-      // Lead with the vulcan's flight time; shells drop, so lift them.
-      const lead = dist / SMG_SPEED;
-      const ax = tgt.cx + tgt.body.vx * lead;
-      const ay = tgt.cy + tgt.body.vy * lead * 0.5;
-      cmd.aim = quantizeAim(Math.atan2(ay - cy, ax - cx) + (this.rng.next() - 0.5) * 2 * this.noise);
-      // Close but out of sight (a floor or wall between): shell toward it to
-      // open a way; still nothing after a while, go on foot and dig.
-      this.blind = !this.seeTarget && dist < 240 ? this.blind + 1 : 0;
-      if (isMole(k)) {
-        // A mole: the SMG at range, the flamethrower up close; blocked or blind, it burns its way through.
-        if (this.blind > 30 || (this.tankStuck > 30 && dir !== 0)) {
-          cmd.aim = quantizeAim(this.blind > 30 ? Math.atan2(tgt.cy - cy, tgt.cx - cx) : dir > 0 ? 0.15 : Math.PI - 0.15);
-          buttons |= BTN_SCOPE;
-        } else if (t >= this.holdFire && this.seeTarget && dist < 380) {
-          buttons |= BTN_FIRE;
-          if (dist < 105) buttons |= BTN_SCOPE;
-        }
-      } else if (this.blind > 60 && k.cannonCd <= 0) {
-        cmd.aim = quantizeAim(Math.atan2(tgt.cy - cy, tgt.cx - cx));
-        buttons |= BTN_SCOPE;
-      } else if (this.tankStuck > 45 && dir !== 0) {
-        // Treads and jets get nowhere: shell a way through, ahead and a little down.
-        cmd.aim = quantizeAim(dir > 0 ? 0.25 : Math.PI - 0.25);
-        buttons |= BTN_SCOPE;
-      } else if (t >= this.holdFire && this.seeTarget && dist < 380) {
+    // What it's after: a clone, or the quarry (a basilisk's head).
+    let foe: { x: number; y: number; vx: number; vy: number; feet: number } | null = tgt ? { x: tgt.cx, y: tgt.cy, vx: tgt.body.vx, vy: tgt.body.vy, feet: tgt.body.y + ACTOR_H } : null;
+    if (!foe && world.exterminationLive) {
+      const q = this.quarry(world, p);
+      if (q) foe = { x: q.x, y: q.y, vx: 0, vy: 0, feet: q.y + 12 };
+    }
+    if (!foe) {
+      this.tankStuck = 0;
+      this.path = null;
+      cmd.buttons = 0;
+      return cmd;
+    }
+    const dx = foe.x - cx;
+    const dist = Math.hypot(dx, foe.y - cy);
+    if ((t + this.phase) % 4 === 0) this.seeTarget = clearLine(world, cx, cy - 4, foe.x, foe.y);
+    // Out of sight, or a long way off: the planned way there.
+    const route = !this.seeTarget || dist > 300 ? this.pathNav(world, p, foe.x, foe.feet, k) : null;
+    if (!route) this.path = null;
+    let goalX = route ? route.goalX : foe.x;
+    // Siege defenders keep to the fortress and the ground before it.
+    const sg = world.siegeLive && p.team === DEFENDERS ? world.siege : null;
+    if (sg) {
+      const west = sg.side === 0;
+      goalX = west ? Math.max(sg.fort[0], Math.min(sg.fort[1] + 220, goalX)) : Math.min(sg.fort[1], Math.max(sg.fort[0] - 220, goalX));
+    }
+    const gdx = goalX - cx;
+    const dir = route ? (Math.abs(gdx) > 3 ? Math.sign(gdx) : 0) : Math.abs(dx) > 220 ? Math.sign(dx) : Math.abs(dx) < 90 ? -Math.sign(dx) : 0;
+    if (dir > 0) buttons |= BTN_RIGHT;
+    if (dir < 0) buttons |= BTN_LEFT;
+    // Stuck means no progress toward where it's going over a couple of seconds
+    // (rocking against a face it can't climb still counts as stuck).
+    if (dir === 0 && !route) this.tankStuck = 0;
+    else if (moved < 0.3) this.tankStuck++;
+    if ((t + this.phase) % 60 === 0) {
+      const d = route ? Math.hypot(foe.x - cx, foe.y - cy) : Math.abs(dx);
+      if ((dir !== 0 || route) && d > this.progD - 10) this.tankStuck = Math.max(this.tankStuck, 60) + 30;
+      else if (d < this.progD - 10) this.tankStuck = 0;
+      this.progD = d;
+    }
+    // Jets: up where the route climbs, over what the treads can't take, up to a foe overhead.
+    if ((route?.up || this.tankStuck > 8 || (!route && foe.y < cy - 60)) && k.fuel > (route?.up ? 0 : 20)) buttons |= BTN_UP;
+    // (Over the drop its route goes down: no jets, let it fall.)
+    if (route && !route.up && this.path && this.pathIdx + 1 < this.path.pts.length && this.path.pts[this.pathIdx + 1].y > bottom + 12) buttons &= ~BTN_UP;
+    // Lead with the vulcan's flight time; shells drop, so lift them.
+    const lead = dist / SMG_SPEED;
+    const ax = foe.x + foe.vx * lead;
+    const ay = foe.y + foe.vy * lead * 0.5;
+    cmd.aim = quantizeAim(Math.atan2(ay - cy, ax - cx) + (this.rng.next() - 0.5) * 2 * this.noise);
+    // Close but out of sight (a floor or wall between): shell toward it to
+    // open a way; still nothing after a while, bail out and dig.
+    this.blind = !this.seeTarget && dist < 240 ? this.blind + 1 : 0;
+    // Soft ground on its route: shell (burn) a way through, at where the route goes into it.
+    const digAt = route?.dig ? { x: route.digX, y: route.digY - tankH(k) / 2 + 7 } : null;
+    const fight = t >= this.holdFire && this.seeTarget && dist < 380;
+    if (isMole(k)) {
+      // A mole: the SMG at range, the flamethrower up close; blocked or blind, it burns its way through.
+      if (fight) {
         buttons |= BTN_FIRE;
-        const sl = dist / CANNON_SPEED;
-        const lift = 0.5 * GRAVITY * PROJ[4].gravity * sl * sl;
-        if (dist > 60 && Math.abs(Math.atan2(ay - lift - cy, Math.abs(ax - cx))) < 1.1) {
-          cmd.aim = quantizeAim(Math.atan2(ay - lift - cy, ax - cx));
-          buttons |= BTN_SCOPE;
-        }
+        if (dist < 105) buttons |= BTN_SCOPE;
+      } else if (digAt) {
+        cmd.aim = quantizeAim(Math.atan2(digAt.y - cy, digAt.x - cx));
+        buttons |= BTN_SCOPE;
+      } else if (this.blind > 30 || (this.tankStuck > 30 && dir !== 0)) {
+        cmd.aim = quantizeAim(this.blind > 30 ? Math.atan2(foe.y - cy, foe.x - cx) : dir > 0 ? 0.15 : Math.PI - 0.15);
+        buttons |= BTN_SCOPE;
       }
-    } else this.tankStuck = 0;
+    } else if (fight) {
+      buttons |= BTN_FIRE;
+      const sl = dist / CANNON_SPEED;
+      const lift = 0.5 * GRAVITY * PROJ[4].gravity * sl * sl;
+      if (dist > 60 && Math.abs(Math.atan2(ay - lift - cy, Math.abs(ax - cx))) < 1.1) {
+        cmd.aim = quantizeAim(Math.atan2(ay - lift - cy, ax - cx));
+        buttons |= BTN_SCOPE;
+      }
+    } else if (digAt && Math.hypot(digAt.x - cx, digAt.y - cy) < 90 && k.cannonCd <= 0) {
+      cmd.aim = quantizeAim(Math.atan2(digAt.y - cy, digAt.x - cx));
+      buttons |= BTN_SCOPE;
+    } else if (this.blind > 60 && k.cannonCd <= 0) {
+      cmd.aim = quantizeAim(Math.atan2(foe.y - cy, foe.x - cx));
+      buttons |= BTN_SCOPE;
+    } else if (this.tankStuck > 45 && dir !== 0) {
+      // Treads and jets get nowhere: shell a way through, ahead and a little down.
+      cmd.aim = quantizeAim(dir > 0 ? 0.25 : Math.PI - 0.25);
+      buttons |= BTN_SCOPE;
+    }
     cmd.buttons = buttons;
-    const bail = (this.tankStuck > 240 || this.blind > 360) && (t & 7) === 0;
+    const bail = (this.tankStuck > 300 || this.blind > 360) && (t & 7) === 0;
     if (bail) {
       this.tankStuck = 0;
       this.blind = 0;
@@ -1109,6 +1167,11 @@ export class BotBrain {
     cmd.inv = invByte(p.slot, p.invVersion, bail);
     return cmd;
   }
+}
+
+/** A vehicle's body for the path planner: its size in nodes; shelling through soft ground dear (a mole burns through it cheaply), jets dearer than a jetpack. */
+function vehicleBody(k: Tank): NavBody {
+  return { w: Math.ceil(tankW(k) / NAV_CELL), h: Math.ceil(tankH(k) / NAV_CELL), dig: isMole(k) ? 3 : 10, climb: 2, hang: 0.7, fall: true };
 }
 
 /** Is the straight line between two points free of terrain? (2-cell steps) */

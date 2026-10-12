@@ -383,8 +383,14 @@ function assistTargets(g: Game): AssistTarget[] {
   // Wildlife that's out and about: a millipede or an asp by its head (the millipede's weak
   // spot) and mid-body. Never one lying in wait, frozen or curled up as a gem: the assist
   // mustn't give its camouflage away.
-  // (Where it's drawn, as the clones are: Game.beastPose.)
+  // (Where it's drawn, as the clones are: Game.beastPose.) Wasps (seeders) by their bodies, and their
+  // nests by their middles, too.
   for (const [slot, v] of g.beastViews) {
+    if (v.kind === BeastKind.Seeder || v.kind === BeastKind.Nest) {
+      const pose = g.beastPose(v);
+      out.push({ x: pose.pts[0], y: pose.pts[1], vx: pose.vx, vy: pose.vy, g: 3000 + slot, core: true });
+      continue;
+    }
     if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp && v.kind !== BeastKind.Basilisk) || v.frozen || v.gem) continue;
     const pose = g.beastPose(v);
     const n = pose.pts.length >> 1;
@@ -516,7 +522,8 @@ function frame(now: number): void {
       // What the aim was locked onto coming into this tick.
       const heldG = lastG;
       const auto =
-        input.touch && input.autoMode && !st && !input.pointAssist && g.alive && !g.drive && !flying && !dogged && !g.building && !g.calling && !NO_ASSIST.has(g.weapon)
+        // (Driving or flying too: the vehicle's guns find their own target.)
+        input.touch && input.autoMode && !st && !input.pointAssist && g.alive && !g.building && !g.calling && (flying || dogged || !NO_ASSIST.has(g.weapon))
           ? autoTarget(ox, oy, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), autoRange(g.weapon), lastG)
           : null;
       if (auto) {

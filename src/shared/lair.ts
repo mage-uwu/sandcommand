@@ -41,8 +41,8 @@ export const LAIR_DENS = 4;
 const LAIR_MARGIN = 260;
 const LAIR_DEPTH = 120;
 const LAIR_HEIGHT = 250;
-/** The chutes down into it: half-width. */
-const CHUTE_HALF = 14;
+/** The chutes down into it: half-width (room for a tank to drop down one). */
+const CHUTE_HALF = 22;
 /** A gap left past each partition (cells): room for a basilisk, and for a clone to jet through. */
 const PARTITION_GAP = 64;
 

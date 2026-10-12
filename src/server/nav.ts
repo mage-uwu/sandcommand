@@ -46,6 +46,11 @@ const g = new Float32Array(GW * GH);
 const came = new Int32Array(GW * GH);
 const seen = new Uint16Array(GW * GH);
 const closed = new Uint16Array(GW * GH);
+/** What entering a node costs this search (memoized: a node is weighed from each of its neighbours). */
+const enterMemo = new Float32Array(GW * GH);
+const enterStamp = new Uint16Array(GW * GH);
+/** And of that, what's for hanging in the air (not charged a vehicle dropping). */
+const hangMemo = new Float32Array(GW * GH);
 let stamp = 0;
 // The open set: a binary heap of node ids by f.
 const heap = new Int32Array(GW * GH);
@@ -135,13 +140,31 @@ export interface NavPath {
  * search (a partial path heads the right way). `avoid`: somewhere to steer
  * clear of (where the last plan got stuck).
  */
-export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: number, maxExpand = 2500, avoid?: { x: number; y: number; r: number }): NavPath {
+export interface NavBody {
+  /** Nodes wide (centred on the path's node) and tall (up from it). */
+  w: number;
+  h: number;
+  /** What a node of soft ground in its way costs (shelling a way through, for a vehicle). */
+  dig: number;
+  /** Each node climbed (jets), and each node of open air under it. */
+  climb: number;
+  hang: number;
+  /** Dropping costs nothing (no hanging in the air charged going down: a vehicle, which falls where a clone would rather climb down). */
+  fall?: boolean;
+  /** How greedily it heads for the goal (the heuristic's weight: over 1 searches far less, for a path a little longer than the best). */
+  greed?: number;
+}
+/** A clone: one node wide, two tall. */
+export const CLONE_BODY: NavBody = { w: 1, h: 2, dig: DIG_COST, climb: CLIMB_COST, hang: HANG_COST };
+
+export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: number, maxExpand = 2500, avoid?: { x: number; y: number; r: number }, body: NavBody = CLONE_BODY): NavPath {
   stamp = (stamp + 1) & 0xffff;
   if (stamp === 0) {
     clsStamp.fill(0);
     hangStamp.fill(0);
     seen.fill(0);
     closed.fill(0);
+    enterStamp.fill(0);
     stamp = 1;
   }
   const clampX = (v: number) => Math.max(0, Math.min(GW - 1, Math.floor(v / NAV_CELL)));
@@ -150,30 +173,66 @@ export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: num
   const goal = clampY(ty - 1) * GW + clampX(tx);
   const gxG = goal % GW;
   const gyG = (goal / GW) | 0;
+  const greed = body.greed ?? 1;
   const h = (id: number) => {
     const dx = Math.abs((id % GW) - gxG);
     const dy = Math.abs(((id / GW) | 0) - gyG);
-    return Math.max(dx, dy) + 0.41 * Math.min(dx, dy);
+    return (Math.max(dx, dy) + 0.41 * Math.min(dx, dy)) * greed;
   };
-  /** What it costs to stand in node (x, y): its body there and the node over its head; Infinity through rock. */
-  const enter = (x: number, y: number) => {
-    const a = classify(t, x, y);
-    const b = classify(t, x, y - 1);
-    if (a === ROCK || b === ROCK) return Infinity;
-    let hang = 0;
-    if (a === OPEN) {
-      const id = y * GW + x;
-      if (hangStamp[id] === stamp) hang = hangOf[id];
-      else {
-        while (hang < HANG_MAX && classify(t, x, y + 1 + hang) === OPEN) hang++;
-        hangOf[id] = hang;
-        hangStamp[id] = stamp;
+  /** What it costs to stand in node (x, y): its body there and the nodes over it; Infinity through rock. */
+  const left = (body.w - 1) >> 1;
+  const soft = (x: number, y: number) => {
+    let n = 0;
+    for (let yy = y - body.h + 1; yy <= y; yy++) {
+      for (let xx = x - left; xx < x - left + body.w; xx++) {
+        const c = classify(t, xx, yy);
+        if (c === ROCK) return -1;
+        if (c === SOFT) n++;
       }
+    }
+    return n;
+  };
+  const enter = (x: number, y: number) => {
+    const id = y * GW + x;
+    if (enterStamp[id] !== stamp) {
+      enterStamp[id] = stamp;
+      enterMemo[id] = weigh(x, y, id);
+    }
+    return enterMemo[id];
+  };
+  /** The same, going down into it. */
+  const drop = (x: number, y: number) => {
+    const e = enter(x, y);
+    return body.fall ? e - hangMemo[y * GW + x] : e;
+  };
+  const weigh = (x: number, y: number, at: number) => {
+    const n = soft(x, y);
+    if (n < 0) return Infinity;
+    let hang = HANG_MAX;
+    // (Held up by whatever's under any part of it.)
+    for (let xx = x - left; xx < x - left + body.w && hang > 0; xx++) {
+      if (classify(t, xx, y) !== OPEN) {
+        hang = 0;
+        break;
+      }
+      const id = y * GW + xx;
+      let hh = 0;
+      if (xx >= 0 && xx < GW && hangStamp[id] === stamp) hh = hangOf[id];
+      else {
+        while (hh < HANG_MAX && classify(t, xx, y + 1 + hh) === OPEN) hh++;
+        if (xx >= 0 && xx < GW) {
+          hangOf[id] = hh;
+          hangStamp[id] = stamp;
+        }
+      }
+      hang = Math.min(hang, hh);
     }
     // (Somewhere it got stuck last time: dear, so the plan goes another way.)
     const shun = avoid && Math.abs(x * NAV_CELL + 4 - avoid.x) < avoid.r && Math.abs(y * NAV_CELL + 4 - avoid.y) < avoid.r ? AVOID_COST : 0;
-    return (a === SOFT ? DIG_COST : 0) + (b === SOFT ? DIG_COST : 0) + hang * HANG_COST + shun;
+    hangMemo[at] = hang * body.hang;
+    return n * body.dig + hang * body.hang + shun;
   };
+  const tol = body.w >> 1;
   heapN = 0;
   g[s] = 0;
   came[s] = -1;
@@ -186,7 +245,8 @@ export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: num
     const id = pop();
     if (closed[id] === stamp) continue;
     closed[id] = stamp;
-    if (id === goal) {
+    // (A vehicle is there once its body's within a couple of nodes: the goal's own node may hold the ground it's stood on.)
+    if (id === goal || (tol > 0 && Math.max(Math.abs((id % GW) - gxG), Math.abs(((id / GW) | 0) - gyG)) <= tol)) {
       reached = true;
       best = id;
       break;
@@ -204,12 +264,12 @@ export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: num
         const nx = x + dx;
         const ny = y + dy;
         if (nx < 0 || ny < 1 || nx >= GW || ny >= GH - 1) continue;
-        const e = enter(nx, ny);
+        const e = dy > 0 ? drop(nx, ny) : enter(nx, ny);
         if (e === Infinity) continue;
         // A diagonal can't cut a corner of rock.
         if (dx && dy && (enter(x + dx, y) === Infinity || enter(x, y + dy) === Infinity)) continue;
         const nid = ny * GW + nx;
-        const cost = g[id] + (dx && dy ? 1.41 : 1) + (dy < 0 ? CLIMB_COST : 0) + e;
+        const cost = g[id] + (dx && dy ? 1.41 : 1) + (dy < 0 ? body.climb : 0) + e;
         if (seen[nid] === stamp && cost >= g[nid]) continue;
         seen[nid] = stamp;
         g[nid] = cost;
@@ -222,7 +282,7 @@ export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: num
   for (let id = best; id !== -1; id = came[id]) {
     const x = id % GW;
     const y = (id / GW) | 0;
-    pts.push({ x: x * NAV_CELL + NAV_CELL / 2, y: (y + 1) * NAV_CELL - 1, dig: classify(t, x, y) === SOFT || classify(t, x, y - 1) === SOFT });
+    pts.push({ x: x * NAV_CELL + NAV_CELL / 2 + (body.w % 2 === 0 ? NAV_CELL / 2 : 0), y: (y + 1) * NAV_CELL - 1, dig: soft(x, y) > 0 });
     if (id === s) break;
   }
   pts.reverse();

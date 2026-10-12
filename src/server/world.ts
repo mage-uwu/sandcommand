@@ -1724,6 +1724,12 @@ export class World {
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
+      // (Where its head was before it moves: its motion, for leading it with a locked-on shot.)
+      const pts = this.beastPts[k];
+      if (pts.length) {
+        this.beastHead[k * 2] = pts[0];
+        this.beastHead[k * 2 + 1] = pts[1];
+      }
       if (b) {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
         else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
@@ -2458,6 +2464,9 @@ export class World {
       }
     }
   }
+
+  /** Each creature's head last tick (x, y by slot), for its motion. */
+  private readonly beastHead = new Float32Array(MAX_BEASTS * 2);
 
   /** When each clone (by id) and each vehicle (by slot) can next be battered by a basilisk's body. */
   private readonly basBodyAt = new Int32Array(MAX_PLAYERS);
@@ -4243,13 +4252,25 @@ export class World {
       if (!sh || p.pilot === k || sh.owner === p.id || (p.team !== Team.None && sh.team === p.team)) continue;
       consider(sh.x + SHIP_W / 2, sh.y + SHIP_H / 2, sh.vx, sh.vy);
     }
+    // Wildlife: a crawler by its head and mid-body (not one lying in wait: its camouflage holds),
+    // a wasp by its body, a nest by its middle; each with its motion, to lead it.
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
-      if (!b || (b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp && b.kind !== BeastKind.Basilisk) || b.frozen > 0 || b.gem) continue;
+      if (!b) continue;
       const pts = this.beastPts[k];
+      if (!pts.length) continue;
+      let vx = (pts[0] - this.beastHead[k * 2]) * TICK_RATE;
+      let vy = (pts[1] - this.beastHead[k * 2 + 1]) * TICK_RATE;
+      // (Just hatched into its slot, the last one's head is no motion of its own.)
+      if (Math.hypot(vx, vy) > 900) vx = vy = 0;
+      if (b.kind === BeastKind.Seeder || b.kind === BeastKind.Nest) {
+        consider(pts[0], pts[1], vx, vy);
+        continue;
+      }
+      if ((b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp && b.kind !== BeastKind.Basilisk) || b.frozen > 0 || b.gem) continue;
       const m = (pts.length >> 2) << 1;
-      consider(pts[0], pts[1], 0, 0);
-      consider(pts[m], pts[m + 1], 0, 0);
+      consider(pts[0], pts[1], vx, vy);
+      consider(pts[m], pts[m + 1], vx, vy);
     }
     return best;
   }
