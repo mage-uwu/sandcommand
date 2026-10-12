@@ -88,6 +88,7 @@ import { DOG_KIT, type DogFoe, type DogMemory, SPIDER_KIT, dogThink, newDogMemor
 import {
   CRAFT_H,
   CRAFT_INERTIA,
+  CRAFT_HP,
   CRAFT_INTEGRITY,
   CRAFT_PARTS,
   CRAFT_PART_CENTER,
@@ -6949,7 +6950,7 @@ export class World {
         w.i16(clampI16(c.vy * VEL_SCALE));
         w.u16(quantizeAim(c.a));
         w.u8(Math.round(c.thrust * 255));
-        w.u8(Math.max(0, Math.min(255, Math.ceil(c.hp))));
+        w.u8(Math.max(0, Math.min(255, Math.ceil((c.hp / CRAFT_HP) * 255)))); // (as a share of a whole hull)
         w.u8(c.passenger);
         w.u8(c.phase);
         w.u8(c.parts);

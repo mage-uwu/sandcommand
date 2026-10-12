@@ -3053,7 +3053,7 @@ export class Renderer {
     }
     const spr = this.sprites.craft(team, c.parts, c.a);
     ctx.drawImage(spr.c, cx - spr.r, cy - spr.r);
-    if (c.hp < 70 && (now / 90) % 2 < 1) {
+    if (c.hp < CRAFT_HP / 2 && (now / 90) % 2 < 1) {
       // Damaged: sparks off the hull.
       ctx.fillStyle = '#ffd040';
       ctx.fillRect(cx - 4 + ((now / 50) % 8), cy - 5 + ((now / 70) % 10), 1, 1);

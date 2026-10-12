@@ -373,7 +373,8 @@ const GIBS: Grid[] = [
   ['Rr'], // meat
   ['.KK.', 'KSSK', 'KSeK', '.KR.'], // bare head (helmet already gone)
   ['KOOK', 'OooO', 'OooO', 'KOOK'], // vest plate
-  ['..KK..', '.KLLK.', '.KLHK.', 'KLHHHK', 'KLHHHK', 'KLHVVK', 'KLHvHK', 'KKKKKK'], // rocket nose cone, porthole and all (as on the rocket)
+  // The rocket's nose cone, the very cone drawn on it (its top nine rows, porthole and all), sheared off at its base.
+  ['...KK...', '..KLLK..', '..KLHK..', '.KLHHHK.', '.KLHHHK.', 'KLHHHHHK', 'KLHVVHHK', 'KLHVvHHK', 'KKKKKKKK'],
   ['KLHK', 'LHHK', 'KTTK', 'KHHK'], // rocket hull plate
   ['KGK', 'GGK', 'GK.'], // rocket fin
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle

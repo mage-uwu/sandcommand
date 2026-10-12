@@ -1,6 +1,6 @@
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
-import { CRAFT_PARTS } from './craft.ts';
+import { CRAFT_HP, CRAFT_PARTS } from './craft.ts';
 import { TANK_PARTS, TARANTULA_SCALE, TankKind, WATCHDOG_SCALE, MOLE_SCALE } from './tank.ts';
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
@@ -759,7 +759,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             vy: r.i16() / 8,
             a: dequantizeAim(r.u16()),
             thrust: r.u8() / 255,
-            hp: r.u8(),
+            hp: (r.u8() / 255) * CRAFT_HP,
             passenger: r.u8(),
             phase: r.u8(),
             parts: r.u8(),

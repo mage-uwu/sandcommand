@@ -10,7 +10,7 @@ import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
 import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, NO_OWNER } from '../shared/particles.ts';
-import { type Craft, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
+import { type Craft, CraftPart, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { type Flora, FloraKind, floraBox, GEYSER_CLOUD_R, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -108,6 +108,9 @@ export interface FeedItem {
   /** A kill-feed line (part of the event stream, hidden with the info panel), not a notice for us. */
   kill?: boolean;
 }
+
+/** A drop rocket with nobody aboard: bare gunmetal (as drawn). */
+const CRAFT_GUNMETAL = 0x8a9096;
 
 /** How long a muzzle flash shows after a shot (ms): two frames or so. */
 export const SHOT_FLASH_MS = 70;
@@ -1891,19 +1894,26 @@ export class Game implements FrameHandler {
     this.lastSelfCraft = s;
   }
 
-  craftPart(_slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
-    craftPartOff(this.particles, part, x, y, vx, vy, seed);
+  /** A drop rocket's colours, as drawn: its rider's, else bare gunmetal. */
+  private craftColor(c: CraftState | undefined): number {
+    return c && c.passenger !== 255 ? (this.players.get(c.passenger)?.rgb ?? CRAFT_GUNMETAL) : CRAFT_GUNMETAL;
+  }
+
+  craftPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    craftPartOff(this.particles, part, x, y, vx, vy, seed, this.craftColor(this.craftSnaps.get(slot)?.at(-1)));
     const d = Math.hypot(this.body.x - x, this.body.y - y);
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 300) * 4);
   }
 
   craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+    // (As last heard of: whose it was, and whether its nose cone was still on.)
+    const was = this.craftSnaps.get(slot)?.at(-1);
     this.craftSnaps.delete(slot);
     if (slot === this.rideSlot) {
       this.ride = null;
       this.rideSlot = -1;
     }
-    craftDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE);
+    craftDebris(this.particles, x, y, vx, vy, seed, BLAST_IMPULSE, this.craftColor(was), !was || (was.parts & (1 << CraftPart.Nose)) !== 0);
     this.flashes.push({ x, y, r: 40, at: performance.now() });
     const d = Math.hypot(this.body.x - x, this.body.y - y);
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 500) * 12);

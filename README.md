@@ -2732,8 +2732,10 @@ If it tips over with you aboard, it opens the hatch after a couple of
 seconds. An empty rocket that can't get home scuttles itself.
 
 **It gibs.** A rocket is built from five parts: nose cone, hull, two fins and
-engine. Each has its own hit points, and every hit lands on the part it
-entered. Hits are tested against the rotated hull, in the rocket's own frame.
+engine. Each has its own hit points (hull 280, nose cone 90, fins 60 each,
+engine 100; `CRAFT_PART_HP`), and every hit lands on the part it
+entered. The hull's hit points go out as a share of a whole hull (one
+byte), since they no longer fit in a byte as they are. Hits are tested against the rotated hull, in the rocket's own frame.
 What each loss does:
 
 - **Engine:** no thrust. It falls like a stone, so bail out.
@@ -2746,7 +2748,11 @@ A part that comes off flies away with the velocity of where it was on the
 spinning hull, as heavy `Hull` fragments in the particle engine, and the
 recoil spins the rocket. The part itself gibs: what's left of it tumbles
 off, six to eight torn plate and nozzle shards burst out of it, and sparks,
-a lick of flame and smoke go with them.
+a lick of flame and smoke go with them. The nose cone comes off whole: the
+very cone drawn on the rocket (porthole and all), in the rocket's colours
+(its rider's, or bare gunmetal), thrown up and clear, turning over slowly,
+and it lies on the ground a while. Blown apart, a rocket throws its nose
+cone the same way, unless it was already shot off.
 
 **Everything composes with the field engine:**
 

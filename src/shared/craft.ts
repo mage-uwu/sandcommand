@@ -25,7 +25,7 @@ import type { Terrain } from './terrain.ts';
  */
 export const CRAFT_W = 12;
 export const CRAFT_H = 26;
-export const CRAFT_HP = 140;
+export const CRAFT_HP = 280;
 /** Hits below this penetration energy only scratch a part. */
 export const CRAFT_INTEGRITY = 100;
 export const MAX_CRAFTS = 64;
@@ -63,7 +63,7 @@ export const CraftPart = {
 } as const;
 export const CRAFT_PARTS = 5;
 export const ALL_CRAFT_PARTS = (1 << CRAFT_PARTS) - 1;
-export const CRAFT_PART_HP = [CRAFT_HP, 45, 30, 30, 50];
+export const CRAFT_PART_HP = [CRAFT_HP, 90, 60, 60, 100];
 /** Part centres in body-local cells (u right, v toward the nozzle). */
 export const CRAFT_PART_CENTER: readonly (readonly [number, number])[] = [
   [0, 0],

@@ -1,5 +1,5 @@
 import { GIB_INORGANIC, NO_OWNER, PK, type Particles, craftFragments, craftPartFragments, explosionFragments } from '../shared/particles.ts';
-import { CRAFT_H } from '../shared/craft.ts';
+import { CRAFT_H, CraftPart } from '../shared/craft.ts';
 import { Rng } from '../shared/rng.ts';
 import { Part, has } from '../shared/body.ts';
 
@@ -319,10 +319,11 @@ const CRAFT_SCRAP = 0x8a9096;
  * apart. What's left of it tumbles away, torn plate and nozzle shards burst
  * out of it, with sparks, a lick of flame and smoke.
  */
-export function craftPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number): void {
+export function craftPartOff(p: Particles, part: number, x: number, y: number, vx: number, vy: number, seed: number, color = CRAFT_SCRAP): void {
   craftPartFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
-  // The part itself, mangled, tumbling off.
-  scrapGib(p, x, y, vx + rnd(-30, 30), vy - rnd(20, 60), CRAFT_PART_GIB[part] ?? GIB_PLATE, CRAFT_SCRAP, 0.15);
+  // The part itself, in the rocket's colours, tumbling off (the nose cone thrown up and clear, turning over slowly, so it reads as the cone it was).
+  if (part === CraftPart.Nose) noseCone(p, x, y, vx, vy, color);
+  else scrapGib(p, x, y, vx + rnd(-30, 30), vy - rnd(20, 60), CRAFT_PART_GIB[part] ?? GIB_PLATE, color, 0.15);
   // ...and the shards it sheds.
   const n = 6 + Math.floor(Math.random() * 3);
   for (let k = 0; k < n; k++) {
@@ -333,6 +334,14 @@ export function craftPartOff(p: Particles, part: number, x: number, y: number, v
   burst(p, PK.Spark, x, y, 18, 220, 14, 0, vx * 0.4, vy * 0.4);
   burst(p, PK.Flame, x, y, 10, 130, 12, 0, vx * 0.5, vy * 0.5);
   burst(p, PK.Smoke, x, y, 12, 55, 60);
+}
+
+/** A drop rocket's nose cone, off whole: up and away, turning over slowly, lasting a while on the ground. */
+function noseCone(p: Particles, x: number, y: number, vx: number, vy: number, color: number): void {
+  const i = p.n;
+  if (!p.spawn(PK.Gib, x, y, vx * 0.7 + rnd(-50, 50), Math.min(vy, 0) * 0.5 - rnd(110, 170), rnd(900, 1100), GIB_NOSE | GIB_INORGANIC, color)) return;
+  p.spin[i] = 0;
+  p.spinRate[i] = (Math.random() < 0.5 ? -1 : 1) * rnd(0.05, 0.09);
 }
 
 /** A tumbling piece of scrap (an inorganic gib in `color`), spinning up to `spin`. */
@@ -348,15 +357,17 @@ function scrapGib(p: Particles, x: number, y: number, vx: number, vy: number, pi
  * shrapnel from the seed (those are what actually maim and become scrap),
  * plus big cosmetic hull pieces, a fireball and a smoke column.
  */
-export function craftDebris(p: Particles, x: number, y: number, vx: number, vy: number, seed: number, blastStrength: number): void {
+export function craftDebris(p: Particles, x: number, y: number, vx: number, vy: number, seed: number, blastStrength: number, color = CRAFT_SCRAP, nose = true): void {
   p.blast(x, y, 70, blastStrength * 1.3);
   craftFragments(p, x, y, vx, vy, NO_OWNER, new Rng(seed));
-  const pieces = [GIB_NOSE, GIB_PLATE, GIB_PLATE, GIB_PLATE, GIB_FIN, GIB_FIN, GIB_NOZZLE];
+  // The nose cone (if it's still on) goes up whole, in the rocket's colours.
+  if (nose) noseCone(p, x, y - 8, vx, vy, color);
+  const pieces = [GIB_PLATE, GIB_PLATE, GIB_PLATE, GIB_FIN, GIB_FIN, GIB_NOZZLE];
   for (const piece of pieces) {
     const a = Math.random() * Math.PI * 2;
     const s = rnd(80, 260);
     const i = p.n;
-    if (p.spawn(PK.Gib, x + rnd(-4, 4), y + rnd(-10, 10), vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 80, rnd(600, 750), piece | GIB_INORGANIC, 0x8a9096)) {
+    if (p.spawn(PK.Gib, x + rnd(-4, 4), y + rnd(-10, 10), vx * 0.5 + Math.cos(a) * s, vy * 0.5 + Math.sin(a) * s - 80, rnd(600, 750), piece | GIB_INORGANIC, color)) {
       p.spin[i] = Math.floor(Math.random() * 4);
       p.spinRate[i] = (Math.random() - 0.5) * 0.12;
     }

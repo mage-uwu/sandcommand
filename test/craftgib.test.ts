@@ -24,3 +24,31 @@ it('a drop rocket\'s nose cone shot off flies off as its own piece', () => {
   void before;
   void fin;
 });
+
+it('a drop rocket blown apart throws its nose cone too (unless it was already shot off), in its colours; and it takes twice the punishment', async () => {
+  const { CRAFT_HP, CRAFT_PART_HP } = await import('../src/shared/craft.ts');
+  expect(CRAFT_HP).toBe(280);
+  expect(CRAFT_PART_HP).toEqual([280, 90, 60, 60, 100]);
+  const boom = (noseFirst: boolean) => {
+    const inbox: Uint8Array[] = [];
+    const world = new World(7, { mode: 'sandbox', bots: 0 });
+    const a = world.addPlayer('a', { send: (d) => inbox.push(d) })!;
+    world.addPlayer('b', { send() {} });
+    const game = new Game(); game.myId = a.id;
+    const pump = () => { for (const m of inbox.splice(0)) { const r = new Reader(m); r.u8(); const tk = r.u32(); const ack = r.u16(); game.applyFrame(tk, ack, r); } };
+    for (let t = 0; t < 400 && !world.crafts.some(Boolean); t++) { world.step(); pump(); }
+    const k = world.crafts.findIndex(Boolean);
+    const W = world as unknown as { hurtCraftPart(s: number, p: number, d: number, by: number): void };
+    if (noseFirst) { W.hurtCraftPart(k, 1, 1000, 255); world.step(); pump(); }
+    // (Half a hull's worth doesn't do it now.)
+    W.hurtCraftPart(k, 0, 150, 255);
+    expect(world.crafts[k]).not.toBe(null);
+    const nose0 = noses(game);
+    W.hurtCraftPart(k, 0, 1e9, 255);
+    world.step(); pump();
+    return noses(game) - nose0;
+  };
+  const noses = (game: Game) => { let n = 0; for (let i = 0; i < game.particles.n; i++) if (game.particles.kind[i] === PK.Gib && (game.particles.aux[i] & 0x7f) === GIB_NOSE) n++; return n; };
+  expect(boom(false)).toBe(1);
+  expect(boom(true)).toBe(0);
+});
