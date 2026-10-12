@@ -135,6 +135,15 @@ export const R_VENOM = 43;
  * Sent when it changes much and now and then while anyone has it.
  */
 export const R_CORAL = 44;
+/**
+ * The Stoneburner beacons and molten cores about (sent every frame while
+ * any are, then once empty): u8 beacons, each u16 x, u16 y (+Y_BIAS), u16
+ * ticks to go, u8 phase (BurnerPhase); u8 cores, each u16 x, u16 y
+ * (+Y_BIAS), u16 ticks of burning left.
+ */
+export const R_BURNERS = 45;
+/** A Stoneburner strike lands (broadcast to everyone): u16 x, u16 y (+Y_BIAS), u8 who called it, u32 seed. */
+export const R_STONEBURN = 46;
 /** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
 export const GF_CAVE = 1;
 export const GF_RUMBLE = 2;
@@ -157,7 +166,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 71;
 
 /** Last Man Standing round phases. */
 export const Phase = {

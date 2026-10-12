@@ -1,5 +1,5 @@
 import { GRAVITY } from './constants.ts';
-import type { Rng } from './rng.ts';
+import { type Rng, hash2 } from './rng.ts';
 import type { Terrain } from './terrain.ts';
 import { WEAPONS, WeaponId } from './weapons.ts';
 
@@ -68,8 +68,18 @@ export function spawnLoadout(rng: Rng): InvItem[] {
     inv.push(newItem(WeaponId.ATCannon));
   }
   inv.push(newItem(WeaponId.Digger), newItem(WeaponId.Materializer), newItem(WeaponId.Radio), newItem(WeaponId.RepairKit));
+  // Very, very rarely: a Stoneburner, in place of the grenades or mines (or in a spare slot).
+  // (Rolled off the generator's state without drawing from it: everything else drawn from it stays as it was.)
+  if (hash2(rng.state, 0x570e) / 4294967296 < STONEBURNER_ODDS) {
+    const k = inv.findIndex((it) => it.weapon === WeaponId.Grenade || it.weapon === WeaponId.Mine);
+    if (k >= 0) inv[k] = newItem(WeaponId.Stoneburner);
+    else if (inv.length < INV_MAX) inv.splice(1, 0, newItem(WeaponId.Stoneburner));
+  }
   return inv;
 }
+
+/** The odds a fresh clone's kit holds a Stoneburner (stoneburner.ts): ultra rare. */
+export const STONEBURNER_ODDS = 1 / 400;
 
 export interface GroundItem {
   id: number;

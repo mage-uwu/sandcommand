@@ -2508,6 +2508,57 @@ grenades. The autocannon is in the bunkers' grand halls, and the rest turn
 up in the labyrinth's loot. Bots use all of them, the mines too: with
 nobody about, now and then they leave one behind.
 
+#### The Stoneburner
+
+An orbital strike in a can (`src/shared/stoneburner.ts`). It's ultra rare:
+about one fresh clone in 400 spawns with one, in place of its grenades
+(`STONEBURNER_ODDS`), and about one bunker grand hall in 50 holds one
+instead of its heavy weapon. It's single use: click and the beacon is
+thrown on a grenade's arc, and it's gone from your inventory. It's meant
+for the story mode too.
+
+- **The beacon.** It sticks to the first thing it touches: the ground, a
+  wall, a clone or a vehicle. Stuck to a clone or a vehicle it goes where
+  they go, and drops off if they die or get in a vehicle. Stuck to the
+  ground, it falls again if that ground is dug or blown away. From the
+  throw it counts down 15 s, beeping each time its red eye lights. The
+  blinking starts at once a second and speeds up until it's nearly solid
+  (`blinkPeriod`), and the beep gets higher. In its last five seconds a
+  thin red targeting line rises from it into the sky.
+- **The strike.** A missile drops out of orbit onto the beacon in a third
+  of a second (a white-hot streak and a falling scream), and the world goes
+  white.
+  - **Close in** (150 cells): nobody lives, the thrower included. The kill
+    feed calls it the Stoneburner.
+  - **Out to 420 cells:** the heat and blast fall off with range. Solid
+    ground between you and the blast lets through only 30% of the heat,
+    except inside the crater's own reach.
+  - **Everyone within 520 cells** is thrown away from ground zero and up,
+    cover or not.
+  - **Creatures, vehicles, dropships, drop rockets and doors** take
+    6000 damage at ground zero, falling off out to 360 cells.
+  - **The ground:** a crater 105 cells across, the hardest rock included
+    out to 72. Burning debris is thrown out over everything.
+- **The molten core.** A core of molten rock is left at the crater's
+  bottom and burns its way down for 40 s. It sinks slower and slower as it
+  smoulders out (`footSink`), sears anyone who goes near it, and sends up
+  flame, sparks and smoke.
+- **Everyone sees it.** The strike is broadcast to the whole room
+  (`R_STONEBURN`), wherever each player is:
+  - the screen flashes pure white, HUD and all, and fades back over three
+    seconds;
+  - everyone's view shakes (hardest near it), and a long rumble follows;
+  - the boom reaches everyone, later the further off they are;
+  - a **mushroom cloud** climbs over the site for 70 s: the fireball lifts
+    off the ground, rolls over into a wide cap on its stem with its
+    underside lit by the fire inside, and cools to a dirty grey-brown
+    column that drifts and thins out. A skirt of dust rolls out along the
+    ground at its foot. It's drawn in `src/client/stoneburner-art.ts`.
+- **On the wire.** Beacons and cores go out every frame while any exist
+  (`R_BURNERS`), then once more when they're gone.
+
+Bots leave it alone.
+
 #### Landmines
 
 - **Who sets them off.** A mine is armed 1.5 s after it is laid. Then the

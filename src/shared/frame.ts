@@ -40,6 +40,8 @@ import {
   R_BEAST_DIE,
   R_VENOM,
   R_CORAL,
+  R_BURNERS,
+  R_STONEBURN,
   BEAST_SCALE,
   BEAST_SAME,
   GameMode,
@@ -168,6 +170,20 @@ export interface GeyserState {
   x: number;
   y: number;
   flags: number;
+}
+
+/** A Stoneburner beacon: where, ticks to go (of its countdown, or of the missile's fall), and its phase (BurnerPhase). */
+export interface BurnerState {
+  x: number;
+  y: number;
+  fuse: number;
+  phase: number;
+}
+/** A Stoneburner strike's molten core: where, and ticks of burning left. */
+export interface FootState {
+  x: number;
+  y: number;
+  life: number;
 }
 
 export interface MineState {
@@ -325,6 +341,10 @@ export interface FrameHandler {
   traps(spent: Uint8Array): void;
   /** Every landmine laid (the whole list, when it changes). */
   mines(list: MineState[]): void;
+  /** The Stoneburner beacons and molten cores about (R_BURNERS). */
+  burners(beacons: BurnerState[], feet: FootState[]): void;
+  /** A Stoneburner strike lands (R_STONEBURN, to everyone). */
+  stoneBurn(x: number, y: number, by: number, seed: number): void;
   /** The map's geysers and their state (R_GEYSERS). */
   geysers(list: GeyserState[]): void;
   /** Geyser `i` blows (R_GEYSER_BLOW): mirror its burst from `seed`. */
@@ -645,6 +665,23 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.water(bodies);
         break;
       }
+      case R_BURNERS: {
+        const beacons: BurnerState[] = [];
+        const nb = r.u8();
+        for (let i = 0; i < nb; i++) beacons.push({ x: r.u16(), y: r.u16() - Y_BIAS, fuse: r.u16(), phase: r.u8() });
+        const feet: FootState[] = [];
+        const nf = r.u8();
+        for (let i = 0; i < nf; i++) feet.push({ x: r.u16(), y: r.u16() - Y_BIAS, life: r.u16() });
+        h.burners(beacons, feet);
+        break;
+      }
+      case R_STONEBURN: {
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        const by = r.u8();
+        h.stoneBurn(x, y, by, r.u32());
+        break;
+      }
       case R_MINES: {
         const n = r.u8();
         const list: MineState[] = [];
@@ -937,6 +974,8 @@ export const nullHandler: FrameHandler = {
   round() {},
   traps() {},
   mines() {},
+  burners() {},
+  stoneBurn() {},
   geysers() {},
   geyserBlow() {},
   floraState() {},

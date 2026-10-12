@@ -670,3 +670,41 @@ export function beastGibs(p: Particles, pts: readonly number[]): void {
     bloodSplat(p, x, y, 4, 90);
   }
 }
+
+/**
+ * A Stoneburner strike landing (on this client): the fireball (a great
+ * burst of flame), sparks and burning debris thrown out over everything, a
+ * wall of dust and smoke rolling out along the ground, and the blast wave
+ * through every loose grain about.
+ */
+export function stoneburnBlast(p: Particles, x: number, y: number, impulse: number): void {
+  p.blast(x, y, 420, impulse * 5);
+  burst(p, PK.Flame, x, y - 10, 260, 420, 34);
+  burst(p, PK.Flame, x, y - 30, 120, 180, 60, 0, 0, -120);
+  burst(p, PK.Spark, x, y, 160, 620, 40);
+  // Burning debris arcing out.
+  for (let k = 0; k < 90; k++) {
+    const a = -Math.PI * (0.05 + 0.9 * Math.random());
+    const s = rnd(220, 700);
+    p.spawn(PK.Flame, x + rnd(-20, 20), y + rnd(-10, 4), Math.cos(a) * s, Math.sin(a) * s, rnd(40, 90));
+  }
+  // The base surge: dust and smoke rolling out along the ground both ways.
+  for (let k = 0; k < 140; k++) {
+    const dir = k % 2 ? 1 : -1;
+    p.spawn(PK.Smoke, x + rnd(-30, 30), y + rnd(-14, 6), dir * rnd(120, 520), rnd(-60, 10), rnd(120, 220));
+    if (k % 3 === 0) p.spawn(PK.Dust, x + rnd(-20, 20), y + rnd(-6, 6), dir * rnd(160, 600), rnd(-90, -10), rnd(60, 120), 0, 0xb09070);
+  }
+  burst(p, PK.Smoke, x, y - 40, 120, 160, 200, 0, 0, -90);
+}
+
+/**
+ * A Stoneburner's molten core, one tick of it (`heat` 1 fresh, falling to 0
+ * as it smoulders out): white-hot flame licking up out of it, sparks
+ * spitting, and a column of smoke off the pit.
+ */
+export function moltenCore(p: Particles, x: number, y: number, heat: number): void {
+  const n = heat > 0.5 ? 3 : heat > 0.15 ? 2 : 1;
+  for (let k = 0; k < n; k++) p.spawn(PK.Flame, x + rnd(-8, 8), y + rnd(-3, 3), rnd(-25, 25), -rnd(30, 70 + 120 * heat), rnd(8, 16 + 12 * heat));
+  if (Math.random() < 0.25 + 0.5 * heat) p.spawn(PK.Spark, x + rnd(-6, 6), y - 2, rnd(-80, 80), -rnd(60, 200), rnd(10, 22));
+  if (Math.random() < 0.35) p.spawn(PK.Smoke, x + rnd(-8, 8), y - 6, rnd(-15, 15), -rnd(30, 70), rnd(90, 160));
+}

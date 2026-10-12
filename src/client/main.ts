@@ -413,7 +413,7 @@ function clearLine(g: Game, x0: number, y0: number, x1: number, y1: number): boo
   return true;
 }
 /** Tools aimed at the ground or at friends (or nothing): no snapping onto enemies. */
-const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol, WeaponId.Mine]);
+const NO_ASSIST = new Set<number>([WeaponId.Digger, WeaponId.Materializer, WeaponId.Radio, WeaponId.RepairKit, WeaponId.Idol, WeaponId.Mine, WeaponId.Stoneburner]);
 /** Touch auto mode (the AUTO button): on unless switched off, and the choice is remembered. */
 input.autoMode = storageGet('sc.auto') !== 'off';
 touch.setAuto(input.autoMode, (on) => storageSet('sc.auto', on ? 'on' : 'off'));

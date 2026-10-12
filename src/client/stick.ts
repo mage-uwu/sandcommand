@@ -45,6 +45,8 @@ export const WHEEL_FREE: ReadonlySet<number> = new Set<number>([
   WeaponId.RepairKit,
   WeaponId.Idol,
   WeaponId.Mine,
+  // (The Stoneburner's beacon is thrown at a spot, not a target.)
+  WeaponId.Stoneburner,
   // (The laser charges as long as it's held, target or none: a thumb can't
   // otherwise get a charge going before a target turns up.)
   WeaponId.Laser,

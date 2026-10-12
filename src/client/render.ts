@@ -19,6 +19,8 @@ import { MOTHER_NAME } from './mother-script.ts';
 import { drawFlora, drawGeysers } from './flora-art.ts';
 import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
+import { CLOUD_MS } from '../shared/stoneburner.ts';
+import { drawBeacons, drawFeet, drawMushroom, drawStoneFlash } from './stoneburner-art.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
@@ -763,6 +765,17 @@ export class Renderer {
     // Now and then, on a cave's back wall: a trace of whoever was here first.
     if (game.relics.length) drawRelics(ctx, game.relics, camX - halfW, camY - halfH, camX + halfW, camY + halfH);
 
+    // A Stoneburner strike's mushroom cloud, over the site (behind the ground: it rises out of the crater).
+    for (let i = game.stoneBurns.length - 1; i >= 0; i--) {
+      const sb = game.stoneBurns[i];
+      const t = (now - sb.at) / 1000;
+      if (t * 1000 > CLOUD_MS) {
+        game.stoneBurns.splice(i, 1);
+        continue;
+      }
+      drawMushroom(ctx, sb.x, sb.y, t, sb.seed);
+    }
+
     // Terrain chunks in view.
     const vx0 = Math.max(0, Math.floor((camX - halfW) / CHUNK));
     const vx1 = Math.min(CHUNKS_X - 1, Math.floor((camX + halfW) / CHUNK));
@@ -831,6 +844,10 @@ export class Renderer {
         ctx.fillRect(x, y - 3, 1, 1);
       }
     }
+
+    // Stoneburner beacons (and the missile coming down on one), and the molten cores of strikes past.
+    if (game.footList.length) drawFeet(ctx, game.footList, now);
+    if (game.burnerList.length) drawBeacons(ctx, game.burnerList, now);
 
     // Tanks (behind the clones, so a clone walking past shows in front).
     const wmx = (input.mouseX * (W / innerWidth) - offX) / z;
@@ -1468,6 +1485,8 @@ export class Renderer {
 
     this.drawHud(game, input, net, views, dpr, W, H);
     if (game.coach) this.drawCoach(game.coach, dpr, W);
+    // A Stoneburner strike's flash: every screen in the room goes white, HUD and all, and fades back.
+    drawStoneFlash(ctx, W, H, now - game.stoneFlashAt);
   }
 
   /**

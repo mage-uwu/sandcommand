@@ -255,6 +255,41 @@ export class Sfx {
     this.burst(v, 0.3, 1.2, 'bandpass', 2200, 2, 0.3, 700);
   }
 
+  /** A Stoneburner beacon's beep: a hard electronic pip, higher and sharper as the countdown runs out (`urgency` 0..1). */
+  beep(x: number, y: number, urgency: number): void {
+    const v = this.voice(x, y, 0.32, 0.12, 1.6, true);
+    if (!v) return;
+    const f = 1500 + 900 * urgency;
+    this.tone(v, 0, 0.08, 'square', f, f, 0.22);
+    this.tone(v, 0, 0.06, 'sine', f * 2, f * 2, 0.08);
+  }
+
+  /** The Stoneburner's missile coming down out of orbit: a falling scream, heard all over. */
+  incoming(x: number, y: number): void {
+    const v = this.voice(x, y, 0.6, 0.6, 8, true);
+    if (!v) return;
+    this.tone(v, 0, 0.36, 'sawtooth', 3200, 260, 0.3);
+    this.burst(v, 0, 0.36, 'bandpass', 6000, 3, 0.5, 400);
+  }
+
+  /**
+   * A Stoneburner strike: heard by everyone, wherever they are (later the
+   * further off: the sound comes after the flash). A crack, then a boom that
+   * shakes the floor, and a rumble that rolls on for seconds after.
+   */
+  stoneburn(x: number, y: number): void {
+    const dist = Math.hypot(x - this.earX, y - this.earY);
+    const v = this.voice(x, y, 1, 10, 30, true);
+    if (!v) return;
+    const late = Math.min(2.5, dist / 1400);
+    this.burst(v, late, 0.18, 'lowpass', 9000, 0.6, 1.3);
+    this.tone(v, late, 3.2, 'sine', 58, 16, 1.8);
+    this.tone(v, late + 0.02, 2.6, 'sawtooth', 44, 20, 0.5);
+    this.burst(v, late, 1.4, 'lowpass', 2200, 0.8, 1.4, 90);
+    this.rumble(v, late + 0.2, 8, 320, 60, 1.1);
+    for (let k = 0; k < 10; k++) this.burst(v, late + 0.4 + Math.random() * 3.5, 0.03, 'highpass', 2000 + Math.random() * 3000, 0.8, 0.2);
+  }
+
   /** Seeders on the wing: a rasping, wavering buzz. */
   buzz(x: number, y: number): void {
     const v = this.voice(x, y, 0.3, 0.7);
@@ -447,6 +482,27 @@ export class Sfx {
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(f).connect(g).connect(v.dest);
     src.start(t, Math.random() * 1.5, dur + 0.05);
+  }
+
+  /** A long low roll of noise (looped: longer than the noise buffer), the filter falling from `f0` to `f1` as it dies away over `dur`. */
+  private rumble(v: Voice, at: number, dur: number, f0: number, f1: number, gain: number): void {
+    const c = this.ctx;
+    const t = v.t + at;
+    const src = c.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    f.Q.value = 0.9;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f).connect(g).connect(v.dest);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + dur + 0.05);
   }
 
   /** A pitched blip: an oscillator swept from `f0` to `f1`, decaying over `dur`. */

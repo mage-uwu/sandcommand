@@ -149,6 +149,8 @@ export const PROJ_IDOL = -5;
 export const PROJ_LASER = -6;
 /** WeaponDef.proj for the landmine: placed on the ground in front of you, not fired. */
 export const PROJ_MINE = -7;
+/** WeaponDef.proj for the Stoneburner: throws its beacon (World.throwBurner), once; it's gone from the inventory as it goes. */
+export const PROJ_BURNER = -8;
 /** Laser: ticks to a full charge (8 s); the least charge that fires; and the beam at a given charge (0..1). */
 export const LASER_MAX = 30 * 8;
 export const LASER_MIN = 3;
@@ -202,6 +204,8 @@ export const WeaponId = {
   Mine: 17,
   /** Blaster: rapid bolts of light, the laser's SMG cousin. */
   Blaster: 18,
+  /** Stoneburner: a sticky beacon, thrown once; fifteen seconds later an orbital strike lands on it (stoneburner.ts). Ultra rare. */
+  Stoneburner: 19,
 } as const;
 
 /**
@@ -265,6 +269,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   // Two to carry; each placed one is armed after a moment. Another pair is ready 5 s after the last goes down.
   { name: 'Mine', proj: PROJ_MINE, muzzle: 6, rpm: 60, auto: false, speed: 0, spread: 0, clip: 2, reload: 150, scope: 60 },
   { name: 'Blaster', proj: ProjKind.Bolt, muzzle: 14, rpm: 600, auto: true, speed: 1300, spread: 0.035, clip: 30, reload: 75, scope: 160, kick: 2, climb: 0.01, lockCone: 0.07 },
+  // One beacon, thrown once (single use: no reload, it's gone once thrown).
+  { name: 'Stoneburner', proj: PROJ_BURNER, muzzle: 6, rpm: 30, auto: false, speed: 0, spread: 0, clip: 1, reload: 0, scope: 120 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */

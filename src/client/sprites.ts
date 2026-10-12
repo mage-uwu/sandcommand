@@ -357,6 +357,18 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 2,
   },
+  {
+    // Stoneburner in hand: the squat beacon, steel with a hazard band and its red eye
+    grid: [
+      '....KKKK.',
+      'KAAKgggGK',
+      'KAAKYyYyK',
+      'KAAKGrGGK',
+      '.KKKKKKKK',
+    ],
+    px: 1,
+    py: 2,
+  },
 ];
 
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.

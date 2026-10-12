@@ -164,7 +164,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -192,6 +192,8 @@ import {
   R_BEAST_DIE,
   R_VENOM,
   R_CORAL,
+  R_BURNERS,
+  R_STONEBURN,
   BEAST_SCALE,
   BEAST_SAME,
   GF_CAVE,
@@ -243,7 +245,8 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, FOOT_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_PUSH, STONE_PUSH_R, footSink } from '../shared/stoneburner.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastLair, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
@@ -475,6 +478,7 @@ export class Player {
   trapsSeen = -1;
   /** The mines revision this client last got. */
   minesSeen = -1;
+  burnersSeen = -1;
   /** The geysers' state as this client last heard it (World.geysersRev). */
   geysersSeen = -1;
   /** The flora's state as this client last heard it (World.floraRev). */
@@ -636,6 +640,10 @@ export class World {
   trapsRev = 0;
   /** Landmines laid by clones (see layMine), and a revision bumped whenever the list changes. */
   readonly mines: Mine[] = [];
+  /** Stoneburner beacons about (thrown, stuck, or their missile coming down), and the molten cores their strikes left (stoneburner.ts). */
+  readonly burners: Burner[] = [];
+  readonly feet: Foot[] = [];
+  burnersRev = 0;
   minesRev = 0;
   /**
    * The map's geysers (frosting.ts): each vent's mouth, its hit points, the
@@ -2877,6 +2885,252 @@ export class World {
    * point). A gem asp is soft all through: the blast falls off only half as
    * fast across its reach (two or three grenades anywhere near finish one).
    */
+  /**
+   * The Stoneburner, thrown: its beacon leaves the hand on a grenade's arc
+   * (and is gone from the inventory: single use).
+   */
+  private throwBurner(p: Player): void {
+    const aim = dequantizeAim(p.aimQ);
+    const cos = Math.cos(aim);
+    const sin = Math.sin(aim);
+    const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
+    const m = WEAPONS[WeaponId.Stoneburner].muzzle;
+    this.burners.push({
+      x: sh.x + cos * m,
+      y: sh.y + sin * m,
+      vx: cos * BURNER_THROW + p.body.vx * 0.5,
+      vy: sin * BURNER_THROW + p.body.vy * 0.5,
+      phase: BurnerPhase.Flying,
+      fuse: BURNER_FUSE,
+      owner: p.id,
+      onPlayer: 255,
+      onTank: -1,
+      ox: 0,
+      oy: 0,
+      age: 0,
+    });
+    this.burnersRev++;
+    p.inv.splice(p.slot, 1);
+    p.slot = Math.max(0, Math.min(p.slot, p.inv.length - 1));
+    this.invChanged(p);
+  }
+
+  /**
+   * The beacons: in flight, until they stick to the first thing they touch
+   * (the ground, a clone, a vehicle: carried along with it, and dropping off
+   * if it goes); stuck, counting down; then the missile, and the strike
+   * (stoneBurn). And the molten cores their strikes left (stepFeet).
+   */
+  private stepBurners(): void {
+    const t = this.terrain;
+    for (let i = this.burners.length - 1; i >= 0; i--) {
+      const b = this.burners[i];
+      b.age++;
+      if (b.phase === BurnerPhase.Flying) {
+        b.vy = Math.min(600, b.vy + GRAVITY * DT);
+        const steps = Math.max(1, Math.ceil((Math.hypot(b.vx, b.vy) * DT) / 1));
+        for (let k = 0; k < steps && b.phase === BurnerPhase.Flying; k++) {
+          const nx = b.x + (b.vx * DT) / steps;
+          const ny = b.y + (b.vy * DT) / steps;
+          if (t.isSolid(Math.floor(nx), Math.floor(ny))) {
+            b.phase = BurnerPhase.Stuck;
+            b.vx = b.vy = 0;
+            break;
+          }
+          b.x = nx;
+          b.y = ny;
+          if (this.stickBurner(b)) break;
+        }
+        // (Off the bottom of the world, or out the sides: lost.)
+        if (b.y > WORLD_H || b.x < 0 || b.x >= WORLD_W) {
+          this.burners.splice(i, 1);
+          this.burnersRev++;
+          continue;
+        }
+        if (b.phase !== BurnerPhase.Flying) this.burnersRev++;
+      }
+      // Riding on something: carried with it; it gone (dead, wrecked, climbed out of), off it drops.
+      if (b.onPlayer !== 255) {
+        const q = this.players[b.onPlayer];
+        if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0) this.unstick(b);
+        else {
+          b.x = q.cx + b.ox;
+          b.y = q.cy + b.oy;
+        }
+      } else if (b.onTank >= 0) {
+        const k = this.tanks[b.onTank];
+        if (!k) this.unstick(b);
+        else {
+          b.x = k.x + tankW(k) / 2 + b.ox;
+          b.y = k.y + tankH(k) / 2 + b.oy;
+        }
+      } else if (b.phase === BurnerPhase.Stuck && !this.solidNear(b.x, b.y)) {
+        // The ground it was stuck to dug or blown away: it falls again.
+        b.phase = BurnerPhase.Flying;
+        this.burnersRev++;
+      }
+      if (b.phase === BurnerPhase.Flying && b.age > BURNER_FUSE * 3) {
+        this.burners.splice(i, 1);
+        this.burnersRev++;
+        continue;
+      }
+      // The countdown runs from the moment it leaves the hand.
+      if (b.phase !== BurnerPhase.Strike) {
+        if (--b.fuse <= 0) {
+          b.phase = BurnerPhase.Strike;
+          b.fuse = BURNER_STRIKE;
+          this.burnersRev++;
+        }
+        continue;
+      }
+      if (--b.fuse <= 0) {
+        this.burners.splice(i, 1);
+        this.burnersRev++;
+        this.stoneBurn(b.x, b.y, b.owner);
+      }
+    }
+    this.stepFeet();
+  }
+
+  /** Is there solid ground within the beacon's sticky reach? */
+  private solidNear(x: number, y: number): boolean {
+    for (let dy = -BURNER_STICK_R; dy <= BURNER_STICK_R; dy++) for (let dx = -BURNER_STICK_R; dx <= BURNER_STICK_R; dx++) if (this.terrain.isSolid(Math.floor(x + dx), Math.floor(y + dy))) return true;
+    return false;
+  }
+
+  /** A flying beacon touching a clone (not its thrower, the first moment) or a vehicle: stuck to it. */
+  private stickBurner(b: Burner): boolean {
+    for (const q of this.players) {
+      if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0 || (q.id === b.owner && b.age < 12)) continue;
+      if (b.x < q.body.x - 1 || b.x > q.body.x + ACTOR_W + 1 || b.y < q.body.y - 1 || b.y > q.body.y + ACTOR_H + 1) continue;
+      b.phase = BurnerPhase.Stuck;
+      b.onPlayer = q.id;
+      b.ox = b.x - q.cx;
+      b.oy = b.y - q.cy;
+      return true;
+    }
+    for (let k = 0; k < this.tanks.length; k++) {
+      const v = this.tanks[k];
+      if (!v || b.x < v.x || b.x > v.x + tankW(v) || b.y < v.y || b.y > v.y + tankH(v)) continue;
+      b.phase = BurnerPhase.Stuck;
+      b.onTank = k;
+      b.ox = b.x - (v.x + tankW(v) / 2);
+      b.oy = b.y - (v.y + tankH(v) / 2);
+      return true;
+    }
+    return false;
+  }
+
+  private unstick(b: Burner): void {
+    b.onPlayer = 255;
+    b.onTank = -1;
+    if (b.phase === BurnerPhase.Stuck) b.phase = BurnerPhase.Flying;
+    this.burnersRev++;
+  }
+
+  /**
+   * The strike lands at (x, y): the crater (the hardest rock too, near the
+   * middle), the heat and the blast (certain death close in; out to
+   * STONE_HEAT_R, falling off, and much less behind solid ground), every
+   * clone shoved away, creatures and vehicles torn apart, a storm of
+   * burning debris, and the molten core left at the crater's bottom. Every
+   * client hears of it (broadcast): the flash, the shaking, the cloud.
+   */
+  stoneBurn(x: number, y: number, by: number): void {
+    const owner = by === 255 ? NO_OWNER : by;
+    const seed = this.rng.nextU32();
+    // Who's caught: worked out before the ground they're stood on goes.
+    const caught: { p: Player; d: number; open: boolean }[] = [];
+    for (const p of this.players) {
+      if (!p || !p.alive) continue;
+      const d = Math.hypot(p.cx - x, p.cy - y);
+      if (d < STONE_PUSH_R) caught.push({ p, d, open: d < STONE_CRATER_R || this.lineClear(x, y - 4, p.cx, p.cy) });
+    }
+    this.carve(x, y, STONE_CRATER_R, STONE_CORE_R, 250, owner);
+    this.grains.blast(x, y, STONE_PUSH_R * 0.8, BLAST_IMPULSE * 5);
+    explosionFragments(this.grains, x, y, ProjKind.Bomb, owner, new Rng(seed));
+    // Burning debris thrown out over everything.
+    for (let k = 0; k < 160; k++) {
+      const a = -Math.PI * (0.05 + 0.9 * this.rng.next());
+      const sp = 200 + 520 * this.rng.next();
+      this.grains.spawn(PK.Flame, x + this.rng.range(-20, 20), y + this.rng.range(-12, 6), Math.cos(a) * sp, Math.sin(a) * sp, 40 + this.rng.int(50), 0, 0, owner);
+    }
+    this.splashBeasts(x, y, STONE_HARM_R, STONE_HARM, by);
+    this.splashTanks(x, y, STONE_HARM_R, STONE_HARM, owner);
+    this.splashShips(x, y, STONE_HARM_R, STONE_HARM, owner);
+    this.splashCrafts(x, y, STONE_HARM_R, STONE_HARM, owner);
+    this.splashDoors(x, y, STONE_HARM_R * 0.6, STONE_HARM, by);
+    this.kickItems(x, y, STONE_PUSH_R);
+    for (const { p, d, open } of caught) {
+      if (!p.alive) continue;
+      // The shove: away from ground zero, and up.
+      const f = Math.max(0, 1 - d / STONE_PUSH_R);
+      const l = d || 1;
+      p.body.vx += ((p.cx - x) / l) * STONE_PUSH * f;
+      p.body.vy += ((p.cy - y) / l) * STONE_PUSH * f * 0.6 - STONE_PUSH * 0.45 * f;
+      p.body.onGround = false;
+      if (d < STONE_KILL_R && (open || d < STONE_CRATER_R + 20)) {
+        this.damage(p, 9999, by, W_STONEBURNER, false, true);
+        continue;
+      }
+      if (d >= STONE_HEAT_R) continue;
+      const heat = 260 * (1 - (d - STONE_KILL_R) / (STONE_HEAT_R - STONE_KILL_R)) * (open ? 1 : STONE_COVER);
+      this.damage(p, Math.min(9999, d < STONE_KILL_R ? heat * 2.2 : heat), by, W_STONEBURNER);
+    }
+    // The molten core, left at the bottom of the crater.
+    let fy = Math.floor(y + STONE_CRATER_R - 4);
+    while (fy < WORLD_H - 12 && !this.terrain.isSolid(Math.floor(x), fy + FOOT_R)) fy++;
+    this.feet.push({ x, y: fy, life: FOOT_LIFE, owner: by, sink: 0 });
+    this.burnersRev++;
+    const w = this.broadcast;
+    w.u8(R_STONEBURN);
+    w.u16(clampU16(x));
+    w.u16(clampU16(y + Y_BIAS));
+    w.u8(by);
+    w.u32(seed);
+  }
+
+  /**
+   * The molten cores: each burns its way down through whatever's under it,
+   * slower and slower as it smoulders out (footSink), shedding flame (which
+   * sears whoever goes down the pit after it) and smoke.
+   */
+  private stepFeet(): void {
+    for (let i = this.feet.length - 1; i >= 0; i--) {
+      const f = this.feet[i];
+      if (--f.life <= 0) {
+        this.feet.splice(i, 1);
+        this.burnersRev++;
+        continue;
+      }
+      const owner = f.owner === 255 ? NO_OWNER : f.owner;
+      f.sink += footSink(f.life);
+      if (f.sink >= 1) {
+        const n = Math.floor(f.sink);
+        f.sink -= n;
+        // (Not through the bottom of the world: bedrock holds it.)
+        if (f.y + FOOT_R + n < WORLD_H - 14) f.y += n;
+      }
+      if (this.tick % 4 === 0) {
+        const r = Math.max(4, Math.round(FOOT_R * (0.6 + 0.4 * (f.life / FOOT_LIFE))));
+        this.carve(Math.round(f.x + this.rng.range(-3, 3)), Math.round(f.y + 3), r, r, 0, owner);
+      }
+      // Flame licking up out of it (more while it's fresh).
+      const heat = f.life / FOOT_LIFE;
+      if (this.rng.next() < 0.3 + 0.6 * heat) {
+        this.grains.spawn(PK.Flame, f.x + this.rng.range(-FOOT_R, FOOT_R), f.y - 2, this.rng.range(-30, 30), -40 - 90 * heat * this.rng.next(), 10 + this.rng.int(14), 0, 0, owner);
+      }
+      // Up close, its heat sears (through the pit's walls or not).
+      if (this.tick % 6 === 0) {
+        for (const p of this.players) {
+          if (!p || !p.alive) continue;
+          const d = Math.hypot(p.cx - f.x, p.cy - f.y);
+          if (d < 34) this.damage(p, (8 + 22 * heat) * (1 - d / 34), f.owner, W_STONEBURNER, true);
+        }
+      }
+    }
+  }
+
   private splashBeasts(x: number, y: number, r: number, dmg: number, by: number): void {
     for (let k = 0; k < MAX_BEASTS; k++) {
       if (!this.beasts[k]) continue;
@@ -3094,6 +3348,9 @@ export class World {
     this.items.length = 0;
     this.mines.length = 0;
     this.minesRev++;
+    this.burners.length = 0;
+    this.feet.length = 0;
+    this.burnersRev++;
     this.grains.n = 0;
     this.projectiles.n = 0;
     this.pendingPixels.clear();
@@ -3797,6 +4054,11 @@ export class World {
     const want = spun && def.proj !== PROJ_BUILD && def.proj !== PROJ_RADIO && def.proj !== PROJ_IDOL && (p.mob.canFire || def.proj === PROJ_REPAIR) && (def.auto ? pressed : fresh) && p.reloadLeft === 0 && (def.clip === 0 || item.ammo > 0);
     if (want && def.proj === PROJ_REPAIR) {
       this.healWave(p);
+      p.firing = true;
+      return;
+    }
+    if (want && def.proj === PROJ_BURNER && p.cooldown <= 0) {
+      this.throwBurner(p);
       p.firing = true;
       return;
     }
@@ -6468,6 +6730,7 @@ export class World {
     this.stepItems();
     this.stepTraps();
     this.stepMines();
+    this.stepBurners();
     this.stepEvac();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
@@ -6723,6 +6986,24 @@ export class World {
           w.u16(clampU16(b.y + Y_BIAS));
           w.u16(clampU16(b.level + Y_BIAS));
           w.u16(clampU16(b.volume));
+        }
+      }
+      // The Stoneburner beacons and molten cores: every frame while any are about (they move, count down), once more when they're gone.
+      if (this.burners.length || this.feet.length || p.burnersSeen !== this.burnersRev) {
+        p.burnersSeen = this.burnersRev;
+        w.u8(R_BURNERS);
+        w.u8(Math.min(255, this.burners.length));
+        for (const b of this.burners.slice(0, 255)) {
+          w.u16(clampU16(b.x));
+          w.u16(clampU16(b.y + Y_BIAS));
+          w.u16(Math.max(0, b.fuse));
+          w.u8(b.phase);
+        }
+        w.u8(Math.min(255, this.feet.length));
+        for (const f of this.feet.slice(0, 255)) {
+          w.u16(clampU16(f.x));
+          w.u16(clampU16(f.y + Y_BIAS));
+          w.u16(f.life);
         }
       }
       if (p.minesSeen !== this.minesRev) {
@@ -7311,6 +7592,29 @@ const SHIP_SURF_REACH = 26;
 /** A bunker door's hit points: most of a tank's hull. */
 export const DOOR_HP = TANK_HP * 0.6;
 /** A laid landmine: where it sits (on the ground cell at x, y), who laid it and their side, and ticks until it's armed. */
+/** A Stoneburner beacon (stoneburner.ts): where, how it's moving, its countdown (or the missile's fall), whose; what it's stuck to (a clone, a vehicle) and where on it. */
+interface Burner {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  phase: number;
+  fuse: number;
+  owner: number;
+  onPlayer: number;
+  onTank: number;
+  ox: number;
+  oy: number;
+  age: number;
+}
+/** A Stoneburner strike's molten core, burning its way down (`sink`: the fraction of a cell it's sunk toward the next). */
+interface Foot {
+  x: number;
+  y: number;
+  life: number;
+  owner: number;
+  sink: number;
+}
 interface Mine {
   id: number;
   x: number;

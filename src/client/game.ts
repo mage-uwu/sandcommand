@@ -2,14 +2,15 @@ import { type Decor, placeDecor } from './decor.ts';
 import { BTN_FIRE, type Body, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, applyFrameRecords } from '../shared/frame.ts';
+import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, type BurnerState, type FootState, applyFrameRecords } from '../shared/frame.ts';
+import { BURNER_FUSE, BurnerPhase, FOOT_LIFE, beepAt } from '../shared/stoneburner.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_STONEBURNER, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, CraftPart, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -25,7 +26,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -172,6 +173,10 @@ export interface Sfx {
   hiss(x: number, y: number, big: boolean): void;
   buzz(x: number, y: number): void;
   roar(x: number, y: number): void;
+  /** The Stoneburner: its beacon's beep (`urgency` 0..1 as the countdown runs out), the missile's scream, the strike. */
+  beep(x: number, y: number, urgency: number): void;
+  incoming(x: number, y: number): void;
+  stoneburn(x: number, y: number): void;
 }
 
 const CAREER_KEY = 'sc.career';
@@ -676,6 +681,7 @@ export class Game implements FrameHandler {
       const s = ss[ss.length - 1];
       if (s && actors.n < MAX_ACTORS) actors.add(196 + slot, s.x, s.y, s.vx, s.vy, SHIP_W, SHIP_H, 120, 255, 0.2);
     }
+    this.stoneTick();
     this.particles.step(this.collider, DT, this.particleHooks, actors);
     this.shake *= 0.85;
     this.hurtFlash *= 0.9;
@@ -1075,6 +1081,73 @@ export class Game implements FrameHandler {
   /** Our own tarantula, if we have one out. */
   mySpider(): TankView | null {
     return this.tankViews().find((v) => isSpider(v) && v.owner === this.myId) ?? null;
+  }
+
+  /** Stoneburner beacons and molten cores about (R_BURNERS). */
+  burnerList: BurnerState[] = [];
+  footList: FootState[] = [];
+  /** Stoneburner strikes seen: where, when (performance.now ms), and their seed (the cloud over each hangs for CLOUD_MS). */
+  readonly stoneBurns: { x: number; y: number; at: number; seed: number }[] = [];
+  /** When the last strike's flash went off (performance.now ms; the screen whites out, then fades). */
+  stoneFlashAt = -1e9;
+  /** The ground still shaking after a strike (a long rumble under the quick jolts of `shake`). */
+  quake = 0;
+
+  burners(beacons: BurnerState[], feet: FootState[]): void {
+    // A beacon beeps each time its light comes on: any tick of its countdown since we last heard of it
+    // (matched to the one nearest where it was) that its light came on in.
+    for (const b of beacons) {
+      if (b.phase === BurnerPhase.Strike) continue;
+      let prev: BurnerState | null = null;
+      let best = 40;
+      for (const o of this.burnerList) {
+        const d = Math.hypot(o.x - b.x, o.y - b.y);
+        if (d < best && o.fuse >= b.fuse) {
+          best = d;
+          prev = o;
+        }
+      }
+      const from = prev ? prev.fuse - 1 : b.fuse;
+      for (let f = from; f >= b.fuse && f > 0 && from - f < 30; f--) {
+        if (beepAt(f)) {
+          this.sfx?.beep(b.x, b.y, 1 - f / BURNER_FUSE);
+          break;
+        }
+      }
+    }
+    // The missile on its way: the scream of it, once.
+    for (const b of beacons) if (b.phase === BurnerPhase.Strike && !this.burnerList.some((o) => o.phase === BurnerPhase.Strike && Math.hypot(o.x - b.x, o.y - b.y) < 40)) this.sfx?.incoming(b.x, b.y);
+    this.burnerList = beacons;
+    this.footList = feet;
+  }
+
+  /**
+   * A Stoneburner strike lands: the whole room sees it. The world whites
+   * out and fades back to the fireball, the mushroom cloud starts to climb
+   * over the site, everything shakes (worst near it, but everyone feels it),
+   * and the roar of it reaches everyone.
+   */
+  stoneBurn(x: number, y: number, _by: number, seed: number): void {
+    const now = performance.now();
+    this.stoneFlashAt = now;
+    this.stoneBurns.push({ x, y, at: now, seed });
+    if (this.stoneBurns.length > 4) this.stoneBurns.shift();
+    stoneburnBlast(this.particles, x, y, BLAST_IMPULSE);
+    this.flashes.push({ x, y, r: 260, at: now });
+    const me = this.body;
+    const d = Math.hypot(me.x - x, me.y - y);
+    this.shake = Math.max(this.shake, 14 + Math.max(0, 1 - d / 1500) * 26);
+    this.quake = Math.max(this.quake, 4 + Math.max(0, 1 - d / 2500) * 12);
+    this.sfx?.stoneburn(x, y);
+  }
+
+  /** Every tick: the rumble dying away, and the molten cores burning (flame, smoke, sparks off them). */
+  private stoneTick(): void {
+    if (this.quake > 0.05) {
+      this.shake = Math.max(this.shake, this.quake);
+      this.quake *= 0.985;
+    } else this.quake = 0;
+    for (const f of this.footList) moltenCore(this.particles, f.x, f.y, f.life / FOOT_LIFE);
   }
 
   /** Landmines on the map (R_MINES). */
@@ -1794,7 +1867,7 @@ export class Game implements FrameHandler {
     const kn = this.players.get(killer)?.name ?? '???';
     const vn = this.players.get(victim)?.name ?? '???';
     // Kills are credited by what did the damage: a projectile kind, or one of the W_* causes.
-    const how = weapon === W_BLISTER ? 'Blister Coral' : weapon === W_GEYSER ? 'Geyser' : weapon === W_ROCKFALL ? 'Falling Rock' : weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
+    const how = weapon === W_STONEBURNER ? 'Stoneburner' : weapon === W_BLISTER ? 'Blister Coral' : weapon === W_GEYSER ? 'Geyser' : weapon === W_ROCKFALL ? 'Falling Rock' : weapon === W_RAM ? 'Ram' : weapon === W_CRAFT ? 'Drop Rocket' : weapon === W_TANK ? 'Tank' : weapon === W_SHIP ? 'Dropship' : weapon === W_DEBRIS ? 'Debris' : weapon === W_BURN ? 'Fire' : weapon === 255 ? 'fell' : projName(weapon);
     let text: string;
     if (weapon === 255) text = `${vn} cratered`;
     else if (weapon === W_LASER && killer !== victim) text = `${kn} [Laser] ${vn}`;
@@ -1807,6 +1880,7 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Venom) text = `${vn} was spat on by a millipede`;
     else if (killer === 255 && weapon === W_VENOM) text = `${vn} died of venom`;
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
+    else if (weapon === W_STONEBURNER && (killer === victim || killer === 255)) text = `${vn} was vaporized by the Stoneburner`;
     else if (killer === victim) text = weapon === W_DEBRIS ? `${vn} was buried` : weapon === W_BURN ? `${vn} burned` : `${vn} self-destructed`;
     else text = `${kn} [${how}] ${vn}`;
     if (victim === this.myId) {
@@ -2185,6 +2259,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === ProjKind.Venom) return "spat on by a millipede";
   if (killer === 255 && weapon === W_VENOM) return 'died of venom';
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';
+  if (weapon === W_STONEBURNER) return by ? `vaporized by the Stoneburner [${by} called it down]` : 'vaporized by the Stoneburner';
   if (weapon === W_GEYSER) return by ? `caught in a geyser's blast [${by} set it off]` : "caught in a geyser's blast";
   if (weapon === W_BLISTER) return by ? `scalded by a bursting blister coral [${by} burst it]` : 'scalded by a bursting blister coral';
   if (weapon === W_ROCKFALL) return by ? `crushed by falling rock [${by} brought it down]` : 'crushed by falling rock';
