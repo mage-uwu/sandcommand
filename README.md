@@ -790,7 +790,10 @@ rock, knees arched high, stepping in two alternating sets, quicker than a
 droid's (`src/client/spider-art.ts`).
 - **Camouflage.** Its hide takes the colour of the very ground under it,
   mottled with the rock's greys and grit, a dark folium of chevrons down its
-  abdomen. With nobody about it wanders a while, then presses flat to the
+  abdomen. One GEMM crystal is set into the top of its abdomen (pink,
+  turquoise or emerald), faceted and glinting now and then; lying in wait
+  it's just another gem in the rock, and a lure.
+  With nobody about it wanders a while, then presses flat to the
   rock with its legs splayed wide and lies in wait for 10 to 60 seconds,
   perfectly still: its outline gone, its eyes dull, a lump of the stone.
   The aim assist leaves one lying in wait alone.

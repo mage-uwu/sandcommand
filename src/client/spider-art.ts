@@ -12,10 +12,10 @@ import type { GroundColor } from './beast-art.ts';
  *
  * Its camouflage is the caves' own: its hide takes the colour of the very
  * ground under it, mottled with the rock's greys and grit, a dark folium
- * down its abdomen. Lying in wait it presses flat to the rock with its legs
- * splayed wide, its outline gone and its eyes dull: a lump of the stone.
- * Hunting, its outline sharpens, its eyes catch the light red, and dashing
- * or leaping its fangs come out.
+ * down its abdomen, and one GEMM crystal set into its back. Lying in wait
+ * it presses flat to the rock with its legs splayed wide, its outline gone
+ * and its eyes dull: a lump of the stone. Hunting, its outline sharpens,
+ * its eyes catch the light red, and dashing or leaping its fangs come out.
  */
 
 const hsh = (a: number, b: number, c = 0) => {
@@ -141,6 +141,7 @@ export function drawCaveSpider(ctx: CanvasRenderingContext2D, t: Terrain, ground
   // The body: the abdomen (fat, behind), the head (smaller, ahead); a waist between.
   body(ctx, bx - tx * 3, by - ty * 3, tx, ty, ux, uy, 5.2, 4, base, seed, 1, !frozen);
   body(ctx, hx - ux * sink + tx * 0.8, hy - uy * sink + ty * 0.8, tx, ty, ux, uy, 3.3, 2.7, base, seed, 0, !frozen);
+  gem(ctx, bx - tx * 3.4 + ux * 3.4, by - ty * 3.4 + uy * 3.4, tx, ty, ux, uy, seed, now);
   // Its face: fangs (out, dashing or leaping), feelers, and its eyes.
   const fx = hx - ux * sink + tx * 3.2;
   const fy = hy - uy * sink + ty * 3.2;
@@ -180,6 +181,47 @@ export function drawCaveSpider(ctx: CanvasRenderingContext2D, t: Terrain, ground
     ctx.fillRect(Math.round(ex + tx), Math.round(ey + ty), 1, 1);
     ctx.fillStyle = '#ffb0a0';
     ctx.fillRect(Math.round(ex + tx * 0.2 + ux * 0.6), Math.round(ey + ty * 0.2 + uy * 0.6), 1, 1);
+  }
+}
+
+/** Its one gem, by its seed: pink, turquoise or emerald (dark, mid, lit, glint), as the GEMMs in the ground are. */
+const SPIDER_GEMS = [
+  ['#8a0c46', '#ff2a8a', '#ff8ac4', '#ffe0f0'],
+  ['#0a6a66', '#18c8c0', '#80fff0', '#e0fffc'],
+  ['#0c5a2a', '#22b85a', '#90ffb0', '#e8fff0'],
+];
+/**
+ * The one gem set into the top of its abdomen: a faceted crystal, a point
+ * standing up off its back, its lit face toward its head, a dark outline,
+ * glinting now and then. Lying in wait it's still there: just another
+ * GEMM in the rock (a lure, as much as anything).
+ */
+function gem(ctx: CanvasRenderingContext2D, x: number, y: number, tx: number, ty: number, ux: number, uy: number, seed: number, now: number): void {
+  const g = SPIDER_GEMS[seed % 3];
+  const R = 4;
+  for (let py = Math.floor(y - R); py <= Math.ceil(y + R); py++) {
+    for (let px = Math.floor(x - R); px <= Math.ceil(x + R); px++) {
+      const dx = px + 0.5 - x;
+      const dy = py + 0.5 - y;
+      const u = dx * tx + dy * ty;
+      const v = dx * ux + dy * uy;
+      // A diamond, taller than wide (pointing up off its back), its foot sunk in the hide.
+      const e = Math.abs(u) / 2.6 + Math.max(v, -v * 1.6) / 3.3;
+      if (e > 1 || v < -1.4) continue;
+      let c: string;
+      if (e > 0.8) c = OUTLINE;
+      else if (u > 0.25) c = v > 0.6 ? g[2] : g[1];
+      else if (u < -0.25) c = g[0];
+      else c = g[1];
+      ctx.fillStyle = c;
+      ctx.fillRect(px, py, 1, 1);
+    }
+  }
+  // Its glint: now and then, a flash on the lit facet.
+  const tw = Math.sin(now / 420 + seed * 1.7);
+  if (tw > 0.7) {
+    ctx.fillStyle = g[3];
+    ctx.fillRect(Math.round(x + tx * 0.6 + ux * 1), Math.round(y + ty * 0.6 + uy * 1), 1, 1);
   }
 }
 
