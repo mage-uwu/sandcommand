@@ -188,6 +188,13 @@ export const CSPIDER_BITE_R = 7;
 export const CSPIDER_BITE = 24;
 export const CSPIDER_BITE_CD = 16;
 export const CSPIDER_SHOVE = 90;
+/**
+ * Its bite goes for a limb (an arm or a leg, a droid's metal legs alike):
+ * CSPIDER_RIP of the time it tears it clean off; otherwise it mauls it
+ * (CSPIDER_MAUL wound points into it), so the next bite likely takes it.
+ */
+export const CSPIDER_RIP = 0.5;
+export const CSPIDER_MAUL = 30;
 /** Lying in wait (ticks: 10 to 60 s), and wandering between. */
 export const CSPIDER_FREEZE_MIN = 30 * 10;
 export const CSPIDER_FREEZE_MAX = 30 * 60;

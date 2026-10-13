@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ClassId, resetBody } from '../src/shared/body.ts';
+import { ClassId, DROID_LEGS, Part, has, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { ProjKind } from '../src/shared/weapons.ts';
@@ -88,6 +88,28 @@ describe('the cave spider', () => {
     }
     expect(bitten).toBe(true);
     expect(a.lastWeapon).toBe(W_SPIDER);
+  });
+
+  it('its bite goes for the limbs: it tears arms and legs clean off (a droid\'s metal legs too)', () => {
+    for (const cls of [ClassId.Medium, ClassId.Droid]) {
+      const { world, a } = cave();
+      resetBody(a.parts, cls, 0);
+      const limbs = cls === ClassId.Droid ? DROID_LEGS : [Part.GunArm, Part.OffArm, Part.LegB, Part.LegF];
+      const count = () => limbs.filter((l) => has(a.parts.mask, l)).length;
+      const b = putSpider(world, 1000, 440, -1);
+      let bites = 0;
+      for (let k = 0; k < 30 * 20 && count() > limbs.length - 2 && a.alive; k++) {
+        hold(a);
+        a.hp = 100;
+        const before = b.coilCd;
+        world.step();
+        if (b.coilCd > before) bites++;
+      }
+      // Two limbs gone, in a handful of bites.
+      expect(count(), `class ${cls}`).toBeLessThanOrEqual(limbs.length - 2);
+      expect(bites, `class ${cls}`).toBeLessThanOrEqual(8);
+      expect(a.lastWeapon).toBe(W_SPIDER);
+    }
   });
 
   it('it closes the last stretch with a dash, or leaps at them through the air, fangs out', () => {

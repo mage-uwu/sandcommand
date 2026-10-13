@@ -817,10 +817,13 @@ droid's (`src/client/spider-art.ts`).
   cells a second. From further off, in sight, it leaps at them through the
   air, far faster and more often than a millipede flings (every 1.5 s, out
   to 150 cells). Dashing or leaping, its fangs come out.
-- **The bite.** A quick, heavy bite (24 harm) and a shove that knocks the
-  clone back and up, then away a moment (about half a second) before the
-  next. No venom: it's the speed that kills. The kill feed says "run down
-  by a cave spider".
+- **The bite rips limbs off.** Every bite goes for a limb, an arm or a
+  leg (a spider droid's metal legs alike). Half the time it tears it clean
+  off and flings it away; otherwise it mauls it, so the next bite likely
+  takes it. Each bite is also 24 harm and a shove that knocks the clone
+  back and up, then the spider is away a moment (about half a second)
+  before the next. No venom: a clone it catches is taken apart. The kill
+  feed says "torn apart by a cave spider".
 - **Durable.** 260 hit points and no armour: it takes well over a dozen
   rifle rounds. Hurt, it wakes. It bleeds a pale, sickly green ichor, and
   killed it bursts into gobbets of it, its head, abdomen and legs flung off

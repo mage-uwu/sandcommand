@@ -400,6 +400,8 @@ import {
   CSPIDER_SHARE,
   CSPIDER_SHOVE,
   CSPIDER_WANDER,
+  CSPIDER_RIP,
+  CSPIDER_MAUL,
 } from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -2306,7 +2308,12 @@ export class World {
       for (const p of this.players) {
         if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > CSPIDER_BITE_R + 4) continue;
-        this.damage(p, CSPIDER_BITE, NO_OWNER, W_SPIDER);
+        this.spiderBite(p, pts[0], pts[1]);
+        if (!p.alive) {
+          b.coilCd = CSPIDER_BITE_CD;
+          b.lunge = 0;
+          break;
+        }
         const s = Math.sign(p.cx - pts[0]) || 1;
         p.body.vx += s * CSPIDER_SHOVE;
         p.body.vy -= CSPIDER_SHOVE * 0.4;
@@ -2315,6 +2322,28 @@ export class World {
         break;
       }
     }
+  }
+
+  /**
+   * A cave spider's bite on `p`, its jaws at (jx, jy): it goes for a limb
+   * (an arm or a leg; a droid's legs), and half the time tears it clean
+   * off (flung away from its jaws); else it mauls it, so the next bite
+   * likely takes it. CSPIDER_BITE harm to the clone either way.
+   */
+  private spiderBite(p: Player, jx: number, jy: number): void {
+    const res = this.strikeScratch;
+    res.hp = 0;
+    res.detached.length = 0;
+    res.vital = false;
+    const limbs = p.parts.cls === ClassId.Droid ? DROID_LEGS : CORAL_LIMBS;
+    const have = limbs.filter((l) => has(p.parts.mask, l));
+    if (have.length) {
+      const part = have[this.beastRng.int(have.length)];
+      harm(p.parts, part, this.beastRng.next() < CSPIDER_RIP ? 1e4 : CSPIDER_MAUL, res);
+    }
+    // (The harm to the clone is the bite's, whatever the limb took.)
+    res.hp = CSPIDER_BITE;
+    this.applyStrike(p, res, NO_OWNER, W_SPIDER, jx, jy);
   }
 
   /** A basilisk, hibernating down in the caves: on a deep, roomy floor (it's huge), far from everyone. */

@@ -1903,7 +1903,7 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Dart) text = `${vn} took a poisoned dart`;
     else if (killer === 255 && weapon === W_COIL) text = `${vn} was crushed and bitten by a millipede`;
     else if (killer === 255 && weapon === W_ASP) text = `${vn} was bitten by a gem asp`;
-    else if (killer === 255 && weapon === W_SPIDER) text = `${vn} was run down by a cave spider`;
+    else if (killer === 255 && weapon === W_SPIDER) text = `${vn} was torn apart by a cave spider`;
     else if (killer === 255 && weapon === W_SEED) text = `a seeder's nest burst out of ${vn}`;
     else if (killer === 255 && weapon === W_BASILISK) text = `${vn} was devoured by a basilisk`;
     else if (killer === 255 && weapon === W_DRAGON) text = `${vn} was devoured by a dragon`;
@@ -2285,7 +2285,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
   if (killer === 255 && weapon === W_COIL) return 'crushed and bitten by a millipede';
   if (killer === 255 && weapon === W_ASP) return 'bitten by a gem asp';
-  if (killer === 255 && weapon === W_SPIDER) return 'run down by a cave spider';
+  if (killer === 255 && weapon === W_SPIDER) return 'torn apart by a cave spider';
   if (killer === 255 && weapon === W_SEED) return "a seeder's nest burst out of you";
   if (killer === 255 && weapon === W_BASILISK) return 'devoured by a basilisk';
   if (killer === 255 && weapon === W_DRAGON) return 'devoured by a dragon';
