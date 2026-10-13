@@ -4742,6 +4742,13 @@ export class World {
     p.reloadLeft = 0;
     // A fresh, random kit (always a primary, a digger and a materializer), or a scripted one.
     p.inv = this.kitFor?.(p) ?? spawnLoadout(this.rng);
+    // (mage777 never deploys without one.)
+    if (!this.kitFor && p.name.trim().toLowerCase() === STONEBURNER_NAME && !p.inv.some((it) => it.weapon === WeaponId.Stoneburner)) {
+      const k = p.inv.findIndex((it) => it.weapon === WeaponId.Grenade || it.weapon === WeaponId.Mine);
+      if (k >= 0) p.inv[k] = newItem(WeaponId.Stoneburner);
+      else p.inv.splice(1, 0, newItem(WeaponId.Stoneburner));
+      if (p.inv.length > INV_MAX) p.inv.splice(INV_MAX);
+    }
     p.slot = 0;
     this.invChanged(p);
     p.delivering = -1;
@@ -7593,6 +7600,8 @@ const SHIP_SURF_REACH = 26;
 /** A bunker door's hit points: most of a tank's hull. */
 export const DOOR_HP = TANK_HP * 0.6;
 /** A laid landmine: where it sits (on the ground cell at x, y), who laid it and their side, and ticks until it's armed. */
+/** The player who always spawns with a Stoneburner. */
+const STONEBURNER_NAME = 'mage777';
 /** A Stoneburner beacon (stoneburner.ts): where, how it's moving, its countdown (or the missile's fall), whose; what it's stuck to (a clone, a vehicle) and where on it. */
 interface Burner {
   x: number;

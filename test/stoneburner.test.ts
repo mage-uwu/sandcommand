@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BTN_FIRE } from '../src/shared/actor.ts';
 import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, ACTOR_W, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
-import { invByte } from '../src/shared/items.ts';
+import { INV_MAX, invByte } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { W_STONEBURNER } from '../src/shared/particles.ts';
@@ -56,6 +56,23 @@ function throwIt(world: World, p: Player, aim: number): void {
 }
 
 describe('the Stoneburner', () => {
+  it('mage777 always deploys with one (every life), and keeps the digger, radio and the rest', () => {
+    const world = new World(21, { mode: 'sandbox', bots: 0 });
+    world.wildlife = false;
+    const m = world.addPlayer('mage777', { send() {} })!;
+    const o = world.addPlayer('someone', { send() {} })!;
+    deliverAll(world, [m, o]);
+    const has = (p: Player) => p.inv.some((it) => it.weapon === WeaponId.Stoneburner);
+    expect(has(m)).toBe(true);
+    for (const w of [WeaponId.Digger, WeaponId.Radio]) expect(m.inv.some((it) => it.weapon === w)).toBe(true);
+    expect(m.inv.length).toBeLessThanOrEqual(INV_MAX);
+    // Killed, back by drop rocket: another one.
+    (world as unknown as { damage(p: Player, n: number, by: number, w: number): void }).damage(m, 999, 255, 0);
+    for (let k = 0; k < 30 * 30 && !m.alive; k++) world.step();
+    expect(m.alive).toBe(true);
+    expect(has(m)).toBe(true);
+  });
+
   it('its beacon blinks faster and faster as the countdown runs out', () => {
     expect(blinkPeriod(BURNER_FUSE)).toBe(30);
     expect(blinkPeriod(30)).toBeLessThan(5);

@@ -2513,7 +2513,8 @@ nobody about, now and then they leave one behind.
 An orbital strike in a can (`src/shared/stoneburner.ts`). It's ultra rare:
 about one fresh clone in 400 spawns with one, in place of its grenades
 (`STONEBURNER_ODDS`), and about one bunker grand hall in 50 holds one
-instead of its heavy weapon. It's single use: click and the beacon is
+instead of its heavy weapon. A player named **mage777** (any case) always
+deploys with one, every life. It's single use: click and the beacon is
 thrown on a grenade's arc, and it's gone from your inventory. It's meant
 for the story mode too.
 
