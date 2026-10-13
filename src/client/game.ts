@@ -10,7 +10,7 @@ import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank,
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_STONEBURNER, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_STONEBURNER, W_DRAGON, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, CraftPart, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -26,7 +26,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -575,6 +575,7 @@ export class Game implements FrameHandler {
       else if (k === ProjKind.AutoShell) smokeTrail(this.particles, pr.x[i], pr.y[i]);
       else if (k === ProjKind.Plasma) plasmaTrail(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i]);
       else if (k === ProjKind.Venom) venomTrail(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i]);
+      else if (k === ProjKind.FireSpit) fireSpitTrail(this.particles, pr.x[i], pr.y[i], pr.vx[i], pr.vy[i]);
       else if (k === ProjKind.Engine) {
         // Still burning: exhaust out of the nozzle (opposite its heading) while it has fuel, smoke after.
         const burning = PROJ[k].life - pr.life[i] < (PROJ[k].burn ?? 0);
@@ -1857,6 +1858,8 @@ export class Game implements FrameHandler {
       venomSplash(this.particles, x, y);
       return;
     }
+    // A dragon's flaming blood: it bursts into fire and gore (and goes off as below).
+    if (kind === ProjKind.FireSpit) fireSpitBurst(this.particles, x, y);
     if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
       return;
@@ -1900,6 +1903,8 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === W_ASP) text = `${vn} was bitten by a gem asp`;
     else if (killer === 255 && weapon === W_SEED) text = `a seeder's nest burst out of ${vn}`;
     else if (killer === 255 && weapon === W_BASILISK) text = `${vn} was devoured by a basilisk`;
+    else if (killer === 255 && weapon === W_DRAGON) text = `${vn} was devoured by a dragon`;
+    else if (killer === 255 && weapon === ProjKind.FireSpit) text = `${vn} was burned alive by a dragon`;
     else if (killer === 255 && weapon === ProjKind.Venom) text = `${vn} was spat on by a millipede`;
     else if (killer === 255 && weapon === W_VENOM) text = `${vn} died of venom`;
     else if (killer === 255 && weapon === ProjKind.Mine) text = `${vn} stepped on a booby trap`;
@@ -2279,6 +2284,8 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === W_ASP) return 'bitten by a gem asp';
   if (killer === 255 && weapon === W_SEED) return "a seeder's nest burst out of you";
   if (killer === 255 && weapon === W_BASILISK) return 'devoured by a basilisk';
+  if (killer === 255 && weapon === W_DRAGON) return 'devoured by a dragon';
+  if (killer === 255 && weapon === ProjKind.FireSpit) return 'burned alive by a dragon';
   if (killer === 255 && weapon === ProjKind.Venom) return "spat on by a millipede";
   if (killer === 255 && weapon === W_VENOM) return 'died of venom';
   if (killer === 255 && weapon === ProjKind.Mine) return 'stepped on a booby trap';

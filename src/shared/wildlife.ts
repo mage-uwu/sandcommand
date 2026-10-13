@@ -23,7 +23,7 @@ import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -346,6 +346,35 @@ export const BASILISK_BITE = 400;
 export const BASILISK_CRUSH = 0.3;
 export const BASILISK_BITE_CD = 12;
 
+/**
+ * The **dragon**: the basilisk again, three times over: three times its
+ * girth and length (it bores tunnels a tank could drive down) and three
+ * times as hard to kill, scaled in blood red and black with bone spikes
+ * down its back. It sleeps, wakes and hunts as a basilisk does (World
+ * stepBasilisk, with everything scaled by DRAGON_SCALE), and as well as its
+ * jaws it **spits flaming blood** (ProjKind.FireSpit): volleys of burning
+ * gore lobbed at whatever it's hunting, that burst into fire where they
+ * land. It's rarer than a basilisk: a wild one turns up now and then in a
+ * basilisk's place (DRAGON_ODDS).
+ */
+export const DRAGON_SCALE = 3;
+export const DRAGON_SEGS = BASILISK_SEGS;
+export const DRAGON_GAP = BASILISK_GAP * DRAGON_SCALE;
+export const DRAGON_R = BASILISK_R * DRAGON_SCALE;
+export const DRAGON_HP = BASILISK_HP * 3;
+/** How often a wild basilisk's turn brings a dragon instead. */
+export const DRAGON_ODDS = 0.25;
+/** Its spit: how far off it'll spit at what it's hunting (cells), ticks between volleys, globs in one, and their speed (cells/s). */
+export const DRAGON_SPIT_RANGE = 700;
+export const DRAGON_SPIT_CD = 30 * 2;
+export const DRAGON_SPIT_VOLLEY = 4;
+export const DRAGON_SPIT_SPEED = 520;
+
+/** A basilisk or a dragon (the same beast at two sizes): bores, sleeps, hunts. */
+export const wyrm = (kind: number) => kind === BeastKind.Basilisk || kind === BeastKind.Dragon;
+/** How many times a basilisk's size this one is. */
+export const wyrmScale = (kind: number) => (kind === BeastKind.Dragon ? DRAGON_SCALE : 1);
+
 /** Each kind's build: body points, trail cells between them, hit radius, full health. */
 export const BEAST_BUILD = [
   { segs: MILLI_SEGS, gap: MILLI_GAP, r: MILLI_R, hp: MILLI_HP },
@@ -353,10 +382,11 @@ export const BEAST_BUILD = [
   { segs: 2, gap: 1, r: SEEDER_R, hp: SEEDER_HP },
   { segs: 1, gap: 1, r: NEST_R, hp: NEST_HP },
   { segs: BASILISK_SEGS, gap: BASILISK_GAP, r: BASILISK_R, hp: BASILISK_HP },
+  { segs: DRAGON_SEGS, gap: DRAGON_GAP, r: DRAGON_R, hp: DRAGON_HP },
 ] as const;
 
 /** Does this kind bore through the rock (no crawl: its head goes where it steers)? */
-export const burrows = (kind: number) => kind === BeastKind.Basilisk;
+export const burrows = (kind: number) => kind === BeastKind.Basilisk || kind === BeastKind.Dragon;
 
 /** Does this kind fly (no crawl, no trail: it's where it is)? */
 export const flies = (kind: number) => kind === BeastKind.Seeder;
@@ -818,16 +848,17 @@ export function boreStep(t: Terrain, b: Beast, gx: number, gy: number, speed: nu
   const hx = Math.round(b.fx);
   const hy = Math.round(b.fy);
   let held = false;
-  for (let k = 2; k <= 10 && !held; k += 2) if (gripAt(t, hx, hy + k) || gripAt(t, hx + k, hy) || gripAt(t, hx - k, hy) || gripAt(t, hx, hy - k)) held = true;
+  const sc = wyrmScale(b.kind);
+  for (let k = 2; k <= 10 * sc && !held; k += 2) if (gripAt(t, hx, hy + k) || gripAt(t, hx + k, hy) || gripAt(t, hx - k, hy) || gripAt(t, hx, hy - k)) held = true;
   // Flung (or nothing to hold): a thing in flight, under gravity, steering nowhere; caught by rock.
   if (b.flung > 0) b.flung--;
   if (b.flung > 0 || !held) return flyBallistic(t, b, dt, held);
   // Turn toward it (the short way round), at its rate.
   let d = ((want - b.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-  const max = BASILISK_TURN * dt;
+  const max = (BASILISK_TURN / Math.sqrt(sc)) * dt;
   b.ang += Math.max(-max, Math.min(max, d));
   // Whatever won't yield, dead ahead: swing aside (the way that's open), and hold there.
-  const look = BASILISK_BORE + 2;
+  const look = BASILISK_BORE * sc + 2;
   for (let tries = 0; tries < 6; tries++) {
     const ax = Math.round(b.fx + Math.cos(b.ang) * look);
     const ay = Math.round(b.fy + Math.sin(b.ang) * look);

@@ -27,6 +27,7 @@ import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES,
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
+import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
@@ -405,10 +406,11 @@ export class Renderer {
       pts.length = 0;
       for (let i = 0; i < pose.pts.length; i++) pts.push(pose.pts[i]);
       // (By its head, with room for its body: a basilisk's is long.)
-      const m = v.kind === BeastKind.Basilisk ? 240 : 80;
+      const m = v.kind === BeastKind.Dragon ? 720 : v.kind === BeastKind.Basilisk ? 240 : 80;
       if (pts[0] < camX - halfW - m || pts[0] > camX + halfW + m || pts[1] < camY - halfH - m || pts[1] > camY + halfH + m) continue;
       const lift = pose.lift;
       if (v.kind === BeastKind.Basilisk) drawBasilisk(ctx, pts, v.seed, v.frozen, v.frenzy, now);
+      else if (v.kind === BeastKind.Dragon) drawDragon(ctx, pts, v.seed, v.frozen, v.frenzy, now);
       else if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
       else if (v.kind === BeastKind.Nest) drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
       else if (v.kind === BeastKind.Asp) {
@@ -928,6 +930,7 @@ export class Renderer {
       if (g.x < camX - halfW - 10 || g.x > camX + halfW + 10 || g.y < camY - halfH - 10 || g.y > camY + halfH + 10) continue;
       ctx.globalAlpha = Math.min(1, g.life / 30);
       if (g.kind === BeastKind.Basilisk) drawBasiliskGib(ctx, g.x, g.y, g.a, g.seed, g.i);
+      else if (g.kind === BeastKind.Dragon) drawDragonGib(ctx, g.x, g.y, g.a, g.seed, g.i);
       else if (g.kind === BeastKind.Seeder || g.kind === BeastKind.Nest) drawCritterGib(ctx, g.x, g.y, g.a, g.kind, g.seed, g.i);
       else drawSegmentGib(ctx, game.terrain, this.groundColor, g.x, g.y, g.a, g.kind, g.seed, g.i, now);
     }
@@ -1073,6 +1076,21 @@ export class Renderer {
         ctx.fillStyle = (now / 90) % 2 < 1 ? '#ff3030' : '#a01010';
         ctx.fillRect(3, -1, 2, 2);
         ctx.restore();
+      } else if (k === ProjKind.FireSpit) {
+        // A dragon's spit: a glob of burning blood, a dark red heart in a halo of flame.
+        const op = ctx.globalCompositeOperation;
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(x, y, 0, x, y, 9);
+        g.addColorStop(0, 'rgba(255,200,80,0.9)');
+        g.addColorStop(0.5, 'rgba(255,90,20,0.45)');
+        g.addColorStop(1, 'rgba(200,30,10,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - 9, y - 9, 18, 18);
+        ctx.globalCompositeOperation = op;
+        ctx.fillStyle = '#6a0408';
+        ctx.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
+        ctx.fillStyle = '#ff8a20';
+        ctx.fillRect(Math.round(x) - 1, Math.round(y) - 2, 2, 1);
       } else if (k === ProjKind.Venom) {
         // Millipede venom: a wet, dark-red glob, a bright glint on it, drawn out a little along its flight.
         ctx.save();

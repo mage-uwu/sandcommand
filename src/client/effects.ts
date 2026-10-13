@@ -732,3 +732,21 @@ export function moltenCore(p: Particles, x: number, y: number, heat: number): vo
     burst(p, PK.Smoke, x, y - 4, 18, r * 3, 80);
   }
 }
+
+/** A dragon's spit in flight: flame streaming off it, drops of burning blood falling away, a little smoke. */
+export function fireSpitTrail(p: Particles, x: number, y: number, vx: number, vy: number): void {
+  p.spawn(PK.Flame, x + rnd(-1.5, 1.5), y + rnd(-1.5, 1.5), vx * 0.15 + rnd(-20, 20), vy * 0.15 + rnd(-30, 10), rnd(6, 12));
+  if (Math.random() < 0.4) p.spawn(PK.Blood, x, y, vx * 0.1 + rnd(-15, 15), vy * 0.1 + rnd(-10, 10), 40);
+  if (Math.random() < 0.25) p.spawn(PK.Smoke, x, y, rnd(-10, 10), rnd(-20, 0), rnd(30, 60));
+}
+
+/** A dragon's spit bursting: a splash of blood and a gout of flame thrown up off it. */
+export function fireSpitBurst(p: Particles, x: number, y: number): void {
+  bloodSplat(p, x, y, 18, 120);
+  for (let k = 0; k < 30; k++) {
+    const a = -Math.PI * Math.random();
+    const s = rnd(60, 260);
+    p.spawn(PK.Flame, x + rnd(-3, 3), y + rnd(-3, 2), Math.cos(a) * s, Math.sin(a) * s, rnd(14, 34));
+  }
+  burst(p, PK.Smoke, x, y - 4, 14, 60, 90);
+}

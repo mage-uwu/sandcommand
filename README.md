@@ -886,6 +886,33 @@ and very hard to kill.
   it and another comes up six minutes later. Killed, it breaks into chunks
   of plate, each dressed as its section was.
 
+**The dragon** is the basilisk three times over: three times its girth
+and length (it bores tunnels a tank could drive down) and three times its
+health. It sleeps, wakes and hunts just as a basilisk does, with
+everything scaled up: wake range, how far it hears, its stirring, its dive,
+its jaws' reach, its bore, and how hard its body batters. For its size
+it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
+`World.stepBasilisk` runs both).
+- **It spits flaming blood.** Hunting something it can see within 700
+  cells, it lobs a volley of four globs of burning gore on the arc that
+  lands, fanned out a little, every couple of seconds
+  (`ProjKind.FireSpit`). Each bursts into blood and a gout of fire that
+  burns whoever it reaches.
+- **Kill feed:** "devoured by a dragon" for its jaws and body, "burned
+  alive by a dragon" for its spit.
+- **Where it turns up:** it's rarer than a basilisk. When the wild
+  basilisk's turn comes round, a quarter of the time it's a dragon
+  instead (`DRAGON_ODDS`), deeper down and further from anyone. Only one
+  of either is about at a time.
+- **Its look** (`src/client/dragon-art.ts`) is its own sharper pixel
+  sprite, baked once and drawn turned along its body with no smoothing,
+  so every edge stays crisp:
+  - overlapping blood-red scales lit from above, over ochre belly plates;
+  - a row of bone spikes down its spine, shrinking toward a barbed tail;
+  - frenzied, the cracks between its scales glow like coals;
+  - a long horned head with a spiked brow and ember eyes, whose jaw drops
+    open on rows of fangs over a throat glowing with its fire.
+
 ## Frosting: craters, gem caverns, geysers and flora
 
 Each map is grown with some extra frosting after its bunkers and caves.

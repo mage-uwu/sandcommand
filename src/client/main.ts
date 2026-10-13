@@ -391,7 +391,7 @@ function assistTargets(g: Game): AssistTarget[] {
       out.push({ x: pose.pts[0], y: pose.pts[1], vx: pose.vx, vy: pose.vy, g: 3000 + slot, core: true });
       continue;
     }
-    if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp && v.kind !== BeastKind.Basilisk) || v.frozen || v.gem) continue;
+    if ((v.kind !== BeastKind.Millipede && v.kind !== BeastKind.Asp && v.kind !== BeastKind.Basilisk && v.kind !== BeastKind.Dragon) || v.frozen || v.gem) continue;
     const pose = g.beastPose(v);
     const n = pose.pts.length >> 1;
     if (n < 2) continue;

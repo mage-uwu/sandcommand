@@ -4,7 +4,7 @@ import { ACTOR_H, ACTOR_W, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { W_BASILISK } from '../src/shared/particles.ts';
 import { PROJ, ProjKind } from '../src/shared/weapons.ts';
-import { BASILISK_CALM, BASILISK_R, BASILISK_SLEEP_MAX, BeastKind, MILLI_R, bodyPoints, newBeast } from '../src/shared/wildlife.ts';
+import { BASILISK_CALM, BASILISK_R, BASILISK_SLEEP_MAX, BeastKind, MILLI_R, bodyPoints, newBeast, wyrm } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 import { Game } from '../src/client/game.ts';
@@ -246,7 +246,8 @@ describe('the basilisk', () => {
       const world = new World(seed);
       world.beasts.fill(null);
       expect((world as unknown as { spawnBasilisk(): boolean }).spawnBasilisk(), `seed ${seed}`).toBe(true);
-      const b = world.beasts.find((o) => o?.kind === BeastKind.Basilisk)!;
+      // (Or now and then a dragon in its place.)
+      const b = world.beasts.find((o) => o && wyrm(o.kind))!;
       expect(b.frozen).toBeGreaterThan(0);
       expect(b.y).toBeGreaterThan(world.terrain.surfaceY(b.x) + 100);
       found++;

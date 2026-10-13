@@ -1,4 +1,4 @@
-import { BeastKind } from '../shared/wildlife.ts';
+import { BeastKind, wyrm } from '../shared/wildlife.ts';
 import { DEFENDERS } from '../shared/siege.ts';
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
 import { ClassId, DROID_MASK, stumps } from '../shared/body.ts';
@@ -295,7 +295,7 @@ export class BotBrain {
     for (let k = 0; k < world.beasts.length; k++) {
       const b = world.beasts[k];
       // (Not a basilisk asleep: they don't know it's there, and they'd only wake it. Unless that's the job: Extermination.)
-      if (!b || (b.kind === BeastKind.Basilisk && b.frozen > 0 && !world.exterminationLive)) continue;
+      if (!b || (wyrm(b.kind) && b.frozen > 0 && !world.exterminationLive)) continue;
       const pts = world.beastPts[k];
       for (let i = 0; i < pts.length; i += 4) {
         const d = Math.hypot(pts[i] - sx, pts[i + 1] - sy);

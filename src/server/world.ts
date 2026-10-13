@@ -164,7 +164,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, W_DRAGON, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -350,6 +350,14 @@ import {
   newSeeder,
   hitScale,
   BASILISK_BITE,
+  DRAGON_ODDS,
+  DRAGON_R,
+  DRAGON_SPIT_CD,
+  DRAGON_SPIT_RANGE,
+  DRAGON_SPIT_SPEED,
+  DRAGON_SPIT_VOLLEY,
+  wyrm,
+  wyrmScale,
   BASILISK_BITE_CD,
   BASILISK_BORE,
   BASILISK_BORE_EVERY,
@@ -1726,7 +1734,7 @@ export class World {
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
       const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
       if (nests < (this.caves ? NESTS_CAVES : NESTS_PLAIN)) this.spawnNest();
-      else if (this.tick >= this.basiliskAt && !this.beasts.some((b) => b?.kind === BeastKind.Basilisk)) {
+      else if (this.tick >= this.basiliskAt && !this.beasts.some((b) => b && wyrm(b.kind))) {
         if (this.spawnBasilisk()) this.basiliskAt = Infinity;
       }
       else if (this.beasts.filter((b) => b && (b.kind === BeastKind.Millipede || b.kind === BeastKind.Asp)).length < want) this.spawnBeast();
@@ -1743,7 +1751,7 @@ export class World {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
         else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
         else if (b.kind === BeastKind.Nest) this.stepNest(k, b);
-        else if (b.kind === BeastKind.Basilisk) this.stepBasilisk(k, b);
+        else if (wyrm(b.kind)) this.stepBasilisk(k, b);
         else this.stepMillipede(k, b);
       }
     }
@@ -2170,7 +2178,10 @@ export class World {
       const c = this.calm;
       if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
       if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 700)) continue;
-      const b = newBeast(t, BeastKind.Basilisk, x, y - 8, rng.next() < 0.5 ? -1 : 1);
+      // (Now and then, a dragon in its place: deeper down, and far from anyone.)
+      const kind = rng.next() < DRAGON_ODDS ? BeastKind.Dragon : BeastKind.Basilisk;
+      if (kind === BeastKind.Dragon && (y < surf + 260 || this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 1100))) continue;
+      const b = newBeast(t, kind, x, y - 8 * wyrmScale(kind), rng.next() < 0.5 ? -1 : 1);
       b.seed = rng.int(256);
       b.frozen = BASILISK_SLEEP_MIN + rng.int(BASILISK_SLEEP_MAX - BASILISK_SLEEP_MIN);
       this.beasts[slot] = b;
@@ -2282,9 +2293,27 @@ export class World {
     return plan ? { x: plan.x, y: plan.y } : null;
   }
 
+  /**
+   * A dragon spits: a volley of flaming blood from its jaws at (tx, ty),
+   * each glob on the arc that lands near it (fanned out a little: a spray,
+   * not a shot), then a while before the next.
+   */
+  private dragonSpit(b: Beast, hx: number, hy: number, tx: number, ty: number): void {
+    const rng = this.beastRng;
+    const g = GRAVITY * PROJ[ProjKind.FireSpit].gravity;
+    const sol = ballisticAim(hx, hy, { x: tx, y: ty, vx: 0, vy: 0 }, DRAGON_SPIT_SPEED, g);
+    const a0 = sol ? sol.aim : Math.atan2(ty - hy, tx - hx) - 0.35;
+    for (let k = 0; k < DRAGON_SPIT_VOLLEY; k++) {
+      const a = a0 + rng.range(-0.12, 0.12);
+      const sp = DRAGON_SPIT_SPEED * rng.range(0.9, 1.08);
+      this.spawnProj(this.nextProjId++, ProjKind.FireSpit, NO_OWNER, hx + Math.cos(a) * 20, hy + Math.sin(a) * 20, Math.cos(a) * sp, Math.sin(a) * sp);
+    }
+    b.spitCd = DRAGON_SPIT_CD + rng.int(30);
+  }
+
   /** Disturbed: a basilisk wakes in a killing frenzy (up top already, it hunts at once). */
   private enrage(b: Beast): void {
-    if (b.kind !== BeastKind.Basilisk) return;
+    if (!wyrm(b.kind)) return;
     // (A lair basilisk is on its own ground already: it hunts where it is, no rush for the surface.)
     if (b.frenzy === 0) b.surfaced = this.lairHome.has(b) || b.fy <= this.terrain.surfaceY(Math.round(b.fx)) + 4;
     b.frozen = 0;
@@ -2296,14 +2325,15 @@ export class World {
   private basiliskDisturbed(b: Beast, pts: number[]): boolean {
     for (const p of this.players) {
       if (!p || !p.alive || p.pilot >= 0) continue;
-      if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) < BASILISK_WAKE && this.lineClear(pts[0], pts[1], p.cx, p.cy)) return true;
-      if (nearestPoint(pts, p.cx, p.cy).d < BASILISK_TOUCH) return true;
+      const sc = wyrmScale(b.kind);
+      if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) < BASILISK_WAKE * sc && this.lineClear(pts[0], pts[1], p.cx, p.cy)) return true;
+      if (nearestPoint(pts, p.cx, p.cy).d < BASILISK_TOUCH * sc) return true;
     }
     return false;
   }
 
   /** What a frenzied basilisk goes for: the nearest it can see from its head (or feel, near enough, through the ground). A clone in a vehicle: the vehicle. */
-  private basiliskPrey(hx: number, hy: number): { x: number; y: number } | null {
+  private basiliskPrey(hx: number, hy: number, sc = 1): { x: number; y: number } | null {
     let best: { x: number; y: number } | null = null;
     let bestD = Infinity;
     for (const p of this.players) {
@@ -2312,10 +2342,10 @@ export class World {
       const x = tk ? tk.x + tankW(tk) / 2 : p.cx;
       const y = tk ? tankCoreY(tk) : p.cy;
       const d = Math.hypot(x - hx, y - hy);
-      if (d >= bestD || d > BASILISK_SENSE) continue;
+      if (d >= bestD || d > BASILISK_SENSE * (1 + (sc - 1) * 0.25)) continue;
       // (Just under the ground, it watches the surface over it, as a shark the water.)
       const sy = Math.min(hy, this.terrain.surfaceY(Math.round(hx)) - 3);
-      if (d > BASILISK_FEEL && !this.lineClear(hx, hy, x, y) && !this.lineClear(hx, sy, x, y)) continue;
+      if (d > BASILISK_FEEL * sc && !this.lineClear(hx, hy, x, y) && !this.lineClear(hx, sy, x, y)) continue;
       bestD = d;
       best = { x, y };
     }
@@ -2334,7 +2364,12 @@ export class World {
     const t = this.terrain;
     const rng = this.beastRng;
     const pts = this.beastPts[k];
+    // (A dragon: the same beast, everything scaled up; a bit quicker for its size.)
+    const sc = wyrmScale(b.kind);
+    const pace = 1 + (sc - 1) * 0.15;
+    const bore = BASILISK_BORE * sc;
     if (b.coilCd > 0) b.coilCd--;
+    if (b.spitCd > 0) b.spitCd--;
     const surf = t.surfaceY(Math.round(b.fx));
     let gx = b.fx;
     let gy = b.fy;
@@ -2349,31 +2384,31 @@ export class World {
     if (b.frenzy === 0) {
       // Stirring (or diving to sleep): a short way through the rock, then sleep.
       if (b.still === 0) {
-        b.lastX = Math.max(80, Math.min(WORLD_W - 80, b.fx + (rng.next() - 0.5) * 2 * BASILISK_STIR));
-        b.lastY = Math.max(surf + BASILISK_DEEP * 0.6, Math.min(WORLD_H - 40, b.fy + (rng.next() - 0.3) * BASILISK_STIR));
+        b.lastX = Math.max(80, Math.min(WORLD_W - 80, b.fx + (rng.next() - 0.5) * 2 * BASILISK_STIR * sc));
+        b.lastY = Math.max(surf + BASILISK_DEEP * sc * 0.6, Math.min(WORLD_H - 40, b.fy + (rng.next() - 0.3) * BASILISK_STIR * sc));
       }
       gx = b.lastX;
       gy = b.lastY;
       // (A lair basilisk, calmed, bores its way back home to its den.)
       const home = this.lairHome.get(b);
       const homing = !!home && gx === home.x && gy === home.y;
-      speed = homing || b.fy < surf + BASILISK_DEEP * 0.5 ? BASILISK_RISE : BASILISK_CREEP;
-      if (Math.hypot(gx - b.fx, gy - b.fy) < 10 || ++b.still > (homing ? 30 * 60 : 30 * 15)) {
+      speed = (homing || b.fy < surf + BASILISK_DEEP * sc * 0.5 ? BASILISK_RISE : BASILISK_CREEP) * pace;
+      if (Math.hypot(gx - b.fx, gy - b.fy) < 10 * sc || ++b.still > (homing ? 30 * 60 : 30 * 15)) {
         b.still = 0;
         b.frozen = BASILISK_SLEEP_MIN + rng.int(BASILISK_SLEEP_MAX - BASILISK_SLEEP_MIN);
       }
     } else if (!b.surfaced) {
       // Its first instinct: up, the straightest way it can bore, to the surface.
       gx = b.fx + Math.cos(b.ang) * 6;
-      gy = surf - 12;
-      speed = BASILISK_RISE;
+      gy = surf - 12 * sc;
+      speed = BASILISK_RISE * pace;
       if (b.fy <= surf + 3) b.surfaced = true;
     } else {
       // In the lair: it hunts by ear, anyone anywhere in its cave, finding its way to them along
       // the cave's walls, floor and roof (basiliskRoute). Wild, it hunts what it sees up top.
       const lair = this.lairHome.has(b);
-      const prey = lair ? this.lairPrey(b.fx, b.fy) : this.basiliskPrey(b.fx, b.fy);
-      speed = BASILISK_HUNT;
+      const prey = lair ? this.lairPrey(b.fx, b.fy) : this.basiliskPrey(b.fx, b.fy, sc);
+      speed = BASILISK_HUNT * pace;
       if (prey) {
         b.frenzy = BASILISK_CALM;
         const via = lair ? this.basiliskRoute(b, prey.x, prey.y) : null;
@@ -2383,13 +2418,15 @@ export class World {
         speed *= sprintTick(b, true, rng.next());
         const d = Math.hypot(prey.x - b.fx, prey.y - b.fy);
         if (b.flung === 0 && b.flingCd === 0 && d > FLING_MIN * 3 && d < FLING_MAX * 2.5 && rng.next() < 0.1 && this.lineClear(b.fx, b.fy, prey.x, prey.y)) fling(b, b.fx, b.fy, prey.x, prey.y, 3);
+        // A dragon spits flaming blood at it: a volley of burning gore, lobbed, from its jaws.
+        if (b.kind === BeastKind.Dragon && b.spitCd === 0 && d < DRAGON_SPIT_RANGE && d > DRAGON_R * 2 && this.lineClear(pts[0], pts[1], prey.x, prey.y)) this.dragonSpit(b, pts[0], pts[1], prey.x, prey.y);
       } else if (--b.frenzy <= 0) {
         // Nothing left: down into the deep, to sleep.
         b.frenzy = 0;
         b.still = 1;
         const home = this.lairHome.get(b);
         b.lastX = home ? home.x : b.fx;
-        b.lastY = home ? home.y : Math.min(WORLD_H - 40, surf + BASILISK_DEEP);
+        b.lastY = home ? home.y : Math.min(WORLD_H - 40, surf + BASILISK_DEEP * (1 + (sc - 1) * 0.5));
         b.surfaced = false;
       } else if (lair) {
         // Nobody about: back toward its den, the way it knows.
@@ -2399,41 +2436,42 @@ export class World {
         gy = via ? via.y : home.y;
       } else {
         // Prowling, just under the ground, the way it was going.
-        gx = b.fx + (Math.cos(b.ang) >= 0 ? 60 : -60);
-        gy = surf + 18;
+        gx = b.fx + (Math.cos(b.ang) >= 0 ? 60 : -60) * sc;
+        gy = surf + 18 * sc;
       }
     }
     if (speed > 0) {
       const moved = boreStep(t, b, gx, gy, speed, DT);
       b.bored += moved;
-      if (b.bored >= BASILISK_BORE_EVERY) {
+      if (b.bored >= BASILISK_BORE_EVERY * sc) {
         b.bored = 0;
         // (Only a bite where there's rock to take.)
-        const ax = b.fx + Math.cos(b.ang) * BASILISK_BORE * 0.5;
-        const ay = b.fy + Math.sin(b.ang) * BASILISK_BORE * 0.5;
-        if (t.isSolid(Math.round(ax), Math.round(ay)) || t.isSolid(Math.round(b.fx), Math.round(b.fy + BASILISK_BORE - 2)) || t.isSolid(Math.round(b.fx), Math.round(b.fy - BASILISK_BORE + 2))) {
+        const ax = b.fx + Math.cos(b.ang) * bore * 0.5;
+        const ay = b.fy + Math.sin(b.ang) * bore * 0.5;
+        if (t.isSolid(Math.round(ax), Math.round(ay)) || t.isSolid(Math.round(b.fx), Math.round(b.fy + bore - 2)) || t.isSolid(Math.round(b.fx), Math.round(b.fy - bore + 2))) {
           // (Near anything that won't yield, a soft bite only: its jaws never so much as chip cement or bedrock.)
           let hard = false;
-          for (let dy = -BASILISK_BORE - 2; dy <= BASILISK_BORE + 2 && !hard; dy += 2) {
-            for (let dx = -BASILISK_BORE - 2; dx <= BASILISK_BORE + 2; dx += 2) {
+          for (let dy = -bore - 2; dy <= bore + 2 && !hard; dy += 2 * sc) {
+            for (let dx = -bore - 2; dx <= bore + 2; dx += 2 * sc) {
               if (!boreable(t, Math.round(ax + dx), Math.round(ay + dy))) {
                 hard = true;
                 break;
               }
             }
           }
-          this.carve(ax, ay, BASILISK_BORE, hard ? 0 : BASILISK_BORE, 3);
+          this.carve(ax, ay, bore, hard ? 0 : bore, 3 * sc);
         }
       }
     }
     bodyPoints(t, b, pts);
     // Its jaws.
     if (b.frenzy > 0 && b.coilCd === 0) {
-      const reach = BASILISK_R + BASILISK_JAWS;
+      const reach = (BASILISK_R + BASILISK_JAWS) * sc;
+      const jaws = b.kind === BeastKind.Dragon ? W_DRAGON : W_BASILISK;
       for (const p of this.players) {
         if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > reach) continue;
-        this.damage(p, BASILISK_BITE, NO_OWNER, W_BASILISK);
+        this.damage(p, BASILISK_BITE, NO_OWNER, jaws);
         b.coilCd = BASILISK_BITE_CD;
       }
       for (let s = 0; s < this.tanks.length; s++) {
@@ -2442,33 +2480,33 @@ export class World {
         const cx = Math.max(tk.x, Math.min(tk.x + tankW(tk), pts[0]));
         const cy = Math.max(tk.y, Math.min(tk.y + tankH(tk), pts[1]));
         if (Math.hypot(cx - pts[0], cy - pts[1]) > reach) continue;
-        this.hurtTankPart(s, TankPart.Hull, TANK_HP * BASILISK_CRUSH, NO_OWNER);
+        this.hurtTankPart(s, TankPart.Hull, TANK_HP * BASILISK_CRUSH * sc, NO_OWNER);
         b.coilCd = BASILISK_BITE_CD;
       }
     }
     // Its body: awake, and moving, the great plated length of it batters whoever it rolls
     // into (each clone struck at most every BAS_BODY_CD ticks), and knocks them away.
     if (b.frenzy > 0 && Math.hypot(b.vx, b.vy) > 10) {
-      const r = BASILISK_R + 2;
+      const r = BASILISK_R * sc + 2;
       for (const p of this.players) {
         if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || this.tick < this.basBodyAt[p.id]) continue;
         // (Its head is its jaws' business; from the second segment back.)
         const { d, i } = nearestPoint(pts, p.cx, p.cy);
         if (i < 1 || d > r) continue;
-        this.damage(p, BAS_BODY_HARM, NO_OWNER, W_BASILISK);
+        this.damage(p, BAS_BODY_HARM * (1 + (sc - 1) * 0.5), NO_OWNER, b.kind === BeastKind.Dragon ? W_DRAGON : W_BASILISK);
         this.basBodyAt[p.id] = this.tick + BAS_BODY_CD;
         const dx = p.cx - pts[i * 2];
         const dy = p.cy - pts[i * 2 + 1];
         const l = Math.hypot(dx, dy) || 1;
-        p.body.vx += (dx / l) * 140;
-        p.body.vy += (dy / l) * 140 - 60;
+        p.body.vx += (dx / l) * 140 * (1 + (sc - 1) * 0.4);
+        p.body.vy += (dy / l) * 140 * (1 + (sc - 1) * 0.4) - 60;
       }
       for (let s = 0; s < this.tanks.length; s++) {
         const tk = this.tanks[s];
         if (!tk || this.tick < this.basBodyAtTank[s]) continue;
         const { d } = nearestPoint(pts, tk.x + tankW(tk) / 2, tk.y + tankH(tk) / 2);
         if (d > r + tankW(tk) / 2) continue;
-        this.hurtTankPart(s, TankPart.Hull, TANK_HP * BAS_BODY_CRUSH, NO_OWNER);
+        this.hurtTankPart(s, TankPart.Hull, TANK_HP * BAS_BODY_CRUSH * sc, NO_OWNER);
         this.basBodyAtTank[s] = this.tick + BAS_BODY_CD;
       }
     }
@@ -2868,11 +2906,11 @@ export class World {
     b.frozen = 0;
     b.gem = false;
     if (b.kind === BeastKind.Nest) b.alarm = 30 * 8; // (hurt: it senses danger, whoever it is)
-    if (b.kind === BeastKind.Basilisk) this.enrage(b);
+    if (wyrm(b.kind)) this.enrage(b);
     if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
     if (b.hp > 0) return;
     this.beasts[k] = null;
-    if (b.kind === BeastKind.Basilisk) this.basiliskAt = this.tick + BASILISK_RESPAWN;
+    if (wyrm(b.kind)) this.basiliskAt = this.tick + BASILISK_RESPAWN;
     const w = this.broadcast;
     w.u8(R_BEAST_DIE);
     w.u8(k);
@@ -3205,7 +3243,7 @@ export class World {
       const { d, i } = nearestPoint(this.beastPts[k], x, y);
       const kind = this.beasts[k]!.kind;
       const falloff = kind === BeastKind.Asp ? 1 - (0.5 * d) / r : 1 - d / r;
-      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : kind === BeastKind.Basilisk ? 0.6 : 1) * hitScale(kind, i) * falloff, by);
+      if (d < r) this.hurtBeast(k, dmg * (kind === BeastKind.Millipede ? 1.5 : wyrm(kind) ? 0.6 : 1) * hitScale(kind, i) * falloff, by);
     }
   }
 
@@ -3776,13 +3814,14 @@ export class World {
     }
     // Wildlife: a circle round each body point. (A creature's own venom never hits its kind; a laser
     // goes through them, beam() hurts every one along it.)
-    if (kind !== ProjKind.Venom && kind !== LASER_VEHICLES_ONLY) {
+    if (kind !== ProjKind.Venom && kind !== ProjKind.FireSpit && kind !== LASER_VEHICLES_ONLY) {
       const len = Math.hypot(dx, dy);
       for (let k = 0; k < MAX_BEASTS; k++) {
         const pts = this.beasts[k] ? this.beastPts[k] : null;
         if (!pts || !pts.length) continue;
         // (Too far off to touch it, from its head: its body's no longer than this.)
-        if (Math.hypot(pts[0] - x0, pts[1] - y0) > len + 90) continue;
+        const build = BEAST_BUILD[this.beasts[k]!.kind];
+        if (Math.hypot(pts[0] - x0, pts[1] - y0) > len + build.segs * build.gap + build.r) continue;
         for (let i = 0; i < pts.length; i += 2) {
           const t = segmentCircle(x0, y0, dx, dy, pts[i], pts[i + 1], BEAST_BUILD[this.beasts[k]!.kind].r);
           if (t >= 0 && t < bestT) {
@@ -3946,8 +3985,8 @@ export class World {
       const scale = hitScale(kind, nearestPoint(this.beastPts[bk], x, y).i);
       // A basilisk's plates: half what gets through them, next to nothing what doesn't; a shaped charge a small share.
       const dmg =
-        kind === BeastKind.Basilisk
-          ? (energy > TANK_INTEGRITY ? def.damage * 0.5 : def.damage * 0.05) + (def.antiArmor ? BASILISK_HP * def.antiArmor * 0.15 : 0)
+        wyrm(kind)
+          ? (energy > TANK_INTEGRITY ? def.damage * 0.5 : def.damage * 0.05) + (def.antiArmor ? BEAST_BUILD[kind].hp * def.antiArmor * 0.15 : 0)
           : armoured
             ? (energy > TANK_INTEGRITY ? def.damage : def.damage * 0.2) + (def.antiArmor ? MILLI_HP * def.antiArmor * 0.5 : 0)
             : def.damage;
@@ -4017,6 +4056,15 @@ export class World {
     // Plasma leaves a lick of flame where it landed (that burns whoever stands in it).
     if (kind === ProjKind.Plasma) for (let n = 0; n < 2; n++) this.grains.spawn(PK.Flame, x + this.rng.range(-2, 2), y + this.rng.range(-2, 2), this.rng.range(-30, 30), this.rng.range(-60, 10), 8 + this.rng.int(8), 0, 0, owner);
     const seed = this.rng.nextU32();
+    // A dragon's flaming blood, bursting: the fire it throws out (it burns whoever it reaches), and the blood.
+    if (kind === ProjKind.FireSpit) {
+      for (let n = 0; n < 26; n++) {
+        const a = -Math.PI * this.rng.next();
+        const sp = 60 + this.rng.next() * 200;
+        this.grains.spawn(PK.Flame, x + this.rng.range(-4, 4), y + this.rng.range(-4, 2), Math.cos(a) * sp, Math.sin(a) * sp, 20 + this.rng.int(30), 0, 0, NO_OWNER);
+      }
+      for (let n = 0; n < 10; n++) this.grains.spawn(PK.Blood, x, y, this.rng.range(-120, 120), this.rng.range(-160, 20), 40, 0, 0, NO_OWNER);
+    }
     if (detonate) {
       if (def.carveR > 0 && (actor < 0 || !def.ballistic)) {
         this.carve(x, y, def.carveR, def.coreR, def.debris, owner);
@@ -4598,7 +4646,7 @@ export class World {
         consider(pts[0], pts[1], vx, vy);
         continue;
       }
-      if ((b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp && b.kind !== BeastKind.Basilisk) || b.frozen > 0 || b.gem) continue;
+      if ((b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp && !wyrm(b.kind)) || b.frozen > 0 || b.gem) continue;
       const m = (pts.length >> 2) << 1;
       consider(pts[0], pts[1], vx, vy);
       consider(pts[m], pts[m + 1], vx, vy);
@@ -4662,7 +4710,7 @@ export class World {
       if (!pts) continue;
       for (let i = 0; i < pts.length; i += 2) {
         if (segmentCircle(x0, y0, x1 - x0, y1 - y0, pts[i], pts[i + 1], BEAST_BUILD[this.beasts[k]!.kind].r + w) >= 0) {
-          this.hurtBeast(k, wound * hitScale(this.beasts[k]!.kind, i >> 1) * (this.beasts[k]!.kind === BeastKind.Basilisk ? 0.3 : 1), by);
+          this.hurtBeast(k, wound * hitScale(this.beasts[k]!.kind, i >> 1) * (wyrm(this.beasts[k]!.kind) ? 0.3 : 1), by);
           break;
         }
       }
@@ -7350,7 +7398,8 @@ export class World {
       for (let k = 0; k < MAX_BEASTS; k++) {
         const pts = this.beasts[k] ? this.beastPts[k] : null;
         // (By its head, with room for its body: a basilisk's is long.)
-        const m = this.beasts[k]?.kind === BeastKind.Basilisk ? 220 : 60;
+        const bk = this.beasts[k]?.kind ?? 0;
+        const m = wyrm(bk) ? 220 * wyrmScale(bk) : 60;
         const inView = !!pts && pts.length > 0 && pts[0] >= vx0 - m && pts[0] <= vx1 + m && pts[1] >= vy0 - m && pts[1] <= vy1 + m;
         this.beastInView[k] = inView ? 1 : 0;
         if (inView) nBeast++;
