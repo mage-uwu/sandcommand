@@ -14,6 +14,8 @@ import { Game } from '../src/client/game.ts';
 import { deliverAll } from './helpers.ts';
 
 const FLOOR = 700;
+/** The sludge never climbs back up past here (well up the crater's side). */
+const FOOT_TOP = FLOOR - 20;
 /** A sandbox: flat dirt from FLOOR down (bedrock at the bottom), open air over it; `n` clones in it, frames to the first fed to a client. */
 function range(n: number) {
   const world = new World(11, { mode: 'sandbox', bots: 0 });
@@ -173,22 +175,34 @@ describe('the Stoneburner', () => {
     expect(world.tanks[0]).toBe(null);
   });
 
-  it("the molten core burns its way down for 40 s, slower as it goes, and smoulders out", () => {
+  it('the molten sludge pools in the crater, eats the ground it touches, and sets as glassy slag', () => {
     const { world, ps, place } = range(2);
     place(ps[0], 300);
     place(ps[1], 3800);
-    world.stoneBurn(2000, FLOOR - 1, 255);
-    expect(world.feet.length).toBe(1);
-    const f = world.feet[0];
-    const y0 = f.y;
-    for (let k = 0; k < 30 * 10; k++) world.step();
-    const y10 = f.y;
-    for (let k = 0; k < 30 * 10; k++) world.step();
-    const y20 = f.y;
-    expect(y10).toBeGreaterThan(y0 + 20);
-    expect(y20 - y10).toBeLessThan(y10 - y0); // (slowing)
-    expect(world.terrain.isSolid(2000, y20)).toBe(false); // (burned its way down)
+    const gz = 2000;
+    world.stoneBurn(gz, FLOOR - 1, 255);
+    expect(world.feet.length).toBeGreaterThan(20);
+    // Settled into the crater a moment later: the ground under it as it was then.
+    for (let k = 0; k < 30 * 2; k++) world.step();
+    const air = () => {
+      let n = 0;
+      for (let y = FLOOR; y < FLOOR + 260; y++) for (let x = gz - 160; x < gz + 160; x++) if (!world.terrain.isSolid(x, y)) n++;
+      return n;
+    };
+    const air0 = air();
+    for (let k = 0; k < 30 * 12; k++) world.step();
+    // Eaten into: noticeably more ground gone under it.
+    expect(air() - air0).toBeGreaterThan(400);
+    // It's a pool, not a point: spread across the crater floor, and down in it (never back up out of it).
+    const xs = world.feet.map((f) => f.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(30);
+    for (const f of world.feet) expect(f.y).toBeGreaterThan(FOOT_TOP);
+    // Burned out, set: none left, and slag (glass) where they were.
     for (let k = 0; k < FOOT_LIFE; k++) world.step();
     expect(world.feet.length).toBe(0);
+    let glass = 0;
+    for (let y = FLOOR; y < WORLD_H; y++) for (let x = gz - 300; x < gz + 300; x++) if (world.terrain.get(x, y) === Mat.Glass) glass++;
+    expect(glass).toBeGreaterThan(10);
   });
+
 });

@@ -67,29 +67,53 @@ function drawMissile(ctx: CanvasRenderingContext2D, x: number, gy: number, left:
   ctx.fill();
 }
 
-/** The molten cores in their pits: a white-hot heart in an orange glow, flickering, dimming as it smoulders out. */
+/**
+ * The molten sludge: each blob a glob of glowing slag (white-yellow while
+ * fresh, orange, then a dull red under a darkening crust as it cools), in a
+ * glow of its own, so a pool of them reads as one seething puddle and a
+ * trickle of them as a stream.
+ */
 export function drawFeet(ctx: CanvasRenderingContext2D, list: readonly FootState[], now: number): void {
+  const op = ctx.globalCompositeOperation;
+  // The glow first, all of it (added up where they crowd together).
+  ctx.globalCompositeOperation = 'lighter';
   for (const f of list) {
     const heat = f.life / FOOT_LIFE;
-    const flick = 0.85 + 0.15 * Math.sin(now / 55 + f.x);
-    const r = (18 + 26 * heat) * flick;
+    const r = 6 + 10 * heat;
     const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
-    g.addColorStop(0, `rgba(255,250,210,${0.95 * Math.min(1, heat * 2 + 0.3)})`);
-    g.addColorStop(0.25, `rgba(255,170,60,${0.75 * Math.min(1, heat * 2 + 0.25)})`);
-    g.addColorStop(0.6, `rgba(220,60,20,${0.35 * Math.min(1, heat + 0.2)})`);
-    g.addColorStop(1, 'rgba(120,20,10,0)');
-    const op = ctx.globalCompositeOperation;
-    ctx.globalCompositeOperation = 'lighter';
+    g.addColorStop(0, `rgba(255,150,50,${0.3 * Math.min(1, heat * 1.5 + 0.2)})`);
+    g.addColorStop(1, 'rgba(200,50,10,0)');
     ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalCompositeOperation = op;
-    // The puddle of it at the bottom of the pit.
-    ctx.fillStyle = heat > 0.3 ? '#fff4c0' : heat > 0.1 ? '#ffb040' : '#c04018';
-    ctx.fillRect(Math.round(f.x - 6), Math.round(f.y + 3), 13, 3);
-    ctx.fillStyle = heat > 0.3 ? '#ffd060' : '#902a10';
-    ctx.fillRect(Math.round(f.x - 8), Math.round(f.y + 5), 17, 3);
+    ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
+  }
+  ctx.globalCompositeOperation = op;
+  // Then the sludge itself, in layers across the whole puddle (crust, then the melt, then its hottest
+  // heart), so neighbouring blobs run together as one, the dark crust only round its edge.
+  const tone = (heat: number) =>
+    heat > 0.55 ? ['#7a2a10', '#ffc050', '#fff0b0'] : heat > 0.3 ? ['#5a2010', '#e86a1c', '#ffb040'] : heat > 0.12 ? ['#2a1610', '#a83410', '#e05818'] : ['#1e120c', '#4a1a10', '#8a2a10'];
+  for (let layer = 0; layer < 3; layer++) {
+    for (const f of list) {
+      const heat = f.life / FOOT_LIFE;
+      const x = Math.round(f.x);
+      const y = Math.round(f.y);
+      const seed = (x * 7 + y * 13) & 3;
+      ctx.fillStyle = tone(heat)[layer];
+      if (layer === 0) {
+        ctx.fillRect(x - 5, y - 1, 11, 4);
+        ctx.fillRect(x - 4, y - 3 + (seed & 1), 9, 7);
+      } else if (layer === 1) {
+        ctx.fillRect(x - 4, y - 1, 9, 3);
+        ctx.fillRect(x - 3, y - 2 - (seed >> 1), 7, 5);
+      } else {
+        const flick = Math.sin(now / 90 + x * 0.7 + y) * 0.5 + 0.5;
+        ctx.fillRect(x - 2 - (seed & 1), y - 1, 4 + (seed & 1), 2 + (flick > 0.5 ? 1 : 0));
+        // (Crust floating on it as it cools: dark flecks.)
+        if (heat < 0.4) {
+          ctx.fillStyle = tone(heat)[0];
+          ctx.fillRect(x + 1 - seed, y - 2, 2, 1);
+        }
+      }
+    }
   }
 }
 

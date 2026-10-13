@@ -15,9 +15,10 @@ import { TICK_RATE } from './constants.ts';
  *   range, and much less behind solid ground (the heat comes in a straight
  *   line; the blast shoves everyone, cover or not).
  * - **The crater** (STONE_CRATER_R, the hardest rock included out to
- *   STONE_CORE_R), and a core of molten rock at its bottom (the "foot"),
- *   which keeps burning its way down for up to FOOT_LIFE ticks, slower and
- *   slower as it smoulders out, searing whoever goes near it.
+ *   STONE_CORE_R), and a pool of caustic molten sludge at its bottom (the
+ *   "foot"): it flows like wet sand and eats away the ground it touches
+ *   for up to FOOT_LIFE ticks, searing whoever goes near it, then sets as
+ *   slag.
  *
  * Everyone in the room sees it: the flash, the shaking, the mushroom cloud
  * over the site (World broadcasts it; the client draws it all from that).
@@ -53,10 +54,20 @@ export const STONE_CORE_R = 72;
 /** Damage dealt at ground zero to creatures and vehicles (falling off with range: still enough to wreck a tank most of the way out). */
 export const STONE_HARM = 40000;
 export const STONE_HARM_R = 560;
-/** The molten core: how long it burns (40 s), its bite (cells), and how fast it sinks at first (cells per tick). */
+/**
+ * The molten sludge left in the crater: SLUDGE_BLOBS blobs of caustic,
+ * glowing slag, each SLUDGE_R cells round. They flow like wet sand
+ * (falling, sliding down any slope, spreading out to pool in the low
+ * places), and eat away whatever ground they touch, hard rock and all,
+ * so they sink and seep through it. They burn up to FOOT_LIFE ticks
+ * (40 s; each a little less or more), eating slower as they cool, then set
+ * as glassy slag.
+ */
 export const FOOT_LIFE = 40 * TICK_RATE;
-export const FOOT_R = 9;
-export const FOOT_SINK = 0.16;
+export const SLUDGE_BLOBS = 44;
+export const SLUDGE_R = 3;
+/** How many ticks between a hot blob's bites of the ground it touches (cooling, it bites less often). */
+export const SLUDGE_BITE = 5;
 /** How long the mushroom cloud hangs over the site (ms, on the client). */
 export const CLOUD_MS = 70_000;
 
@@ -76,11 +87,6 @@ export function blinkOn(left: number): boolean {
 /** Is this the tick its light comes on (when it beeps)? */
 export function beepAt(left: number): boolean {
   return left % blinkPeriod(left) === 0;
-}
-
-/** How fast the core sinks with `life` ticks left (it slows as it smoulders out). */
-export function footSink(life: number): number {
-  return FOOT_SINK * Math.max(0.15, life / FOOT_LIFE);
 }
 
 /** A beacon's state: in the air, stuck fast (counting down), or the missile on its way down. */

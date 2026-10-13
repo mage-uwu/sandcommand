@@ -715,13 +715,12 @@ export function stoneburnBlast(p: Particles, x: number, y: number, impulse: numb
 }
 
 /**
- * A Stoneburner's molten core, one tick of it (`heat` 1 fresh, falling to 0
- * as it smoulders out): white-hot flame licking up out of it, sparks
- * spitting, and a column of smoke off the pit.
+ * A blob of a Stoneburner's molten sludge, one tick of it (`heat` 1 fresh,
+ * falling to 0 as it sets): now and then a lick of flame, a spit of sparks,
+ * a wisp of acrid smoke (a pool of them makes a fair column of it).
  */
 export function moltenCore(p: Particles, x: number, y: number, heat: number): void {
-  const n = heat > 0.5 ? 3 : heat > 0.15 ? 2 : 1;
-  for (let k = 0; k < n; k++) p.spawn(PK.Flame, x + rnd(-8, 8), y + rnd(-3, 3), rnd(-25, 25), -rnd(30, 70 + 120 * heat), rnd(8, 16 + 12 * heat));
-  if (Math.random() < 0.25 + 0.5 * heat) p.spawn(PK.Spark, x + rnd(-6, 6), y - 2, rnd(-80, 80), -rnd(60, 200), rnd(10, 22));
-  if (Math.random() < 0.35) p.spawn(PK.Smoke, x + rnd(-8, 8), y - 6, rnd(-15, 15), -rnd(30, 70), rnd(90, 160));
+  if (Math.random() < 0.08 + 0.3 * heat) p.spawn(PK.Flame, x + rnd(-3, 3), y - 2, rnd(-15, 15), -rnd(20, 40 + 80 * heat), rnd(6, 10 + 8 * heat));
+  if (Math.random() < 0.04 + 0.12 * heat) p.spawn(PK.Spark, x + rnd(-2, 2), y - 2, rnd(-60, 60), -rnd(40, 160), rnd(8, 18));
+  if (Math.random() < 0.06) p.spawn(PK.Smoke, x + rnd(-3, 3), y - 4, rnd(-10, 10), -rnd(20, 50), rnd(80, 140), 0, heat > 0.3 ? 0 : 0x6a6a40);
 }

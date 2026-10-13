@@ -2542,10 +2542,22 @@ for the story mode too.
     wreck a tank most of the way out.
   - **The ground:** a crater 105 cells across, the hardest rock included
     out to 72. Burning debris is thrown out over everything.
-- **The molten core.** A core of molten rock is left at the crater's
-  bottom and burns its way down for 40 s. It sinks slower and slower as it
-  smoulders out (`footSink`), sears anyone who goes near it, and sends up
-  flame, sparks and smoke.
+- **The molten sludge.** The strike leaves a pool of caustic molten slag
+  in the crater, about 44 blobs of it (`SLUDGE_BLOBS`). It isn't a solid
+  thing that drills down; it flows like wet sand:
+  - it falls, slides down any slope, and spreads sideways, crowding apart
+    rather than stacking, so it pools in the low places;
+  - it eats whatever ground it touches (below first, then the sides, hard
+    rock too), so it sinks, widens its pit, and seeps through into any
+    cave or tunnel underneath;
+  - it eats more slowly as it cools over up to 40 s;
+  - it sears anyone who gets near it, and sheds flame, sparks and acrid
+    smoke;
+  - when it's spent, each blob sets as a few grains of glassy slag that
+    settle as real ground.
+
+  On screen the blobs run together into one glowing puddle: white-yellow
+  while fresh, then orange, then a dull red under a darkening crust.
 - **Everyone sees it.** The strike is broadcast to the whole room
   (`R_STONEBURN`), wherever each player is:
   - the screen flashes pure white, HUD and all, and fades back over three

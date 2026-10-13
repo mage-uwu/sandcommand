@@ -245,7 +245,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, FOOT_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R, footSink } from '../shared/stoneburner.ts';
+import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
@@ -3078,10 +3078,18 @@ export class World {
       const heat = d < STONE_KILL_R ? 180 : 260 * (1 - (d - STONE_KILL_R) / (STONE_HEAT_R - STONE_KILL_R)) * (open ? 1 : STONE_COVER);
       this.damage(p, Math.min(9999, heat), by, W_STONEBURNER);
     }
-    // The molten core, left at the bottom of the crater.
-    let fy = Math.floor(y + STONE_CRATER_R - 4);
-    while (fy < WORLD_H - 12 && !this.terrain.isSolid(Math.floor(x), fy + FOOT_R)) fy++;
-    this.feet.push({ x, y: fy, life: FOOT_LIFE, owner: by, sink: 0 });
+    // The molten sludge, splashed down into the bottom of the crater (it finds its own level from there).
+    for (let k = 0; k < SLUDGE_BLOBS && this.feet.length < MAX_SLUDGE; k++) {
+      const a = this.rng.range(-0.8, 0.8);
+      this.feet.push({
+        x: x + Math.sin(a) * STONE_CRATER_R * 0.55 * this.rng.next(),
+        y: y + STONE_CRATER_R * 0.4 * this.rng.next(),
+        vx: this.rng.range(-90, 90),
+        vy: this.rng.range(-60, 120),
+        life: Math.round(FOOT_LIFE * this.rng.range(0.7, 1)),
+        owner: by,
+      });
+    }
     this.burnersRev++;
     const w = this.broadcast;
     w.u8(R_STONEBURN);
@@ -3092,42 +3100,100 @@ export class World {
   }
 
   /**
-   * The molten cores: each burns its way down through whatever's under it,
-   * slower and slower as it smoulders out (footSink), shedding flame (which
-   * sears whoever goes down the pit after it) and smoke.
+   * The molten sludge: blobs of caustic slag that flow like wet sand. They
+   * fall; resting on something they slide down any slope there is and
+   * spread out sideways, so they pool in the low places, crowding apart
+   * rather than stacking up. And they eat whatever ground they touch, below
+   * first, then the sides (hard rock too), so they sink and seep through
+   * it, more slowly as they cool. They sear whoever comes near, shed flame
+   * and smoke, and at the end set as a little glassy slag.
    */
   private stepFeet(): void {
-    for (let i = this.feet.length - 1; i >= 0; i--) {
-      const f = this.feet[i];
-      if (--f.life <= 0) {
-        this.feet.splice(i, 1);
+    const t = this.terrain;
+    const R = SLUDGE_R;
+    const solid = (x: number, y: number) => t.isSolid(Math.floor(x), Math.floor(y));
+    const feet = this.feet;
+    // Crowding: blobs too close push apart (mostly sideways: a pool spreads, it doesn't stack).
+    for (let i = 0; i < feet.length; i++) {
+      for (let j = i + 1; j < feet.length; j++) {
+        const a = feet[i];
+        const b = feet[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= (R * 2) ** 2 || d2 === 0) continue;
+        const d = Math.sqrt(d2);
+        const push = ((R * 2 - d) / d) * 12;
+        a.vx -= dx * push;
+        b.vx += dx * push;
+        if (dy > 0) b.vy += dy * push * 0.2;
+        else a.vy -= dy * push * 0.2;
+      }
+    }
+    for (let i = feet.length - 1; i >= 0; i--) {
+      const f = feet[i];
+      const owner = f.owner === 255 ? NO_OWNER : f.owner;
+      const heat = f.life / FOOT_LIFE;
+      if (--f.life <= 0 || f.y > WORLD_H - 10) {
+        // Set: a few grains of glassy slag where it was (they settle as ground).
+        for (let k = 0; k < 4; k++) this.grains.spawn(PK.Grain, f.x + this.rng.range(-R, R), f.y + this.rng.range(-R, 0), 0, 20, 400, Mat.Glass, 0, NO_OWNER);
+        feet.splice(i, 1);
         this.burnersRev++;
         continue;
       }
-      const owner = f.owner === 255 ? NO_OWNER : f.owner;
-      f.sink += footSink(f.life);
-      if (f.sink >= 1) {
-        const n = Math.floor(f.sink);
-        f.sink -= n;
-        // (Not through the bottom of the world: bedrock holds it.)
-        if (f.y + FOOT_R + n < WORLD_H - 14) f.y += n;
+      const below = solid(f.x, f.y + R + 1);
+      if (below) {
+        // Resting: thick (cooler, thicker), sliding down whichever way is open, or spreading.
+        f.vx *= 0.8;
+        const dl = !solid(f.x - R - 1, f.y + R + 1);
+        const dr = !solid(f.x + R + 1, f.y + R + 1);
+        if (dl && !dr) f.vx -= 30;
+        else if (dr && !dl) f.vx += 30;
+        else if (dl && dr) f.vx += this.rng.next() < 0.5 ? -30 : 30;
+        else f.vx += this.rng.range(-10, 10) * heat;
+        if (f.vy > 0) f.vy = 0;
+      } else f.vy = Math.min(320, f.vy + GRAVITY * DT);
+      // Move, a cell at a time; a wall stops it that way.
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(f.vx), Math.abs(f.vy)) * DT));
+      for (let k = 0; k < steps; k++) {
+        const nx = f.x + (f.vx * DT) / steps;
+        if (solid(nx + Math.sign(f.vx) * R, f.y)) f.vx = 0;
+        else f.x = nx;
+        const ny = f.y + (f.vy * DT) / steps;
+        if (solid(f.x, ny + Math.sign(f.vy) * R)) f.vy = 0;
+        else f.y = ny;
       }
-      if (this.tick % 4 === 0) {
-        const r = Math.max(4, Math.round(FOOT_R * (0.6 + 0.4 * (f.life / FOOT_LIFE))));
-        this.carve(Math.round(f.x + this.rng.range(-3, 3)), Math.round(f.y + 3), r, r, 0, owner);
-      }
-      // Flame licking up out of it (more while it's fresh).
-      const heat = f.life / FOOT_LIFE;
-      if (this.rng.next() < 0.3 + 0.6 * heat) {
-        this.grains.spawn(PK.Flame, f.x + this.rng.range(-FOOT_R, FOOT_R), f.y - 2, this.rng.range(-30, 30), -40 - 90 * heat * this.rng.next(), 10 + this.rng.int(14), 0, 0, owner);
-      }
-      // Up close, its heat sears (through the pit's walls or not).
-      if (this.tick % 6 === 0) {
-        for (const p of this.players) {
-          if (!p || !p.alive) continue;
-          const d = Math.hypot(p.cx - f.x, p.cy - f.y);
-          if (d < 34) this.damage(p, (8 + 22 * heat) * (1 - d / 34), f.owner, W_STONEBURNER, true);
+      // Eating the ground it touches: below first, then the sides; hard rock too.
+      const every = Math.max(1, Math.round(SLUDGE_BITE / Math.max(0.15, heat)));
+      if ((this.tick + i) % every === 0) {
+        const tries = [
+          [0, R + 1],
+          [-R - 1, R],
+          [R + 1, R],
+          [-R - 1, 0],
+          [R + 1, 0],
+        ];
+        for (const [ox, oy] of tries) {
+          if (!solid(f.x + ox, f.y + oy)) continue;
+          // (Not the world's floor: the bedrock there holds it.)
+          if (f.y + oy >= WORLD_H - 14) break;
+          this.carve(Math.round(f.x + ox * 0.6), Math.round(f.y + oy * 0.7), R + 1, R + 1, 0, owner);
+          break;
         }
+      }
+      // Flame and smoke off it (more while it's fresh).
+      if (this.rng.next() < 0.05 + 0.15 * heat) this.grains.spawn(PK.Flame, f.x + this.rng.range(-R, R), f.y - R, this.rng.range(-20, 20), -30 - 80 * heat * this.rng.next(), 8 + this.rng.int(10), 0, 0, owner);
+    }
+    // Up close, its heat sears (through whatever's between or not).
+    if (this.tick % 6 === 0 && feet.length) {
+      for (const p of this.players) {
+        if (!p || !p.alive) continue;
+        let worst = 0;
+        for (const f of feet) {
+          const d = Math.hypot(p.cx - f.x, p.cy - f.y);
+          if (d < 22) worst = Math.max(worst, (4 + 14 * (f.life / FOOT_LIFE)) * (1 - d / 22));
+        }
+        if (worst > 0) this.damage(p, worst * 2, feet[0].owner, W_STONEBURNER, true);
       }
     }
   }
@@ -7617,14 +7683,17 @@ interface Burner {
   oy: number;
   age: number;
 }
-/** A Stoneburner strike's molten core, burning its way down (`sink`: the fraction of a cell it's sunk toward the next). */
+/** A blob of a Stoneburner strike's molten sludge: where, how it's moving, ticks of burning left, whose. */
 interface Foot {
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   life: number;
   owner: number;
-  sink: number;
 }
+/** At most this many blobs of sludge about at once (several strikes' worth). */
+const MAX_SLUDGE = 200;
 interface Mine {
   id: number;
   x: number;
