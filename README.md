@@ -904,14 +904,26 @@ it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
   basilisk's turn comes round, a quarter of the time it's a dragon
   instead (`DRAGON_ODDS`), deeper down and further from anyone. Only one
   of either is about at a time.
-- **Its look** (`src/client/dragon-art.ts`) is its own sharper pixel
-  sprite, baked once and drawn turned along its body with no smoothing,
-  so every edge stays crisp:
-  - overlapping blood-red scales lit from above, over ochre belly plates;
-  - a row of bone spikes down its spine, shrinking toward a barbed tail;
-  - frenzied, the cracks between its scales glow like coals;
-  - a long horned head with a spiked brow and ember eyes, whose jaw drops
-    open on rows of fangs over a throat glowing with its fire.
+- **Its look** (`src/client/dragon-art.ts`). Where the other creatures
+  wear the caves' GEMMs and stone to hide, this one wears them to show
+  off. It's an apex predator with no reason to hide: a dazzling, horrible
+  splendour at its scale.
+  - **Hide:** red, a dragon's colours gone feral: mottled, caked in dirt,
+    flecked with grit, with only broken hints of scale. The belly is
+    scuffed ochre plates.
+  - **GEMMs:** faceted crystal rosettes are set into its back (pink,
+    turquoise, emerald, shaded like the crystals in the ground). Gem veins
+    run down its flanks and a crest of crystal spines runs along its
+    spine. Glints twinkle over all of it as it moves, brighter in its
+    frenzy.
+  - **Head:** heavy and blunt, with a cold, small eye, and a crystal crust
+    on its brow. A **dimetrodon sail** rises off its skull and neck: bone
+    spines fanned up with membrane strung between them, its edge sagging
+    between the tips. Each panel is banded up through the gem colours
+    with a peacock-feather eyespot in it. In its frenzy its jaw drops
+    open over a throat glowing with the fire it spits.
+  - **Drawing:** the sprites are baked once and drawn turned along its
+    body with no smoothing, so every edge stays crisp.
 
 ## Frosting: craters, gem caverns, geysers and flora
 
