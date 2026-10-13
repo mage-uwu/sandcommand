@@ -908,20 +908,28 @@ it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
   wear the caves' GEMMs and stone to hide, this one wears them to show
   off. It's an apex predator with no reason to hide: a dazzling, horrible
   splendour at its scale.
-  - **Hide:** red, a dragon's colours gone feral: mottled, caked in dirt,
-    flecked with grit, with only broken hints of scale. The belly is
-    scuffed ochre plates.
-  - **GEMMs:** faceted crystal rosettes are set into its back (pink,
-    turquoise, emerald, shaded like the crystals in the ground). Gem veins
-    run down its flanks and a crest of crystal spines runs along its
-    spine. Glints twinkle over all of it as it moves, brighter in its
-    frenzy.
-  - **Head:** heavy and blunt, with a cold, small eye, and a crystal crust
-    on its brow. A **dimetrodon sail** rises off its skull and neck: bone
-    spines fanned up with membrane strung between them, its edge sagging
-    between the tips. Each panel is banded up through the gem colours
-    with a peacock-feather eyespot in it. In its frenzy its jaw drops
-    open over a throat glowing with the fire it spits.
+  - **Body:** plated like the basilisk's, at three times the scale, with
+    lumpy rock plates rimmed in raw, pored flesh and fringed with fleshy
+    cilia. It wears the same terrain camouflage, but in sections, and
+    each section is dressed in a different stone:
+    - **Veined rock:** dark red, shot through with broad, blazing GEMM
+      seams and faceted crystal rosettes (pink, turquoise, emerald).
+    - **Hoard:** crusted solid with crystal.
+    - **Strata:** banded red and ochre, hung with dripstone.
+    - **Coral:** crimson coral grown over the rock, glowing with polyps.
+
+    Clusters of crystal spines crowd along its back. Glints twinkle over
+    all of it as it moves, brighter in its frenzy.
+  - **Head:** the basilisk's flytrap jaw, scaled up. Two rock flaps with
+    a GEMM seam down each, rimmed with interlocking teeth. They gape open
+    over a maw glowing with the fire it spits. Its eyes are cold and burn
+    red in its frenzy. Like a basilisk lizard, it's crested: a tall casque
+    of faceted GEMM blades rakes back off its snout, a beard of shards
+    hangs under its jaw, and crystal horns curl back off the hinge. A
+    **dimetrodon sail** rises off its skull and
+    neck: bone spines fanned up with membrane strung between them, its
+    edge sagging between the tips. Each panel is banded up through the
+    gem colours with a peacock-feather eyespot in it.
   - **Drawing:** the sprites are baked once and drawn turned along its
     body with no smoothing, so every edge stays crisp.
 

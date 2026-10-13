@@ -6,17 +6,20 @@ import { DRAGON_R } from '../shared/wildlife.ts';
  * for part of the rock, this one has no reason to hide: it wears them to
  * show off, an apex predator in a dazzling, horrible splendour.
  *
- * - **Hide**: rough red, a dragon's colours gone feral: mottled, caked in
- *   dirt, flecked with grit; its belly banded ochre plates, scuffed.
- * - **GEMMs**: faceted crystal rosettes set into its back (pink, turquoise,
- *   emerald, shaded like the crystals in the ground), gem veins running
- *   down its flanks, a crest of crystal spines along its spine. Glints
- *   play over all of it as it moves (brighter in its frenzy).
- * - **Head**: heavy and blunt, a sail rising off its skull like a
- *   dimetrodon's: bone spines with webbing strung between them, banded in
- *   gem colours, eyespots in it, its edge sagging between the spines. Its
- *   jaw drops open in its frenzy over a throat glowing with the fire it
- *   spits; its small eye is cold.
+ * - **Body**: the basilisk's lumpy rock plates and terrain camouflage at
+ *   three times the scale, rimmed in raw flesh, fringed with cilia, each
+ *   stretch of it dressed in its own stone: dark rock blazing with GEMM
+ *   seams and crystal rosettes, a hoard crusted solid with crystal, red and
+ *   ochre strata hung with dripstone, coral glowing with polyps. Crystal
+ *   spines crowd its back in clusters; glints play over it all as it moves
+ *   (brighter in its frenzy).
+ * - **Head**: the basilisk's flytrap jaw, gem-seamed and toothed, gaping
+ *   over a maw glowing with the fire it spits; cold eyes (burning red in
+ *   its frenzy); crested like a basilisk lizard, a tall casque of GEMM blades
+ *   raked back off its snout, a beard of shards under its jaw, crystal horns
+ *   curling back off the hinge; and a sail rising off its skull like a dimetrodon's: bone
+ *   spines with webbing strung between them, banded in gem colours,
+ *   eyespots in it, its edge sagging between the spines.
  *
  * Its sprites are baked once, a pixel at a time, facing right with its back
  * up, then drawn turned along its body with no smoothing (every edge crisp).
@@ -132,86 +135,151 @@ function crystal(u: number, v: number, c: Gem, bright: boolean): RGBA | 0 {
   return rgb(pal[i]);
 }
 
-/** Where the rosettes sit on body section `i` (u along, v across: up is negative), its girth w. */
-function gemsOf(i: number, w: number, len: number): Gem[] {
-  const out: Gem[] = [];
-  const n = 2 + Math.floor(hsh(i, 7) * 2);
-  for (let k = 0; k < n; k++) {
-    out.push({
-      u: (-0.6 + (1.2 * (k + 0.5)) / n + (hsh(i, k, 1) - 0.5) * 0.2) * len,
-      v: -w * (0.25 + 0.4 * hsh(i, k, 2)),
-      r: w * (0.16 + 0.12 * hsh(i, k, 3)),
-      g: Math.floor(hsh(i, k, 4) * 3),
-    });
+/**
+ * The body, as the basilisk's is made (beast-art.ts drawBasilisk), three
+ * times over: lumpy plates, each section dressed as something the ground is
+ * made of, living flesh showing round their rims (blotched, pored), cilia
+ * fringing its underside. Where the basilisk's dress is camouflage, the
+ * dragon's is display, opulent and terrible: its rock is dark and red, run
+ * through with broad, blazing GEMM seams and clusters; some sections are
+ * a hoard, crusted solid with faceted crystal; its strata are banded red and
+ * ochre, hung with dripstone; its coral glows.
+ */
+const Dress = { Vein: 0, Strata: 1, Coral: 2, Hoard: 3 } as const;
+const dressOf = (i: number) => {
+  let at = 1;
+  for (let sec = 0; sec < 12; sec++) {
+    const len = 2 + Math.floor(hsh(sec, 5, 7) * 2);
+    if (i < at + len) return [Dress.Vein, Dress.Hoard, Dress.Strata, Dress.Vein, Dress.Coral, Dress.Hoard][Math.floor(hsh(sec, 6, 8) * 6)];
+    at += len;
   }
-  return out;
-}
+  return Dress.Vein;
+};
+const D_ROCK = ['#1e0e10', '#2c1418', '#3a1a1e', '#4a2226', '#5a2a2c'];
+const D_STRATA = ['#5a2418', '#7a3420', '#9a5228', '#b8763a', '#d0965a'];
+const D_CORAL = ['#4e1020', '#7a1a30', '#a82a44', '#d85a74', '#ffa8bc'];
+const D_FLESH = ['#3a0c14', '#5a1620', '#7a222c', '#9a3440'];
+const D_CILIA = ['#c8a098', '#ead0c4'];
+/** Basilisk-sized cells this many cells across (its texture at three times the scale). */
+const S3 = 3;
 
 const segCache = new Map<string, Sprite>();
 const segGems = new Map<string, Gem[]>();
-/** Body section `i` of `n` (1: its neck, n - 1: its tail's tip): girth tapering, crystals set in its back, a crest of crystal spines. */
-function segSprite(i: number, n: number, bright: boolean): { s: Sprite; gems: Gem[] } {
-  const key = `${i}|${n}|${bright ? 1 : 0}`;
+/** Body section `i` of `n` (1: its neck, n - 1: the tip of its tail), awake or (`frozen`) as still as stone; `bright`: its frenzy, its gems ablaze. */
+function segSprite(i: number, n: number, bright: boolean, frozen = false): { s: Sprite; gems: Gem[] } {
+  const key = `${i}|${n}|${bright ? 1 : 0}|${frozen ? 1 : 0}`;
+  const hit = segCache.get(key);
+  if (hit) return { s: hit, gems: segGems.get(key)! };
   const f = i / Math.max(1, n - 1);
-  const w = DRAGON_R * 1.12 * (1 - 0.6 * f);
-  const len = DRAGON_R * 1.15;
-  let s = segCache.get(key);
-  if (s) return { s, gems: segGems.get(key)! };
-  const gems = gemsOf(i, w, len);
-  const crestH = Math.max(3, Math.round(10 * (1 - 0.7 * f)));
-  const tail = i === n - 1;
-  const W = Math.ceil(len * 2 + (tail ? len : 0)) + 6;
-  const H = Math.ceil(w * 2 + crestH) + 6;
-  const ox = Math.ceil(len) + 3 + (tail ? Math.ceil(len) : 0);
-  const oy = Math.ceil(w + crestH) + 3;
-  const k = i * 17 + 3;
-  const c = bake(W, H, (x, y) => {
+  const w = 11 * S3 * (1 - 0.42 * f);
+  const len = 10 * S3;
+  const dress = dressOf(i);
+  const cilia = dress === Dress.Coral || i % 3 === 1;
+  const reach = Math.ceil(Math.max(w, len)) + 4 * S3;
+  const Wd = reach * 2 + 2;
+  const Hd = reach * 2 + 2;
+  const ox = reach + 1;
+  const oy = reach + 1;
+  const gems: Gem[] = [];
+  const k = i * 131 + 7;
+  // Its crystal clusters (and so its glints): a few, set into its back, more on a hoard.
+  const nGem = dress === Dress.Hoard ? 4 : dress === Dress.Vein ? 2 : 0;
+  for (let g = 0; g < nGem; g++) gems.push({ u: ((g + 0.5) / nGem - 0.5) * len * 1.3 + (hsh(i, g, 21) - 0.5) * len * 0.2, v: -w * (0.2 + 0.45 * hsh(i, g, 22)), r: w * (0.13 + 0.09 * hsh(i, g, 23)), g: Math.floor(hsh(i, g, 24) * 3) });
+  /** Light across it: lit along its back, shadowed under its belly (a round body, not a flat one). */
+  const lightAt = (v: number) => (v < -w * 0.45 ? 1 : v > w * 0.35 ? -1 : 0);
+  const pick = (pal: readonly string[], t: number, v: number) => rgb(pal[Math.max(0, Math.min(pal.length - 1, Math.floor(t * pal.length) + lightAt(v)))]);
+  /** A cell of its dress at (u, v). */
+  const dressPixel = (u: number, v: number): RGBA => {
+    const h = hsh(Math.floor(u), Math.floor(v), k);
+    if (dress === Dress.Vein || dress === Dress.Hoard) {
+      for (const g of gems) {
+        const c = crystal(u, v, g, bright);
+        if (c) return c;
+      }
+      // Seams of GEMM wandering through the rock: veins, catching the light.
+      const wob = (vn(u, v, 10, k + 4) - 0.5) * w * 0.35;
+      const seam = Math.abs(v - w * 0.3 * Math.sin(u * 0.07 + i * 1.7) - wob);
+      const seam2 = Math.abs(v + w * 0.35 - w * 0.18 * Math.sin(u * 0.13 + i * 2.3) - wob * 0.5);
+      const width = dress === Dress.Hoard ? 2.6 : 1.8;
+      if (seam < width * S3 * 0.5 || seam2 < width * S3 * 0.3) {
+        const pal = GEMS[(i + (u > 0 ? 1 : 0)) % 3];
+        const edge = seam < width * S3 * 0.5 ? seam / (width * S3 * 0.5) : seam2 / (width * S3 * 0.3);
+        return rgb(pal[Math.min(3, (edge < 0.35 ? 3 : edge < 0.7 ? 2 : 1) + (bright && edge > 0.35 ? 1 : 0) - (v > w * 0.3 ? 1 : 0))]);
+      }
+      // Specks of crystal in the rock round them (a hoard's thick with them).
+      if (h > (dress === Dress.Hoard ? 0.9 : 0.965) && vn(u, v, 8, k + 6) > 0.45) return rgb(GEMS[Math.floor(hsh(Math.floor(u), Math.floor(v), k + 7) * 3)][2]);
+      const t = vn(u, v, 7, k) * 0.7 + vn(u, v, 2.5, k + 1) * 0.3;
+      return pick(D_ROCK, t, v);
+    }
+    if (dress === Dress.Strata) {
+      const layer = (v + Math.sin(u * 0.08 + i) * 2 * S3 + vn(u, v, 9, k) * 4) / (2.2 * S3);
+      const t = ((Math.floor(layer) % D_STRATA.length) + D_STRATA.length) % D_STRATA.length;
+      return rgb(D_STRATA[Math.max(0, Math.min(4, t + (h > 0.9 ? 1 : 0) + lightAt(v)))]);
+    }
+    // Coral grown over it: soft lobes, and its polyps glowing here and there.
+    const lobe = vn(u, v, 5, k + 5) * 0.55 + vn(u, v, 2, k + 12) * 0.3 + vn(u, v, 1.1, k + 13) * 0.15;
+    // Its polyps: bright points, scattered over the lobes.
+    if (h > 0.975 && lobe > 0.55) return rgb(bright ? '#fff4b0' : D_CORAL[4]);
+    // (The rock it grew on, showing between the lobes.)
+    if (lobe < 0.44) return pick(D_ROCK, vn(u, v, 7, k) * 0.8, v);
+    return pick(D_CORAL, (lobe - 0.44) * 2.2, v);
+  };
+  const c = bake(Wd, Hd, (x, y) => {
     const u = x + 0.5 - ox;
     const v = y + 0.5 - oy;
-    // The tail's end: a long, rough whip.
-    if (tail && u < -len * 0.6) {
-      const t = (-u - len * 0.6) / (len * 1.2);
-      const half = w * 0.5 * (1 - t);
-      if (t > 1 || Math.abs(v) > half) return 0;
-      return Math.abs(v) > half - 1.2 ? OUTLINE : hide(u, v, k, false);
+    // A lumpy plate, not a clean oval.
+    const th = Math.atan2(v, u);
+    const lump = 1 + 0.09 * Math.sin(th * 5 + i * 1.3) + 0.05 * Math.sin(th * 9 + i);
+    const e = ((u / len) ** 2 + (v / w) ** 2) / (lump * lump);
+    if (e > 1) {
+      // Cilia: fine fleshy hairs off its underside (and over the coral's back), in fringes.
+      if (cilia && Math.abs(u) < len * 0.75) {
+        const strand = (((u + 300) % (3.2 * S3)) + 3.2 * S3) % (3.2 * S3) < 1.2;
+        const out = v > 0 ? v - w : dress === Dress.Coral ? -v - w : -1;
+        if (strand && out > 0 && out < (2 + ((Math.floor(u / (3.2 * S3)) + i) & 1)) * S3) return out > 1.6 * S3 ? rgb(D_CILIA[1]) : rgb(D_CILIA[0]);
+      }
+      // A crest of crystal spines along its spine, gem by gem.
+      const sp = 3 * S3;
+      const su = (((u + 300) % sp) + sp) % sp;
+      const ci = Math.floor((u + 300) / sp);
+      // (In clusters, not a fence: some bare stretches, some crowded with tall ones.)
+      const crowd = vn(ci * 3.1 + i * 17, 0, 1.7, 77);
+      if (v < 0 && Math.abs(u) < len * 0.8 && crowd > 0.4) {
+        const top = -w - (1.5 + 6 * hsh(ci, i, 9) * (crowd - 0.3)) * (1 - 0.5 * f) * S3 * (1 - Math.abs(su - sp / 2) / (sp * 0.5));
+        if (v >= top && v < -w * 0.9) {
+          const pal = GEMS[Math.floor(hsh(ci, i, 10) * 3)];
+          return rgb(v < top + 1.5 ? pal[3] : su < sp / 2 ? pal[2] : pal[1]);
+        }
+      }
+      return 0;
     }
-    // The crest: short crystal spines along its spine (a rough row, gem by gem).
-    const spacing = 9;
-    const su = ((u % spacing) + spacing) % spacing;
-    const ci = Math.floor((u + 300) / spacing);
-    if (v < -w * 0.74 && Math.abs(u) < len * 0.9) {
-      const hgt = crestH * (0.6 + 0.4 * hsh(ci, i, 9));
-      const top = -w * 0.74 - hgt * (1 - Math.abs(su - spacing / 2) / (spacing * 0.45));
-      if (v >= top) {
-        const pal = GEMS[Math.floor(hsh(ci, i, 10) * 3)];
-        if (v < top + 1.2) return rgb(pal[3]);
-        return rgb(su < spacing / 2 ? pal[2] : pal[1]);
+    const h = hsh(Math.floor(u), Math.floor(v), k + 3);
+    if (e > 0.86 && !frozen) return OUTLINE;
+    // Round the rim, where plate gives way: living flesh, blotched, pored.
+    if (e > 0.62 && vn(u, v, 5, k + 3) > 0.45) return h < 0.06 ? rgb('#1a0408') : rgb(D_FLESH[Math.min(3, Math.floor(vn(u, v, 3.5, k + 9) * 4.4))]);
+    let px = dressPixel(u, v);
+    // (Grit over all of it.)
+    if (h > 0.97) px = GRIT;
+    return px;
+  });
+  // Dripstone off the strata's underside: stalactites, hanging.
+  if (dress === Dress.Strata) {
+    const g = c.getContext('2d')!;
+    for (let sIdx = 0; sIdx < 3; sIdx++) {
+      const sx = ox + (sIdx - 1) * len * 0.6;
+      const sl = (3 + Math.floor(hsh(i, sIdx, 31) * 6)) * S3;
+      const by = oy + w * 0.7;
+      for (let t = 0; t < sl; t++) {
+        const half = Math.max(0, Math.round((1 - t / sl) * S3 * 1.2));
+        g.fillStyle = t < 2 ? D_STRATA[4] : D_STRATA[2 + (t % 2)];
+        g.fillRect(Math.round(sx - half), Math.round(by + t), half * 2 + 1, 1);
       }
     }
-    const e = (u / len) ** 2 + (v / w) ** 2;
-    if (e > 1) return 0;
-    if (e > 0.88) return OUTLINE;
-    // Its belly: ochre plates, scuffed and dirty.
-    if (v > w * 0.42) {
-      if ((((u + 200 + vn(u, v, 5, k) * 2) % 6) + 6) % 6 < 1) return rgb(DIRT[0]);
-      const d = vn(u, v, 7, k + 5);
-      const bi = Math.min(3, Math.floor(d * 4.4));
-      return hsh(Math.round(u), Math.round(v), k + 6) > 0.95 ? GRIT : d > 0.7 ? mixRGB(BELLY[bi], DIRT[2], 0.5) : rgb(BELLY[bi]);
-    }
-    // The rosettes, set into its back.
-    for (const g of gems) {
-      const cpx = crystal(u, v, g, bright);
-      if (cpx) return cpx;
-    }
-    // Gem veins: thin bright seams running back down its flanks.
-    const vein = Math.abs(v + w * 0.05 - w * 0.22 * Math.sin(u * 0.09 + i * 1.9));
-    if (vein < 0.8 && hsh(Math.floor(u / 5), i, 11) > 0.3) return rgb(GEMS[(i + 1) % 3][bright ? 2 : 1]);
-    return hide(u, v, k, false);
-  });
-  s = { c, ox, oy };
-  segCache.set(key, s);
+  }
+  const sp: Sprite = { c, ox, oy };
+  segCache.set(key, sp);
   segGems.set(key, gems);
-  return { s, gems };
+  return { s: sp, gems };
 }
 
 /** The sail's spines: where each rises off the skull (u), its height (as a share of the tallest), its lean back. */
@@ -234,13 +302,14 @@ function headSprite(open: boolean, frame: number, asleep: boolean, bright: boole
   const back = DRAGON_R * 0.9; // skull behind the hinge
   const L = DRAGON_R * 1.5; // snout, hinge to tip (blunt, heavy)
   const sail = DRAGON_R * 2.1; // the tallest spine
-  const gape = open ? 0.34 + frame * 0.1 : 0;
-  const Wd = Math.ceil(back * 1.9 + L + sail * 0.5) + 10;
-  const Hd = Math.ceil(W * 2 + sail + L * Math.sin(gape)) + 10;
+  const gape = open ? 0.22 + frame * 0.18 : 0;
+  const Wd = Math.ceil(back * 1.9 + L * 1.25 + sail * 0.5) + 10;
+  const Hd = Math.ceil(W * 2.6 + sail + L * 1.25 * Math.sin(gape) * 2) + 10;
   const ox = Math.ceil(back * 1.9 + sail * 0.35) + 5;
   const oy = Math.ceil(W + sail) + 4;
   // Half its height along it: a heavy skull, a blunt rounded snout.
-  const hw = (u: number) => (u < -back ? W * 0.82 : u < 0 ? W * (0.82 + 0.18 * (1 + u / back)) : W * (1 - 0.45 * (u / L) ** 1.6));
+  // (The flytrap's outline: its skull, then the upper flap tapering to its tip.)
+  const hw = (u: number) => (u < -back ? W * 0.82 : u <= 0 ? W * (1 - Math.max(0, -u - back * 0.45) / back) : W * (1 - u / (L * 1.25)));
   // The sail: spines fanned up off the top of the skull (the back ones raked back, the front ones nearly upright).
   const tips = SPINES.map((sp, k) => {
     const base = -back * 1.9 + ((k + 0.3) / SPINES.length) * (back * 1.9 + L * 0.4);
@@ -300,38 +369,96 @@ function headSprite(open: boolean, frame: number, asleep: boolean, bright: boole
       if (hsh(Math.round(u), Math.round(v), 33) > 0.96) return rgb(pal[3]);
       return rgb(pal[band >= 4 ? (bright ? 3 : 2) : band >= 2 ? 1 : 0]);
     }
-    // The lower jaw, swung down by the gape about the hinge.
-    if (gape > 0) {
-      const ju = u * Math.cos(-gape) - v * Math.sin(-gape);
-      const jv = u * Math.sin(-gape) + v * Math.cos(-gape);
-      if (jv > 0 && ju > 0 && ju < L * 0.92) {
-        const half = hw(ju) * 0.6;
-        if (jv <= half) {
-          if (jv < 2.5 && hsh(Math.floor(ju / 4), 1, 51) > 0.45 && ju > 3) return TOOTH;
-          if (jv > half - 1.2) return OUTLINE;
-          return jv > half * 0.5 ? rgb(BELLY[2]) : hide(ju, jv, 61, false);
+    // The flytrap (the basilisk's, three times over): two flaps of plate hinged at the back, rimmed with
+    // long teeth that interlock along the seam, shut; in its frenzy they gape, working, over a maw lit by
+    // the fire it spits. Each flap rasterised through its own frame.
+    const FL = L * 1.25;
+    for (const sd of [-1, 1]) {
+      const a = sd * gape;
+      const fu = u * Math.cos(a) + v * Math.sin(a);
+      const fv = (-u * Math.sin(a) + v * Math.cos(a)) * sd; // (0 at its inner rim, out to its outer edge)
+      if (fu < 0 || fu > FL) continue;
+      const half = W * (1 - fu / FL);
+      const tu = (fu - 2 * S3 + (sd > 0 ? 1.25 * S3 : 0)) % (2.5 * S3);
+      if (!asleep && fv < 0 && fv > -3.6 * S3 && fu > 2 * S3 && fu < FL - 2 * S3 && Math.abs(tu - 1.25 * S3) < (0.55 - (-fv / (3.6 * S3)) * 0.3) * S3) return fv < -2.6 * S3 ? rgb('#f4ecd8') : TOOTH;
+      // Its crests, like a basilisk lizard's: off the top of its snout a tall casque of crystal blades,
+      // raked back, banded up from dark to blazing; under its jaw a beard of shorter shards.
+      const out = fv - half;
+      if (out > 0) {
+        const top = sd < 0;
+        const c0 = FL * (top ? 0.08 : 0.2);
+        const c1 = FL * (top ? 0.82 : 0.7);
+        if (fu > c0 && fu < c1) {
+          const ph = (fu - c0) / (c1 - c0);
+          // (The casque's profile: rising steep from its back, its peak well back, tapering to the nose.)
+          const H = top ? W * 1.6 * Math.sin(Math.PI * Math.pow(ph, 0.7)) ** 0.8 : W * 0.45 * Math.sin(Math.PI * ph);
+          const P = (top ? 4.2 : 2.8) * S3;
+          const bu = fu + out * (top ? 0.75 : 0.5); // (each blade raked back)
+          const bi = Math.floor(bu / P);
+          const bt = (((bu % P) + P) % P) / P; // across the blade, 0..1
+          const hb = H * (0.7 + 0.3 * hsh(bi, sd, 61));
+          // The casque's lobe: a solid sheet of crystal (the beard's only shards), its blades breaking out of its edge.
+          const sheet = top ? H * 0.55 : 0;
+          const wide = 0.5 * (1 - Math.max(0, out - sheet) / Math.max(1, hb - sheet));
+          const inBlade = out < hb && Math.abs(bt - 0.5) < wide;
+          if (inBlade || out < sheet) {
+            const edgeOut = inBlade ? hb : sheet;
+            if (out > edgeOut - 1.3 || (inBlade && out > sheet && Math.abs(bt - 0.5) > wide - 0.1)) return OUTLINE;
+            const q = out / hb;
+            // (Ribs up each blade, the facets either side of them lit and shadowed.)
+            if (inBlade && Math.abs(bt - 0.5) < 0.05 && q > 0.15) return rgb(GEMS[(bi + (top ? 0 : 1)) % 3][3]);
+            const pal = GEMS[(bi + (top ? 0 : 1)) % 3];
+            const lvl = q < 0.18 ? 0 : q < 0.45 ? 1 : q < 0.75 ? 2 : 3;
+            if (hsh(Math.floor(u), Math.floor(v), 62) > 0.96) return rgb(pal[3]);
+            return rgb(pal[Math.max(0, Math.min(3, lvl + (bt < 0.5 ? 1 : 0) + (bright ? 1 : 0)))]);
+          }
         }
+        continue;
       }
-      // The throat: glowing with its fire.
-      if (u > 0 && u < L * 0.88 && v > 0 && v < Math.tan(gape) * u) return u > L * 0.5 ? THROAT_DEEP : THROAT;
+      if (fv < 0) continue;
+      if (fv > half - 1.4) return OUTLINE;
+      // Veined plate: dark red rock, a GEMM seam down its length, pale at its inner rim.
+      if (fv < 1.4 * S3) return rgb('#b8a090');
+      const seam = Math.abs(fv - half * 0.5 - Math.sin(fu * 0.12 + sd) * half * 0.15);
+      if (seam < 1.1 * S3) return rgb(GEMS[sd > 0 ? 1 : 0][seam < 0.45 * S3 ? 3 : bright ? 2 : 1]);
+      if (Math.abs((((fu * 0.7 + fv * 1.3) % (4 * S3)) + 4 * S3) % (4 * S3) - 2 * S3) < 0.5) return rgb(D_ROCK[0]);
+      return rgb(D_ROCK[Math.min(4, 1 + Math.floor(vn(fu, fv, 6, 81) * 3.6) + (sd < 0 ? 1 : 0))]);
     }
-    // The skull and snout.
-    if (u < -back || u > L) return 0;
-    const half = hw(u);
-    if (v < -half || v > (gape > 0 ? 0 : half * 0.6)) return 0;
-    if (Math.abs(v) > half * 0.9 || u > L - 1.5 || u < -back + 1.5) return OUTLINE;
-    if (gape > 0 && v > -2.5 && hsh(Math.floor(u / 4), 2, 52) > 0.5 && u > 3 && u < L * 0.85) return TOOTH;
-    // Its eye: small and cold.
-    const ex = L * 0.05;
-    const ey = -half * 0.42;
-    const ed = Math.hypot(u - ex, (v - ey) * 1.3);
-    if (ed < 2.8) return asleep ? (Math.abs(v - ey) < 0.7 ? OUTLINE : rgb(HIDE[0])) : ed < 1.1 ? rgb('#fffef0') : rgb(GEMS[1][1]);
-    if (v > half * 0.3) return rgb(BELLY[1]);
-    // A crystal or two crusted on its brow.
-    const brow: Gem = { u: -back * 0.35, v: -half * 0.55, r: W * 0.2, g: 2 };
+    // The maw between the flaps: dark, deep, lit from inside by its fire.
+    if (gape > 0 && u > 0 && u < FL && Math.abs(v) < Math.tan(gape) * u) return u > FL * 0.6 ? THROAT_DEEP : Math.abs(v) > Math.tan(gape) * u - 2 * S3 ? rgb('#ffb040') : THROAT;
+    // Its horns: crystal, swept back off the hinge below the sail, one either side (the far one shorter, darker).
+    for (const [hu, hv, tu2, tv2, g, dim] of [
+      [-back * 0.15, W * 0.55, -back * 1.05, W * 1.05, 1, 0],
+      [-back * 0.3, -W * 0.1, -back * 0.95, W * 0.5, 0, 1],
+    ] as const) {
+      const du = tu2 - hu;
+      const dv = tv2 - hv;
+      const s2 = Math.max(0, Math.min(1, ((u - hu) * du + (v - hv) * dv) / (du * du + dv * dv)));
+      // (Curling up at the tip.)
+      const d = Math.hypot(u - (hu + du * s2), v - (hv + dv * s2) + s2 * s2 * W * 0.35);
+      const r = (1 - s2) * 1.8 * S3 + 0.8;
+      if (d < r) {
+        if (d > r - 1.3) return OUTLINE;
+        const lit = (u - (hu + du * s2)) * dv - (v - (hv + dv * s2)) * du < 0;
+        return rgb(GEMS[g][Math.max(0, Math.min(3, (s2 > 0.7 ? 3 : s2 > 0.3 ? 2 : 1) - (lit ? 0 : 1) - dim + (bright ? 1 : 0)))]);
+      }
+    }
+    // Its skull: the back of the wedge, plate dressed as its body is, a crest down its middle.
+    if (u > 0.5 || u < -back) return 0;
+    const sh = W * (1 - Math.max(0, -u - back * 0.45) / back);
+    if (Math.abs(v) > sh) return 0;
+    if (Math.abs(v) > sh - 1.4) return OUTLINE;
+    // Its eyes, either side: small, cold, burning in its frenzy.
+    for (const sd of [-1, 1]) {
+      const ed = Math.hypot(u + 2 * S3, v - sd * W * 0.5);
+      if (ed < 2.2 * S3) return asleep ? (ed < 1.2 * S3 ? OUTLINE : rgb(D_ROCK[2])) : ed < 0.8 * S3 ? rgb('#fffef0') : ed < 1.5 * S3 ? rgb(bright ? '#ff3a2a' : GEMS[1][1]) : rgb(bright ? '#7a0c08' : GEMS[1][0]);
+    }
+    if (Math.abs(v) < 2 * S3) return rgb(D_ROCK[4]);
+    const brow: Gem = { u: -back * 0.45, v: -sh * 0.45, r: W * 0.22, g: 2 };
     const bc = crystal(u, v, brow, bright);
     if (bc) return bc;
-    return hide(u, v, 71, false);
+    if (hsh(Math.floor(u), Math.floor(v), 91) > 0.97) return GRIT;
+    return rgb(D_ROCK[Math.min(4, 1 + Math.floor(vn(u, v, 6, 91) * 3.6) + (v < 0 ? 1 : 0))]);
   });
   const out = { s: { c, ox, oy }, eyes: [], spots };
   headCache.set(key, out);
@@ -385,7 +512,7 @@ export function drawDragon(ctx: CanvasRenderingContext2D, pts: readonly number[]
   const P = (i: number) => Math.max(0, Math.min(n - 1, i));
   const dir = (i: number) => Math.atan2(pts[P(i - 1) * 2 + 1] - pts[P(i + 1) * 2 + 1], pts[P(i - 1) * 2] - pts[P(i + 1) * 2]);
   for (let i = n - 1; i >= 1; i--) {
-    const { s, gems } = segSprite(i, n, frenzy);
+    const { s, gems } = segSprite(i, n, frenzy, frozen);
     put(ctx, s, pts[i * 2], pts[i * 2 + 1], dir(i), () => glints(ctx, gems, i, now, frenzy));
   }
   const frame = frenzy ? Math.floor(now / 160) & 1 : 0;
