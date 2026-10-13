@@ -23,7 +23,7 @@ import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5, Spider: 6 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -148,6 +148,52 @@ export const ASP_BITE_CD = 24;
 export const ASP_DISGUISE_MIN = 30 * 60;
 export const ASP_DISGUISE_MAX = 30 * 240;
 export const ASP_WANDER = 30 * 5;
+
+/**
+ * **Cave spiders**: eight-legged hunters about a clone's size, the spider
+ * droid's build gone organic: a knobbly carapace (head and a fat abdomen
+ * behind it) slung between eight long jointed legs, its feet planted on
+ * whatever it holds, floors, walls and ceilings alike (it crawls like the
+ * millipede does). Like the rest of the caves' life it hides by looking
+ * like the ground: lying in wait it freezes still, splayed flat on the rock
+ * (CSPIDER_FREEZE_*), its hide the very colours of the stone round it.
+ *
+ * It's very fast: it runs at its prey (sprinting, too, like the
+ * centipede-likes), and within reach it **dashes** the last stretch
+ * (CSPIDER_DASH for CSPIDER_DASH_TICKS) or, further off and in sight,
+ * **leaps** at them through the air (a fling, far faster and more often than
+ * a millipede's), and bites: a quick, heavy bite and a shove, and away for
+ * a moment before the next. Unarmoured, but tough for its size.
+ */
+export const CSPIDER_SEGS = 2;
+export const CSPIDER_GAP = 4;
+export const CSPIDER_R = 3;
+export const CSPIDER_HP = 260;
+/** Its pace: wandering, and running at prey (cells/s; sprinting, twice that). */
+export const CSPIDER_CRAWL = 45;
+export const CSPIDER_HUNT = 140;
+/** Its dash: from within CSPIDER_DASH_R of its prey, at CSPIDER_DASH cells/s for CSPIDER_DASH_TICKS. */
+export const CSPIDER_DASH = 380;
+export const CSPIDER_DASH_TICKS = 9;
+export const CSPIDER_DASH_R = 46;
+/** Its leap: how much faster than a millipede's fling, how often it may (ticks), and the farthest it leaps (cells). */
+export const CSPIDER_LEAP = 2.6;
+export const CSPIDER_LEAP_CD = 30 * 1.5;
+export const CSPIDER_LEAP_MAX = 150;
+/** How far it sees prey (further lying in wait). */
+export const CSPIDER_SENSE = 260;
+export const CSPIDER_SENSE_FROZEN = 340;
+/** Its bite: reach (cells), harm, ticks between bites, the shove. */
+export const CSPIDER_BITE_R = 7;
+export const CSPIDER_BITE = 24;
+export const CSPIDER_BITE_CD = 16;
+export const CSPIDER_SHOVE = 90;
+/** Lying in wait (ticks: 10 to 60 s), and wandering between. */
+export const CSPIDER_FREEZE_MIN = 30 * 10;
+export const CSPIDER_FREEZE_MAX = 30 * 60;
+export const CSPIDER_WANDER = 30 * 8;
+/** Of the new crawlers that aren't asps, the share that are cave spiders (the rest millipedes). */
+export const CSPIDER_SHARE = 0.4;
 
 /**
  * **Seeders**: small fliers, about a clone's head in size: a wasp's striped
@@ -383,7 +429,11 @@ export const BEAST_BUILD = [
   { segs: 1, gap: 1, r: NEST_R, hp: NEST_HP },
   { segs: BASILISK_SEGS, gap: BASILISK_GAP, r: BASILISK_R, hp: BASILISK_HP },
   { segs: DRAGON_SEGS, gap: DRAGON_GAP, r: DRAGON_R, hp: DRAGON_HP },
+  { segs: CSPIDER_SEGS, gap: CSPIDER_GAP, r: CSPIDER_R, hp: CSPIDER_HP },
 ] as const;
+
+/** Does this kind crawl the cave surfaces (millipede, asp, cave spider)? */
+export const crawler = (kind: number) => kind === BeastKind.Millipede || kind === BeastKind.Asp || kind === BeastKind.Spider;
 
 /** Does this kind bore through the rock (no crawl: its head goes where it steers)? */
 export const burrows = (kind: number) => kind === BeastKind.Basilisk || kind === BeastKind.Dragon;
@@ -1058,7 +1108,8 @@ export function bodyPoints(t: Terrain, b: Beast, out: number[]): number[] {
     }
     return out;
   }
-  if (b.lift > 0) {
+  // (A cave spider's lift is its fangs out, not a rearing neck: the client draws it.)
+  if (b.lift > 0 && b.kind !== BeastKind.Spider) {
     const up = openWay(t, b.x, b.y);
     // (An asp rears up less far, by fewer segments: it's a quarter the size.)
     const neck = b.kind === BeastKind.Asp ? 4 : MILLI_NECK;

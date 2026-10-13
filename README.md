@@ -181,9 +181,10 @@ whoever is nearest, and a clear point at someone still picks them.
 On the enemy it picked, the point goes by angle alone. A head is a target
 of its own beside centre mass: aim a touch high for the headshot, a touch
 low for the body. On a dropship, nudge between its hull and pods.
-Wildlife on the move counts too. A millipede or a gem asp locks by its head
-(the millipede's weak spot) or its mid-body. One lying in wait, frozen or
-curled up as a gem, is left alone: the assist never gives camouflage away.
+Wildlife on the move counts too. A millipede, a gem asp or a cave spider
+locks by its head (the millipede's weak spot) or its mid-body. One lying
+in wait, frozen or curled up as a gem, is left alone: the assist never
+gives camouflage away.
 Wasps (seeders) lock by their body and a wasps' nest by its middle. All of
 it works the same from a vehicle's guns, and touch auto mode keeps working
 while you drive, pilot or steer a watchdog. Locked on, the server leads a
@@ -778,8 +779,37 @@ fringe of tiny legs. It crawls the same surfaces.
   turquoise or emerald), and the goo stains wherever it lands. Killed, it
   bursts into gobbets and strings of goo, and its segments fly off as gem
   pieces.
-- Over half the creatures that come up are asps (the rest millipedes): up
-  to seven at once on a cave map and four on any other.
+- Over half the creatures that come up are asps (the rest millipedes and
+  cave spiders): up to seven at once on a cave map and four on any other.
+
+**The cave spider** is the spider droid's build gone organic: a knobbly
+head and a fat abdomen slung between eight long, jointed legs, about a
+clone's size. It crawls the same surfaces as the millipede (floors, walls
+and ceilings), and its legs walk the droid's way: each foot planted on the
+rock, knees arched high, stepping in two alternating sets, quicker than a
+droid's (`src/client/spider-art.ts`).
+- **Camouflage.** Its hide takes the colour of the very ground under it,
+  mottled with the rock's greys and grit, a dark folium of chevrons down its
+  abdomen. With nobody about it wanders a while, then presses flat to the
+  rock with its legs splayed wide and lies in wait for 10 to 60 seconds,
+  perfectly still: its outline gone, its eyes dull, a lump of the stone.
+  The aim assist leaves one lying in wait alone.
+- **Very fast.** Prey in sight (out to 260 cells, 340 lying in wait), it's
+  off at once, running at 140 cells a second along the surfaces and
+  sprinting at twice that, like the centipede-likes.
+- **Dash and leap.** Within 46 cells it dashes the last stretch at 380
+  cells a second. From further off, in sight, it leaps at them through the
+  air, far faster and more often than a millipede flings (every 1.5 s, out
+  to 150 cells). Dashing or leaping, its fangs come out.
+- **The bite.** A quick, heavy bite (24 harm) and a shove that knocks the
+  clone back and up, then away a moment (about half a second) before the
+  next. No venom: it's the speed that kills. The kill feed says "run down
+  by a cave spider".
+- **Durable.** 260 hit points and no armour: it takes well over a dozen
+  rifle rounds. Hurt, it wakes. It bleeds a pale, sickly green ichor, and
+  killed it bursts into gobbets of it, its head, abdomen and legs flung off
+  whole.
+- About two in five of the crawlers that aren't asps are cave spiders.
 
 **Seeders** are small fliers, each about the size of a clone's head: a
 raven's glossy black head and pale beak, a wasp's black-and-gold striped
@@ -1206,8 +1236,8 @@ come back by drop rocket, as in Regicide.
   (`LAIR_VEHICLES`).
 - **Lesser life.** The lair isn't only the basilisks'. From the start it
   has four wasps' nests hung from its roof (their foragers ranging through
-  the chambers and up the chutes) and a dozen millipedes, a few asps among
-  them, about its floors and walls. They're kept topped up through the
+  the chambers and up the chutes) and a dozen crawlers (millipedes, with
+  a few asps and cave spiders among them) about its floors and walls. They're kept topped up through the
   wave (`stockLair`). A basilisk killed never comes back. To fit it all,
   a world now holds up to 40 creatures (`MAX_BEASTS`).
 

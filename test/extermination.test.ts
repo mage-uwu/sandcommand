@@ -103,9 +103,9 @@ describe('Extermination', () => {
   it('the lair crawls with millipedes and hangs with wasps\' nests, kept up; but no basilisk ever comes back', () => {
     const { world, ps } = exterm(302, 2);
     const count = (k: number) => world.beasts.filter((o) => o?.kind === k).length;
-    // From the start: nests on the roof, millipedes (and a few asps) about the cave.
+    // From the start: nests on the roof, millipedes (and a few asps and cave spiders) about the cave.
     expect(count(BeastKind.Nest)).toBeGreaterThanOrEqual(3);
-    expect(count(BeastKind.Millipede) + count(BeastKind.Asp)).toBeGreaterThanOrEqual(10);
+    expect(count(BeastKind.Millipede) + count(BeastKind.Asp) + count(BeastKind.Spider)).toBeGreaterThanOrEqual(10);
     expect(count(BeastKind.Millipede)).toBeGreaterThan(count(BeastKind.Asp));
     const lair = world.lair!;
     for (const b of world.beasts) {
@@ -118,7 +118,7 @@ describe('Extermination', () => {
     world.hurtBeast(k, 1e9, ps[0].id);
     for (let i = 0; i < world.beasts.length; i++) if (world.beasts[i]?.kind === BeastKind.Millipede) world.beasts[i] = null;
     for (let t = 0; t < 30 * 60; t++) world.step();
-    expect(count(BeastKind.Millipede) + count(BeastKind.Asp)).toBeGreaterThan(0);
+    expect(count(BeastKind.Millipede) + count(BeastKind.Asp) + count(BeastKind.Spider)).toBeGreaterThan(0);
     expect(count(BeastKind.Basilisk)).toBe(LAIR_DENS - 1);
   });
 

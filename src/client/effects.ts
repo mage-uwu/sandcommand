@@ -642,6 +642,32 @@ export function gooSplat(p: Particles, x: number, y: number, gem: number, count:
   }
 }
 
+/** A cave spider's ichor: a pale, sickly green. */
+const ICHOR = 0x6a8a32;
+const ICHOR_HI = 0xc0d878;
+/** A cave spider hurt: a spatter of its ichor. */
+export function ichorSplat(p: Particles, x: number, y: number, count: number, speed: number): void {
+  for (let k = 0; k < count; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = speed * Math.random();
+    p.spawn(PK.Blood, x, y, Math.cos(a) * s, Math.sin(a) * s - speed * 0.3, 60, 0, k % 4 === 0 ? ICHOR_HI : ICHOR);
+  }
+}
+/** A cave spider killed: gobbets and strings of ichor off its body, and a great spatter. */
+export function spiderGibs(p: Particles, pts: readonly number[]): void {
+  for (let i = 0; i < pts.length; i += 2) {
+    const x = pts[i];
+    const y = pts[i + 1];
+    for (let n = 0; n < 2; n++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 30 + Math.random() * 90;
+      p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 60, rnd(400, 650), GIB_SAC | GIB_INORGANIC, n ? ICHOR : ICHOR_HI);
+    }
+    if (Math.random() < 0.5) p.spawn(PK.Gib, x, y, rnd(-70, 70), rnd(-110, -20), rnd(350, 550), GIB_STALK | GIB_INORGANIC, ICHOR);
+    ichorSplat(p, x, y, 14, 90);
+  }
+}
+
 /** A gem asp killed: gobbets of gem-coloured goo flung off its whole body, strings of it, and a great spatter. */
 export function aspGibs(p: Particles, pts: readonly number[], gem: number): void {
   const g = gem % 3;

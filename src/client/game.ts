@@ -10,7 +10,7 @@ import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank,
 import { FACTIONS } from '../shared/factions.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat } from '../shared/kernels.ts';
-import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_STONEBURNER, W_DRAGON, NO_OWNER } from '../shared/particles.ts';
+import { ActorField, MAX_ACTORS, PK, Particles, W_BURN, W_CRAFT, W_DEBRIS, W_SHIP, W_TANK, W_TRAP, W_LASER, releaseCarve, spillGold, W_RAM, W_ROCKFALL, W_GEYSER, W_BLISTER, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_STONEBURNER, W_DRAGON, W_SPIDER, NO_OWNER } from '../shared/particles.ts';
 import { type Craft, CraftPart, craftHalfExtents, newCraft, newCraftStep, stepCraft } from '../shared/craft.ts';
 import { CALL_COST, CallKind, F_ALIVE, F_FIRING, F_GROUND, F_JET, GF_DEAD, GF_RUMBLE, GF_TOXIC, GameMode, MOLE_COST, Phase, TARANTULA_COST, Team, WATCHDOG_COST, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { Rng } from '../shared/rng.ts';
@@ -26,7 +26,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -1291,6 +1291,7 @@ export class Game implements FrameHandler {
         if (v.lift < 0.05 && b.lift >= 0.05) this.sfx?.hiss(b.pts[0], b.pts[1], b.kind === 0);
         v.lift = b.lift;
         // An asp hurt: its goo spatters (more, the harder it was hit).
+        if (b.kind === BeastKind.Spider && b.hp < v.hp) ichorSplat(this.particles, b.pts[0], b.pts[1], Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
         if (b.kind === BeastKind.Asp && b.hp < v.hp) gooSplat(this.particles, b.pts[0], b.pts[1], b.seed, Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
         v.hp = b.hp;
         v.attached = b.attached;
@@ -1358,9 +1359,10 @@ export class Game implements FrameHandler {
     if (v.kind === BeastKind.Nest) coralBurst(this.particles, v.cur[0], v.cur[1]);
     else if (v.kind === BeastKind.Seeder) bloodSplat(this.particles, v.cur[0], v.cur[1], 3, 60);
     else if (v.kind === BeastKind.Asp) aspGibs(this.particles, v.cur, v.seed);
+    else if (v.kind === BeastKind.Spider) spiderGibs(this.particles, v.cur);
     else beastGibs(this.particles, v.cur);
     // Every segment flung off whole (a nest in shards; a seeder's wings torn off it).
-    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Seeder ? 3 : v.cur.length >> 1;
+    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Seeder ? 3 : v.kind === BeastKind.Spider ? 10 : v.cur.length >> 1;
     for (let i = 0; i < n; i++) {
       const at = Math.min(i, (v.cur.length >> 1) - 1);
       const x = v.cur[at * 2] + (v.kind === BeastKind.Nest ? (Math.random() - 0.5) * 10 : 0);
@@ -1901,6 +1903,7 @@ export class Game implements FrameHandler {
     else if (killer === 255 && weapon === ProjKind.Dart) text = `${vn} took a poisoned dart`;
     else if (killer === 255 && weapon === W_COIL) text = `${vn} was crushed and bitten by a millipede`;
     else if (killer === 255 && weapon === W_ASP) text = `${vn} was bitten by a gem asp`;
+    else if (killer === 255 && weapon === W_SPIDER) text = `${vn} was run down by a cave spider`;
     else if (killer === 255 && weapon === W_SEED) text = `a seeder's nest burst out of ${vn}`;
     else if (killer === 255 && weapon === W_BASILISK) text = `${vn} was devoured by a basilisk`;
     else if (killer === 255 && weapon === W_DRAGON) text = `${vn} was devoured by a dragon`;
@@ -2282,6 +2285,7 @@ export function causeOfDeath(killerName: string, killer: number, victim: number,
   if (killer === 255 && weapon === ProjKind.Dart) return 'took a poisoned dart';
   if (killer === 255 && weapon === W_COIL) return 'crushed and bitten by a millipede';
   if (killer === 255 && weapon === W_ASP) return 'bitten by a gem asp';
+  if (killer === 255 && weapon === W_SPIDER) return 'run down by a cave spider';
   if (killer === 255 && weapon === W_SEED) return "a seeder's nest burst out of you";
   if (killer === 255 && weapon === W_BASILISK) return 'devoured by a basilisk';
   if (killer === 255 && weapon === W_DRAGON) return 'devoured by a dragon';

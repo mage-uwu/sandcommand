@@ -164,7 +164,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, W_DRAGON, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, W_DRAGON, W_SPIDER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -381,6 +381,25 @@ import {
   boreable,
   loopWatch,
   resetLoop,
+  crawler,
+  CSPIDER_BITE,
+  CSPIDER_BITE_CD,
+  CSPIDER_BITE_R,
+  CSPIDER_CRAWL,
+  CSPIDER_DASH,
+  CSPIDER_DASH_R,
+  CSPIDER_DASH_TICKS,
+  CSPIDER_FREEZE_MAX,
+  CSPIDER_FREEZE_MIN,
+  CSPIDER_HUNT,
+  CSPIDER_LEAP,
+  CSPIDER_LEAP_CD,
+  CSPIDER_LEAP_MAX,
+  CSPIDER_SENSE,
+  CSPIDER_SENSE_FROZEN,
+  CSPIDER_SHARE,
+  CSPIDER_SHOVE,
+  CSPIDER_WANDER,
 } from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -1737,7 +1756,7 @@ export class World {
       else if (this.tick >= this.basiliskAt && !this.beasts.some((b) => b && wyrm(b.kind))) {
         if (this.spawnBasilisk()) this.basiliskAt = Infinity;
       }
-      else if (this.beasts.filter((b) => b && (b.kind === BeastKind.Millipede || b.kind === BeastKind.Asp)).length < want) this.spawnBeast();
+      else if (this.beasts.filter((b) => b && crawler(b.kind)).length < want) this.spawnBeast();
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
@@ -1749,6 +1768,7 @@ export class World {
       }
       if (b) {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
+        else if (b.kind === BeastKind.Spider) this.stepSpider(k, b);
         else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
         else if (b.kind === BeastKind.Nest) this.stepNest(k, b);
         else if (wyrm(b.kind)) this.stepBasilisk(k, b);
@@ -1764,7 +1784,7 @@ export class World {
   private stockLair(): boolean {
     const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
     if (nests < LAIR_NESTS && this.spawnNest()) return true;
-    const crawlers = this.beasts.filter((b) => b && (b.kind === BeastKind.Millipede || b.kind === BeastKind.Asp)).length;
+    const crawlers = this.beasts.filter((b) => b && crawler(b.kind)).length;
     return crawlers < LAIR_CRAWLERS && this.spawnBeast(LAIR_ASP_SHARE);
   }
 
@@ -1786,7 +1806,9 @@ export class World {
       const c = this.calm;
       if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
       if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 420)) continue;
-      const b = newBeast(t, rng.next() < aspShare ? BeastKind.Asp : BeastKind.Millipede, x, y, rng.next() < 0.5 ? -1 : 1);
+      const roll = rng.next();
+      const kind = roll < aspShare ? BeastKind.Asp : roll < aspShare + (1 - aspShare) * CSPIDER_SHARE ? BeastKind.Spider : BeastKind.Millipede;
+      const b = newBeast(t, kind, x, y, rng.next() < 0.5 ? -1 : 1);
       b.turnAt = this.tick + 60;
       this.beasts[slot] = b;
       bodyPoints(t, b, this.beastPts[slot]);
@@ -1800,7 +1822,7 @@ export class World {
     const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
     if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
     // (Lying in wait, it sees further: a line on anyone in that reach wakes it.)
-    let best = b.kind === BeastKind.Seeder ? SEEDER_SENSE : b.kind === BeastKind.Nest ? NEST_SENSE : b.kind === BeastKind.Asp ? ASP_SENSE : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
+    let best = b.kind === BeastKind.Seeder ? SEEDER_SENSE : b.kind === BeastKind.Nest ? NEST_SENSE : b.kind === BeastKind.Asp ? ASP_SENSE : b.kind === BeastKind.Spider ? (b.frozen > 0 ? CSPIDER_SENSE_FROZEN : CSPIDER_SENSE) : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
     let id = -1;
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
@@ -2153,6 +2175,137 @@ export class World {
         if (p.alive) p.venom = Math.min(VENOM_MAX, p.venom + ASP_BITE_VENOM);
         p.body.vx += Math.sign(p.cx - pts[0]) * 50;
         b.coilCd = ASP_BITE_CD;
+        b.lunge = 0;
+        break;
+      }
+    }
+  }
+
+  /**
+   * One tick of a cave spider (wildlife.ts CSPIDER_*). With nothing about it
+   * wanders a while, then freezes still where it is, flat to the rock, and
+   * waits. Prey in sight, it's off at once, running (and sprinting) along
+   * the surfaces at them; near enough, it dashes the last stretch, or from
+   * further off, in sight, leaps at them through the air; and bites, a
+   * quick heavy bite and a shove.
+   */
+  private stepSpider(k: number, b: Beast): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const pts = this.beastPts[k];
+    const hx = pts.length ? pts[0] : b.x;
+    const hy = pts.length ? pts[1] : b.y;
+    if (b.coilCd > 0) b.coilCd--; // (its bite's cooldown)
+    if ((this.tick + k) % 4 === 0) {
+      const before = b.target;
+      b.target = this.beastTarget(b, hx, hy);
+      if (b.target >= 0 && before < 0) {
+        b.frozen = 0;
+        b.turnAt = this.tick; // (prey: which way to it, now)
+      }
+    }
+    let tgt = b.target >= 0 ? this.players[b.target] : null;
+    if (tgt && (!tgt.alive || tgt.tank >= 0)) {
+      tgt = null;
+      b.target = -1;
+    }
+    const dist = tgt ? Math.hypot(tgt.cx - hx, tgt.cy - hy) : Infinity;
+    // Lying in wait: still, until something comes (or its time is up).
+    if (b.frozen > 0 && !tgt && b.attached) {
+      b.frozen--;
+      bodyPoints(t, b, pts);
+      return;
+    }
+    if (b.lunge > 0) b.lunge--;
+    const pace = sprintTick(b, !!tgt, rng.next());
+    if (tgt && b.attached && b.flung === 0 && b.lunge === 0 && b.coilCd === 0) {
+      const seen = this.lineClear(hx, hy, tgt.cx, tgt.cy);
+      if (dist < CSPIDER_DASH_R && seen) {
+        // The dash: the last stretch, all at once.
+        b.lunge = CSPIDER_DASH_TICKS;
+        b.turnAt = this.tick;
+      } else if (b.flingCd === 0 && dist < CSPIDER_LEAP_MAX && rng.next() < 0.3 && seen) {
+        // The leap: off whatever it holds, through the air at them.
+        b.fx = b.x + 0.5;
+        b.fy = b.y + 0.5;
+        fling(b, b.fx, b.fy, tgt.cx, tgt.cy, CSPIDER_LEAP);
+        b.flingCd = CSPIDER_LEAP_CD;
+        b.attached = false;
+      }
+    }
+    // Its fangs out (the client shows it): dashing or leaping.
+    b.lift += ((b.lunge > 0 || b.flung > 0 ? 1 : 0) - b.lift) * 0.5;
+    if (b.lift < 0.01) b.lift = 0;
+    // Nothing about: wander a while, then freeze.
+    if (!tgt && b.attached && --b.wander <= 0) {
+      b.frozen = CSPIDER_FREEZE_MIN + rng.int(CSPIDER_FREEZE_MAX - CSPIDER_FREEZE_MIN);
+      b.wander = CSPIDER_WANDER + rng.int(CSPIDER_WANDER);
+      bodyPoints(t, b, pts);
+      return;
+    }
+    if (b.flung > 0) {
+      flingStep(t, b, DT);
+      if (b.y >= WORLD_H - 14) {
+        this.beasts[k] = null;
+        return;
+      }
+    } else if (!b.attached) {
+      const y0 = b.y;
+      fallStep(t, b, DT, GRAVITY);
+      const y1 = b.y;
+      for (let y = y0 + 1; y <= y1; y++) {
+        b.y = y;
+        pushTrail(b);
+      }
+      if (b.y >= WORLD_H - 14) {
+        this.beasts[k] = null;
+        return;
+      }
+    } else {
+      if (this.tick >= b.turnAt) {
+        if (tgt) {
+          const ahead = this.probeCrawl(b, false, tgt.cx, tgt.cy);
+          const back = this.probeCrawl(b, true, tgt.cx, tgt.cy);
+          if (back < ahead - 4) turnRound(b);
+          b.turnAt = this.tick + 8;
+        } else {
+          if (rng.next() < 0.3) turnRound(b);
+          b.turnAt = this.tick + 60 + rng.int(120);
+        }
+      }
+      if (Math.abs(b.x - b.lastX) + Math.abs(b.y - b.lastY) > 4) {
+        b.lastX = b.x;
+        b.lastY = b.y;
+        b.still = 0;
+      } else if (++b.still > 45) {
+        turnRound(b);
+        b.still = 0;
+      }
+      b.owed += (b.lunge > 0 ? CSPIDER_DASH : tgt ? CSPIDER_HUNT * pace : CSPIDER_CRAWL) * DT;
+      while (b.owed >= 1 && b.attached) {
+        b.owed--;
+        crawlStep(t, b);
+        pushTrail(b);
+        if (tgt) resetLoop(b);
+        else if (loopWatch(t, b)) {
+          b.attached = false;
+          b.vy = 30;
+          break;
+        }
+        if (tgt && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < CSPIDER_BITE_R) break;
+      }
+    }
+    bodyPoints(t, b, pts);
+    // The bite, for whoever its head is on.
+    if (b.coilCd === 0) {
+      for (const p of this.players) {
+        if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
+        if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > CSPIDER_BITE_R + 4) continue;
+        this.damage(p, CSPIDER_BITE, NO_OWNER, W_SPIDER);
+        const s = Math.sign(p.cx - pts[0]) || 1;
+        p.body.vx += s * CSPIDER_SHOVE;
+        p.body.vy -= CSPIDER_SHOVE * 0.4;
+        b.coilCd = CSPIDER_BITE_CD;
         b.lunge = 0;
         break;
       }
@@ -4646,7 +4799,7 @@ export class World {
         consider(pts[0], pts[1], vx, vy);
         continue;
       }
-      if ((b.kind !== BeastKind.Millipede && b.kind !== BeastKind.Asp && !wyrm(b.kind)) || b.frozen > 0 || b.gem) continue;
+      if ((!crawler(b.kind) && !wyrm(b.kind)) || b.frozen > 0 || b.gem) continue;
       const m = (pts.length >> 2) << 1;
       consider(pts[0], pts[1], vx, vy);
       consider(pts[m], pts[m + 1], vx, vy);
