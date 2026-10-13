@@ -3177,7 +3177,8 @@ export class World {
           if (!solid(f.x + ox, f.y + oy)) continue;
           // (Not the world's floor: the bedrock there holds it.)
           if (f.y + oy >= WORLD_H - 14) break;
-          this.carve(Math.round(f.x + ox * 0.6), Math.round(f.y + oy * 0.7), R + 1, R + 1, 0, owner);
+          // (A big bite: it eats the ground fast.)
+          this.carve(Math.round(f.x + ox * 0.6), Math.round(f.y + oy * 0.7), R + 4, R + 4, 3, owner);
           break;
         }
       }

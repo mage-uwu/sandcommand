@@ -716,11 +716,19 @@ export function stoneburnBlast(p: Particles, x: number, y: number, impulse: numb
 
 /**
  * A blob of a Stoneburner's molten sludge, one tick of it (`heat` 1 fresh,
- * falling to 0 as it sets): now and then a lick of flame, a spit of sparks,
- * a wisp of acrid smoke (a pool of them makes a fair column of it).
+ * falling to 0 as it sets): flame licking off it all the time, and every
+ * so often a grenade's worth of blast going off in it (flame, sparks,
+ * smoke, the air shoved), more often while it's hot. Just the fire: no
+ * fragments (they'd settle into this client's ground alone).
  */
 export function moltenCore(p: Particles, x: number, y: number, heat: number): void {
-  if (Math.random() < 0.08 + 0.3 * heat) p.spawn(PK.Flame, x + rnd(-3, 3), y - 2, rnd(-15, 15), -rnd(20, 40 + 80 * heat), rnd(6, 10 + 8 * heat));
-  if (Math.random() < 0.04 + 0.12 * heat) p.spawn(PK.Spark, x + rnd(-2, 2), y - 2, rnd(-60, 60), -rnd(40, 160), rnd(8, 18));
-  if (Math.random() < 0.06) p.spawn(PK.Smoke, x + rnd(-3, 3), y - 4, rnd(-10, 10), -rnd(20, 50), rnd(80, 140), 0, heat > 0.3 ? 0 : 0x6a6a40);
+  if (Math.random() < 0.15 + 0.35 * heat) p.spawn(PK.Flame, x + rnd(-4, 4), y - 2, rnd(-20, 20), -rnd(30, 60 + 100 * heat), rnd(8, 12 + 10 * heat));
+  if (Math.random() < 0.05) p.spawn(PK.Smoke, x + rnd(-4, 4), y - 5, rnd(-12, 12), -rnd(25, 60), rnd(90, 160));
+  if (Math.random() < 0.012 + 0.03 * heat) {
+    const r = 10 + 10 * heat;
+    p.blast(x, y, r * 1.6, 180);
+    burst(p, PK.Flame, x, y - 2, 22, r * 6, 12);
+    burst(p, PK.Spark, x, y - 2, 16, r * 12, 18);
+    burst(p, PK.Smoke, x, y - 4, 18, r * 3, 80);
+  }
 }

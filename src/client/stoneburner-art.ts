@@ -68,53 +68,26 @@ function drawMissile(ctx: CanvasRenderingContext2D, x: number, gy: number, left:
 }
 
 /**
- * The molten sludge: each blob a glob of glowing slag (white-yellow while
- * fresh, orange, then a dull red under a darkening crust as it cools), in a
- * glow of its own, so a pool of them reads as one seething puddle and a
- * trickle of them as a stream.
+ * The molten sludge: no shapes of its own, only light. Each blob is a hot
+ * white-orange heart in a wide orange glow, added together where they
+ * crowd, so a pool of them is one seething glare; the fire and the blasts
+ * going off in it are particles (effects.ts moltenCore).
  */
 export function drawFeet(ctx: CanvasRenderingContext2D, list: readonly FootState[], now: number): void {
   const op = ctx.globalCompositeOperation;
-  // The glow first, all of it (added up where they crowd together).
   ctx.globalCompositeOperation = 'lighter';
   for (const f of list) {
     const heat = f.life / FOOT_LIFE;
-    const r = 6 + 10 * heat;
+    const flick = 0.85 + 0.15 * Math.sin(now / 70 + f.x * 0.9 + f.y);
+    const r = (16 + 26 * heat) * flick;
     const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
-    g.addColorStop(0, `rgba(255,150,50,${0.3 * Math.min(1, heat * 1.5 + 0.2)})`);
-    g.addColorStop(1, 'rgba(200,50,10,0)');
+    g.addColorStop(0, `rgba(255,${Math.round(150 + 90 * heat)},${Math.round(60 + 120 * heat)},${0.5 * Math.min(1, heat * 1.4 + 0.25)})`);
+    g.addColorStop(0.3, `rgba(255,120,30,${0.22 * Math.min(1, heat * 1.4 + 0.2)})`);
+    g.addColorStop(1, 'rgba(180,40,10,0)');
     ctx.fillStyle = g;
     ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
   }
   ctx.globalCompositeOperation = op;
-  // Then the sludge itself, in layers across the whole puddle (crust, then the melt, then its hottest
-  // heart), so neighbouring blobs run together as one, the dark crust only round its edge.
-  const tone = (heat: number) =>
-    heat > 0.55 ? ['#7a2a10', '#ffc050', '#fff0b0'] : heat > 0.3 ? ['#5a2010', '#e86a1c', '#ffb040'] : heat > 0.12 ? ['#2a1610', '#a83410', '#e05818'] : ['#1e120c', '#4a1a10', '#8a2a10'];
-  for (let layer = 0; layer < 3; layer++) {
-    for (const f of list) {
-      const heat = f.life / FOOT_LIFE;
-      const x = Math.round(f.x);
-      const y = Math.round(f.y);
-      const seed = (x * 7 + y * 13) & 3;
-      ctx.fillStyle = tone(heat)[layer];
-      if (layer === 0) {
-        ctx.fillRect(x - 5, y - 1, 11, 4);
-        ctx.fillRect(x - 4, y - 3 + (seed & 1), 9, 7);
-      } else if (layer === 1) {
-        ctx.fillRect(x - 4, y - 1, 9, 3);
-        ctx.fillRect(x - 3, y - 2 - (seed >> 1), 7, 5);
-      } else {
-        const flick = Math.sin(now / 90 + x * 0.7 + y) * 0.5 + 0.5;
-        ctx.fillRect(x - 2 - (seed & 1), y - 1, 4 + (seed & 1), 2 + (flick > 0.5 ? 1 : 0));
-        // (Crust floating on it as it cools: dark flecks.)
-        if (heat < 0.4) {
-          ctx.fillStyle = tone(heat)[0];
-          ctx.fillRect(x + 1 - seed, y - 2, 2, 1);
-        }
-      }
-    }
-  }
 }
 
 /**

@@ -2547,17 +2547,21 @@ for the story mode too.
   thing that drills down; it flows like wet sand:
   - it falls, slides down any slope, and spreads sideways, crowding apart
     rather than stacking, so it pools in the low places;
-  - it eats whatever ground it touches (below first, then the sides, hard
-    rock too), so it sinks, widens its pit, and seeps through into any
-    cave or tunnel underneath;
+  - it eats whatever ground it touches in big bites (below first, then
+    the sides, hard rock too), so it sinks, widens its pit, and seeps
+    through into any cave or tunnel underneath;
   - it eats more slowly as it cools over up to 40 s;
   - it sears anyone who gets near it, and sheds flame, sparks and acrid
     smoke;
   - when it's spent, each blob sets as a few grains of glassy slag that
     settle as real ground.
 
-  On screen the blobs run together into one glowing puddle: white-yellow
-  while fresh, then orange, then a dull red under a darkening crust.
+  On screen it has no shape of its own, only fire and light: a fierce
+  orange glow round each blob, added up where they pool. Flame licks off
+  it all the time, and every so often a grenade's worth of blast goes off
+  in it (flame, sparks, smoke, the air shoved), more often while it's hot.
+  That's just the fire, without fragments, which would settle into one
+  client's ground alone.
 - **Everyone sees it.** The strike is broadcast to the whole room
   (`R_STONEBURN`), wherever each player is:
   - the screen flashes pure white, HUD and all, and fades back over three
