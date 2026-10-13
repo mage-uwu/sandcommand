@@ -678,23 +678,40 @@ export function beastGibs(p: Particles, pts: readonly number[]): void {
  * through every loose grain about.
  */
 export function stoneburnBlast(p: Particles, x: number, y: number, impulse: number): void {
-  p.blast(x, y, 420, impulse * 5);
-  burst(p, PK.Flame, x, y - 10, 260, 420, 34);
-  burst(p, PK.Flame, x, y - 30, 120, 180, 60, 0, 0, -120);
-  burst(p, PK.Spark, x, y, 160, 620, 40);
+  p.blast(x, y, 520, impulse * 7);
+  // The fireball's first instant: a ball of flame torn outward, and a storm of sparks.
+  burst(p, PK.Flame, x, y - 14, 420, 620, 30);
+  burst(p, PK.Flame, x, y - 40, 160, 260, 70, 0, 0, -260);
+  burst(p, PK.Spark, x, y - 10, 340, 1100, 45);
+  // Burning fragments thrown out like a shell's, flat and fast, streaking (they're only for show here: the server's hurt).
+  for (let k = 0; k < 260; k++) {
+    const a = -Math.PI * (0.02 + 0.96 * Math.random());
+    const s = rnd(500, 1400);
+    p.spawn(PK.Shrapnel, x + rnd(-10, 10), y + rnd(-14, 2), Math.cos(a) * s, Math.sin(a) * s, rnd(16, 34), 0, 0, NO_OWNER);
+  }
+  // Rock thrown high: tumbling chunks of the ground, scorched.
+  for (let k = 0; k < 70; k++) {
+    const a = -Math.PI * (0.18 + 0.64 * Math.random());
+    const s = rnd(300, 900);
+    const i = p.n;
+    if (p.spawn(PK.Gib, x + rnd(-24, 24), y + rnd(-10, 4), Math.cos(a) * s, Math.sin(a) * s, rnd(500, 800), (k % 3 ? GIB_SAC : GIB_BUD) | GIB_INORGANIC, k % 2 ? 0x3a2a22 : 0x5a4436)) {
+      p.spin[i] = Math.floor(Math.random() * 4);
+      p.spinRate[i] = (Math.random() - 0.5) * 0.3;
+    }
+  }
   // Burning debris arcing out.
-  for (let k = 0; k < 90; k++) {
+  for (let k = 0; k < 160; k++) {
     const a = -Math.PI * (0.05 + 0.9 * Math.random());
-    const s = rnd(220, 700);
-    p.spawn(PK.Flame, x + rnd(-20, 20), y + rnd(-10, 4), Math.cos(a) * s, Math.sin(a) * s, rnd(40, 90));
+    const s = rnd(260, 900);
+    p.spawn(PK.Flame, x + rnd(-20, 20), y + rnd(-10, 4), Math.cos(a) * s, Math.sin(a) * s, rnd(40, 100));
   }
-  // The base surge: dust and smoke rolling out along the ground both ways.
-  for (let k = 0; k < 140; k++) {
+  // The base surge: a wall of dust and smoke racing out along the ground both ways.
+  for (let k = 0; k < 320; k++) {
     const dir = k % 2 ? 1 : -1;
-    p.spawn(PK.Smoke, x + rnd(-30, 30), y + rnd(-14, 6), dir * rnd(120, 520), rnd(-60, 10), rnd(120, 220));
-    if (k % 3 === 0) p.spawn(PK.Dust, x + rnd(-20, 20), y + rnd(-6, 6), dir * rnd(160, 600), rnd(-90, -10), rnd(60, 120), 0, 0xb09070);
+    p.spawn(PK.Smoke, x + rnd(-30, 30), y + rnd(-18, 4), dir * rnd(200, 900), rnd(-90, 5), rnd(140, 260));
+    if (k % 2 === 0) p.spawn(PK.Dust, x + rnd(-20, 20), y + rnd(-8, 4), dir * rnd(300, 1100), rnd(-140, -10), rnd(70, 140), 0, 0xb09070);
   }
-  burst(p, PK.Smoke, x, y - 40, 120, 160, 200, 0, 0, -90);
+  burst(p, PK.Smoke, x, y - 50, 180, 260, 220, 0, 0, -160);
 }
 
 /**

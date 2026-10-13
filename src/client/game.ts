@@ -1092,6 +1092,8 @@ export class Game implements FrameHandler {
   stoneFlashAt = -1e9;
   /** The ground still shaking after a strike (a long rumble under the quick jolts of `shake`). */
   quake = 0;
+  /** A strike's ejecta: burning chunks thrown high, trailing fire and smoke till they come down (just for show). */
+  private readonly ejecta: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
 
   burners(beacons: BurnerState[], feet: FootState[]): void {
     // A beacon beeps each time its light comes on: any tick of its countdown since we last heard of it
@@ -1133,6 +1135,11 @@ export class Game implements FrameHandler {
     this.stoneBurns.push({ x, y, at: now, seed });
     if (this.stoneBurns.length > 4) this.stoneBurns.shift();
     stoneburnBlast(this.particles, x, y, BLAST_IMPULSE);
+    for (let k = 0; k < 44; k++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
+      const sp = 380 + Math.random() * 900;
+      this.ejecta.push({ x: x + (Math.random() - 0.5) * 30, y: y - 8, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 60 + Math.floor(Math.random() * 90) });
+    }
     this.flashes.push({ x, y, r: 260, at: now });
     const me = this.body;
     const d = Math.hypot(me.x - x, me.y - y);
@@ -1148,6 +1155,22 @@ export class Game implements FrameHandler {
       this.quake *= 0.985;
     } else this.quake = 0;
     for (const f of this.footList) moltenCore(this.particles, f.x, f.y, f.life / FOOT_LIFE);
+    // The ejecta: falling, trailing fire and then smoke as they cool, till they hit the ground.
+    for (let i = this.ejecta.length - 1; i >= 0; i--) {
+      const e = this.ejecta[i];
+      e.vy += GRAVITY * DT;
+      e.vx *= 0.995;
+      e.x += e.vx * DT;
+      e.y += e.vy * DT;
+      const hot = Math.min(1, e.life / 70);
+      if (--e.life <= 0 || this.terrain.isSolid(Math.floor(e.x), Math.floor(e.y)) || e.y > WORLD_H) {
+        for (let k = 0; k < 6; k++) this.particles.spawn(PK.Spark, e.x, e.y, (Math.random() - 0.5) * 300, -Math.random() * 220, 10 + Math.random() * 8);
+        this.ejecta.splice(i, 1);
+        continue;
+      }
+      if (hot > 0.25) this.particles.spawn(PK.Flame, e.x, e.y, e.vx * 0.05, e.vy * 0.05, 6 + 10 * hot);
+      this.particles.spawn(PK.Smoke, e.x, e.y, e.vx * 0.02, e.vy * 0.02, 50 + 70 * (1 - hot));
+    }
   }
 
   /** Landmines on the map (R_MINES). */

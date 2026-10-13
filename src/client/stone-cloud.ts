@@ -86,6 +86,9 @@ float capR(float t) { return 50.0 + 165.0 * (1.0 - exp(-t / 6.5)); }
 float stemW(float t) { return 16.0 + 30.0 * (1.0 - exp(-t / 6.0)); }
 /** How hot the whole thing still is: blinding at first, then a long, slow cooling (it still glows half a minute on). */
 float hotness(float t) { return 0.45 * exp(-t / 5.0) + 0.55 * exp(-t / 34.0); }
+/** The fireball: ripping out to full size in a fraction of a second, then shooting up into the cap. */
+float fireR(float t) { return 30.0 + 140.0 * (1.0 - exp(-t * 4.0)) + 20.0 * t; }
+vec2 fireC(float t) { return vec2(0.0, 30.0 + rise(t) * 0.85 * smoothstep(0.2, 4.0, t)); }
 /** Where the pillar's axis is at height y (it leans a little with the wind as the cap drifts). */
 float axisX(float y, float t) { return t * 2.5 * clamp(y / max(rise(t), 1.0), 0.0, 1.0); }
 
@@ -106,9 +109,8 @@ float shape(vec2 p, float t) {
   float sk = 70.0 + 240.0 * (1.0 - exp(-t / 5.0));
   float skirt = (1.0 - length(vec2(p.x / sk, (p.y + 4.0) / (16.0 + 24.0 * (1.0 - exp(-t / 6.0)))))) * 0.9;
   // The first seconds: the fireball, swelling up off the ground into the cap.
-  float k = clamp(t / 4.0, 0.0, 1.0);
-  vec2 fc = vec2(0.0, 24.0 + r * 0.7 * k);
-  float fr = 34.0 + 115.0 * sqrt(k);
+  vec2 fc = fireC(t);
+  float fr = fireR(t);
   float ball = (1.0 - length(p - fc) / fr) * (1.0 - smoothstep(3.0, 6.5, t));
   return max(max(cap, stem), max(skirt, ball));
 }
@@ -161,10 +163,12 @@ float temperature(vec2 p, float t) {
   float core = exp(-dx * dx) * inStem * (0.85 + 0.15 * f);
   // The crater at its foot, still burning.
   float base = exp(-dot(p / vec2(55.0, 22.0), p / vec2(55.0, 22.0)));
-  float k = clamp(t / 4.0, 0.0, 1.0);
-  vec2 fc = vec2(0.0, 24.0 + r * 0.7 * k);
-  float fr = 34.0 + 115.0 * sqrt(k);
-  float ball = clamp(1.2 - length(p - fc) / fr, 0.0, 1.0) * (1.0 - smoothstep(2.5, 6.0, t));
+  vec2 fc = fireC(t);
+  float fr = fireR(t);
+  float ball = clamp(1.25 - length(p - fc) / fr, 0.0, 1.0) * (1.0 - smoothstep(2.5, 6.0, t));
+  // Boiling: hot tongues and, after the first second, soot breaking out over it in dark patches.
+  float boil = fbm(vec3(p * 0.03 + vec2(0.0, -t * 30.0) * 0.03, t * 1.7 + uSeed), 4);
+  ball *= mix(0.75 + 0.5 * boil, smoothstep(0.35, 0.65, boil) * 1.2, smoothstep(0.8, 3.0, t));
   float h = max(max(ring, belly * 0.9), max(core, base * 0.9));
   // Turbulent: hot tongues and cooler pockets, flickering.
   float fl = fbm(vec3(p * 0.035 + vec2(0.0, -t * 14.0) * 0.035, t * 0.9 + uSeed * 3.0), 3);
@@ -265,6 +269,50 @@ export function drawCloudHalo(ctx: CanvasRenderingContext2D, x: number, y: numbe
   }
   glowDisc(ctx, x, y - 10, 170, '255,150,70', 0.4 * h * flick);
   ctx.globalCompositeOperation = op;
+}
+
+/**
+ * The shock wave, its first three seconds (world space, behind the ground,
+ * so only the half in the sky shows): a bright ring tearing outward faster
+ * than anything, a fainter echo behind it, the air inside it shimmering
+ * pale, and a white condensation dome flashing round the fireball.
+ */
+export function drawShock(ctx: CanvasRenderingContext2D, x: number, y: number, t: number): void {
+  if (t < 0 || t > 3.2) return;
+  const k = 1 - t / 3.2;
+  const R = 30 + 1000 * (1 - Math.exp(-t * 1.5));
+  const op = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  // The air inside the front, shimmering.
+  ctx.fillStyle = `rgba(255,236,210,${0.09 * k * k})`;
+  ctx.beginPath();
+  ctx.arc(x, y, R, 0, Math.PI * 2);
+  ctx.fill();
+  // The front, and its echo.
+  for (const [rr, aa, ww] of [
+    [R, 0.75, 10],
+    [R * 0.82, 0.35, 6],
+  ] as const) {
+    ctx.strokeStyle = `rgba(255,248,232,${aa * Math.pow(k, 1.4)})`;
+    ctx.lineWidth = ww * (0.4 + 0.6 * k) + 1;
+    ctx.beginPath();
+    ctx.arc(x, y, rr, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = op;
+  // The condensation dome: a white veil flashing out round the fireball and gone.
+  const c = Math.sin(Math.min(1, t / 2.2) * Math.PI);
+  if (c > 0.01) {
+    const r2 = 90 + 260 * (1 - Math.exp(-t * 1.8));
+    const g = ctx.createRadialGradient(x, y - 30, r2 * 0.55, x, y - 30, r2);
+    g.addColorStop(0, 'rgba(240,236,230,0)');
+    g.addColorStop(0.75, `rgba(240,236,230,${0.32 * c})`);
+    g.addColorStop(1, 'rgba(240,236,230,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y - 30, r2, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 /**
@@ -372,6 +420,7 @@ export class StoneCloud {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.SCISSOR_TEST);
     drawCloudHalo(ctx, x, y, t);
+    drawShock(ctx, x, y, t);
     const smooth = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = false;
     const w = cx1 - cx0;

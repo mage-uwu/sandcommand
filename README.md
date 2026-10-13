@@ -2551,8 +2551,22 @@ for the story mode too.
     seconds;
   - everyone's view shakes (hardest near it), and a long rumble follows;
   - the boom reaches everyone, later the further off they are;
-  - a **mushroom cloud** towers over the site for 70 s. First a blinding
-    white fireball swells off the ground. Then comes a glowing, smoking
+  - **the blast itself.** The fireball rips out to full size in a fraction
+    of a second, boiling, with soot breaking out across it in dark
+    patches, then shoots up into the cap. A bright **shock wave** tears
+    outward through the sky with a fainter echo behind it, the air inside
+    it shimmering, and a white condensation dome flashes round the
+    fireball (`drawShock`). On the ground:
+    - hundreds of burning fragments streak out flat and fast;
+    - chunks of scorched rock tumble high;
+    - about forty burning **ejecta** arc out trailing fire and then smoke
+      until they come down;
+    - a wall of dust and smoke races out along the ground both ways.
+
+    All of that is cosmetic, on each client; the server's own debris is
+    what hurts.
+  - a **mushroom cloud** towers over the site for 70 s. First the
+    fireball. Then comes a glowing, smoking
     pillar, white-hot up its core, pouring into a wide cap. Inside the cap
     the rolling vortex ring burns orange through the soot, and the cap's
     belly glows from below. It cools slowly, still glowing half a minute
