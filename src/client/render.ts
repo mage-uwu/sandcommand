@@ -3362,7 +3362,7 @@ export class Renderer {
       for (const bl of game.radar) if (game.isKing(bl.id)) ctx.strokeRect(mx + bl.x * k - 3 * s, my + bl.y * k - 3 * s, 6 * s, 6 * s);
       for (const v of views) if (v.flags & F_ALIVE && game.isKing(v.id)) ctx.strokeRect(mx + v.x * k - 3 * s, my + v.y * k - 3 * s, 6 * s, 6 * s);
     }
-    // Extermination: the basilisks (red when awake, dim asleep), for everyone to hunt.
+    // Extermination: the basilisks and the dragon (red when awake, dim asleep), for everyone to hunt.
     if (rs0?.lair && rs0.mode === GameMode.Extermination) {
       const pulse = 3.5 + Math.sin(performance.now() / 160);
       for (const b of rs0.lair.beasts) {
@@ -3563,7 +3563,7 @@ export class Renderer {
         `WAVE ${rs.wave + 1} IN ${secs}`,
         // (The mode is the headline; the map's biome goes with the hints.)
         (exterm
-          ? 'extermination · everyone together · four basilisks hibernate in the giant cave below · kill them all · respawns'
+          ? 'extermination · everyone together · three basilisks and a dragon hibernate in the giant cave below · kill them all · respawns'
           : siege
           ? 'siege · red holds the fortress and its king for 20 minutes · green has 300 lives to kill him'
           : extraction
@@ -3583,8 +3583,8 @@ export class Renderer {
       if (rs.winner === 255) big('NOBODY GOT OUT', `the idol stays buried · wave ${rs.wave} · next wave in ${secs}`);
       else big(`${TEAM_NAMES[rs.winner]} EXTRACTED`, `${mine ? 'your team got' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' got'} the golden idol out · next wave in ${secs}`, teamCss(rs.winner));
     } else if (rs.phase === Phase.Victory && exterm) {
-      if (rs.winner === 255) big('THE BASILISKS WIN', `${rs.lair?.beasts.length ?? '?'} still alive · wave ${rs.wave} · next wave in ${secs}`, '#ff8070');
-      else big('LAIR CLEARED', `every basilisk is dead · wave ${rs.wave} · next wave in ${secs}`, '#80ff80');
+      if (rs.winner === 255) big('THE BEASTS WIN', `${rs.lair?.beasts.length ?? '?'} still alive · wave ${rs.wave} · next wave in ${secs}`, '#ff8070');
+      else big('LAIR CLEARED', `every basilisk and the dragon dead · wave ${rs.wave} · next wave in ${secs}`, '#80ff80');
     } else if (rs.phase === Phase.Victory && pvp) {
       const won = rs.winner === game.myId;
       const who = (game.players.get(rs.winner)?.name ?? '').replace(/^BOT /, '');
@@ -3641,7 +3641,7 @@ export class Renderer {
         const lair = rs.lair;
         const left = lair?.beasts.length ?? 0;
         const awake = lair?.beasts.filter((b) => b.awake).length ?? 0;
-        parts.push({ t: `BASILISKS ${left}/${lair?.total ?? 4}`, c: left <= 1 ? '#80ff80' : '#ffd34a' }, gap, { t: `${awake} AWAKE`, c: awake > 0 ? '#ff8070' : '#9aa4ad' });
+        parts.push({ t: `BEASTS ${left}/${lair?.total ?? 4}`, c: left <= 1 ? '#80ff80' : '#ffd34a' }, gap, { t: `${awake} AWAKE`, c: awake > 0 ? '#ff8070' : '#9aa4ad' });
         extra = { t: awake > 0 ? 'KILL THEM · they hear you, and hunt you through the cave' : 'down the chutes into the lair · wake them, then kill them', c: awake > 0 ? '#ff8070' : '#c8d0d8' };
       } else if (pvp) {
         modeName = 'PVP';

@@ -308,12 +308,13 @@ export class BotBrain {
     return at;
   }
 
-  /** Extermination: the nearest basilisk left (its head), to go and kill. */
+  /** Extermination: the nearest basilisk (or the dragon) left (its head), to go and kill. */
   private quarry(world: World, p: Player): { x: number; y: number } | null {
     let best = Infinity;
     let at: { x: number; y: number } | null = null;
     for (let k = 0; k < world.beasts.length; k++) {
-      if (world.beasts[k]?.kind !== BeastKind.Basilisk) continue;
+      const q = world.beasts[k];
+      if (!q || !wyrm(q.kind)) continue;
       const pts = world.beastPts[k];
       const d = Math.hypot(pts[0] - p.cx, pts[1] - p.cy);
       if (d < best) {

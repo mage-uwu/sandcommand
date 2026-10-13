@@ -967,7 +967,9 @@ it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
 - **Where it turns up:** it's rarer than a basilisk. When the wild
   basilisk's turn comes round, a quarter of the time it's a dragon
   instead (`DRAGON_ODDS`), deeper down and further from anyone. Only one
-  of either is about at a time.
+  of either is about at a time. In Extermination one of the lair's four
+  dens always holds a dragon, at half a wild one's health like the lair's
+  basilisks, and it hunts the lair the way they do.
 - **Its look** (`src/client/dragon-art.ts`). Where the other creatures
   wear the caves' GEMMs and stone to hide, this one wears them to show
   off. It's an apex predator with no reason to hide: a dazzling, horrible
@@ -1229,8 +1231,8 @@ In a headless 32-bot siege the attackers reached the walls and spent about
 
 ## Extermination
 
-Everyone fights on one side against **four basilisks** (see Wildlife). The
-mode has its own map, **the lair** (`MapKind.Lair`, `src/shared/lair.ts`):
+Everyone fights on one side against **three basilisks and a dragon** (see
+Wildlife). The mode has its own map, **the lair** (`MapKind.Lair`, `src/shared/lair.ts`):
 **one giant cave** hollowed out deep under the map, nearly its whole width,
 about 250 cells tall. Players pour down into it to fight the basilisks on
 their own ground.
@@ -1238,13 +1240,15 @@ their own ground.
   rise from the floor (a gap left under the roof) or hang from the roof (a
   gap left over the floor).
 - **Inside.** Each chamber has a ledge or two up its walls, dripstone
-  hanging from its roof, and a basilisk hibernating on its floor.
+  hanging from its roof, and a basilisk hibernating on its floor. One den
+  (a different one each wave) holds a dragon instead.
 - **Chutes.** Two or three broad chutes drop into it from the surface, each
   into a chamber and off to one side of its den, 44 cells across (wide
   enough for a tank to drop down). They're the way in.
 
-Kill all four and everyone wins together, the fallen included. When the
-twenty-four minutes run out with any still alive, the basilisks win. The dead
+Kill all four (the three basilisks and the dragon) and everyone wins
+together, the fallen included. When the twenty-four minutes run out with
+any still alive, the beasts win. The dead
 come back by drop rocket, as in Regicide.
 - **Waking them.** They sleep the whole wave unless something wakes them,
   and anything coming near does.
@@ -1275,9 +1279,9 @@ come back by drop rocket, as in Regicide.
   wave (`stockLair`). A basilisk killed never comes back. To fit it all,
   a world now holds up to 40 creatures (`MAX_BEASTS`).
 
-**The HUD.** The match card counts the basilisks left and how many are
-awake. The minimap marks each one: dim while it sleeps, a pulsing red dot
-once it's awake. It's in the rotation, and **`?room=extermination`** joins a
+**The HUD.** The match card counts the beasts left (BEASTS n/4: the
+basilisks and the dragon) and how many are awake. The minimap marks each
+one: dim while it sleeps, a pulsing red dot once it's awake. It's in the rotation, and **`?room=extermination`** joins a
 match that plays nothing else.
 
 **Bots.** With nobody else to fight, bots take on the nearest basilisk:

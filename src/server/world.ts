@@ -1167,10 +1167,10 @@ export class World {
     this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
   }
 
-  /** Basilisks still alive (Extermination's quarry). */
+  /** Basilisks (and the dragon) still alive (Extermination's quarry). */
   basilisksLeft(): number {
     let n = 0;
-    for (const b of this.beasts) if (b?.kind === BeastKind.Basilisk) n++;
+    for (const b of this.beasts) if (b && wyrm(b.kind)) n++;
     return n;
   }
 
@@ -1181,7 +1181,8 @@ export class World {
 
   /**
    * Extermination opening: a basilisk hibernating on the floor of every den
-   * (sleeping the wave away, unless someone wakes it: and that's easy), and
+   * but one, and in that one a dragon (sleeping the wave away, unless
+   * someone wakes them: and that's easy), and
    * the cave's lesser life (stockLair). No gold handed out: it's fought on
    * foot, mostly (LAIR_VEHICLES).
    */
@@ -1189,12 +1190,16 @@ export class World {
     this.beasts.fill(null);
     const lair = this.lair;
     if (lair) {
+      const dragonDen = this.beastRng.int(lair.dens.length);
       lair.dens.forEach((d, k) => {
-        const b = newBeast(this.terrain, BeastKind.Basilisk, d.floorX, d.floorY - 8, d.floorX < WORLD_W / 2 ? 1 : -1);
+        const kind = k === dragonDen ? BeastKind.Dragon : BeastKind.Basilisk;
+        // (Up off the floor by its girth: a dragon's is three times a basilisk's.)
+        const y = d.floorY - 8 * wyrmScale(kind);
+        const b = newBeast(this.terrain, kind, d.floorX, y, d.floorX < WORLD_W / 2 ? 1 : -1);
         b.seed = this.beastRng.int(256);
         b.frozen = EXTERMINATION_TICKS + 30 * 60;
-        b.hp = BASILISK_HP * LAIR_HP;
-        this.lairHome.set(b, { x: d.floorX, y: d.floorY - 8 });
+        b.hp = BEAST_BUILD[kind].hp * LAIR_HP;
+        this.lairHome.set(b, { x: d.floorX, y });
         this.beasts[k] = b;
         bodyPoints(this.terrain, b, this.beastPts[k]);
       });
@@ -7513,9 +7518,9 @@ export class World {
           if (counts.length) w.u8(p.vote);
         }
         if (this.waveMode === GameMode.Extermination) {
-          // Extermination: how many it began with, then each basilisk left (its head, and whether it's awake).
+          // Extermination: how many it began with, then each basilisk (or the dragon) left (its head, and whether it's awake).
           w.u8(this.lairBeasts);
-          const left = this.beasts.filter((b): b is Beast => b?.kind === BeastKind.Basilisk);
+          const left = this.beasts.filter((b): b is Beast => !!b && wyrm(b.kind));
           w.u8(left.length);
           for (const b of left) {
             w.u16(clampU16(b.fx));

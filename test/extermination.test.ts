@@ -3,7 +3,7 @@ import { Reader } from '../src/shared/codec.ts';
 import { CALL_COST, CallKind, GameMode, Phase, TEAMS_IN_MODE, Team } from '../src/shared/protocol.ts';
 import { MapKind } from '../src/shared/worldgen.ts';
 import { LAIR_DENS } from '../src/shared/lair.ts';
-import { BASILISK_HP, BeastKind } from '../src/shared/wildlife.ts';
+import { BEAST_BUILD, BeastKind, wyrm, wyrmScale } from '../src/shared/wildlife.ts';
 import { ACTOR_H, ACTOR_W, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { W_BASILISK } from '../src/shared/particles.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
@@ -14,7 +14,8 @@ type Internals = { damage: (p: Player, n: number, by: number, w: number) => void
 function until(world: World, cond: () => boolean, max = 3000): void {
   for (let t = 0; t < max && !cond(); t++) world.step();
 }
-const basilisks = (world: World) => world.beasts.map((b, k) => ({ b, k })).filter((o) => o.b?.kind === BeastKind.Basilisk);
+/** The lair's quarry: its basilisks, and its dragon. */
+const basilisks = (world: World) => world.beasts.map((b, k) => ({ b, k })).filter((o) => o.b && wyrm(o.b.kind));
 const exterm = (seed: number, n: number, send?: (d: Uint8Array) => void, bots = 0) => {
   const world = new World(seed, { mode: 'ffa', rotation: [GameMode.Extermination], tanks: false, bots });
   const ps = Array.from({ length: n }, (_, i) => world.addPlayer(`p${i}`, { send: i === 0 && send ? send : () => {} })!);
@@ -24,28 +25,29 @@ const exterm = (seed: number, n: number, send?: (d: Uint8Array) => void, bots = 
 };
 
 describe('Extermination', () => {
-  it('is fought in the lair: four basilisks, one hibernating on the floor of each den, and everyone on one side', () => {
+  it('is fought in the lair: three basilisks and a dragon, one hibernating on the floor of each den, and everyone on one side', () => {
     const { world, ps } = exterm(301, 3);
     expect(TEAMS_IN_MODE[GameMode.Extermination]).toBe(1);
     expect(world.mapKind).toBe(MapKind.Lair);
     expect(world.lair?.dens.length).toBe(LAIR_DENS);
     const bs = basilisks(world);
     expect(bs.length).toBe(LAIR_DENS);
+    expect(bs.filter(({ b }) => b!.kind === BeastKind.Dragon).length).toBe(1);
     for (const { b } of bs) {
       expect(b!.frozen).toBeGreaterThan(30 * 60 * 10); // (asleep the whole wave, unless woken)
-      expect(world.lair!.dens.some((d) => Math.abs(b!.x - d.floorX) < 8 && Math.abs(b!.y - d.floorY) < 16)).toBe(true);
+      expect(world.lair!.dens.some((d) => Math.abs(b!.x - d.floorX) < 8 && Math.abs(b!.y - d.floorY) < 16 * wyrmScale(b!.kind))).toBe(true);
     }
     for (const p of ps) expect(p.team).toBe(Team.Red);
     expect(world.friendly(ps[0].id, ps[1])).toBe(true);
   });
 
-  it('a cache of heavy weapons lies by every chute mouth, and the basilisks are half as tough as a wild one', () => {
+  it('a cache of heavy weapons lies by every chute mouth, and the basilisks (and the dragon) are half as tough as a wild one', () => {
     const { world } = exterm(308, 2);
     for (const mx of world.lair!.mouths) {
       const near = world.items.filter((it) => Math.abs(it.x - mx) < 60);
       for (const w of [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon]) expect(near.map((it) => it.weapon)).toContain(w);
     }
-    for (const { b } of basilisks(world)) expect(b!.hp).toBe(BASILISK_HP / 2);
+    for (const { b } of basilisks(world)) expect(b!.hp).toBe(BEAST_BUILD[b!.kind].hp / 2);
   });
 
   it('woken, a basilisk stays on its own ground: it finds its way through the cave to a clone and kills it', () => {
@@ -119,7 +121,7 @@ describe('Extermination', () => {
     for (let i = 0; i < world.beasts.length; i++) if (world.beasts[i]?.kind === BeastKind.Millipede) world.beasts[i] = null;
     for (let t = 0; t < 30 * 60; t++) world.step();
     expect(count(BeastKind.Millipede) + count(BeastKind.Asp) + count(BeastKind.Spider)).toBeGreaterThan(0);
-    expect(count(BeastKind.Basilisk)).toBe(LAIR_DENS - 1);
+    expect(basilisks(world).length).toBe(LAIR_DENS - 1);
   });
 
   it('the fallen come back by drop rocket', () => {
