@@ -336,6 +336,8 @@ function glassColor(t: Terrain, x: number, y: number): number {
   return (255 << 24) | (b << 16) | (g << 8) | r;
 }
 
+/** The most cells of remains kept (Game.remains: the oldest go first). */
+const REMAINS_MAX = 300_000;
 /** What each stain tint dries to: red blood, then an asp's goo by gem (pink, turquoise, emerald). */
 const STAIN_RGB = [
   [110, 12, 14],
@@ -549,6 +551,7 @@ export class Renderer {
     let fronts = 0;
     const stain = game.stain;
     const stainTint = game.stainTint;
+    const remains = game.remains;
     const backdrop = game.backdrop;
     const skyline = game.skyline;
     for (let y = 0; y < CHUNK; y++) {
@@ -572,6 +575,11 @@ export class Renderer {
           else if (bd) c = backWallColor(t, bd, ox + x, wy);
           else if (wy > skyline[ox + x] + 3) c = caveShade(t, ox + x, wy);
           else c = grassBlade(t, ox + x, wy);
+          // Remains lying here (gibs settled into the ground): drawn as part of it.
+          if (remains.size) {
+            const rm = remains.get(row + x);
+            if (rm !== undefined) c = rm;
+          }
           // Under standing water: tinted deep and clear, a bright line at its surface.
           if (t.water && t.water[row + x]) c = waterColor(t, ox + x, wy, c);
           px[y * CHUNK + x] = c;
@@ -636,11 +644,80 @@ export class Renderer {
   }
   private miniDirty = false;
 
+  /** For stamping a dead creature's segments into the remains: drawn here, read back. */
+  private buryCanvas: HTMLCanvasElement | null = null;
+
+  /**
+   * Work the gibs that settled since last frame into the ground: each one's
+   * pixels, just as it's drawn (dried a shade darker), into the remains
+   * layer (Game.remains), in the open cells it lies in; their chunks redrawn.
+   */
+  private buryRemains(game: Game): void {
+    const rm = game.remains;
+    const t = game.terrain;
+    const put = (wx: number, wy: number, c: number) => {
+      if (wx < 0 || wy < 0 || wx >= WORLD_W || wy >= WORLD_H || t.isSolid(wx, wy)) return;
+      // (Dried: a shade darker, fully opaque.)
+      const r = Math.round((c & 0xff) * 0.82);
+      const g = Math.round(((c >> 8) & 0xff) * 0.82);
+      const b = Math.round(((c >> 16) & 0xff) * 0.82);
+      const k = wy * WORLD_W + wx;
+      rm.delete(k); // (newest last: the oldest go first when there are too many)
+      rm.set(k, (0xff000000 | (b << 16) | (g << 8) | r) >>> 0);
+      t.markRenderDirty(wx, wy);
+    };
+    for (const g of game.buried) {
+      const rot = ((g.spin % 4) + 4) % 4;
+      const sp = this.sprites.gibPixels(g.color, g.aux & 0x7f, rot);
+      const x0 = Math.floor(g.x - sp.w / 2);
+      const y0 = Math.floor(g.y - sp.h / 2);
+      for (let y = 0; y < sp.h; y++) for (let x = 0; x < sp.w; x++) {
+        const c = sp.data[y * sp.w + x];
+        if (c >>> 24 > 128) put(x0 + x, y0 + y, c);
+      }
+    }
+    game.buried.length = 0;
+    if (game.buriedSegments.length) {
+      const S = 192;
+      const c = (this.buryCanvas ??= Object.assign(document.createElement('canvas'), { width: S, height: S }));
+      const bx = c.getContext('2d', { willReadFrequently: true })!;
+      for (const g of game.buriedSegments) {
+        const ox = Math.round(g.x) - S / 2;
+        const oy = Math.round(g.y) - S / 2;
+        bx.setTransform(1, 0, 0, 1, 0, 0);
+        bx.clearRect(0, 0, S, S);
+        bx.imageSmoothingEnabled = false;
+        bx.translate(-ox, -oy);
+        if (g.kind === BeastKind.Basilisk) drawBasiliskGib(bx, g.x, g.y, g.a, g.seed, g.i);
+        else if (g.kind === BeastKind.Dragon) drawDragonGib(bx, g.x, g.y, g.a, g.seed, g.i);
+        else if (g.kind === BeastKind.Spider) drawSpiderGib(bx, g.x, g.y, g.a, g.seed, g.i);
+        else if (g.kind === BeastKind.Web) drawWebGib(bx, g.x, g.y, g.a, g.seed, g.i);
+        else if (g.kind === BeastKind.Seeder || g.kind === BeastKind.Nest) drawCritterGib(bx, g.x, g.y, g.a, g.kind, g.seed, g.i);
+        else drawSegmentGib(bx, t, this.groundColor, g.x, g.y, g.a, g.kind, g.seed, g.i, performance.now());
+        const d = new Uint32Array(bx.getImageData(0, 0, S, S).data.buffer);
+        for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+          const v = d[y * S + x];
+          if (v >>> 24 > 128) put(ox + x, oy + y, v);
+        }
+      }
+      game.buriedSegments.length = 0;
+    }
+    // Too many: the oldest go (as if trodden into the dirt).
+    if (rm.size > REMAINS_MAX) {
+      for (const k of rm.keys()) {
+        rm.delete(k);
+        t.markRenderDirty(k % WORLD_W, Math.floor(k / WORLD_W));
+        if (rm.size <= REMAINS_MAX * 0.9) break;
+      }
+    }
+  }
+
   draw(game: Game, input: InputState, net: Link, alpha: number): void {
     this.game = game;
     const now = performance.now();
     this.fps = this.fps * 0.95 + (1000 / Math.max(1, now - this.lastFrame)) * 0.05;
     this.lastFrame = now;
+    this.buryRemains(game);
     this.updateChunks(game);
     const ctx = this.ctx;
     const W = this.canvas.width;

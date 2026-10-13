@@ -2217,7 +2217,8 @@ spilled GEMMs), sparks, flames, smoke, dust, blood and gibs. They are all one
 structure-of-arrays particle with a *kind*. A row of per-kind parameters sets
 gravity or buoyancy, drag, restitution, friction, how strongly the kind
 couples to each field, and what happens on contact: grains become terrain,
-blood stains the surface, gibs tumble and rest, sparks die once spent. One
+blood stains the surface, gibs tumble, rest and are buried into the
+ground, sparks die once spent. One
 step advances every kind, so a tick costs O(N) in the things that are moving
 plus O(field cells touched). It never scales with the size of the grid, and
 it doesn't snowball. The server runs the same engine with grains only.
@@ -2512,8 +2513,16 @@ Every death gibs the clone. The kill record (`R_KILL`, 18 B) carries position,
 velocity, overkill and a seed. Each client bursts the clone into helmet,
 torso, limbs, jetpack and meat (`gibBurst` in `src/client/effects.ts`): gib particles in the shared engine. The parts tumble,
 bounce and leave blood trails, and blood droplets stain the terrain in a
-client-only stain layer that the chunk rasterizer blends in. Gibs are
-cosmetic, but the GEMMs a clone spills are real. The server throws it from the
+client-only stain layer that the chunk rasterizer blends in.
+
+**Remains.** Gibs don't fade away. About a second and a half after one
+comes to rest, it becomes part of the ground: its pixels, just as it was
+drawn and dried a shade darker, are stamped into a client-only remains
+layer (`Game.remains`), and the chunk rasterizer draws them in the open
+cells they lie in, as terrain. A dead creature's tumbling segments go the
+same way. Remains stay until something blasts or digs the ground round
+them, which knocks them loose in a puff of their colour; the oldest go
+first past 300,000 cells. Gibs are cosmetic, but the GEMMs a clone spills are real. The server throws it from the
 seed and deposits it as terrain, and every client throws the same shower from
 the same seed. Explosive and high-overkill deaths scatter harder.
 

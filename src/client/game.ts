@@ -206,6 +206,9 @@ function saveCareer(c: { kills: number; deaths: number }): void {
 export const kdRatio = (kills: number, deaths: number) => kills / Math.max(1, deaths);
 
 /** A creature in view, as the client keeps it (Game.beastViews). */
+/** Ticks a dead creature's segment lies at rest before it's worked into the ground (the remains). */
+const SEGMENT_BURY = 45;
+
 export interface BeastView {
   kind: number;
   seed: number;
@@ -284,7 +287,24 @@ export class Game implements FrameHandler {
       this.stainTint[c] = color ? (goo >= 0 ? goo + 1 : this.stainTint[c]) : 0;
       this.terrain.markRenderDirty(x, y);
     },
+    bury: (x: number, y: number, spin: number, aux: number, color: number) => {
+      this.buried.push({ x, y, spin, aux, color });
+    },
   };
+  /**
+   * Remains: what gibs left as they settled, worked into the ground. A
+   * settled gib isn't faded out: its pixels are stamped into this layer
+   * (cell index -> its colour, 0xAABBGGRR, dried a shade darker), and the
+   * terrain draws them in the open cells they lie in, as part of the
+   * ground. Cosmetic, never networked; blasted or dug away with the ground
+   * round them. (The renderer does the stamping, from `buried` and
+   * `buriedSegments`: it has the sprites.)
+   */
+  readonly remains = new Map<number, number>();
+  /** Gibs (particles) settled this tick, to be stamped into the remains by the renderer. */
+  readonly buried: { x: number; y: number; spin: number; aux: number; color: number }[] = [];
+  /** A dead creature's segments settled this tick, likewise. */
+  readonly buriedSegments: { x: number; y: number; a: number; kind: number; seed: number; i: number }[] = [];
   readonly field = new DistanceField(this.terrain);
   readonly collider = new Collider(this.terrain, this.field);
   readonly players = new Map<number, PlayerInfo>();
@@ -617,9 +637,16 @@ export class Game implements FrameHandler {
     }
     if (this.alive && this.parts !== ALL_PARTS && this.body.cls !== ClassId.Droid) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
     if (this.alive && headless(this.parts, this.body.cls)) droidSocket(this.particles, this.body.x, this.body.y);
-    // A dead millipede's segments tumbling: gravity, a bounce off the ground, rest, fade.
+    // A dead creature's segments tumbling: gravity, a bounce off the ground, rest; settled a while, worked into the ground.
     for (let k = this.segmentGibs.length - 1; k >= 0; k--) {
       const g = this.segmentGibs[k];
+      const resting = Math.hypot(g.vx, g.vy) < 20 && this.terrain.isSolid(Math.floor(g.x), Math.floor(g.y) + 2);
+      g.rest = resting ? (g.rest ?? 0) + 1 : 0;
+      if (g.rest >= SEGMENT_BURY) {
+        this.buriedSegments.push({ x: g.x, y: g.y, a: g.a, kind: g.kind, seed: g.seed, i: g.i });
+        this.segmentGibs.splice(k, 1);
+        continue;
+      }
       if (--g.life <= 0) {
         this.segmentGibs.splice(k, 1);
         continue;
@@ -1268,7 +1295,7 @@ export class Game implements FrameHandler {
    * and all), tumbling, bouncing, coming to rest and fading: where, how it's
    * turned and spinning, which creature (seed) and segment it was, life left (ticks).
    */
-  readonly segmentGibs: { x: number; y: number; vx: number; vy: number; a: number; va: number; kind: number; seed: number; i: number; life: number }[] = [];
+  readonly segmentGibs: { x: number; y: number; vx: number; vy: number; a: number; va: number; kind: number; seed: number; i: number; life: number; rest?: number }[] = [];
   private buzzAt = -1e9;
   beasts(list: BeastState[]): void {
     const seen = new Set<number>();
@@ -1487,9 +1514,31 @@ export class Game implements FrameHandler {
     releaseCarve(this.particles, removed, detached, x, y, debris, new Rng(seed));
     // Blasted cells take their blood stains with them.
     for (let i = 0; i < removed.length; i += 3) this.stain[removed[i + 1] * WORLD_W + removed[i]] = 0;
+    // And any remains lying in or on what was blasted are knocked loose: a puff of them.
+    if (this.remains.size && removed.length) this.knockRemains(x, y, r + 3);
     if (r <= 6 && removed.length) {
       // Digger / bullet chips: a puff of whatever was dug.
       digDust(this.particles, x, y, matRgb(removed[2]), Math.min(6, removed.length / 3));
+    }
+  }
+
+  /** Remains within `r` of (x, y) knocked loose (a blast, a dig): gone from the ground, a puff of their colour. */
+  private knockRemains(x: number, y: number, r: number): void {
+    const r2 = r * r;
+    let puffs = 0;
+    for (let cy = Math.max(0, Math.floor(y - r)); cy <= Math.min(WORLD_H - 1, Math.ceil(y + r)); cy++) {
+      for (let cx = Math.max(0, Math.floor(x - r)); cx <= Math.min(WORLD_W - 1, Math.ceil(x + r)); cx++) {
+        if ((cx - x) ** 2 + (cy - y) ** 2 > r2) continue;
+        const c = cy * WORLD_W + cx;
+        const col = this.remains.get(c);
+        if (col === undefined) continue;
+        this.remains.delete(c);
+        this.terrain.markRenderDirty(cx, cy);
+        if (puffs++ < 24 && (cx + cy) % 3 === 0) {
+          const rgb = ((col & 0xff) << 16) | (col & 0xff00) | ((col >> 16) & 0xff);
+          this.particles.spawn(PK.Dust, cx + 0.5, cy + 0.5, (cx - x) * 8 + (Math.random() - 0.5) * 40, (cy - y) * 8 - 40 * Math.random(), 30 + Math.random() * 30, 0, rgb);
+        }
+      }
     }
   }
 
@@ -1671,6 +1720,9 @@ export class Game implements FrameHandler {
     this.particles.n = 0;
     this.projectiles.n = 0;
     this.stain.fill(0);
+    this.remains.clear();
+    this.buried.length = 0;
+    this.buriedSegments.length = 0;
     this.groundItems.clear();
     this.craftSnaps.clear();
     this.ride = null;

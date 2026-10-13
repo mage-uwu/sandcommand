@@ -50,7 +50,9 @@ const C_SETTLE = 0; // become terrain (grains)
 const C_BOUNCE = 1; // bounce and slide until life ends
 const C_STAIN = 2; // stain the surface and disappear (blood)
 const C_SPENT = 3; // bounce, disappear once slow (sparks)
-const C_RIGID = 4; // tumble, bounce, rest, fade (gibs)
+const C_RIGID = 4; // tumble, bounce, rest, then bury (or fade, with nothing to bury it) (gibs)
+/** Ticks a gib lies at rest before it's buried into the ground (with a bury hook). */
+const GIB_BURY = 45;
 
 // What a particle does after striking an actor.
 const A_PASS = 0; // keeps going (flames lick past)
@@ -165,6 +167,8 @@ export interface ParticleHooks {
   settle?: (x: number, y: number, mat: number) => void;
   /** Blood hit solid terrain at cell (x, y) (client stain layer); `color` its own (0: red blood). */
   stain?: (x: number, y: number, color: number) => void;
+  /** A gib settled a while at (x, y) (its spin, piece and colour as drawn): it becomes part of the ground (client remains layer). */
+  bury?: (x: number, y: number, spin: number, aux: number, color: number) => void;
 }
 
 /**
@@ -512,6 +516,12 @@ export class Particles {
       if (mode === C_RIGID && this.rest[i]) {
         // A resting gib costs one support test until something disturbs it.
         if (t.isSolid(Math.floor(px), Math.floor(py) + 1)) {
+          // Settled a while: it becomes part of the ground (the client's remains layer), rather than fading.
+          if (hooks.bury && this.rest[i] < 255 && ++this.rest[i] >= GIB_BURY) {
+            hooks.bury(px, py, Math.round(this.spin[i]), this.aux[i], this.color[i]);
+            this.removeAt(i);
+            continue;
+          }
           if (--this.life[i] === 0) this.removeAt(i);
           else i++;
           continue;
