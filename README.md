@@ -654,6 +654,19 @@ The planet's own creatures (`src/shared/wildlife.ts`). Nobody drives them,
 ever: the server thinks for them, and they fight everyone alike, bots
 included.
 
+**Where they live.** Every map, in every mode (only the tutorial has none):
+PvP, Regicide's fortresses, Siege, Extraction's labyrinth and the rest.
+- **A mix, always.** The first crawlers to come up on any map are one of
+  each kind (a cave spider, a gem asp, a millipede); after that it's the
+  luck of the roll. Up to seven crawlers at once on a cave map, four on
+  any other.
+- **Wasps.** Three wasps' nests on a cave map and two on any other, each
+  sending out its seeders.
+- **One basilisk.** Deep in the caves of any map (PvP and Regicide
+  included), one basilisk may come up (now and then a dragon instead),
+  never more than one at a time. Not in the labyrinth: its ancient stone
+  isn't for boring through.
+
 **The millipede** lives in the caves: a long, many-legged ambush predator
 about four clones long, drawn in pixels like the ground and the plants (one
 terrain cell to a pixel).

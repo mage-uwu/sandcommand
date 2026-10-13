@@ -1739,10 +1739,13 @@ export class World {
   /**
    * Wildlife (wildlife.ts): keep up their numbers (now and then a new one
    * comes up out of the deep, well away from everyone), and let each one
-   * think and crawl. Not in the labyrinth, nor in the tutorial.
+   * think and crawl. On every map and in every mode (not in the tutorial):
+   * a mix of every kind of crawler, wasps' nests, and (deep down, on any
+   * map but the labyrinth, whose ancient stone it would only bore into) a
+   * basilisk.
    */
   private stepBeasts(): void {
-    if (!this.wildlife || this.dungeon) return;
+    if (!this.wildlife) return;
     // (The lair: no new basilisks, but it crawls with millipedes and hangs with wasps' nests.)
     if (this.lair && this.tick >= this.beastSpawnAt) {
       this.beastSpawnAt = this.tick + BEAST_RESPAWN;
@@ -1753,7 +1756,7 @@ export class World {
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
       const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
       if (nests < (this.caves ? NESTS_CAVES : NESTS_PLAIN)) this.spawnNest();
-      else if (this.tick >= this.basiliskAt && !this.beasts.some((b) => b && wyrm(b.kind))) {
+      else if (!this.dungeon && this.tick >= this.basiliskAt && !this.beasts.some((b) => b && wyrm(b.kind))) {
         if (this.spawnBasilisk()) this.basiliskAt = Infinity;
       }
       else if (this.beasts.filter((b) => b && crawler(b.kind)).length < want) this.spawnBeast();
@@ -1807,7 +1810,9 @@ export class World {
       if (c && x > c.x0 && x < c.x1 && y > c.y0) continue;
       if (this.players.some((p) => p && p.alive && Math.hypot(p.cx - x, p.cy - y) < 420)) continue;
       const roll = rng.next();
-      const kind = roll < aspShare ? BeastKind.Asp : roll < aspShare + (1 - aspShare) * CSPIDER_SHARE ? BeastKind.Spider : BeastKind.Millipede;
+      // (A mix, always: any kind of crawler not about yet comes up first; then it's the luck of the roll.)
+      const missing = CRAWLER_MIX.find((k) => !this.beasts.some((o) => o?.kind === k));
+      const kind = missing ?? (roll < aspShare ? BeastKind.Asp : roll < aspShare + (1 - aspShare) * CSPIDER_SHARE ? BeastKind.Spider : BeastKind.Millipede);
       const b = newBeast(t, kind, x, y, rng.next() < 0.5 ? -1 : 1);
       b.turnAt = this.tick + 60;
       this.beasts[slot] = b;
@@ -7821,7 +7826,9 @@ const NESTS_CAVES = 3;
 const LAIR_NESTS = 4;
 const LAIR_CRAWLERS = 12;
 const LAIR_ASP_SHARE = 0.2;
-const NESTS_PLAIN = 1;
+const NESTS_PLAIN = 2;
+/** The crawlers every map has one of before the rest come up by the luck of the roll. */
+const CRAWLER_MIX = [BeastKind.Spider, BeastKind.Asp, BeastKind.Millipede];
 /** Of the creatures that come up, how many are asps (the rest millipedes). */
 const ASP_SHARE = 0.55;
 const BEAST_RESPAWN = 30 * 25;
