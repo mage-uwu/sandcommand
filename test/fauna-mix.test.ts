@@ -18,7 +18,8 @@ describe('fauna on every map, in every mode', () => {
       const { world, w } = on(mode);
       for (let k = 0; k < 3; k++) expect(w.spawnBeast(), `mode ${mode}`).toBe(true);
       const kinds = new Set(world.beasts.filter((b) => b).map((b) => b!.kind));
-      expect([...kinds].sort(), `mode ${mode}`).toEqual([BeastKind.Millipede, BeastKind.Asp, BeastKind.Spider].sort());
+      // (The spiders a pack, with their web.)
+      expect([...kinds].sort(), `mode ${mode}`).toEqual([BeastKind.Millipede, BeastKind.Asp, BeastKind.Spider, BeastKind.Web].sort());
     }
   });
 

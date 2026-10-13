@@ -23,7 +23,7 @@ import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5, Spider: 6 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5, Spider: 6, Web: 7 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -195,6 +195,26 @@ export const CSPIDER_SHOVE = 90;
  */
 export const CSPIDER_RIP = 0.5;
 export const CSPIDER_MAUL = 30;
+/**
+ * They hunt in **packs** of CSPIDER_PACK_MIN to CSPIDER_PACK_MAX, out of a
+ * **web nest** of their own: a mass of silk on the cave roof (or a wall)
+ * over where they came up. One that sees prey calls the rest of its pack
+ * within CSPIDER_PACK_CALL onto them; hurt one, or the nest, and the pack
+ * turns on whoever did it. A limb torn off isn't left: the spider carries
+ * it home in its jaws and works it into the web (WEB_LIMBS at most shown),
+ * so a nest that's been feeding a while is hung with arms and legs. The
+ * nest can be shot down (WEB_HP); its pack fights on without it.
+ */
+export const CSPIDER_PACK_MIN = 2;
+export const CSPIDER_PACK_MAX = 5;
+export const CSPIDER_PACK_CALL = 320;
+/** Near enough its nest (cells) to work the limb it carries into it. */
+export const CSPIDER_HOME_R = 16;
+/** The longest it carries a limb looking for the way home before it drops it (ticks). */
+export const CSPIDER_CARRY_MAX = 30 * 45;
+export const WEB_R = 7;
+export const WEB_HP = 360;
+export const WEB_LIMBS = 24;
 /** Lying in wait (ticks: 10 to 60 s), and wandering between. */
 export const CSPIDER_FREEZE_MIN = 30 * 10;
 export const CSPIDER_FREEZE_MAX = 30 * 60;
@@ -437,6 +457,7 @@ export const BEAST_BUILD = [
   { segs: BASILISK_SEGS, gap: BASILISK_GAP, r: BASILISK_R, hp: BASILISK_HP },
   { segs: DRAGON_SEGS, gap: DRAGON_GAP, r: DRAGON_R, hp: DRAGON_HP },
   { segs: CSPIDER_SEGS, gap: CSPIDER_GAP, r: CSPIDER_R, hp: CSPIDER_HP },
+  { segs: 1, gap: 1, r: WEB_R, hp: WEB_HP },
 ] as const;
 
 /** Does this kind crawl the cave surfaces (millipede, asp, cave spider)? */
@@ -448,7 +469,7 @@ export const burrows = (kind: number) => kind === BeastKind.Basilisk || kind ===
 /** Does this kind fly (no crawl, no trail: it's where it is)? */
 export const flies = (kind: number) => kind === BeastKind.Seeder;
 /** Does this kind stay put (a nest)? */
-export const rooted = (kind: number) => kind === BeastKind.Nest;
+export const rooted = (kind: number) => kind === BeastKind.Nest || kind === BeastKind.Web;
 
 /** Venom: a dose (harm it does in all), the most the blood holds, the harm a tick. */
 export const VENOM_DOSE = 36;
@@ -540,6 +561,9 @@ export interface Beast {
   frenzy: number;
   surfaced: boolean;
   bored: number;
+  /** A cave spider carrying a torn-off limb home in its jaws (0: none; else 1 + the part). A web nest: the limbs worked into it. */
+  carry: number;
+  limbs: number;
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
@@ -607,6 +631,8 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     frenzy: 0,
     surfaced: false,
     bored: 0,
+    carry: 0,
+    limbs: 0,
   };
   if (burrows(kind)) {
     // Lying along the cave floor, its body trailing out behind its head (half sunk in the rock, like a seam of it).

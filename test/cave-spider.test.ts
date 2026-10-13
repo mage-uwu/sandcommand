@@ -4,7 +4,7 @@ import { ACTOR_H } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { ProjKind } from '../src/shared/weapons.ts';
 import { W_SPIDER } from '../src/shared/particles.ts';
-import { ASP_HP, BEAST_BUILD, BeastKind, CSPIDER_FREEZE_MIN, CSPIDER_HP, MILLI_HUNT, bodyPoints, crawler, newBeast } from '../src/shared/wildlife.ts';
+import { ASP_HP, BEAST_BUILD, BeastKind, CSPIDER_FREEZE_MIN, CSPIDER_HP, CSPIDER_PACK_MAX, CSPIDER_PACK_MIN, MILLI_HUNT, bodyPoints, crawler, nestCentre, newBeast } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -162,5 +162,107 @@ describe('the cave spider', () => {
     expect(kinds.has(BeastKind.Spider)).toBe(true);
     expect(kinds.has(BeastKind.Millipede)).toBe(true);
     expect(kinds.has(BeastKind.Asp)).toBe(true);
+  });
+});
+
+describe('cave spider packs and their web', () => {
+  /** A web on the tunnel's roof at x 1150, and `n` spiders of its pack on the floor under it. */
+  function pack(n: number, xs: number[] = []) {
+    const { world, a } = cave();
+    const web = newBeast(world.terrain, BeastKind.Web, 1150, 380, 1);
+    world.beasts[1] = web;
+    nestCentre(web, world.beastPts[1]);
+    const spiders = [];
+    for (let i = 0; i < n; i++) {
+      const b = newBeast(world.terrain, BeastKind.Spider, xs[i] ?? 1140 + i * 8, 440, -1);
+      b.home = 1;
+      world.beasts[2 + i] = b;
+      bodyPoints(world.terrain, b, world.beastPts[2 + i]);
+      spiders.push(b);
+    }
+    return { world, a, web, spiders };
+  }
+
+  it('they come up in packs of two to five, with a web of their own on the roof over them; a pack counts as two crawlers', () => {
+    const sizes = new Set<number>();
+    for (const seed of [12, 13, 14, 15, 16, 17]) {
+      const world = new World(seed);
+      world.beasts.fill(null);
+      const w = world as unknown as { spawnPack(x: number, y: number): boolean; crawlers(): number; spawnBeast(): boolean };
+      // (The first crawler up is a spider: a pack. A try now and then finds nowhere to come up.)
+      for (let n = 0; n < 6 && !world.beasts.some((b) => b); n++) w.spawnBeast();
+      const webs = world.beasts.filter((b) => b?.kind === BeastKind.Web);
+      const spiders = world.beasts.filter((b) => b?.kind === BeastKind.Spider);
+      expect(webs.length).toBe(1);
+      expect(spiders.length).toBeGreaterThanOrEqual(CSPIDER_PACK_MIN);
+      expect(spiders.length).toBeLessThanOrEqual(CSPIDER_PACK_MAX);
+      const k = world.beasts.indexOf(webs[0]);
+      for (const s of spiders) expect(s!.home).toBe(k);
+      // On the rock (the roof, if it could), above the pack.
+      const web = webs[0]!;
+      expect(world.terrain.isSolid(web.x + web.hx, web.y + web.hy)).toBe(true);
+      expect(web.y).toBeLessThanOrEqual(spiders[0]!.y);
+      expect(w.crawlers()).toBe(2);
+      sizes.add(spiders.length);
+    }
+    expect(sizes.size).toBeGreaterThan(1);
+  });
+
+  it('one that sees prey calls its pack onto them', () => {
+    // A rock wall at x 1100 between the clone and the pack, but for the one this side of it.
+    const { world, a, spiders } = pack(3, [1060, 1150, 1170]);
+    for (let y = 380; y <= 440; y++) for (let x = 1100; x < 1106; x++) world.terrain.set(x, y, Mat.Rock);
+    world.terrainReplaced();
+    for (const s of spiders) s.frozen = 30 * 60;
+    let all = false;
+    for (let k = 0; k < 12 && !all; k++) {
+      hold(a);
+      world.step();
+      all = spiders.every((s) => s.target === a.id);
+    }
+    // (All three on the clone at once: the two behind the wall that can't see them too.)
+    expect(all).toBe(true);
+  });
+
+  it('shoot their web and the whole pack turns on you', () => {
+    const { world, a, spiders } = pack(3);
+    for (const s of spiders) s.frozen = 30 * 60;
+    // (Walled off: none of them can see the clone.)
+    for (let y = 380; y <= 440; y++) for (let x = 1000; x < 1010; x++) world.terrain.set(x, y, Mat.Rock);
+    world.terrainReplaced();
+    world.hurtBeast(1, 10, a.id);
+    expect(spiders.every((s) => s.hurtBy === a.id && s.frozen === 0)).toBe(true);
+  });
+
+  it('a limb torn off is carried home in its jaws and worked into the web', () => {
+    const { world, a, web, spiders } = pack(1);
+    const b = spiders[0];
+    let carried = false;
+    for (let k = 0; k < 30 * 40 && web.limbs === 0; k++) {
+      if (b.carry === 0 && !carried) hold(a);
+      a.hp = 100;
+      world.step();
+      if (b.carry > 0) {
+        carried = true;
+        // (Jaws full: it bites nobody on the way.)
+        expect(b.target).toBe(-1);
+        // The clone out of its way, so it's free to go home.
+        a.body.x = 900;
+      }
+    }
+    expect(carried).toBe(true);
+    expect(web.limbs).toBe(1);
+    expect(b.carry).toBe(0);
+    // (Sent to clients: how many it holds.)
+    expect(Math.round(web.lift * 255)).toBe(1);
+  });
+
+  it('its web gone, the pack fights on, homeless (and drops what it was carrying)', () => {
+    const { world, a, spiders } = pack(2);
+    spiders[0].carry = 3;
+    world.hurtBeast(1, 1e6, a.id);
+    expect(world.beasts[1]).toBe(null);
+    expect(spiders.every((s) => s.home === -1)).toBe(true);
+    expect(spiders[0].carry).toBe(0);
   });
 });

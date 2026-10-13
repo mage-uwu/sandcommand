@@ -78,9 +78,10 @@ function openFrom(t: Terrain, x: number, y: number): { x: number; y: number } {
 /**
  * Draw a cave spider from its body points (head, abdomen): its `slot` (its
  * feet are remembered by it), camouflage seed, fangs out (`lift` 0..1),
- * lying in wait (`frozen`), holding on to something (`attached`).
+ * lying in wait (`frozen`), holding on to something (`attached`), a torn-off
+ * limb in its jaws (`carry`).
  */
-export function drawCaveSpider(ctx: CanvasRenderingContext2D, t: Terrain, ground: GroundColor, slot: number, pts: readonly number[], seed: number, lift: number, frozen: boolean, attached: boolean, now: number): void {
+export function drawCaveSpider(ctx: CanvasRenderingContext2D, t: Terrain, ground: GroundColor, slot: number, pts: readonly number[], seed: number, lift: number, frozen: boolean, attached: boolean, now: number, carry = false): void {
   const hx = pts[0];
   const hy = pts[1];
   const ax = pts[2] ?? hx - 4;
@@ -145,6 +146,8 @@ export function drawCaveSpider(ctx: CanvasRenderingContext2D, t: Terrain, ground
   // Its face: fangs (out, dashing or leaping), feelers, and its eyes.
   const fx = hx - ux * sink + tx * 3.2;
   const fy = hy - uy * sink + ty * 3.2;
+  // Carrying a limb home: it hangs from its jaws, swinging as it runs.
+  if (carry) drawLimb(ctx, fx + tx * 0.5, fy + ty * 0.5, Math.atan2(ty, tx) + 0.9 + Math.sin(now / 90 + seed) * 0.25, limbKind(seed, 99), seed);
   const spread = lift;
   for (const s of [-1, 1]) {
     const len = 1.6 + spread * 2.2;
@@ -400,6 +403,123 @@ function spiderFeet(slot: number, seed: number, t: Terrain, cx: number, cy: numb
   }
   g.init = true;
   return { x: g.x, y: g.y };
+}
+
+/** Which limb (0: an arm, 1: a leg, 2: a droid's metal leg) a web's limb `i` (or a carried one) is. */
+function limbKind(seed: number, i: number): number {
+  const h = hsh(seed, i, 71);
+  return h < 0.45 ? 0 : h < 0.9 ? 1 : 2;
+}
+/** A clone's sleeve, skin, trousers, boot; a droid's tin; torn flesh, and blood. */
+const LIMB = { sleeve: '#4a5a34', skin: '#c8906a', trouser: '#3e4a2c', boot: '#241e18', tin: '#b9bfc4', tinDk: '#7d858c', torn: '#a8203a', blood: '#6a0810' };
+
+/**
+ * A torn-off limb, pixel by pixel, from its torn end at (x, y) out along
+ * `a`: an arm (sleeve, then bare forearm and a hand), a leg (trouser, then
+ * a boot), or a droid's metal leg (tin, a knee joint, a point). Its torn end
+ * raw and bloody (a droid's sparking dark).
+ */
+export function drawLimb(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, kind: number, seed: number): void {
+  const cx = Math.cos(a);
+  const cy = Math.sin(a);
+  const len = kind === 0 ? 6 : 7;
+  for (let k = 0; k <= len; k++) {
+    const px = Math.round(x + cx * k);
+    const py = Math.round(y + cy * k);
+    let c: string;
+    if (kind === 2) c = k === 0 ? OUTLINE : k === 3 ? OUTLINE : k > 5 ? LIMB.tinDk : LIMB.tin;
+    else if (k === 0) c = LIMB.torn;
+    else if (kind === 0) c = k < 3 ? LIMB.sleeve : LIMB.skin;
+    else c = k < 5 ? LIMB.trouser : LIMB.boot;
+    ctx.fillStyle = c;
+    ctx.fillRect(px, py, 1, 1);
+    // Two cells thick (the far side a shade darker), the droid's leg only one.
+    if (kind !== 2 && k > 0) {
+      ctx.fillStyle = kind === 0 ? (k < 3 ? '#38462a' : '#a87456') : k < 5 ? '#2e3820' : '#18140f';
+      ctx.fillRect(Math.round(x + cx * k - cy), Math.round(y + cy * k + cx), 1, 1);
+    }
+  }
+  // A hand (or the boot's toe) at the end; a drip of blood off the torn end.
+  if (kind === 0) {
+    ctx.fillStyle = LIMB.skin;
+    ctx.fillRect(Math.round(x + cx * (len + 1)), Math.round(y + cy * (len + 1)), 1, 1);
+  } else if (kind === 1) {
+    ctx.fillStyle = LIMB.boot;
+    ctx.fillRect(Math.round(x + cx * len + cy), Math.round(y + cy * len - cx), 1, 1);
+  }
+  if (kind !== 2 && hsh(seed, Math.round(x), 73) > 0.4) {
+    ctx.fillStyle = LIMB.blood;
+    ctx.fillRect(Math.round(x), Math.round(y) + 1, 1, 1);
+  }
+}
+
+/**
+ * A cave spiders' web nest, hung off the rock at (x, y) (its centre): a
+ * mass of grey-white silk, dense and lumpy at its heart, guy-lines strung
+ * out from it to the rock round it, and worked into it the limbs the pack
+ * has torn off and carried home (`limbs` of them: arms, legs, the odd
+ * droid's leg), stuck out of it at all angles, half-wrapped, stained.
+ */
+export function drawWebNest(ctx: CanvasRenderingContext2D, t: Terrain, x: number, y: number, seed: number, limbs: number, now: number): void {
+  const out = openFrom(t, x, y);
+  // Guy-lines: from its heart out to the rock round it (wherever there's rock within reach).
+  ctx.fillStyle = 'rgba(214,210,200,0.55)';
+  for (let k = 0; k < 9; k++) {
+    const a = Math.atan2(-out.y, -out.x) + (k - 4) * 0.42 + (hsh(seed, k, 3) - 0.5) * 0.3;
+    for (let r = 4; r < 22; r++) {
+      const gx = x + Math.cos(a) * r;
+      const gy = y + Math.sin(a) * r;
+      if (t.isSolid(Math.floor(gx), Math.floor(gy))) {
+        line(ctx, x + Math.cos(a) * 3, y + Math.sin(a) * 3, gx, gy);
+        break;
+      }
+    }
+  }
+  // Its limbs (behind the silk at their torn ends): out of it at all angles, more the longer it's fed.
+  const n = Math.min(limbs, 24);
+  for (let i = 0; i < n; i++) {
+    const a = hsh(seed, i, 5) * Math.PI * 2;
+    const r = 2 + hsh(seed, i, 6) * 3.5 + i * 0.12;
+    drawLimb(ctx, x + Math.cos(a) * r, y + Math.sin(a) * r, a + (hsh(seed, i, 7) - 0.5) * 0.8, limbKind(seed, i), seed + i);
+  }
+  // The silk: a lumpy mass (growing with what's in it), dense at its heart, stringy at its edge, dark hollows in it.
+  const R = 6 + Math.min(4, n * 0.2);
+  for (let py = Math.floor(y - R); py <= Math.ceil(y + R); py++) {
+    for (let px = Math.floor(x - R); px <= Math.ceil(x + R); px++) {
+      const dx = px + 0.5 - x;
+      const dy = py + 0.5 - y;
+      const th = Math.atan2(dy, dx);
+      const lump = R * (0.75 + 0.18 * Math.sin(th * 3 + seed) + 0.1 * Math.sin(th * 7 + seed * 2));
+      const d = Math.hypot(dx, dy) / lump;
+      if (d > 1) continue;
+      const h = hsh(px, py, seed + 11);
+      // (Stringy at the edge: only some cells.)
+      if (d > 0.7 && h < (d - 0.7) * 2.6) continue;
+      let c = d < 0.45 ? (h < 0.3 ? '#bcb6aa' : '#d6d0c4') : h < 0.25 ? '#a29c90' : h < 0.85 ? '#cdc7bb' : '#ece8de';
+      if (h > 0.93 && d < 0.8) c = '#2a2426'; // (a hollow)
+      if (h < 0.05 && n > 0) c = '#7a2a2a'; // (stained)
+      ctx.fillStyle = c;
+      ctx.fillRect(px, py, 1, 1);
+    }
+  }
+  // Silk wound over the limbs where they go in.
+  ctx.fillStyle = '#e4e0d6';
+  for (let i = 0; i < n; i++) {
+    const a = hsh(seed, i, 5) * Math.PI * 2;
+    const r = R * 0.8;
+    ctx.fillRect(Math.round(x + Math.cos(a) * r), Math.round(y + Math.sin(a) * r), 1, 1);
+  }
+  void now;
+}
+
+/** A piece of a web shot down: a tuft of silk (`i` even) or one of its limbs (odd). */
+export function drawWebGib(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, seed: number, i: number): void {
+  if (i % 2) {
+    drawLimb(ctx, x, y, a, limbKind(seed, i), seed + i);
+    return;
+  }
+  ctx.fillStyle = '#d6d0c4';
+  for (let k = 0; k < 6; k++) ctx.fillRect(Math.round(x + Math.cos(a + k) * hsh(seed, i, k) * 2.5), Math.round(y + Math.sin(a + k) * hsh(seed, i, k + 9) * 2.5), 1, 1);
 }
 
 /** A piece of a dead one, flung off whole: its head (`i` 0), its abdomen (1), or a leg (the rest). */

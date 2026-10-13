@@ -386,7 +386,7 @@ function assistTargets(g: Game): AssistTarget[] {
   // (Where it's drawn, as the clones are: Game.beastPose.) Wasps (seeders) by their bodies, and their
   // nests by their middles, too.
   for (const [slot, v] of g.beastViews) {
-    if (v.kind === BeastKind.Seeder || v.kind === BeastKind.Nest) {
+    if (v.kind === BeastKind.Seeder || v.kind === BeastKind.Nest || v.kind === BeastKind.Web) {
       const pose = g.beastPose(v);
       out.push({ x: pose.pts[0], y: pose.pts[1], vx: pose.vx, vy: pose.vy, g: 3000 + slot, core: true });
       continue;

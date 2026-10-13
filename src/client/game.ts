@@ -217,6 +217,8 @@ export interface BeastView {
   coiled: boolean;
   gem: boolean;
   frenzy: boolean;
+  /** A cave spider carrying a torn-off limb home. */
+  carry: boolean;
   /** Its body points as last sent, and the frame before. */
   prev: number[];
   cur: number[];
@@ -1301,6 +1303,7 @@ export class Game implements FrameHandler {
         // A basilisk woken: its roar.
         if (!v.frenzy && b.frenzy) this.sfx?.roar(b.pts[0], b.pts[1]);
         v.frenzy = b.frenzy;
+        v.carry = b.carry;
         pushBeastSnap(v, this.frameTick);
       } else {
         // A brood out of its nest: the buzz of it (once for the lot).
@@ -1308,7 +1311,7 @@ export class Game implements FrameHandler {
           this.buzzAt = performance.now();
           this.sfx?.buzz(b.pts[0], b.pts[1]);
         }
-        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, prev: b.pts, cur: b.pts, snaps: [] };
+        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, carry: b.carry, prev: b.pts, cur: b.pts, snaps: [] };
         pushBeastSnap(nv, this.frameTick);
         this.beastViews.set(b.slot, nv);
       }
@@ -1357,16 +1360,17 @@ export class Game implements FrameHandler {
     // Where it's drawn, not where it last was.
     v.cur = [...this.beastPose(v).pts];
     if (v.kind === BeastKind.Nest) coralBurst(this.particles, v.cur[0], v.cur[1]);
+    else if (v.kind === BeastKind.Web) bloodSplat(this.particles, v.cur[0], v.cur[1], 6, 70);
     else if (v.kind === BeastKind.Seeder) bloodSplat(this.particles, v.cur[0], v.cur[1], 3, 60);
     else if (v.kind === BeastKind.Asp) aspGibs(this.particles, v.cur, v.seed);
     else if (v.kind === BeastKind.Spider) spiderGibs(this.particles, v.cur);
     else beastGibs(this.particles, v.cur);
     // Every segment flung off whole (a nest in shards; a seeder's wings torn off it).
-    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Seeder ? 3 : v.kind === BeastKind.Spider ? 10 : v.cur.length >> 1;
+    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Web ? 8 + 2 * Math.min(24, Math.round(v.lift * 255)) : v.kind === BeastKind.Seeder ? 3 : v.kind === BeastKind.Spider ? 10 : v.cur.length >> 1;
     for (let i = 0; i < n; i++) {
       const at = Math.min(i, (v.cur.length >> 1) - 1);
-      const x = v.cur[at * 2] + (v.kind === BeastKind.Nest ? (Math.random() - 0.5) * 10 : 0);
-      const y = v.cur[at * 2 + 1] + (v.kind === BeastKind.Nest ? (Math.random() - 0.5) * 10 : 0);
+      const x = v.cur[at * 2] + (v.kind === BeastKind.Nest || v.kind === BeastKind.Web ? (Math.random() - 0.5) * 10 : 0);
+      const y = v.cur[at * 2 + 1] + (v.kind === BeastKind.Nest || v.kind === BeastKind.Web ? (Math.random() - 0.5) * 10 : 0);
       const j = Math.min(n - 1, i + 1);
       const a = at < i || n < 2 ? Math.random() * Math.PI * 2 : Math.atan2(v.cur[Math.max(0, i - 1) * 2 + 1] - v.cur[j * 2 + 1], v.cur[Math.max(0, i - 1) * 2] - v.cur[j * 2]);
       const out = Math.random() * Math.PI * 2;

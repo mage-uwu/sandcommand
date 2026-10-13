@@ -828,7 +828,22 @@ droid's (`src/client/spider-art.ts`).
   rifle rounds. Hurt, it wakes. It bleeds a pale, sickly green ichor, and
   killed it bursts into gobbets of it, its head, abdomen and legs flung off
   whole.
-- About two in five of the crawlers that aren't asps are cave spiders.
+- **Packs.** They come up in packs of two to five, at most two packs on a
+  map at once (three in Extermination's lair). One that sees prey calls the
+  rest of its pack (within 320 cells) onto them, and they keep after them
+  even out of their own sight. Hurt one, or its web, and the whole pack
+  turns on whoever did it.
+- **Webs hung with limbs.** Each pack has a nest: a lumpy mass of grey silk
+  hung from the cave roof over where they came up (or a wall, or the floor
+  if there's no roof in reach), guy-lines strung from it to the rock. A
+  spider that tears a limb off doesn't leave it. It carries it home in its
+  jaws, biting nobody on the way, and works it into the web. With its web
+  in reach, up on the roof say, it leaps up to it. A web that's been
+  feeding a while bristles with arms, legs and the odd droid's leg,
+  stained. Shoot it down (360 hit points) and it bursts into silk and the
+  limbs it held; the pack fights on without it.
+- About two in five of the crawlers that aren't asps are cave spiders (a
+  pack counts as two crawlers).
 
 **Seeders** are small fliers, each about the size of a clone's head: a
 raven's glossy black head and pale beak, a wasp's black-and-gold striped

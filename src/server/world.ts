@@ -402,6 +402,12 @@ import {
   CSPIDER_WANDER,
   CSPIDER_RIP,
   CSPIDER_MAUL,
+  CSPIDER_PACK_MIN,
+  CSPIDER_PACK_MAX,
+  CSPIDER_PACK_CALL,
+  CSPIDER_HOME_R,
+  WEB_LIMBS,
+  CSPIDER_CARRY_MAX,
 } from '../shared/wildlife.ts';
 import { WATER_TICKS, type WaterBody, paintWater, solveLevel } from '../shared/water.ts';
 import { BLISTER_DAMAGE, BLISTER_FUSE_HIT, BLISTER_FUSE_TOUCH, BLISTER_R, BLISTER_TOUCH, type Flora, FloraKind, floraBox, GEYSER_BLAST, GEYSER_BLAST_R, GEYSER_CHANCE, GEYSER_CLOUD_R, GEYSER_COOLDOWN, GEYSER_FUSE, GEYSER_FUSE_SHOT, GEYSER_HP, GEYSER_TOXIC, GEYSER_TOXIC_TICKS, geyserBurst, geyserCloud } from '../shared/frosting.ts';
@@ -1761,7 +1767,7 @@ export class World {
       else if (!this.dungeon && this.tick >= this.basiliskAt && !this.beasts.some((b) => b && wyrm(b.kind))) {
         if (this.spawnBasilisk()) this.basiliskAt = Infinity;
       }
-      else if (this.beasts.filter((b) => b && crawler(b.kind)).length < want) this.spawnBeast();
+      else if (this.crawlers() < want) this.spawnBeast();
     }
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
@@ -1774,6 +1780,7 @@ export class World {
       if (b) {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
         else if (b.kind === BeastKind.Spider) this.stepSpider(k, b);
+        else if (b.kind === BeastKind.Web) this.holdOn(k, b);
         else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
         else if (b.kind === BeastKind.Nest) this.stepNest(k, b);
         else if (wyrm(b.kind)) this.stepBasilisk(k, b);
@@ -1789,7 +1796,7 @@ export class World {
   private stockLair(): boolean {
     const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
     if (nests < LAIR_NESTS && this.spawnNest()) return true;
-    const crawlers = this.beasts.filter((b) => b && crawler(b.kind)).length;
+    const crawlers = this.crawlers();
     return crawlers < LAIR_CRAWLERS && this.spawnBeast(LAIR_ASP_SHARE);
   }
 
@@ -1815,13 +1822,101 @@ export class World {
       // (A mix, always: any kind of crawler not about yet comes up first; then it's the luck of the roll.)
       const missing = CRAWLER_MIX.find((k) => !this.beasts.some((o) => o?.kind === k));
       const kind = missing ?? (roll < aspShare ? BeastKind.Asp : roll < aspShare + (1 - aspShare) * CSPIDER_SHARE ? BeastKind.Spider : BeastKind.Millipede);
-      const b = newBeast(t, kind, x, y, rng.next() < 0.5 ? -1 : 1);
+      if (kind === BeastKind.Spider && this.beasts.filter((o) => o?.kind === BeastKind.Web).length < (this.lair ? LAIR_PACKS : PACKS)) return this.spawnPack(x, y);
+      // (Enough packs about: a millipede instead.)
+      const b = newBeast(t, kind === BeastKind.Spider ? BeastKind.Millipede : kind, x, y, rng.next() < 0.5 ? -1 : 1);
       b.turnAt = this.tick + 60;
       this.beasts[slot] = b;
       bodyPoints(t, b, this.beastPts[slot]);
       return true;
     }
     return false;
+  }
+
+  /**
+   * How many crawlers are about, a pack of cave spiders counting as two
+   * (each pack by its web; one whose web is gone, on its own).
+   */
+  private crawlers(): number {
+    let n = 0;
+    for (const b of this.beasts) {
+      if (!b) continue;
+      if (b.kind === BeastKind.Web) n += 2;
+      else if (b.kind === BeastKind.Spider) n += this.webOf(b) ? 0 : 1;
+      else if (crawler(b.kind)) n++;
+    }
+    return n;
+  }
+
+  /** A cave spider's web (its pack's nest), if it's still there. */
+  private webOf(b: Beast): Beast | null {
+    const w = b.home >= 0 ? this.beasts[b.home] : null;
+    return w && w.kind === BeastKind.Web ? w : null;
+  }
+
+  /**
+   * A pack of cave spiders come up at (x, y) (an open cell on a floor):
+   * their web on the roof over it (or the nearest rock: a wall, the floor),
+   * and CSPIDER_PACK_MIN..MAX of them on the floor round it, as many as
+   * there's room for.
+   */
+  private spawnPack(x: number, y: number): boolean {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const slot = this.beasts.indexOf(null);
+    // (Room for its web and a pack, leaving room for wasps to hatch.)
+    const free = this.beasts.filter((o) => !o).length - 1;
+    if (slot < 0 || free - PACK_ROOM < CSPIDER_PACK_MIN) return false;
+    let wy = y;
+    while (wy > y - 60 && !t.isSolid(x, wy - 1)) wy--;
+    if (!t.isSolid(x, wy - 1)) wy = y; // (no roof in reach: on the floor beside them)
+    const web = newBeast(t, BeastKind.Web, x, wy, 1);
+    web.seed = rng.int(256);
+    this.beasts[slot] = web;
+    nestCentre(web, this.beastPts[slot]);
+    const n = Math.min(CSPIDER_PACK_MIN + rng.int(CSPIDER_PACK_MAX - CSPIDER_PACK_MIN + 1), free - PACK_ROOM);
+    for (let i = 0; i < n; i++) {
+      const s = this.beasts.indexOf(null);
+      if (s < 0) break;
+      // Spread along the floor either side (where there's floor), else bunched up.
+      const off = (i % 2 ? -1 : 1) * Math.ceil(i / 2) * 7;
+      const sx = !t.isSolid(x + off, y) && t.isSolid(x + off, y + 1) ? x + off : x;
+      const b = newBeast(t, BeastKind.Spider, sx, y, rng.next() < 0.5 ? -1 : 1);
+      b.seed = rng.int(256);
+      b.home = slot;
+      b.turnAt = this.tick + 60;
+      this.beasts[s] = b;
+      bodyPoints(t, b, this.beastPts[s]);
+    }
+    return true;
+  }
+
+  /** A creature gone (killed, or fallen out of the world): a web's pack loses its home, and drops what it was carrying there. */
+  private killBeast(k: number): void {
+    const b = this.beasts[k];
+    this.beasts[k] = null;
+    if (b?.kind !== BeastKind.Web) return;
+    for (const o of this.beasts) {
+      if (o?.kind !== BeastKind.Spider || o.home !== k) continue;
+      o.home = -1;
+      o.carry = 0;
+    }
+  }
+
+  /** A cave spider's pack (out to CSPIDER_PACK_CALL from (x, y)) turned on clone `id`: whoever isn't already after someone. */
+  private callPack(home: number, x: number, y: number, id: number, hurt: boolean): void {
+    if (home < 0) return;
+    for (const o of this.beasts) {
+      if (o?.kind !== BeastKind.Spider || o.home !== home) continue;
+      const pts = this.beastPts[this.beasts.indexOf(o)];
+      if (Math.hypot(pts[0] - x, pts[1] - y) > CSPIDER_PACK_CALL) continue;
+      // (Called, it keeps after them out of its own sight, as if they'd hurt it; hurt, it turns on them whoever it was after.)
+      if (hurt || o.hurtBy < 0) o.hurtBy = id;
+      if (o.target >= 0 && !hurt) continue;
+      o.target = id;
+      o.frozen = 0;
+      o.turnAt = this.tick;
+    }
   }
 
   /** Who a creature goes for: whoever hurt it (not too far off), else the nearest clone it can see. */
@@ -2203,12 +2298,23 @@ export class World {
     const hx = pts.length ? pts[0] : b.x;
     const hy = pts.length ? pts[1] : b.y;
     if (b.coilCd > 0) b.coilCd--; // (its bite's cooldown)
-    if ((this.tick + k) % 4 === 0) {
+    // Carrying a limb home: its jaws are full; it hunts nothing until it's worked it into the web.
+    const web = this.webOf(b);
+    if (b.carry > 0 && (!web || ++b.legAge > CSPIDER_CARRY_MAX)) b.carry = 0;
+    const home = b.carry > 0 ? this.beastPts[b.home] : null;
+    if (home && Math.hypot(home[0] - hx, home[1] - hy) < CSPIDER_HOME_R) {
+      web!.limbs++;
+      web!.lift = Math.min(WEB_LIMBS, web!.limbs) / 255;
+      b.carry = 0;
+    }
+    if (b.carry > 0) b.target = -1;
+    else if ((this.tick + k) % 4 === 0) {
       const before = b.target;
       b.target = this.beastTarget(b, hx, hy);
       if (b.target >= 0 && before < 0) {
         b.frozen = 0;
         b.turnAt = this.tick; // (prey: which way to it, now)
+        this.callPack(b.home, hx, hy, b.target, false); // (and the pack's on them too)
       }
     }
     let tgt = b.target >= 0 ? this.players[b.target] : null;
@@ -2218,7 +2324,7 @@ export class World {
     }
     const dist = tgt ? Math.hypot(tgt.cx - hx, tgt.cy - hy) : Infinity;
     // Lying in wait: still, until something comes (or its time is up).
-    if (b.frozen > 0 && !tgt && b.attached) {
+    if (b.frozen > 0 && !tgt && !home && b.attached) {
       b.frozen--;
       bodyPoints(t, b, pts);
       return;
@@ -2240,11 +2346,19 @@ export class World {
         b.attached = false;
       }
     }
+    // Carrying a limb, its web in sight and in reach (up on the roof over it, say): it leaps up to it.
+    if (home && b.attached && b.flung === 0 && b.flingCd === 0 && Math.hypot(home[0] - hx, home[1] - hy) < CSPIDER_LEAP_MAX && this.lineClear(hx, hy, home[0], home[1])) {
+      b.fx = b.x + 0.5;
+      b.fy = b.y + 0.5;
+      fling(b, b.fx, b.fy, home[0], home[1], CSPIDER_LEAP);
+      b.flingCd = CSPIDER_LEAP_CD;
+      b.attached = false;
+    }
     // Its fangs out (the client shows it): dashing or leaping.
     b.lift += ((b.lunge > 0 || b.flung > 0 ? 1 : 0) - b.lift) * 0.5;
     if (b.lift < 0.01) b.lift = 0;
     // Nothing about: wander a while, then freeze.
-    if (!tgt && b.attached && --b.wander <= 0) {
+    if (!tgt && !home && b.attached && --b.wander <= 0) {
       b.frozen = CSPIDER_FREEZE_MIN + rng.int(CSPIDER_FREEZE_MAX - CSPIDER_FREEZE_MIN);
       b.wander = CSPIDER_WANDER + rng.int(CSPIDER_WANDER);
       bodyPoints(t, b, pts);
@@ -2253,7 +2367,7 @@ export class World {
     if (b.flung > 0) {
       flingStep(t, b, DT);
       if (b.y >= WORLD_H - 14) {
-        this.beasts[k] = null;
+        this.killBeast(k);
         return;
       }
     } else if (!b.attached) {
@@ -2265,14 +2379,15 @@ export class World {
         pushTrail(b);
       }
       if (b.y >= WORLD_H - 14) {
-        this.beasts[k] = null;
+        this.killBeast(k);
         return;
       }
     } else {
       if (this.tick >= b.turnAt) {
-        if (tgt) {
-          const ahead = this.probeCrawl(b, false, tgt.cx, tgt.cy);
-          const back = this.probeCrawl(b, true, tgt.cx, tgt.cy);
+        const goal = tgt ? [tgt.cx, tgt.cy] : home;
+        if (goal) {
+          const ahead = this.probeCrawl(b, false, goal[0], goal[1]);
+          const back = this.probeCrawl(b, true, goal[0], goal[1]);
           if (back < ahead - 4) turnRound(b);
           b.turnAt = this.tick + 8;
         } else {
@@ -2288,12 +2403,12 @@ export class World {
         turnRound(b);
         b.still = 0;
       }
-      b.owed += (b.lunge > 0 ? CSPIDER_DASH : tgt ? CSPIDER_HUNT * pace : CSPIDER_CRAWL) * DT;
+      b.owed += (b.lunge > 0 ? CSPIDER_DASH : tgt ? CSPIDER_HUNT * pace : home ? CSPIDER_HUNT : CSPIDER_CRAWL) * DT;
       while (b.owed >= 1 && b.attached) {
         b.owed--;
         crawlStep(t, b);
         pushTrail(b);
-        if (tgt) resetLoop(b);
+        if (tgt || home) resetLoop(b);
         else if (loopWatch(t, b)) {
           b.attached = false;
           b.vy = 30;
@@ -2304,11 +2419,18 @@ export class World {
     }
     bodyPoints(t, b, pts);
     // The bite, for whoever its head is on.
-    if (b.coilCd === 0) {
+    if (b.coilCd === 0 && b.carry === 0) {
       for (const p of this.players) {
         if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > CSPIDER_BITE_R + 4) continue;
-        this.spiderBite(p, pts[0], pts[1]);
+        const torn = this.spiderBite(p, pts[0], pts[1]);
+        // A limb torn off: it takes it, home to the web (if it has one).
+        if (torn >= 0 && this.webOf(b)) {
+          b.carry = 1 + torn;
+          b.legAge = 0;
+          b.target = -1;
+          b.turnAt = this.tick;
+        }
         if (!p.alive) {
           b.coilCd = CSPIDER_BITE_CD;
           b.lunge = 0;
@@ -2328,22 +2450,26 @@ export class World {
    * A cave spider's bite on `p`, its jaws at (jx, jy): it goes for a limb
    * (an arm or a leg; a droid's legs), and half the time tears it clean
    * off (flung away from its jaws); else it mauls it, so the next bite
-   * likely takes it. CSPIDER_BITE harm to the clone either way.
+   * likely takes it. CSPIDER_BITE harm to the clone either way. The part
+   * it tore off (-1: none).
    */
-  private spiderBite(p: Player, jx: number, jy: number): void {
+  private spiderBite(p: Player, jx: number, jy: number): number {
     const res = this.strikeScratch;
     res.hp = 0;
     res.detached.length = 0;
     res.vital = false;
     const limbs = p.parts.cls === ClassId.Droid ? DROID_LEGS : CORAL_LIMBS;
     const have = limbs.filter((l) => has(p.parts.mask, l));
+    let part = -1;
     if (have.length) {
-      const part = have[this.beastRng.int(have.length)];
+      part = have[this.beastRng.int(have.length)];
       harm(p.parts, part, this.beastRng.next() < CSPIDER_RIP ? 1e4 : CSPIDER_MAUL, res);
     }
     // (The harm to the clone is the bite's, whatever the limb took.)
     res.hp = CSPIDER_BITE;
+    const torn = part >= 0 && res.detached.includes(part) ? part : -1;
     this.applyStrike(p, res, NO_OWNER, W_SPIDER, jx, jy);
+    return torn;
   }
 
   /** A basilisk, hibernating down in the caves: on a deep, roomy floor (it's huge), far from everyone. */
@@ -2736,6 +2862,33 @@ export class World {
   }
 
   /**
+   * A rooted thing (a coral nest, a spiders' web) holding on to its rock:
+   * that dug away, it takes hold of whatever else is next to it, or falls,
+   * and lies where it lands. False if it fell out of the world.
+   */
+  private holdOn(k: number, b: Beast): boolean {
+    const t = this.terrain;
+    if (b.attached && t.isSolid(b.x + b.hx, b.y + b.hy)) return true;
+    if (!anchorNest(t, b)) {
+      b.vy = Math.min(400, b.vy + GRAVITY * DT);
+      for (let n = Math.max(1, Math.round(b.vy * DT)); n > 0; n--) {
+        if (t.isSolid(b.x, b.y + 1)) {
+          b.vy = 0;
+          anchorNest(t, b);
+          break;
+        }
+        b.y++;
+      }
+      if (b.y >= WORLD_H - 14) {
+        this.killBeast(k);
+        return false;
+      }
+    }
+    nestCentre(b, this.beastPts[k]);
+    return true;
+  }
+
+  /**
    * One tick of a coral nest. Every NEST_LOOK ticks it feels about it for
    * danger (a clone in sight within NEST_SENSE, or its alarm up: it was
    * hurt), and with danger about and none of its brood still out, it sends
@@ -2746,24 +2899,7 @@ export class World {
     const t = this.terrain;
     const pts = this.beastPts[k];
     if (b.alarm > 0) b.alarm--;
-    if (!b.attached || !t.isSolid(b.x + b.hx, b.y + b.hy)) {
-      if (!anchorNest(t, b)) {
-        b.vy = Math.min(400, b.vy + GRAVITY * DT);
-        for (let n = Math.max(1, Math.round(b.vy * DT)); n > 0; n--) {
-          if (t.isSolid(b.x, b.y + 1)) {
-            b.vy = 0;
-            anchorNest(t, b);
-            break;
-          }
-          b.y++;
-        }
-        if (b.y >= WORLD_H - 14) {
-          this.beasts[k] = null;
-          return;
-        }
-      }
-      nestCentre(b, pts);
-    }
+    if (!this.holdOn(k, b)) return;
     if ((this.tick + k) % NEST_LOOK !== 0 || this.tick < b.brood) return;
     const danger = b.alarm > 0 || this.beastTarget(b, pts[0], pts[1]) >= 0;
     if (this.beasts.some((o) => o?.kind === BeastKind.Seeder && o.home === k)) return;
@@ -3093,10 +3229,15 @@ export class World {
     b.frozen = 0;
     b.gem = false;
     if (b.kind === BeastKind.Nest) b.alarm = 30 * 8; // (hurt: it senses danger, whoever it is)
+    // A cave spider or its web hurt: the whole pack turns on whoever did it.
+    if ((b.kind === BeastKind.Spider || b.kind === BeastKind.Web) && by < MAX_PLAYERS && this.players[by]?.alive) {
+      const pts = this.beastPts[k];
+      this.callPack(b.kind === BeastKind.Web ? k : b.home, pts[0], pts[1], by, true);
+    }
     if (wyrm(b.kind)) this.enrage(b);
     if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
     if (b.hp > 0) return;
-    this.beasts[k] = null;
+    this.killBeast(k);
     if (wyrm(b.kind)) this.basiliskAt = this.tick + BASILISK_RESPAWN;
     const w = this.broadcast;
     w.u8(R_BEAST_DIE);
@@ -4829,7 +4970,7 @@ export class World {
       let vy = (pts[1] - this.beastHead[k * 2 + 1]) * TICK_RATE;
       // (Just hatched into its slot, the last one's head is no motion of its own.)
       if (Math.hypot(vx, vy) > 900) vx = vy = 0;
-      if (b.kind === BeastKind.Seeder || b.kind === BeastKind.Nest) {
+      if (b.kind === BeastKind.Seeder || b.kind === BeastKind.Nest || b.kind === BeastKind.Web) {
         consider(pts[0], pts[1], vx, vy);
         continue;
       }
@@ -7209,7 +7350,7 @@ export class World {
       w.u8(b.seed);
       w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
       w.u8(Math.round(b.lift * 255));
-      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0));
+      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0) | (b.carry > 0 ? 32 : 0));
       w.u16(clampU16(pts[0] * POS_SCALE));
       w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
       for (let i = 2; i < pts.length; i += 2) {
@@ -7856,6 +7997,10 @@ const LAIR_NESTS = 4;
 const LAIR_CRAWLERS = 12;
 const LAIR_ASP_SHARE = 0.2;
 const NESTS_PLAIN = 2;
+/** The most cave spider packs about at once (in the lair, and anywhere else), and the creature slots a new pack leaves free (for wasps to hatch into). */
+const PACKS = 2;
+const LAIR_PACKS = 3;
+const PACK_ROOM = 8;
 /** The crawlers every map has one of before the rest come up by the luck of the roll. */
 const CRAWLER_MIX = [BeastKind.Spider, BeastKind.Asp, BeastKind.Millipede];
 /** Of the creatures that come up, how many are asps (the rest millipedes). */
