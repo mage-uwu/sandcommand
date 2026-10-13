@@ -931,7 +931,10 @@ it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
     edge sagging between the tips. Each panel is banded up through the
     gem colours with a peacock-feather eyespot in it.
   - **Drawing:** the sprites are baked once and drawn turned along its
-    body with no smoothing, so every edge stays crisp.
+    body with no smoothing, so every edge stays crisp. Its maw and teeth
+    are shaded with ordered (Bayer) dithering: the maw from the fire deep
+    in its throat out to the dark at its lips, the teeth from stained
+    roots to bleached tips.
 
 ## Frosting: craters, gem caverns, geysers and flora
 

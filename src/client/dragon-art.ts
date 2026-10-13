@@ -43,9 +43,18 @@ const GRIT = rgb('#22160f');
 const BELLY = ['#7a5026', '#8a5a2a', '#a8743a', '#bf8a4a'];
 const BONE = rgb('#d8ccb0');
 const BONE_LO = rgb('#968a70');
-const THROAT = rgb('#ff5a10');
-const THROAT_DEEP = rgb('#7a1006');
-const TOOTH = rgb('#cfc4a8');
+/** Its maw, from the fire in its throat out to the dark at the lips; its teeth, root (stained) to tip. */
+const MAW = ['#fff0a0', '#ffb040', '#ff5a10', '#c02808', '#7a1006', '#3a0604'].map(rgb);
+const TEETH = ['#6a5a44', '#9a8a6c', '#cfc4a8', '#e6dcc4', '#f8f2e2'].map(rgb);
+/** A 4x4 ordered (Bayer) dither: the threshold at pixel (x, y), 0..1. */
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const bayer = (x: number, y: number) => (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
+/** Ramp `pal` at `t` (0..1), dithered between its tones at pixel (x, y). */
+const dither = (pal: readonly RGBA[], t: number, x: number, y: number): RGBA => {
+  const f = Math.max(0, Math.min(1, t)) * (pal.length - 1);
+  const i = Math.floor(f);
+  return pal[Math.min(pal.length - 1, i + (f - i > bayer(x, y) ? 1 : 0))];
+};
 /** The GEMMs it wears (the ground's own: pink, turquoise, emerald), dark to light. */
 const GEMS = [
   ['#8a0c46', '#ff2a8a', '#ff7ab8', '#ffd0e8'],
@@ -380,7 +389,11 @@ function headSprite(open: boolean, frame: number, asleep: boolean, bright: boole
       if (fu < 0 || fu > FL) continue;
       const half = W * (1 - fu / FL);
       const tu = (fu - 2 * S3 + (sd > 0 ? 1.25 * S3 : 0)) % (2.5 * S3);
-      if (!asleep && fv < 0 && fv > -3.6 * S3 && fu > 2 * S3 && fu < FL - 2 * S3 && Math.abs(tu - 1.25 * S3) < (0.55 - (-fv / (3.6 * S3)) * 0.3) * S3) return fv < -2.6 * S3 ? rgb('#f4ecd8') : TOOTH;
+      if (!asleep && fv < 0 && fv > -3.6 * S3 && fu > 2 * S3 && fu < FL - 2 * S3 && Math.abs(tu - 1.25 * S3) < (0.55 - (-fv / (3.6 * S3)) * 0.3) * S3) {
+        // Stained at the root, bleaching to the tip; the far side of each in shadow (dithered).
+        const q = -fv / (3.6 * S3);
+        return dither(TEETH, q * 1.05 - (tu > 1.25 * S3 ? 0.3 : 0), x, y);
+      }
       // Its crests, like a basilisk lizard's: off the top of its snout a tall casque of crystal blades,
       // raked back, banded up from dark to blazing; under its jaw a beard of shorter shards.
       const out = fv - half;
@@ -418,14 +431,19 @@ function headSprite(open: boolean, frame: number, asleep: boolean, bright: boole
       if (fv < 0) continue;
       if (fv > half - 1.4) return OUTLINE;
       // Veined plate: dark red rock, a GEMM seam down its length, pale at its inner rim.
-      if (fv < 1.4 * S3) return rgb('#b8a090');
+      if (fv < 1.4 * S3 || (fv < 2.4 * S3 && (fv - 1.4 * S3) / S3 < bayer(x, y))) return fv < 0.5 * S3 ? dither(TEETH, 0.35, x, y) : rgb('#b8a090');
       const seam = Math.abs(fv - half * 0.5 - Math.sin(fu * 0.12 + sd) * half * 0.15);
       if (seam < 1.1 * S3) return rgb(GEMS[sd > 0 ? 1 : 0][seam < 0.45 * S3 ? 3 : bright ? 2 : 1]);
       if (Math.abs((((fu * 0.7 + fv * 1.3) % (4 * S3)) + 4 * S3) % (4 * S3) - 2 * S3) < 0.5) return rgb(D_ROCK[0]);
       return rgb(D_ROCK[Math.min(4, 1 + Math.floor(vn(fu, fv, 6, 81) * 3.6) + (sd < 0 ? 1 : 0))]);
     }
     // The maw between the flaps: dark, deep, lit from inside by its fire.
-    if (gape > 0 && u > 0 && u < FL && Math.abs(v) < Math.tan(gape) * u) return u > FL * 0.6 ? THROAT_DEEP : Math.abs(v) > Math.tan(gape) * u - 2 * S3 ? rgb('#ffb040') : THROAT;
+    if (gape > 0 && u > 0 && u < FL && Math.abs(v) < Math.tan(gape) * u) {
+      // Hottest deep in its throat, dimming out to the dark at its lips; lit brighter where the fire licks its gums.
+      const lip = Math.tan(gape) * u - Math.abs(v);
+      const glow = lip < 2 * S3 ? 0.18 * (1 - lip / (2 * S3)) : 0;
+      return dither(MAW, (u / FL) * 1.0 + 0.05 - glow - (bright ? 0.08 : 0), x, y);
+    }
     // Its horns: crystal, swept back off the hinge below the sail, one either side (the far one shorter, darker).
     for (const [hu, hv, tu2, tv2, g, dim] of [
       [-back * 0.15, W * 0.55, -back * 1.05, W * 1.05, 1, 0],
