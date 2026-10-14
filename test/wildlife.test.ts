@@ -117,24 +117,37 @@ describe('millipedes in the world', () => {
     expect(a.hp).toBeGreaterThan(hp - 20); // (not all at once)
   });
 
-  it('it comes after a clone along the walls and roof, coils round them like a rope and bites: dead', () => {
+  it('it comes after a clone along the walls and roof, coils round them like a rope, writhes with them, bites, and flings them far', () => {
     const { world, a } = cave();
     // Far down the tunnel, on the roof, going away from the clone.
     const b = put(world, 1240, 380, 1);
     b.spitCd = 1e9; // (no spitting: it has to come and get them)
     let coiled = -1;
     let heldAt = 0;
-    for (let k = 0; k < 30 * 12 && a.alive; k++) {
+    let writhed = 0;
+    let flungFrom = -1;
+    for (let k = 0; k < 30 * 12 && a.alive && flungFrom < 0; k++) {
+      const wasCoiled = b.coil === a.id;
       world.step();
       if (coiled < 0 && b.coil === a.id) {
         coiled = k;
         heldAt = a.body.x;
       }
-      // Held fast while it's wound round them.
-      if (coiled >= 0 && b.coil === a.id) expect(Math.abs(a.body.x - heldAt)).toBeLessThan(0.5);
+      // Writhing: dragged about while it's wound round them.
+      if (b.coil === a.id) writhed = Math.max(writhed, Math.abs(a.body.x - heldAt));
+      if (wasCoiled && b.coil !== a.id) flungFrom = a.cx;
     }
     expect(coiled).toBeGreaterThanOrEqual(0);
-    expect(a.alive).toBe(false);
+    expect(writhed).toBeGreaterThan(2);
+    // Bitten (and poisoned), and flung: a second later, far from where it let go.
+    expect(a.lastWeapon).toBeGreaterThan(0);
+    expect(flungFrom).toBeGreaterThan(0);
+    if (a.alive) {
+      expect(a.venom).toBeGreaterThan(0);
+      expect(Math.hypot(a.body.vx, a.body.vy)).toBeGreaterThan(200);
+      for (let k = 0; k < 30; k++) world.step();
+      expect(Math.abs(a.cx - flungFrom)).toBeGreaterThan(40);
+    }
   });
 
   it('hurt hard enough while it holds someone, it lets them go', () => {

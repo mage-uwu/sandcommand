@@ -715,11 +715,13 @@ terrain cell to a pixel).
   the surfaces at 160 cells a second for two and a half seconds, then hunts
   at 70. It picks its way by trying a few dozen steps each way along the
   ground and taking the one that gets it nearer.
-- **It coils and bites.** The clone its head reaches, it wraps round like a
-  rope, holding them fast where they stand. After just over half a second
-  it bites, for 150: an instant kill on most (a droid's frame takes 70).
-  Hurt hard enough while it holds someone (6% of its health), it lets go.
-  After a kill it lies still a while, sated.
+- **It coils, writhes, bites and flings.** The clone its head reaches, it
+  wraps round like a rope and writhes with, dragging them about, for a
+  second. Then it bites (45 harm and a dose of venom; a droid's frame
+  takes 35) and flings them far, away from its body and up, at 460 cells a
+  second: it's the landing, or the wall, that hurts. Hurt hard enough while
+  it holds someone (6% of its health), it lets go. After that it lies
+  still a while.
 - **It spits.** With prey further off but in reach, it first rears its
   front up off the ground. A hood spreads either side of its neck like a
   pixel-art coral sea fan, ribbed, with glowing tips round its rim and a
@@ -931,8 +933,14 @@ and very hard to kill.
   ground, like a shark, watching the surface over it. Anything in sight
   within 520 cells it goes for, as does anything it feels through the
   ground within 220. It surges through the earth at 115 cells a second and
-  leaps out of it after prey, arcing back down. Its jaws kill a clone
-  outright and crush 30% off a vehicle's hull a bite.
+  leaps out of it after prey, arcing back down. Its jaws crush 30% off a
+  vehicle's hull a bite.
+- **It holds, thrashes and flings.** A clone its jaws close on (40 harm)
+  it holds in its mouth for a second, thrashing, its head swinging side to
+  side and dragging them through the rock with it, mauling them (about 30
+  more). Then it flings them far, off the way its head swung and up, at
+  620 cells a second. A dragon does the same, harder: half as much harm
+  again from its bite, a fiercer maul, and a fling 60% stronger.
 - **Its body batters too.** Awake and moving, its plated length hits
   whoever it rolls into for 22 harm (8% of a vehicle's hull), knocking them
   away. The same victim can be hit again every 0.6 seconds.

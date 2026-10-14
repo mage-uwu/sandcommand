@@ -103,14 +103,17 @@ export const MILLI_LIFT = 13;
 export const MILLI_NECK = 5;
 /**
  * Its coil: a clone its head reaches (within MILLI_COIL_R) it wraps round
- * like a rope, holding them fast, and after MILLI_COIL_TICKS bites: harm
- * enough to kill most outright (a droid's frame takes less). Hurt hard
- * enough while it holds them (MILLI_COIL_BREAK), it lets go.
+ * like a rope and writhes with, dragging them about, for MILLI_COIL_TICKS
+ * (a second); then it bites (MILLI_COIL_KILL harm and a dose of venom; a
+ * droid's frame takes less) and flings them far (MILLI_FLING cells/s, away
+ * from its body and up). Hurt hard enough while it holds them
+ * (MILLI_COIL_BREAK), it lets go.
  */
 export const MILLI_COIL_R = 9;
-export const MILLI_COIL_TICKS = 18;
-export const MILLI_COIL_KILL = 150;
-export const MILLI_COIL_DROID = 70;
+export const MILLI_COIL_TICKS = 30;
+export const MILLI_COIL_KILL = 45;
+export const MILLI_COIL_DROID = 35;
+export const MILLI_FLING = 460;
 export const MILLI_COIL_BREAK = MILLI_HP * 0.06;
 export const MILLI_COIL_SEGS = 8;
 /** After a coil (bitten or broken off): ticks before it can coil again. */
@@ -415,7 +418,17 @@ export const BASILISK_CALM = 30 * 25;
 export const BASILISK_DEEP = 160;
 /** Its jaws: reach past its girth, harm to a clone (death), to a vehicle's hull (a share of a tank's), ticks between bites. */
 export const BASILISK_JAWS = 6;
-export const BASILISK_BITE = 400;
+/**
+ * Its bite: whoever its jaws close on (BASILISK_BITE harm, and half again
+ * from a dragon) it holds in its mouth for BASILISK_HOLD ticks, thrashing,
+ * dragging them through the rock with it and mauling them (BASILISK_MAUL a
+ * tick); then it flings them far (BASILISK_FLING cells/s, more from a
+ * dragon), off the way its head swung, and up.
+ */
+export const BASILISK_BITE = 40;
+export const BASILISK_HOLD = 30;
+export const BASILISK_MAUL = 1;
+export const BASILISK_FLING = 620;
 export const BASILISK_CRUSH = 0.3;
 export const BASILISK_BITE_CD = 12;
 
@@ -564,6 +577,9 @@ export interface Beast {
   /** A cave spider carrying a torn-off limb home in its jaws (0: none; else 1 + the part). A web nest: the limbs worked into it. */
   carry: number;
   limbs: number;
+  /** A basilisk (or dragon) holding a clone in its jaws (their id, or -1), and ticks into it. */
+  hold: number;
+  holdT: number;
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
@@ -633,6 +649,8 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     bored: 0,
     carry: 0,
     limbs: 0,
+    hold: -1,
+    holdT: 0,
   };
   if (burrows(kind)) {
     // Lying along the cave floor, its body trailing out behind its head (half sunk in the rock, like a seam of it).

@@ -350,6 +350,11 @@ import {
   newSeeder,
   hitScale,
   BASILISK_BITE,
+  BASILISK_HOLD,
+  BASILISK_MAUL,
+  BASILISK_FLING,
+  MILLI_FLING,
+  MILLI_COIL_SEGS,
   DRAGON_ODDS,
   DRAGON_R,
   DRAGON_SPIT_CD,
@@ -2132,7 +2137,9 @@ export class World {
       return;
     }
     b.coilT++;
-    // Held: right where it caught them.
+    // Writhing with them: the coil (and they in it) thrashed about, this way and that.
+    b.coilX += Math.cos(b.coilT * 0.55) * 1.4;
+    b.coilY += Math.sin(b.coilT * 0.8) * 0.8;
     v.body.x = b.coilX - ACTOR_W / 2;
     v.body.y = b.coilY - (v.cy - v.body.y);
     v.body.vx = 0;
@@ -2140,13 +2147,80 @@ export class World {
     if (b.coilT < MILLI_COIL_TICKS) return;
     const droid = v.parts.cls === ClassId.Droid;
     this.damage(v, droid ? MILLI_COIL_DROID : MILLI_COIL_KILL, NO_OWNER, W_COIL);
-    if (v.alive) v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
+    if (v.alive) {
+      v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
+      // And flung far: away from the rest of its body, and up.
+      const pts = this.beastPts[k];
+      const at = Math.min(MILLI_COIL_SEGS, (pts.length >> 1) - 1) * 2;
+      this.flingClone(v, b.coilX - pts[at], b.coilY - pts[at + 1], MILLI_FLING);
+    }
     this.uncoil(b);
     // Sated: it lies still a while.
     b.frozen = MILLI_FREEZE_MIN;
     b.target = -1;
     b.hurtBy = -1;
-    void k;
+  }
+
+  /**
+   * A clone flung by a creature: off along (dx, dy) and up, at `speed`
+   * (cells/s): off their feet and through the air; it's the landing (or
+   * the wall) that hurts.
+   */
+  private flingClone(p: Player, dx: number, dy: number, speed: number): void {
+    let l = Math.hypot(dx, dy);
+    if (l < 0.01) {
+      dx = this.rng.next() < 0.5 ? -1 : 1;
+      dy = 0;
+      l = 1;
+    }
+    p.body.vx = (dx / l) * speed;
+    p.body.vy = Math.min((dy / l) * speed, 0) - speed * 0.55;
+  }
+
+  /**
+   * A basilisk (or dragon) with a clone in its jaws: it thrashes, its head
+   * swinging this way and that and dragging them through the rock with it,
+   * mauling them; after BASILISK_HOLD ticks it flings them far, off the way
+   * its head swung, and up.
+   */
+  private holdTick(k: number, b: Beast, sc: number): void {
+    const t = this.terrain;
+    const pts = this.beastPts[k];
+    const v = this.players[b.hold];
+    if (!v || !v.alive || v.tank >= 0 || v.pilot >= 0) {
+      b.hold = -1;
+      b.coilCd = BASILISK_BITE_CD;
+      return;
+    }
+    b.holdT++;
+    // The thrash: its head swung side to side, driving on through the rock with them.
+    b.ang += Math.sin(b.holdT * 0.6) * 0.3;
+    boreStep(t, b, b.fx + Math.cos(b.ang) * 40 * sc, b.fy + Math.sin(b.ang) * 40 * sc, BASILISK_HUNT * 0.7 * sc, DT);
+    if (b.holdT % 4 === 0) {
+      const bore = BASILISK_BORE * sc;
+      const ax = b.fx + Math.cos(b.ang) * bore * 0.5;
+      const ay = b.fy + Math.sin(b.ang) * bore * 0.5;
+      if (boreable(t, Math.round(ax), Math.round(ay))) this.carve(ax, ay, bore, bore, 2 * sc);
+    }
+    bodyPoints(t, b, pts);
+    // In its mouth: just ahead of its head.
+    v.body.x = pts[0] + Math.cos(b.ang) * BASILISK_R * 0.4 * sc - ACTOR_W / 2;
+    v.body.y = pts[1] + Math.sin(b.ang) * BASILISK_R * 0.4 * sc - (v.cy - v.body.y);
+    v.body.vx = 0;
+    v.body.vy = 0;
+    const jaws = b.kind === BeastKind.Dragon ? W_DRAGON : W_BASILISK;
+    if (b.holdT % 3 === 0) this.damage(v, BASILISK_MAUL * 3 * (1 + (sc - 1) * 0.25), NO_OWNER, jaws);
+    if (!v.alive) {
+      b.hold = -1;
+      b.coilCd = BASILISK_BITE_CD;
+      return;
+    }
+    if (b.holdT < BASILISK_HOLD) return;
+    // Flung: off the way its head was swinging, and up.
+    this.flingClone(v, Math.cos(b.ang), Math.sin(b.ang), BASILISK_FLING * (1 + (sc - 1) * 0.3));
+    b.hold = -1;
+    b.holdT = 0;
+    b.coilCd = BASILISK_BITE_CD * 3;
   }
 
   private uncoil(b: Beast): void {
@@ -2688,6 +2762,11 @@ export class World {
     const bore = BASILISK_BORE * sc;
     if (b.coilCd > 0) b.coilCd--;
     if (b.spitCd > 0) b.spitCd--;
+    // A clone in its jaws: nothing else, until it's done with them.
+    if (b.hold >= 0) {
+      this.holdTick(k, b, sc);
+      return;
+    }
     const surf = t.surfaceY(Math.round(b.fx));
     let gx = b.fx;
     let gy = b.fy;
@@ -2789,8 +2868,14 @@ export class World {
       for (const p of this.players) {
         if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > reach) continue;
-        this.damage(p, BASILISK_BITE, NO_OWNER, jaws);
+        // Its jaws close on them: it has them.
+        this.damage(p, BASILISK_BITE * (1 + (sc - 1) * 0.25), NO_OWNER, jaws);
         b.coilCd = BASILISK_BITE_CD;
+        if (p.alive) {
+          b.hold = p.id;
+          b.holdT = 0;
+          break;
+        }
       }
       for (let s = 0; s < this.tanks.length; s++) {
         const tk = this.tanks[s];
@@ -7355,7 +7440,7 @@ export class World {
       w.u8(b.seed);
       w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
       w.u8(Math.round(b.lift * 255));
-      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0) | (b.carry > 0 ? 32 : 0));
+      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 || b.hold >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0) | (b.carry > 0 ? 32 : 0));
       w.u16(clampU16(pts[0] * POS_SCALE));
       w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
       for (let i = 2; i < pts.length; i += 2) {

@@ -4,7 +4,7 @@ import { ACTOR_H, ACTOR_W, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { W_BASILISK } from '../src/shared/particles.ts';
 import { PROJ, ProjKind } from '../src/shared/weapons.ts';
-import { BASILISK_CALM, BASILISK_R, BASILISK_SLEEP_MAX, BeastKind, MILLI_R, bodyPoints, newBeast, wyrm } from '../src/shared/wildlife.ts';
+import { BASILISK_CALM, BASILISK_HOLD, BASILISK_R, BASILISK_SLEEP_MAX, BeastKind, MILLI_R, bodyPoints, newBeast, wyrm } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 import { Game } from '../src/client/game.ts';
@@ -44,6 +44,54 @@ function deep(ceiling: number = Mat.Rock) {
 }
 
 describe('the basilisk', () => {
+  for (const kind of [BeastKind.Basilisk, BeastKind.Dragon]) it(`${kind === BeastKind.Dragon ? 'a dragon' : 'a basilisk'}'s bite: it holds the clone in its jaws, thrashing and dragging them about for a second, then flings them far`, () => {
+    const { world, a, b: old } = deep();
+    world.beasts[0] = null;
+    const b = newBeast(world.terrain, kind, 1150, 652, -1);
+    world.beasts[0] = b;
+    bodyPoints(world.terrain, b, world.beastPts[0]);
+    void old;
+    if (kind === BeastKind.Dragon) {
+      // (A dragon: the clone right by it, in the cave; woken by them.)
+      a.body.x = 1100;
+      a.body.y = 661 - ACTOR_H;
+      world.hurtBeast(0, 1, a.id);
+    } else {
+      // (A basilisk: woken, it makes for the surface first; the clone up there in its way.)
+      world.hurtBeast(0, 1, 255);
+      for (let k = 0; k < 30 * 20 && !b.surfaced; k++) world.step();
+      a.body.x = b.fx + 160;
+      a.body.y = SURF - ACTOR_H;
+    }
+    a.hp = 100;
+    let held = -1;
+    let at = { x: 0, y: 0 };
+    let dragged = 0;
+    let released = -1;
+    for (let k = 0; k < 30 * 10 && released < 0 && a.alive; k++) {
+      world.step();
+      a.hp = Math.max(a.hp, 60); // (kept alive: it's the hold we're watching)
+      if (held < 0 && b.hold === a.id) {
+        held = k;
+        at = { x: a.cx, y: a.cy };
+      }
+      if (b.hold === a.id) {
+        // In its mouth: right at its head.
+        const pts = world.beastPts[0];
+        expect(Math.hypot(a.cx - pts[0], a.cy - pts[1])).toBeLessThan(BASILISK_R * 3 * (kind === BeastKind.Dragon ? 3 : 1));
+        dragged = Math.max(dragged, Math.hypot(a.cx - at.x, a.cy - at.y));
+      }
+      if (held >= 0 && b.hold !== a.id) released = k;
+    }
+    expect(held).toBeGreaterThanOrEqual(0);
+    expect(released - held).toBeGreaterThanOrEqual(BASILISK_HOLD - 1);
+    expect(released - held).toBeLessThanOrEqual(BASILISK_HOLD + 2);
+    expect(dragged).toBeGreaterThan(4);
+    // Flung: fast, and up.
+    expect(Math.hypot(a.body.vx, a.body.vy)).toBeGreaterThan(400);
+    expect(a.body.vy).toBeLessThan(0);
+  });
+
   it('three times the millipede, and it hibernates very still for up to four minutes', () => {
     const { world, b } = deep();
     expect(BASILISK_R).toBeCloseTo(MILLI_R * 3);
