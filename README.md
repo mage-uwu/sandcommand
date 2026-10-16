@@ -959,8 +959,10 @@ and very hard to kill.
   of plate, each dressed as its section was.
 
 **The dragon** is the basilisk three times over: three times its girth
-and length (it bores tunnels a tank could drive down) and three times its
-health. It sleeps, wakes and hunts just as a basilisk does, with
+(it bores tunnels a tank could drive down), each of its segments three
+times the size, and three times its health; and it has twice as many
+segments (30), so it's six times as long. Laid out in a den near the map's
+edge, its body folds back on itself in the rock. It sleeps, wakes and hunts just as a basilisk does, with
 everything scaled up: wake range, how far it hears, its stirring, its dive,
 its jaws' reach, its bore, and how hard its body batters. For its size
 it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
@@ -994,6 +996,13 @@ it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
 
     Clusters of crystal spines crowd along its back. Glints twinkle over
     all of it as it moves, brighter in its frenzy.
+  - **Rattle:** the last six sections of its tail are a rattlesnake's
+    rattle, a stack of interlocking beads (a fat lobe, a collar the next
+    one sits in, a blunt button at the tip), each crusted solid with big
+    faceted GEMM crystals, mostly one gem to a bead (pink, turquoise,
+    emerald in turn), lit from above, dark stone in the cracks. Awake, the
+    beads shiver side to side out of step, blazing, and every couple of
+    seconds it rattles: a dry buzz of crystal clicks from its tail.
   - **Head:** the basilisk's flytrap jaw, scaled up. Two rock flaps with
     a GEMM seam down each, rimmed with interlocking teeth. They gape open
     over a maw glowing with the fire it spits. Its eyes are cold and burn

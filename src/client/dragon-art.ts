@@ -1,4 +1,4 @@
-import { DRAGON_R } from '../shared/wildlife.ts';
+import { DRAGON_R, DRAGON_RATTLE, DRAGON_SEGS } from '../shared/wildlife.ts';
 
 /**
  * The dragon, in pixels (wildlife.ts DRAGON_*): the basilisk three times
@@ -483,6 +483,70 @@ function headSprite(open: boolean, frame: number, asleep: boolean, bright: boole
   return out;
 }
 
+/**
+ * Its rattle: the last DRAGON_RATTLE sections of its tail, a rattlesnake's
+ * stack of interlocking hollow beads, but crusted solid with GEMM crystal.
+ * Bead `j` (0 next to its body, out to the tip), each a lobe and a collar
+ * (the next one's lobe sits in it), smaller toward the tip; every one
+ * packed with faceted crystals (lit facet up-forward, shadowed down-back),
+ * dark seams between. `bright`: its frenzy, the crystals blazing.
+ */
+const rattleCache = new Map<string, { s: Sprite; gems: Gem[] }>();
+function rattleSprite(j: number, bright: boolean): { s: Sprite; gems: Gem[] } {
+  const key = `${j}|${bright ? 1 : 0}`;
+  const hit = rattleCache.get(key);
+  if (hit) return hit;
+  const k = j / Math.max(1, DRAGON_RATTLE - 1);
+  const w = 11 * S3 * 0.6 * (1 - 0.32 * k); // (half its girth: the tail's, tapering to the tip)
+  const L = DRAGON_R * 1.15 * (1 - 0.2 * k); // (half its length: long enough to sit in the next one's collar)
+  const tip = j === DRAGON_RATTLE - 1;
+  const R = Math.ceil(Math.max(w, L)) + 3;
+  const ox = R + 1;
+  const oy = R + 1;
+  const gems: Gem[] = [];
+  for (let g = 0; g < 2; g++) gems.push({ u: L * (0.35 - 0.5 * g), v: -w * (0.35 + 0.2 * g), r: w * 0.28, g: (j + g) % 3 });
+  /** Its outline at (u, v): the lobe (forward, fat) and the collar (behind, narrow, a lip round it). */
+  const inside = (u: number, v: number): number => {
+    const lobe = ((u - L * 0.18) / (L * 0.82)) ** 2 + (v / w) ** 2;
+    const collar = ((u + L * 0.62) / (L * 0.36)) ** 2 + (v / (w * 0.72)) ** 2;
+    // (The tip: a blunt rounded button, no collar beyond it.)
+    return tip ? Math.min(lobe, ((u + L * 0.3) / (L * 0.5)) ** 2 + (v / (w * 0.8)) ** 2) : Math.min(lobe, collar);
+  };
+  const c = bake(R * 2 + 2, R * 2 + 2, (x, y) => {
+    const u = x + 0.5 - ox;
+    const v = y + 0.5 - oy;
+    const e = inside(u, v);
+    if (e > 1) return 0;
+    if (e > 0.82) return OUTLINE;
+    // The seam where lobe meets collar: a dark groove across it.
+    if (!tip && Math.abs(u + L * 0.3) < 1.2 && Math.abs(v) < w * 0.8) return rgb('#140a10');
+    // The crust: big faceted crystals packed over it (5-cell cells, offset row by row), each split
+    // on its diagonal into a lit facet and a shadowed one, dark stone in the cracks between;
+    // mostly the bead's own gem, now and then another.
+    const S = 5;
+    const row = Math.floor((v + 300) / S);
+    const uu = u + 300 + (row & 1) * 2.5;
+    const cx = Math.floor(uu / S);
+    const fu = (uu % S) / S;
+    const fv = ((v + 300) % S) / S;
+    if (fu < 0.16 || fv < 0.16) return rgb(D_ROCK[hsh(cx, row, 320 + j) < 0.5 ? 0 : 1]);
+    const h = hsh(cx, row, 300 + j);
+    const pal = GEMS[h < 0.7 ? j % 3 : (j + 1 + Math.floor(h * 10)) % 3];
+    // (Lit from above: the top of the bead brighter, its underside dark; round, so its rim darker too.)
+    const lit = v < -w * 0.3 ? 1 : v > w * 0.45 ? -1 : 0;
+    const face = fu > fv ? 1 : -1;
+    let t = 1 + lit + face + (bright ? 1 : 0) - (e > 0.6 ? 1 : 0);
+    if (hsh(cx, row, 310 + j) < 0.12) t -= 2; // (a dull one, here and there)
+    if (t < 0) return rgb(D_ROCK[2]);
+    // (A pin of light on the brightest facets.)
+    if (t >= 3 && fu > 0.7 && fv < 0.4) return rgb(pal[3]);
+    return rgb(pal[Math.min(3, t)]);
+  });
+  const out = { s: { c, ox, oy }, gems };
+  rattleCache.set(key, out);
+  return out;
+}
+
 /** Draw `s` at (x, y), turned to `a` (mirrored when it faces left, so its back stays up); then `over` in its own frame. */
 function put(ctx: CanvasRenderingContext2D, s: Sprite, x: number, y: number, a: number, over?: () => void): void {
   ctx.save();
@@ -529,8 +593,17 @@ export function drawDragon(ctx: CanvasRenderingContext2D, pts: readonly number[]
   ctx.imageSmoothingEnabled = false;
   const P = (i: number) => Math.max(0, Math.min(n - 1, i));
   const dir = (i: number) => Math.atan2(pts[P(i - 1) * 2 + 1] - pts[P(i + 1) * 2 + 1], pts[P(i - 1) * 2] - pts[P(i + 1) * 2]);
-  for (let i = n - 1; i >= 1; i--) {
-    const { s, gems } = segSprite(i, n, frenzy, frozen);
+  // Its rattle, the last few of it: awake, a blur of shivering beads (each thrown side to side, out of step).
+  const rattle = n > DRAGON_RATTLE + 2 ? n - DRAGON_RATTLE : n;
+  for (let i = n - 1; i >= rattle; i--) {
+    const j = i - rattle;
+    const { s, gems } = rattleSprite(j, frenzy);
+    const a = dir(i);
+    const shake = frenzy && !frozen ? Math.sin(now / 16 + j * 1.9) * (1.5 + j * 0.8) : 0;
+    put(ctx, s, pts[i * 2] - Math.sin(a) * shake, pts[i * 2 + 1] + Math.cos(a) * shake, a, () => glints(ctx, gems, 200 + j, now, frenzy));
+  }
+  for (let i = rattle - 1; i >= 1; i--) {
+    const { s, gems } = segSprite(i, rattle, frenzy, frozen);
     put(ctx, s, pts[i * 2], pts[i * 2 + 1], dir(i), () => glints(ctx, gems, i, now, frenzy));
   }
   const frame = frenzy ? Math.floor(now / 160) & 1 : 0;
@@ -540,9 +613,10 @@ export function drawDragon(ctx: CanvasRenderingContext2D, pts: readonly number[]
 }
 
 /** A section of a dead dragon, tumbling (its head, if it's the first). */
-export function drawDragonGib(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, _seed: number, i: number, n = 15): void {
+export function drawDragonGib(ctx: CanvasRenderingContext2D, x: number, y: number, a: number, _seed: number, i: number, n = DRAGON_SEGS): void {
   const smooth = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = false;
-  put(ctx, i === 0 ? headSprite(false, 0, true, false).s : segSprite(Math.min(i, n - 1), n, false).s, x, y, a);
+  const rattle = n - DRAGON_RATTLE;
+  put(ctx, i === 0 ? headSprite(false, 0, true, false).s : i >= rattle ? rattleSprite(Math.min(i - rattle, DRAGON_RATTLE - 1), false).s : segSprite(i, rattle, false).s, x, y, a);
   ctx.imageSmoothingEnabled = smooth;
 }

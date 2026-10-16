@@ -245,6 +245,17 @@ export class Sfx {
     this.burst(v, 0.05, big ? 0.5 : 0.3, 'highpass', big ? 3500 : 6000, 0.8, 0.5);
   }
 
+  /** A dragon's rattle: a rapid dry buzz of crystal beads, a train of hard little clicks, swelling and dying. */
+  rattle(x: number, y: number): void {
+    const v = this.voice(x, y, 0.45, 1.1, 2);
+    if (!v) return;
+    for (let k = 0; k < 34; k++) {
+      const t = k * 0.03;
+      const env = Math.sin((Math.PI * k) / 34);
+      this.burst(v, t, 0.018, 'bandpass', 5200 + (k % 3) * 600, 3, 0.25 + 0.6 * env);
+    }
+  }
+
   /** A basilisk waking in its frenzy: a deep grinding roar, rock in its throat, that carries a long way. */
   roar(x: number, y: number): void {
     const v = this.voice(x, y, 0.8, 2.2, 2.5, true);

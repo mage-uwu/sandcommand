@@ -3,7 +3,7 @@ import { ClassId, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { ProjKind, projName } from '../src/shared/weapons.ts';
-import { BASILISK_HP, BASILISK_R, BEAST_BUILD, BeastKind, DRAGON_HP, DRAGON_R, bodyPoints, burrows, newBeast, wyrm } from '../src/shared/wildlife.ts';
+import { BASILISK_HP, BASILISK_R, BEAST_BUILD, BeastKind, DRAGON_HP, DRAGON_R, DRAGON_RATTLE, bodyPoints, burrows, newBeast, wyrm } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -32,10 +32,13 @@ function lair() {
 }
 
 describe('the dragon', () => {
-  it('is the basilisk three times over: three times the girth and length, three times the health', () => {
+  it('is the basilisk three times over (three times the girth, the health, and each segment), and twice as many segments', () => {
     expect(DRAGON_R).toBeCloseTo(BASILISK_R * 3);
     expect(DRAGON_HP).toBe(BASILISK_HP * 3);
     expect(BEAST_BUILD[BeastKind.Dragon].gap).toBe(BEAST_BUILD[BeastKind.Basilisk].gap * 3);
+    // (And twice the segments: six times as long, the last of them its rattle.)
+    expect(BEAST_BUILD[BeastKind.Dragon].segs).toBe(BEAST_BUILD[BeastKind.Basilisk].segs * 2);
+    expect(DRAGON_RATTLE).toBeGreaterThan(2);
     expect(wyrm(BeastKind.Dragon) && burrows(BeastKind.Dragon)).toBe(true);
     expect(projName(ProjKind.FireSpit)).toBe('Dragon');
   });
@@ -73,5 +76,15 @@ describe('the dragon', () => {
       }
     }
     expect(widest).toBeGreaterThan(9 * 2 * 1.8);
+  });
+  it("laid out in its den, it folds back on itself rather than run off the map's edge", () => {
+    const { world } = lair();
+    const b = newBeast(world.terrain, BeastKind.Dragon, 300, 520, 1);
+    const pts = bodyPoints(world.terrain, b, []);
+    expect(pts.length).toBe(BEAST_BUILD[BeastKind.Dragon].segs * 2);
+    for (let i = 0; i < pts.length; i += 2) {
+      expect(pts[i]).toBeGreaterThanOrEqual(0);
+      expect(pts[i]).toBeLessThan(WORLD_W);
+    }
   });
 });

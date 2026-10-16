@@ -444,7 +444,9 @@ export const BASILISK_BITE_CD = 12;
  * basilisk's place (DRAGON_ODDS).
  */
 export const DRAGON_SCALE = 3;
-export const DRAGON_SEGS = BASILISK_SEGS;
+/** Twice a basilisk's segments (and each three times the size): six times its length. Its last DRAGON_RATTLE are its rattle. */
+export const DRAGON_SEGS = BASILISK_SEGS * 2;
+export const DRAGON_RATTLE = 6;
 export const DRAGON_GAP = BASILISK_GAP * DRAGON_SCALE;
 export const DRAGON_R = BASILISK_R * DRAGON_SCALE;
 export const DRAGON_HP = BASILISK_HP * 3;
@@ -655,7 +657,17 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
   if (burrows(kind)) {
     // Lying along the cave floor, its body trailing out behind its head (half sunk in the rock, like a seam of it).
     b.trail = [];
-    for (let k = 0; k <= build.segs * build.gap; k++) b.trail.push(x - dir * k, y - 2);
+    // (Folded back on itself where it would run off the map's edge: a long one lies coiled in the rock.)
+    let tx = x;
+    let ty = y - 2;
+    let step = -dir;
+    for (let k = 0; k <= build.segs * build.gap; k++) {
+      b.trail.push(tx, ty);
+      if (tx + step < 4 || tx + step > WORLD_W - 5) {
+        step = -step;
+        ty = Math.max(4, ty - build.r * 2);
+      } else tx += step;
+    }
     b.fy = y - 2;
     return b;
   }

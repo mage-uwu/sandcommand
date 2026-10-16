@@ -173,6 +173,7 @@ export interface Sfx {
   hiss(x: number, y: number, big: boolean): void;
   buzz(x: number, y: number): void;
   roar(x: number, y: number): void;
+  rattle(x: number, y: number): void;
   /** The Stoneburner: its beacon's beep (`urgency` 0..1 as the countdown runs out), the missile's scream, the strike. */
   beep(x: number, y: number, urgency: number): void;
   incoming(x: number, y: number): void;
@@ -1297,6 +1298,8 @@ export class Game implements FrameHandler {
    */
   readonly segmentGibs: { x: number; y: number; vx: number; vy: number; a: number; va: number; kind: number; seed: number; i: number; life: number; rest?: number }[] = [];
   private buzzAt = -1e9;
+  /** When each dragon last rattled (by slot, ms). */
+  private readonly rattleAt = new Map<number, number>();
   beasts(list: BeastState[]): void {
     const seen = new Set<number>();
     this.beastsGone.clear();
@@ -1329,6 +1332,11 @@ export class Game implements FrameHandler {
         v.gem = b.gem;
         // A basilisk woken: its roar.
         if (!v.frenzy && b.frenzy) this.sfx?.roar(b.pts[0], b.pts[1]);
+        // A dragon awake: its rattle, every couple of seconds, from its tail.
+        if (b.kind === BeastKind.Dragon && b.frenzy && !b.frozen && performance.now() - (this.rattleAt.get(b.slot) ?? -1e9) > 2200) {
+          this.rattleAt.set(b.slot, performance.now());
+          this.sfx?.rattle(b.pts[b.pts.length - 2], b.pts[b.pts.length - 1]);
+        }
         v.frenzy = b.frenzy;
         v.carry = b.carry;
         pushBeastSnap(v, this.frameTick);
