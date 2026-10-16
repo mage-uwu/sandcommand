@@ -5,7 +5,7 @@ import { MAX_PLAYERS, TICK_RATE } from '../shared/constants.ts';
 import {
   C_CHAT,
   C_BUILD,
-  C_CALL, C_VOTE,
+  C_CALL, C_VOTE, C_TEAM,
   C_INPUT,
   C_PING,
   C_RESYNC,
@@ -38,6 +38,7 @@ function msgClass(type: number): MsgClass | null {
       return MsgClass.Build;
     case C_CALL:
     case C_VOTE:
+    case C_TEAM:
       return MsgClass.Call;
     case C_RESYNC:
       return MsgClass.Resync;
@@ -184,6 +185,9 @@ export class GameRoom extends DurableObject<Env> {
           break;
         case C_VOTE:
           world.vote(id, r.u8());
+          break;
+        case C_TEAM:
+          world.changeTeam(id, r.u8());
           break;
       }
     } catch {

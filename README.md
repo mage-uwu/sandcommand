@@ -351,6 +351,21 @@ The screen splits down the middle:
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
 
+**Humans.** Other human players (not bots) wear a tiny gold star over
+their name tag.
+
+**Changing team.** Dead in a team mode, a row of the sides comes up at the
+bottom of the screen (TEAM: RED, GREEN, and in Extraction BLUE and GOLD,
+ours lit): click or tap one, or press C for the next.
+- **Respawn modes** (Regicide, Siege, Extraction): at once, and you come
+  back on the new side. To keep the sides even, one of its bots crosses
+  over to your old one; with no bot to trade, you can only move to a side
+  that isn't bigger.
+- **Last Team Standing** (out for the wave): it's kept, and holds from the
+  next wave's draw on.
+- Never while riding in on a drop rocket, never for a king, and not in the
+  modes without sides (PvP, Last Man Standing, Extermination).
+
 **Objective pointer.** While what you should be doing is off screen, a
 small, half-transparent chevron at the screen's edge points the way, the
 word for it beside it and how far (`KILL 238m`), in the mode's colour

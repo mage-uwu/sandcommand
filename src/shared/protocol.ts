@@ -17,6 +17,8 @@ export const C_BUILD = 0x06;
 export const C_CALL = 0x07;
 /** End of a wave: a vote for the next one's mode, mode u8 (one of VOTE_MODES). */
 export const C_VOTE = 0x08;
+/** Change team (dead, in a team mode): u8 team. */
+export const C_TEAM = 0x09;
 
 /** What a radio can call in. */
 /** What a radio can call in; `Pilot` takes (or hands back) remote control of our own dropship. */
@@ -166,7 +168,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 75;
+export const PROTOCOL_VERSION = 76;
 
 /** Last Man Standing round phases. */
 export const Phase = {

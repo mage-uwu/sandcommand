@@ -77,6 +77,10 @@ export class LocalLink implements Link {
     this.tutorial.world.call(this.tutorial.me.id, kind);
   }
 
+  team(team: number): void {
+    this.tutorial.world.changeTeam(this.tutorial.me.id, team);
+  }
+
   vote(mode: number): void {
     this.tutorial.world.vote(this.tutorial.me.id, mode);
   }

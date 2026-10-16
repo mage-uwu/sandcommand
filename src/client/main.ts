@@ -1,6 +1,6 @@
 import { ACTOR_H, ACTOR_W, CHUNK_COUNT, GRAVITY, TICK_RATE } from '../shared/constants.ts';
 import { applyCarve } from '../shared/particles.ts';
-import { CallKind, PROTOCOL_VERSION, Phase, VOTE_MODES, quantizeAim } from '../shared/protocol.ts';
+import { CallKind, PROTOCOL_VERSION, Phase, TEAMS_IN_MODE, VOTE_MODES, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
 import { LASER_MIN, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
@@ -63,6 +63,14 @@ addEventListener('keydown', (e) => {
   openMother(null);
 });
 
+/** Dead in a team mode, mid-wave: the choice of side is up (render.ts drawTeamPick). */
+const teamPickOpen = () => !!game && !game.alive && game.ride?.passenger !== game.myId && game.roundState?.phase === Phase.Live && TEAMS_IN_MODE[game.roundState.mode] >= 2;
+// C: over to the next side.
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyC' || input.typing || e.repeat || !teamPickOpen() || !game) return;
+  const n = TEAMS_IN_MODE[game.roundState!.mode];
+  net?.team(((game.myTeam < n ? game.myTeam : -1) + 1) % n);
+});
 /** The vote on the next mode is up (the wave's result is showing). */
 const voteOpen = () => !!game?.roundState?.vote && game.roundState.phase === Phase.Victory;
 /** Vote for the mode at `i` in VOTE_MODES. */
@@ -87,7 +95,7 @@ const input = new InputState(canvas);
 const renderer = new Renderer(canvas);
 const touch = new TouchControls(canvas, input, {
   chat: () => input.onChatKey?.(),
-  overUi: (x, y) => (!!game?.building && renderer.menuHit(x, y) >= 0) || (!!game?.calling && renderer.callMenuHit(x, y) >= 0) || (voteOpen() && renderer.voteHit(x, y) >= 0),
+  overUi: (x, y) => (!!game?.building && renderer.menuHit(x, y) >= 0) || (!!game?.calling && renderer.callMenuHit(x, y) >= 0) || (voteOpen() && renderer.voteHit(x, y) >= 0) || (teamPickOpen() && renderer.teamHit(x, y) >= 0),
   // Building, or out of the wave: taps on the right act on the spot touched.
   // (With the radio out the fire pad stays a stick: it scrolls the menu, and fires to call.)
   pointMode: () => !game || !game.alive || game.building,
@@ -650,6 +658,11 @@ function frame(now: number): void {
       const click = input.takeClick();
       // The vote up: a click (or tap) on a mode votes for it.
       if (click && voteOpen()) castVote(renderer.voteHit(input.mouseX, input.mouseY));
+      // Dead in a team mode: a click (or tap) on a side switches to it.
+      if (click && teamPickOpen()) {
+        const t = renderer.teamHit(input.mouseX, input.mouseY);
+        if (t >= 0) net?.team(t);
+      }
       // Radio in hand: the selector (aim, wheel or hover) picks a line of
       // its menu; the trigger (a click, a tap, the fire pad) calls it.
       if (g.calling) {

@@ -1,6 +1,6 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
-import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, VOTE_MODES, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
+import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, VOTE_MODES, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, TEAMS_IN_MODE, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { BIOME_NAMES, Biome } from '../shared/worldgen.ts';
@@ -1483,6 +1483,8 @@ export class Renderer {
       ctx.fillText(tag, sx + dpr, sy + dpr);
       ctx.fillStyle = info?.color ?? '#ccc';
       ctx.fillText(tag, sx, sy);
+      // A human (not a bot): a tiny star over their name.
+      if (info && !info.bot) drawStar(ctx, sx, sy - 11 * dpr, 3.2 * dpr);
       if (v.hp < ACTOR_MAX_HP) {
         const w = 24 * dpr;
         ctx.fillStyle = '#300';
@@ -3560,6 +3562,9 @@ export class Renderer {
     // (Not over the ballot while the vote's up: Tab still shows the scoreboard.)
     const ballot = !!rs?.vote && rs.phase === Phase.Victory;
     if (!input.scoreboard && !ballot && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
+    // Dead in a team mode: the choice of side.
+    this.teamRects.length = 0;
+    if (!input.scoreboard && !between && !game.alive && !piloting && rs && rs.phase === Phase.Live && TEAMS_IN_MODE[rs.mode] >= 2 && !game.isKing(game.myId)) this.drawTeamPick(game, TEAMS_IN_MODE[rs.mode], input.touch, s, W, H);
 
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);
     else if (!between) this.drawObjective(game, views, s, W, H);
@@ -3907,6 +3912,60 @@ export class Renderer {
    * blinking cursor, and the hints in dim phosphor green, wrapped to fit
    * the screen. Everything is sized to fit; each new message slides in.
    */
+  /** Team buttons (Renderer.teamHit), device px, by team. */
+  private readonly teamRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
+
+  /** The team button under a CSS-pixel point, or -1. */
+  teamHit(cssX: number, cssY: number): number {
+    const dpr = this.canvas.width / innerWidth;
+    const x = cssX * dpr;
+    const y = cssY * dpr;
+    for (const r of this.teamRects) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.i;
+    return -1;
+  }
+
+  /**
+   * Dead, in a team mode: a row of the sides (each in its colour, ours lit),
+   * to switch to one (a click or tap, or C for the next), down by the
+   * bottom of the screen, out of the way of the leaderboard.
+   */
+  private drawTeamPick(game: Game, n: number, touch: boolean, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const MONO = 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+    const bw = 92 * s;
+    const bh = 24 * s;
+    const gap = 6 * s;
+    const label = 74 * s;
+    const total = label + n * bw + (n - 1) * gap;
+    const x0 = (W - total) / 2;
+    const y0 = H - 96 * s;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x0 - 8 * s, y0 - 6 * s, total + 16 * s, bh + 12 * s);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${Math.round(11 * s)}px ${MONO}`;
+    ctx.fillStyle = '#b8c2ca';
+    ctx.fillText(touch ? 'TEAM' : 'TEAM (C)', x0, y0 + bh / 2);
+    ctx.textAlign = 'center';
+    const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
+    for (let t = 0; t < n; t++) {
+      const x = x0 + label + t * (bw + gap);
+      const mine = game.myTeam === t;
+      ctx.fillStyle = mine ? teamCss(t) : 'rgba(255,255,255,0.06)';
+      ctx.globalAlpha = mine ? 0.45 : 1;
+      ctx.fillRect(x, y0, bw, bh);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = teamCss(t);
+      ctx.lineWidth = Math.max(1, (mine ? 2 : 1) * s);
+      ctx.strokeRect(x + 0.5, y0 + 0.5, bw - 1, bh - 1);
+      ctx.fillStyle = mine ? '#fff' : teamCss(t);
+      ctx.fillText(`${mine ? '▸ ' : ''}${TEAM_NAMES[t]}`, x + bw / 2, y0 + bh / 2);
+      this.teamRects.push({ x, y: y0, w: bw, h: bh, i: t });
+    }
+    ctx.restore();
+  }
+
   /** Vote buttons (Renderer.voteHit), device px, by index into VOTE_MODES. */
   private readonly voteRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
 
@@ -4135,3 +4194,20 @@ const TARANTULA_HIPS = [-15, -10, -5, 5, 10, 15];
 /** The steepest its body pitches to the ground's slope, and how far it rears up a wall it's climbing (radians). */
 const DROID_MAX_TILT = 0.6;
 const DROID_WALL_TILT = 0.9;
+
+/** A tiny five-pointed star at (x, y), `r` across its points: gold, a dark edge. */
+function drawStar(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const a = -Math.PI / 2 + (k * Math.PI) / 5;
+    const rr = k % 2 ? r * 0.45 : r;
+    if (k) ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    else ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.lineWidth = Math.max(1, r * 0.45);
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.stroke();
+  ctx.fillStyle = '#ffe27a';
+  ctx.fill();
+}

@@ -474,6 +474,8 @@ export class Player {
   waveDeaths = 0;
   /** End of a wave: the mode this player voted for next (255: no vote yet). */
   vote = 255;
+  /** The team this player asked for (255: none): theirs from the next wave's draw (Last Team Standing; respawn modes switch at once). */
+  teamWish = 255;
   inWave = false;
   pendingSpawn = false;
   spectate = 255;
@@ -3804,6 +3806,14 @@ export class World {
     order.sort((a, b) => (a.bot ? 1 : 0) - (b.bot ? 1 : 0));
     const first = this.rng.int(Math.max(1, n));
     order.forEach((p, i) => (p.team = n ? (first + i) % n : Team.None));
+    // Those who've asked for a side get it, a bot from it trading places with them (the numbers stay even).
+    for (const p of order) {
+      if (p.bot || p.teamWish >= n || p.team === p.teamWish) continue;
+      const bot = order.find((o) => o.bot && o.team === p.teamWish);
+      if (!bot) continue;
+      bot.team = p.team;
+      p.team = p.teamWish;
+    }
     this.teamsRev++;
   }
 
@@ -3991,6 +4001,33 @@ export class World {
     p.vote = mode;
     // Everyone's had their say: the count, in a couple of seconds.
     if (this.players.every((o) => !o || o.bot || o.vote !== 255)) this.phaseTimer = Math.min(this.phaseTimer, VOTE_SETTLE);
+  }
+
+  /**
+   * A dead player asks to change team (team modes only, never a king). In
+   * the respawn modes it's at once: they come back on the new side, and to
+   * keep the sides even one of its bots crosses over to their old one (with
+   * no bot to trade, only to a side that isn't bigger). Otherwise (Last Team
+   * Standing: out for the wave) it's noted, and holds from the next wave's
+   * draw on.
+   */
+  changeTeam(id: number, team: number): void {
+    const p = this.players[id];
+    // (Dead, that is: not riding in on a drop rocket, already on its way down to its side.)
+    if (!p || p.bot || p.alive || p.delivering >= 0 || this.mode !== 'ffa' || this.isKing(p)) return;
+    const n = TEAMS_IN_MODE[this.modeOfWave(this.wave)];
+    if (n < 2 || team >= n || team === p.team) return;
+    p.teamWish = team;
+    if (!this.respawnLive || p.team >= n) return;
+    const bot = this.players.find((o): o is Player => !!o && !!o.bot && o.team === team && !this.isKing(o));
+    if (bot) bot.team = p.team;
+    else {
+      const count = new Array<number>(n).fill(0);
+      for (const o of this.players) if (o && o.team < n) count[o.team]++;
+      if (count[team] >= count[p.team]) return;
+    }
+    p.team = team;
+    this.teamsRev++;
   }
 
   /** The vote is open: the wave's result is up, and the room has modes to choose from. */
