@@ -351,6 +351,21 @@ The screen splits down the middle:
   the top-right so the buttons have the corner. Deploy goes fullscreen and
   locks landscape where the browser allows it.
 
+**Objective pointer.** While what you should be doing is off screen, a
+small, half-transparent chevron at the screen's edge points the way, the
+word for it beside it and how far (`KILL 238m`), in the mode's colour
+(`src/client/objectives.ts`). It goes away once the target's on screen, and
+while you're dead or between rounds.
+- **Last man, teams, PvP:** KILL, the nearest enemy (by sight, or the
+  radar for those out of view).
+- **Regicide:** KILL their king. A king gets no pointer: he stays alive.
+- **Siege:** attackers KILL the king. Defenders who've strayed far from
+  him are pointed back to DEFEND him; near him, KILL the nearest attacker.
+- **Extraction:** COLLECT the idol. Carrying it, EXTRACT: to the rocket,
+  or up for the surface while it isn't down yet. A teammate has it:
+  ESCORT. An enemy has it: KILL.
+- **Extermination:** KILL the nearest beast left, the awake ones first.
+
 ## Soundtrack
 
 A dark, lo-fi theme after Crystal Castles and witch house, synthesized

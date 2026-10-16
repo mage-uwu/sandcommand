@@ -28,6 +28,7 @@ import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TAN
 import { ParticleLayer } from './particle-layer.ts';
 import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
+import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
@@ -3561,6 +3562,72 @@ export class Renderer {
     if (!input.scoreboard && !ballot && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
 
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);
+    else if (!between) this.drawObjective(game, views, s, W, H);
+  }
+
+  /**
+   * The objective pointer (objectives.ts): while what we should be doing is
+   * off screen, a small chevron at the screen's edge pointing toward it,
+   * the word for it beside (KILL, COLLECT, EXTRACT...). Quiet: half
+   * transparent, breathing a little, out of the way at the edge.
+   */
+  private drawObjective(game: Game, views: RemoteView[], s: number, W: number, H: number): void {
+    const o = objective(game, knownPlayers(game, views, F_ALIVE));
+    if (!o) return;
+    const z = this.zoom;
+    const dx = (o.x - this.camX) * z;
+    const dy = (o.y - this.camY) * z;
+    const m = 30 * s;
+    // On screen: no pointer (you can see it).
+    if (Math.abs(dx) < W / 2 - m && Math.abs(dy) < H / 2 - m) return;
+    // To the edge (inset), along the way to it.
+    const k = Math.min((W / 2 - m) / Math.max(1e-6, Math.abs(dx)), (H / 2 - m) / Math.max(1e-6, Math.abs(dy)));
+    const px = W / 2 + dx * k;
+    const py = H / 2 + dy * k;
+    const a = Math.atan2(dy, dx);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = 0.5 + 0.12 * Math.sin(performance.now() / 420);
+    ctx.translate(px, py);
+    ctx.rotate(a);
+    // The chevron: a small open arrowhead, with a dark edge so it reads over anything.
+    const r = 8 * s;
+    ctx.lineJoin = 'miter';
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.6, -r * 0.8);
+    ctx.lineTo(r * 0.5, 0);
+    ctx.lineTo(-r * 0.6, r * 0.8);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 4 * s;
+    ctx.stroke();
+    ctx.strokeStyle = o.color;
+    ctx.lineWidth = 2 * s;
+    ctx.stroke();
+    ctx.restore();
+    // The word, on the inside of it (toward the middle of the screen), upright.
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.font = `${Math.round(10 * s)}px ui-monospace, monospace`;
+    ctx.textBaseline = 'middle';
+    // (Beside it, never over it: to its right on the left edge, to its left on the right, under it at the top, over it at the bottom.)
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    let tx = px;
+    let ty = py;
+    if (Math.abs(ca) > 0.6) {
+      ctx.textAlign = ca < 0 ? 'left' : 'right';
+      tx = px - Math.sign(ca) * 12 * s;
+    } else {
+      ctx.textAlign = 'center';
+      ty = py - Math.sign(sa) * 14 * s;
+    }
+    const dist = Math.round(Math.hypot(o.x - game.body.x, o.y - game.body.y) / 10);
+    const label = `${o.verb} ${dist}m`;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(label, tx + s, ty + s);
+    ctx.fillStyle = o.color;
+    ctx.fillText(label, tx, ty);
+    ctx.restore();
   }
 
   /**
