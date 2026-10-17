@@ -106,6 +106,7 @@ describe('modular body', () => {
     resetBody(victim.parts, ClassId.Medium, Faction.GuildTech);
     victim.body.cls = ClassId.Medium;
     victim.body.faction = Faction.GuildTech;
+    victim.parts.tough = 1; // (a bot's body: a human's is tougher, see toughness.test.ts)
     const t = world.terrain;
     for (let x = 900; x < 1100; x++) {
       for (let y = 300; y < 310; y++) t.set(x, y, Mat.Bedrock);

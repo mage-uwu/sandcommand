@@ -2349,6 +2349,16 @@ integrity is stopped there and only bruises. Burns, blast overpressure and
 hard landings don't need to penetrate: they go into the outermost layer
 (blasts hit every part at once, so limbs get blown clean off).
 
+**Human players are about 40% tougher than bots** (`HUMAN_TOUGH = 1.4` in
+`src/server/world.ts`, kept in each body's `tough`). Every part's wound
+limit is 1.4 times a bot's, so a head, vest or limb takes 1.4 times the
+wounds to come off, and every hit costs a human 1/1.4 of the health it would
+cost a bot (`World.damage`). Penetration is unchanged: a round that gets
+through a bot's armour gets through a human's. The result is fewer one-shot
+deaths for someone still learning the game. A bot that hits for 49 takes 35
+off a human; a wound that just takes a bot's head off leaves a human's on.
+The table below is for a bot's body.
+
 | Hit | Energy | Result |
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: two headshots kill |

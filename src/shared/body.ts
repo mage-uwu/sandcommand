@@ -220,10 +220,12 @@ export interface BodyState {
   readonly wounds: Float32Array; // per part
   cls: number; // ClassId
   faction: number; // factions.ts Faction
+  /** Toughness (the server's: HUMAN_TOUGH for a human player, 1 for a bot): its parts take this many times the wounds to tear off. */
+  tough: number;
 }
 
 export function newBodyState(cls: number = ClassId.Medium): BodyState {
-  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls, faction: 0 };
+  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls, faction: 0, tough: 1 };
 }
 
 export function resetBody(s: BodyState, cls: number = ClassId.Medium, faction = s.faction): void {
@@ -241,7 +243,7 @@ function integrityOf(s: BodyState, part: number): number {
 
 /** A part's wound limit for this body's class. */
 export function limitOf(s: BodyState, part: number): number {
-  return partsOf(s.cls)[part].limit * CLASSES[s.cls].limit * FACTIONS[s.faction].limit;
+  return partsOf(s.cls)[part].limit * CLASSES[s.cls].limit * FACTIONS[s.faction].limit * s.tough;
 }
 
 /** Result of one strike: HP lost, parts torn off (in order), whether a vital part went. */

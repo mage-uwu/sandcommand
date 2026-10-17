@@ -72,8 +72,8 @@ function shootRunner(weapon: number, lock: boolean, seed: number): boolean {
     world.input(p.id, { seq: ++seq & 0xffff, buttons: (firing ? BTN_FIRE : 0) | (lock ? BTN_LOCK : 0), aim: quantizeAim(aim), inv });
     world.step();
   }
-  // (Struck: hurt, or a part shot off: from behind, a slug takes the jetpack off its back.)
-  return !q.alive || q.hp < 100 || q.parts.mask !== mask;
+  // (Struck: hurt, or a part shot off or wounded: from behind, a slug or a beam gets the jetpack on its back.)
+  return !q.alive || q.hp < 100 || q.parts.mask !== mask || q.parts.wounds.some((w) => w > 0);
 }
 
 describe('a locked-on shot goes where the target really is', () => {

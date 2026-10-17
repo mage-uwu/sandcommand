@@ -126,6 +126,7 @@ describe('the basilisk', () => {
 
   it('up top it hunts what it sees, and its jaws kill', () => {
     const { world, a, b } = deep();
+    a.parts.tough = 1; // (a bot's body: a human's is tougher, see toughness.test.ts)
     world.hurtBeast(0, 1, 255);
     for (let k = 0; k < 30 * 20 && !b.surfaced; k++) world.step();
     expect(b.surfaced).toBe(true);
