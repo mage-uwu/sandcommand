@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Part, limitOf, newStrike, strike } from '../src/shared/body.ts';
+import { ClassId, HUMANOID_TOUGH, Part, limitOf, newBodyState, newStrike, resetBody, strike } from '../src/shared/body.ts';
 import { Phase } from '../src/shared/protocol.ts';
 import { World } from '../src/server/world.ts';
 
@@ -14,37 +14,40 @@ function room() {
   return { world, me, bot };
 }
 
-describe('human players are tougher than bots', () => {
-  it('about 40%: a hit costs a human 1/1.4 of what it costs a bot, and their parts take 1.4x the wounds to tear off', () => {
-    const { world, me, bot } = room();
-    expect(me.alive && bot.alive).toBe(true);
-    expect(me.parts.tough).toBeCloseTo(1.4);
-    expect(bot.parts.tough).toBe(1);
-    me.hp = 100;
-    bot.hp = 100;
-    (world as unknown as Internals).damage(me, 49, 255, 0);
-    (world as unknown as Internals).damage(bot, 49, 255, 0);
-    expect(100 - me.hp).toBeCloseTo(35);
-    expect(100 - bot.hp).toBeCloseTo(49);
-    // (Their head too: the same class and vendor, 1.4 times its limit.)
-    bot.parts.cls = me.parts.cls;
-    bot.parts.faction = me.parts.faction;
-    expect(limitOf(me.parts, Part.Head) / limitOf(bot.parts, Part.Head)).toBeCloseTo(1.4);
+describe('humanoid clones are about 40% tougher', () => {
+  it('every humanoid class (bots and humans alike) is; the spider droid is not', () => {
+    expect(HUMANOID_TOUGH).toBeCloseTo(1.4);
+    for (const cls of [ClassId.Scout, ClassId.Medium, ClassId.Heavy]) expect(newBodyState(cls).tough).toBeCloseTo(1.4);
+    expect(newBodyState(ClassId.Droid).tough).toBe(1);
+    const s = newBodyState(ClassId.Droid);
+    resetBody(s, ClassId.Medium);
+    expect(s.tough).toBeCloseTo(1.4);
+    const { me, bot } = room();
+    expect(me.parts.tough).toBe(bot.parts.tough);
   });
 
-  it("a wound that takes a bot's head off leaves a human's on", () => {
-    const { me, bot } = room();
-    bot.parts.cls = me.parts.cls;
-    bot.parts.faction = me.parts.faction;
-    me.parts.mask = bot.parts.mask;
-    me.parts.wounds.fill(0);
-    bot.parts.wounds.fill(0);
-    // Just enough to take the bot's head (through whatever covers it).
-    const wound = limitOf(bot.parts, Part.Head) * 1.1;
+  it('a hit costs a clone 1/1.4 of its health, bot or human', () => {
+    const { world, me, bot } = room();
+    for (const p of [me, bot]) {
+      resetBody(p.parts, ClassId.Medium, 0);
+      p.hp = 100;
+      (world as unknown as Internals).damage(p, 49, 255, 0);
+      expect(100 - p.hp).toBeCloseTo(35);
+    }
+  });
+
+  it("a wound that would take a base head off leaves a clone's on", () => {
+    const base = newBodyState(ClassId.Medium);
+    base.tough = 1;
+    const clone = newBodyState(ClassId.Medium);
+    // Just over the base head's limit (helmet off).
+    for (const s of [base, clone]) s.mask &= ~(1 << Part.Helmet);
     const a = newStrike();
     const b = newStrike();
-    strike(bot.parts, Part.Head, 1e6, wound, b);
-    strike(me.parts, Part.Head, 1e6, wound, a);
+    const wound = limitOf(base, Part.Head) * 1.1;
+    expect(limitOf(clone, Part.Head) / limitOf(base, Part.Head)).toBeCloseTo(1.4);
+    strike(base, Part.Head, 1e6, wound, b);
+    strike(clone, Part.Head, 1e6, wound, a);
     expect(b.detached).toContain(Part.Head);
     expect(a.detached).not.toContain(Part.Head);
   });

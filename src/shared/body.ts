@@ -220,17 +220,26 @@ export interface BodyState {
   readonly wounds: Float32Array; // per part
   cls: number; // ClassId
   faction: number; // factions.ts Faction
-  /** Toughness (the server's: HUMAN_TOUGH for a human player, 1 for a bot): its parts take this many times the wounds to tear off. */
+  /** Toughness (toughOf its class): its parts take this many times the wounds to tear off, and a hit costs it this much less health (World.damage). */
   tough: number;
 }
 
+/**
+ * How much tougher a humanoid clone (scout, medium, heavy; bot or human
+ * alike) is than its parts' base numbers: about 40%, so fewer one-shot
+ * deaths. The spider droid (not humanoid) stays as it is.
+ */
+export const HUMANOID_TOUGH = 1.4;
+export const toughOf = (cls: number) => (cls === ClassId.Droid ? 1 : HUMANOID_TOUGH);
+
 export function newBodyState(cls: number = ClassId.Medium): BodyState {
-  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls, faction: 0, tough: 1 };
+  return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls, faction: 0, tough: toughOf(cls) };
 }
 
 export function resetBody(s: BodyState, cls: number = ClassId.Medium, faction = s.faction): void {
   s.cls = cls;
   s.faction = faction;
+  s.tough = toughOf(cls);
   s.mask = CLASSES[cls].mask;
   s.wounds.fill(0);
 }

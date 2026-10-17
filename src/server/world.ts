@@ -4436,7 +4436,7 @@ export class World {
    */
   private damage(victim: Player, amount: number, attacker: number, weapon: number, quiet = false, fatal = false): void {
     if (!victim.alive || (amount <= 0 && !fatal)) return;
-    amount /= victim.parts.tough;
+    amount /= victim.parts.tough; // (a humanoid clone: HUMANOID_TOUGH)
     const overkill = Math.max(0, amount - victim.hp) + (fatal ? 40 : 0);
     victim.hp -= amount;
     if (attacker !== victim.id || victim.lastHitBy === 255) {
@@ -5384,8 +5384,6 @@ export class World {
     // Every clone rolls a class (scout, medium or heavy) and the mercenary
     // vendor that supplied it (Guild-Tech, Rust Nomads, Synth Legion).
     resetBody(p.parts, rollClass(this.rng.next()), rollFaction(this.rng.next()));
-    // (A human player is tougher than a bot: fewer one-shot deaths for someone still learning.)
-    p.parts.tough = p.bot ? 1 : HUMAN_TOUGH;
     b.cls = p.parts.cls;
     b.faction = p.parts.faction;
     mobility(p.parts.mask, p.mob, p.parts.cls);
@@ -8159,12 +8157,6 @@ const LAIR_HP = 0.5;
 /** Extermination is fought on foot, mostly: at most this many vehicles (tanks, watchdogs, tarantulas, moles, dropships) about at once (more radio calls for one are refused). */
 const LAIR_VEHICLES = 3;
 /** What lies by each tunnel mouth in the lair, just clear of the hole. */
-/**
- * How much tougher a human player is than a bot: every part takes this many
- * times the wounds to tear off, and every hit costs them this much less of
- * their health (World.damage).
- */
-const HUMAN_TOUGH = 1.4;
 const LAIR_CACHE = [WeaponId.Bazooka, WeaponId.ATCannon, WeaponId.Autocannon];
 const TUNNEL_CLEAR = 24;
 /** Extraction waves run twelve minutes. */

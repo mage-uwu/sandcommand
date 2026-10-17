@@ -45,18 +45,19 @@ describe('modular body', () => {
   it('limbs are torn off once their wounds reach the limit', () => {
     const s = newBodyState();
     const r = newStrike();
-    for (let k = 0; k < 3; k++) strike(s, Part.LegF, SHRAPNEL, 7, r);
+    for (let k = 0; k < 5; k++) strike(s, Part.LegF, SHRAPNEL, 7, r);
     expect(has(s.mask, Part.LegF)).toBe(true);
-    strike(s, Part.LegF, SHRAPNEL, 7, r); // fourth fragment: 28 >= 26
+    strike(s, Part.LegF, SHRAPNEL, 7, r); // sixth fragment: 42 >= 26 * 1.4 (HUMANOID_TOUGH)
     expect(has(s.mask, Part.LegF)).toBe(false);
     expect(r.detached).toEqual([Part.LegF]);
     expect(r.vital).toBe(false);
     expect(mobility(s.mask, { legs: 0, jet: false, canFire: false, oneHanded: false }).legs).toBe(1);
   });
 
-  it('two rifle headshots kill through a helmet, and take the helmet with the head', () => {
+  it('three rifle headshots kill through a helmet, and take the helmet with the head', () => {
     const s = newBodyState();
     const r = newStrike();
+    strike(s, Part.Head, RIFLE, 16, r);
     strike(s, Part.Head, RIFLE, 16, r);
     expect(r.vital).toBe(false);
     strike(s, Part.Head, RIFLE, 16, r);
@@ -106,7 +107,6 @@ describe('modular body', () => {
     resetBody(victim.parts, ClassId.Medium, Faction.GuildTech);
     victim.body.cls = ClassId.Medium;
     victim.body.faction = Faction.GuildTech;
-    victim.parts.tough = 1; // (a bot's body: a human's is tougher, see toughness.test.ts)
     const t = world.terrain;
     for (let x = 900; x < 1100; x++) {
       for (let y = 300; y < 310; y++) t.set(x, y, Mat.Bedrock);
@@ -139,8 +139,8 @@ describe('modular body', () => {
       applyFrameRecords(r, new Terrain(), h);
     }
     expect(detaches).toBeGreaterThan(0);
-    // Two shots to the head.
-    for (let k = 0; k < 2; k++) shootAt(300 - ACTOR_H + 1);
+    // Three shots to the head.
+    for (let k = 0; k < 3; k++) shootAt(300 - ACTOR_H + 1);
     expect(victim.alive).toBe(false);
     expect(has(victim.parts.mask, Part.Head)).toBe(false);
     expect(shooter.kills).toBe(1);
@@ -154,11 +154,11 @@ describe('clone classes', () => {
     const hvy = newBodyState(ClassId.Heavy);
     const a = newStrike();
     const b = newStrike();
-    for (let k = 0; k < 2; k++) {
+    for (let k = 0; k < 3; k++) {
       strike(med, Part.Head, RIFLE_E, 16, a);
       strike(hvy, Part.Head, RIFLE_E, 16, b);
     }
-    expect(a.vital).toBe(true); // two headshots kill a medium
+    expect(a.vital).toBe(true); // three headshots kill a medium
     expect(b.vital).toBe(false);
     expect(b.detached.length).toBe(0); // stopped at the plate
     // Overpressure: the same blast leaves a heavy's limbs on.
@@ -166,8 +166,8 @@ describe('clone classes', () => {
     const h2 = newBodyState(ClassId.Heavy);
     const ra = newStrike();
     const rb = newStrike();
-    harm(m2, Part.LegF, 30, ra);
-    harm(h2, Part.LegF, 30, rb);
+    harm(m2, Part.LegF, 40, ra);
+    harm(h2, Part.LegF, 40, rb);
     expect(ra.detached).toContain(Part.LegF);
     expect(rb.detached.length).toBe(0);
   });
@@ -200,13 +200,12 @@ describe('clone classes', () => {
 });
 
 describe('arm joints', () => {
-  it('an arm takes three rifle rounds to come off (twice the old joint strength)', () => {
+  it('an arm takes four rifle rounds to come off', () => {
     const RIFLE_E = PROJ[ProjKind.Bullet].mass * PROJ[ProjKind.Bullet].sharp * 880;
     const s = newBodyState(ClassId.Medium);
     const r = newStrike();
-    strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
-    strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
-    expect(has(s.mask, Part.GunArm)).toBe(true); // two hits: still holding the gun
+    for (let k = 0; k < 3; k++) strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
+    expect(has(s.mask, Part.GunArm)).toBe(true); // three hits: still holding the gun
     expect(mobility(s.mask, { legs: 0, jet: false, canFire: false, oneHanded: false }).canFire).toBe(true);
     strike(s, Part.GunArm, RIFLE_E, PROJ[ProjKind.Bullet].damage, r);
     expect(has(s.mask, Part.GunArm)).toBe(false);

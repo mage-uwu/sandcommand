@@ -131,7 +131,6 @@ describe('the spider droid', () => {
     for (const p of [a, b]) {
       resetBody(p.parts, ClassId.Droid, 0);
       p.hp = 100;
-      p.parts.tough = 1; // (a bot's: a human bleeds out slower, see toughness.test.ts)
     }
     a.parts.mask &= ~(1 << DroidPart.Turret);
     let t = 0;

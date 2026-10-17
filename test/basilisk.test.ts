@@ -124,20 +124,21 @@ describe('the basilisk', () => {
     expect(open).toBeGreaterThan(10);
   });
 
-  it('up top it hunts what it sees, and its jaws kill', () => {
+  it('up top it hunts what it sees, and its jaws all but kill (a clone barely lives through one bite)', () => {
     const { world, a, b } = deep();
-    a.parts.tough = 1; // (a bot's body: a human's is tougher, see toughness.test.ts)
     world.hurtBeast(0, 1, 255);
     for (let k = 0; k < 30 * 20 && !b.surfaced; k++) world.step();
     expect(b.surfaced).toBe(true);
     a.body.x = b.fx + 220;
     a.body.y = SURF - ACTOR_H;
-    for (let k = 0; k < 30 * 15 && a.alive; k++) {
+    let bitten = false;
+    for (let k = 0; k < 30 * 15 && a.alive && !(b.hold < 0 && a.hp < 40); k++) {
       a.hp = Math.min(a.hp, 100);
       world.step();
+      if (a.lastWeapon === W_BASILISK) bitten = true;
     }
-    expect(a.alive).toBe(false);
-    expect(a.lastWeapon).toBe(W_BASILISK);
+    expect(!a.alive || a.hp < 40).toBe(true);
+    expect(bitten).toBe(true);
   });
 
   it('nothing left to hunt, it dives back into the deep and sleeps', () => {
