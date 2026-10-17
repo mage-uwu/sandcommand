@@ -414,7 +414,7 @@ export class Renderer {
       if (pts[0] < camX - halfW - m || pts[0] > camX + halfW + m || pts[1] < camY - halfH - m || pts[1] > camY + halfH + m) continue;
       const lift = pose.lift;
       if (v.kind === BeastKind.Basilisk) drawBasilisk(ctx, pts, v.seed, v.frozen, v.frenzy, now);
-      else if (v.kind === BeastKind.Dragon) drawDragon(ctx, pts, v.seed, v.frozen, v.frenzy, now);
+      else if (v.kind === BeastKind.Dragon) drawDragon(ctx, pts, v.seed, v.frozen, v.frenzy, now, lift);
       else if (v.kind === BeastKind.Spider) drawCaveSpider(ctx, game.terrain, this.groundColor, slot, pts, v.seed, lift, v.frozen, v.attached, now, v.carry);
       else if (v.kind === BeastKind.Web) drawWebNest(ctx, game.terrain, pts[0], pts[1], v.seed, Math.round(v.lift * 255), now);
       else if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);

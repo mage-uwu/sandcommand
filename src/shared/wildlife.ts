@@ -457,6 +457,21 @@ export const DRAGON_SPIT_RANGE = 700;
 export const DRAGON_SPIT_CD = 30 * 2;
 export const DRAGON_SPIT_VOLLEY = 4;
 export const DRAGON_SPIT_SPEED = 520;
+/**
+ * Its brood: now and then, prey in sight, it stops dead and roars, jaws
+ * gaping (DRAGON_ROAR ticks, the gape held at its widest); at the top of it
+ * (DRAGON_ROAR_SPIT) it spits DRAGON_BROOD_MIN..DRAGON_BROOD_MAX of the
+ * caves' own crawlers (millipedes, asps) out of its throat, flung at whoever
+ * it's after. Not while there are DRAGON_BROOD_CROWD of them about it already.
+ */
+export const DRAGON_BROOD_CD = 30 * 14;
+export const DRAGON_BROOD_RANGE = 560;
+export const DRAGON_ROAR = 36;
+export const DRAGON_ROAR_SPIT = 22;
+export const DRAGON_BROOD_MIN = 2;
+export const DRAGON_BROOD_MAX = 4;
+export const DRAGON_BROOD_CROWD = 8;
+export const DRAGON_BROOD_FLING = 1.8;
 
 /** A basilisk or a dragon (the same beast at two sizes): bores, sleeps, hunts. */
 export const wyrm = (kind: number) => kind === BeastKind.Basilisk || kind === BeastKind.Dragon;

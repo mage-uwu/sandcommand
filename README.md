@@ -1002,6 +1002,14 @@ it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
   lands, fanned out a little, every couple of seconds
   (`ProjKind.FireSpit`). Each bursts into blood and a gout of fire that
   burns whoever it reaches.
+- **It spits its brood.** Every 14–18 seconds, with its prey in sight
+  within 560 cells, it stops dead and roars, its jaws flung wide (the
+  gape is sent in its `lift`; the client opens the head in steps and plays
+  the roar). Partway into the roar it spits 2–4 millipedes and asps out of
+  its throat, each flung at one of the clones it can see (its prey first),
+  and each set on the clone it was flung at. It doesn't do this while 8
+  crawlers are already about it, or when there are no free creature slots
+  (`DRAGON_BROOD_*`, `DRAGON_ROAR`, `World.dragonBrood`).
 - **Kill feed:** "devoured by a dragon" for its jaws and body, "burned
   alive by a dragon" for its spit.
 - **Where it turns up:** it's rarer than a basilisk. When the wild

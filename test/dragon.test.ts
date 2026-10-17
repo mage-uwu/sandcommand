@@ -3,7 +3,7 @@ import { ClassId, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { ProjKind, projName } from '../src/shared/weapons.ts';
-import { BASILISK_HP, BASILISK_R, BEAST_BUILD, BeastKind, DRAGON_HP, DRAGON_R, DRAGON_RATTLE, bodyPoints, burrows, newBeast, wyrm } from '../src/shared/wildlife.ts';
+import { BASILISK_HP, BASILISK_R, BEAST_BUILD, BeastKind, DRAGON_HP, DRAGON_R, DRAGON_BROOD_MAX, DRAGON_BROOD_MIN, DRAGON_RATTLE, DRAGON_ROAR, bodyPoints, burrows, newBeast, wyrm } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -48,6 +48,7 @@ describe('the dragon', () => {
     const k = world.beasts.indexOf(b);
     world.hurtBeast(k, 1, 255);
     expect(b.frenzy).toBeGreaterThan(0);
+    b.brood = 1e9; // (its spit alone, not its brood)
     let spat = false;
     const pr = (world as unknown as { projectiles: { n: number; kind: Uint8Array } }).projectiles;
     for (let t = 0; t < 30 * 25 && a.alive && a.hp >= 100; t++) {
@@ -59,6 +60,55 @@ describe('the dragon', () => {
     }
     expect(spat).toBe(true);
     expect(!a.alive || a.hp < 100).toBe(true);
+  });
+
+  it('now and then it stops dead and roars, jaws wide, and spits 2-4 millipedes and asps out at the clone it is after', () => {
+    const { world, a, b } = lair();
+    const k = world.beasts.indexOf(b);
+    world.hurtBeast(k, 1, 255);
+    let roared = -1;
+    let at: [number, number] = [0, 0];
+    let still = true;
+    let maxLift = 0;
+    const brood = () => world.beasts.filter((c) => c && (c.kind === BeastKind.Millipede || c.kind === BeastKind.Asp));
+    for (let t = 0; t < 30 * 40 && roared < 0; t++) {
+      a.hp = 100;
+      a.body.x = 1900;
+      a.body.y = Math.min(a.body.y, SURF - ACTOR_H);
+      world.step();
+      if (b.rear > 0) {
+        roared = t;
+        at = [b.fx, b.fy];
+      }
+    }
+    expect(roared).toBeGreaterThanOrEqual(0);
+    expect(brood().length).toBe(0);
+    for (let t = 0; t < DRAGON_ROAR + 2; t++) {
+      a.hp = 100;
+      world.step();
+      maxLift = Math.max(maxLift, b.lift);
+      if (b.rear > 0 && Math.hypot(b.fx - at[0], b.fy - at[1]) > 0.01) still = false;
+    }
+    // (Stock still while it roars, its jaws (lift) flung wide.)
+    expect(still).toBe(true);
+    expect(maxLift).toBeGreaterThan(0.8);
+    expect(b.rear).toBe(0);
+    const out = brood();
+    expect(out.length).toBeGreaterThanOrEqual(DRAGON_BROOD_MIN);
+    expect(out.length).toBeLessThanOrEqual(DRAGON_BROOD_MAX);
+    // Flung, through the air, at it; and set on it.
+    for (const c of out) {
+      expect(c!.target).toBe(a.id);
+      expect(c!.hurtBy).toBe(a.id);
+    }
+    expect(out.some((c) => !c!.attached)).toBe(true);
+    // (They come down near it.)
+    for (let t = 0; t < 30 * 3; t++) {
+      a.hp = 100;
+      world.step();
+    }
+    const near = brood().filter((c) => Math.hypot(c!.fx - a.cx, c!.fy - a.cy) < 200 || Math.hypot(c!.x - a.cx, c!.y - a.cy) < 200);
+    expect(near.length).toBeGreaterThan(0);
   });
 
   it("it bores a tunnel three times a basilisk's", () => {

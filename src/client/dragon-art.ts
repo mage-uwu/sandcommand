@@ -438,7 +438,7 @@ function headSprite(open: boolean, frame: number, asleep: boolean, bright: boole
       return rgb(D_ROCK[Math.min(4, 1 + Math.floor(vn(fu, fv, 6, 81) * 3.6) + (sd < 0 ? 1 : 0))]);
     }
     // The maw between the flaps: dark, deep, lit from inside by its fire.
-    if (gape > 0 && u > 0 && u < FL && Math.abs(v) < Math.tan(gape) * u) {
+    if (gape > 0 && u > 0 && u < FL * Math.cos(gape) && Math.abs(v) < Math.tan(gape) * u) {
       // Hottest deep in its throat, dimming out to the dark at its lips; lit brighter where the fire licks its gums.
       const lip = Math.tan(gape) * u - Math.abs(v);
       const glow = lip < 2 * S3 ? 0.18 * (1 - lip / (2 * S3)) : 0;
@@ -586,7 +586,8 @@ function glints(ctx: CanvasRenderingContext2D, gems: readonly Gem[], i: number, 
 }
 
 /** A dragon along its body points (head first). */
-export function drawDragon(ctx: CanvasRenderingContext2D, pts: readonly number[], _seed: number, frozen: boolean, frenzy: boolean, now: number): void {
+/** `roar` (0..1): its jaws flung wide, roaring (spitting its brood). */
+export function drawDragon(ctx: CanvasRenderingContext2D, pts: readonly number[], _seed: number, frozen: boolean, frenzy: boolean, now: number, roar = 0): void {
   const n = pts.length >> 1;
   if (n < 2) return;
   const smooth = ctx.imageSmoothingEnabled;
@@ -606,8 +607,9 @@ export function drawDragon(ctx: CanvasRenderingContext2D, pts: readonly number[]
     const { s, gems } = segSprite(i, rattle, frenzy, frozen);
     put(ctx, s, pts[i * 2], pts[i * 2 + 1], dir(i), () => glints(ctx, gems, i, now, frenzy));
   }
-  const frame = frenzy ? Math.floor(now / 160) & 1 : 0;
-  const h = headSprite(frenzy, frame, frozen, frenzy);
+  // (Roaring: wide, then wider; else working, in its frenzy.)
+  const frame = roar > 0.15 ? 2 + Math.min(1, Math.floor(roar * 2)) : frenzy ? Math.floor(now / 160) & 1 : 0;
+  const h = headSprite(frenzy || roar > 0.15, frame, frozen, frenzy);
   put(ctx, h.s, pts[0], pts[1], Math.atan2(pts[1] - pts[3], pts[0] - pts[2]), () => glints(ctx, h.spots, 99, now, frenzy));
   ctx.imageSmoothingEnabled = smooth;
 }

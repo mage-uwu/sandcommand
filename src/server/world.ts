@@ -292,6 +292,7 @@ import {
   VENOM_RATE,
   bodyPoints,
   fling,
+  FLING_CD,
   flingStep,
   sprintTick,
   FLING_MIN,
@@ -361,6 +362,14 @@ import {
   DRAGON_SPIT_RANGE,
   DRAGON_SPIT_SPEED,
   DRAGON_SPIT_VOLLEY,
+  DRAGON_BROOD_CD,
+  DRAGON_BROOD_CROWD,
+  DRAGON_BROOD_FLING,
+  DRAGON_BROOD_MAX,
+  DRAGON_BROOD_MIN,
+  DRAGON_BROOD_RANGE,
+  DRAGON_ROAR,
+  DRAGON_ROAR_SPIT,
   wyrm,
   wyrmScale,
   BASILISK_BITE_CD,
@@ -2705,6 +2714,64 @@ export class World {
     b.spitCd = DRAGON_SPIT_CD + rng.int(30);
   }
 
+  /** Room for a dragon's brood by its head at (hx, hy): free slots, and not DRAGON_BROOD_CROWD crawlers about it already. */
+  private broodRoom(hx: number, hy: number): boolean {
+    let free = 0;
+    let near = 0;
+    for (let k = 0; k < this.beasts.length; k++) {
+      const c = this.beasts[k];
+      if (!c) free++;
+      else if ((c.kind === BeastKind.Millipede || c.kind === BeastKind.Asp) && Math.hypot(c.fx - hx, c.fy - hy) < DRAGON_BROOD_RANGE) near++;
+    }
+    return free >= DRAGON_BROOD_MIN && near < DRAGON_BROOD_CROWD;
+  }
+
+  /**
+   * A dragon's brood: DRAGON_BROOD_MIN..MAX millipedes and asps spat out of
+   * its jaws at (hx, hy) (facing dx, dy), each flung at one of the clones it
+   * can see in reach (its prey first, the rest shared out among them), and
+   * set on whoever it was flung at.
+   */
+  private dragonBrood(b: Beast, hx: number, hy: number, dx: number, dy: number): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const marks: Player[] = [];
+    for (const p of this.players) {
+      if (!p || !p.alive || p.pilot >= 0 || p.tank >= 0) continue;
+      if (Math.hypot(p.cx - hx, p.cy - hy) < DRAGON_BROOD_RANGE * 1.2 && this.lineClear(hx, hy, p.cx, p.cy)) marks.push(p);
+    }
+    if (!marks.length) return;
+    marks.sort((p, q) => Math.hypot(p.cx - hx, p.cy - hy) - Math.hypot(q.cx - hx, q.cy - hy));
+    // Out of its throat: just past its lips (or, walled in, at its head).
+    const l = Math.hypot(dx, dy) || 1;
+    let mx = hx + (dx / l) * (DRAGON_R + 3);
+    let my = hy + (dy / l) * (DRAGON_R + 3);
+    if (t.isSolid(Math.floor(mx), Math.floor(my))) {
+      mx = hx;
+      my = hy;
+      if (t.isSolid(Math.floor(mx), Math.floor(my))) return;
+    }
+    const n = DRAGON_BROOD_MIN + rng.int(DRAGON_BROOD_MAX - DRAGON_BROOD_MIN + 1);
+    for (let i = 0; i < n; i++) {
+      const slot = this.beasts.indexOf(null);
+      if (slot < 0) return;
+      const p = marks[i % marks.length];
+      const kind = rng.next() < 0.5 ? BeastKind.Millipede : BeastKind.Asp;
+      const c = newBeast(t, kind, Math.floor(mx), Math.floor(my), p.cx < mx ? -1 : 1);
+      c.seed = rng.int(256);
+      c.fx = mx;
+      c.fy = my;
+      c.attached = false;
+      // (Each a little off the next: a spray of them.)
+      fling(c, mx, my, p.cx + rng.range(-24, 24), p.cy - rng.range(0, 16), DRAGON_BROOD_FLING * rng.range(0.85, 1.15));
+      c.flingCd = FLING_CD;
+      c.target = p.id;
+      c.hurtBy = p.id;
+      this.beasts[slot] = c;
+      bodyPoints(t, c, this.beastPts[slot]);
+    }
+  }
+
   /** Disturbed: a basilisk wakes in a killing frenzy (up top already, it hunts at once). */
   private enrage(b: Beast): void {
     if (!wyrm(b.kind)) return;
@@ -2769,6 +2836,20 @@ export class World {
       this.holdTick(k, b, sc);
       return;
     }
+    if (b.brood > 0) b.brood--;
+    // Roaring (a dragon): stock still, jaws gaping, its brood spat out at the top of it.
+    if (b.rear > 0) {
+      if (b.rear === DRAGON_ROAR_SPIT) this.dragonBrood(b, pts[0], pts[1], pts[0] - pts[2], pts[1] - pts[3]);
+      if (++b.rear > DRAGON_ROAR) b.rear = 0;
+      b.lift += ((b.rear > 0 ? 1 : 0) - b.lift) * 0.35;
+      if (b.lift < 0.01) b.lift = 0;
+      b.vx = 0;
+      b.vy = 0;
+      bodyPoints(t, b, pts);
+      return;
+    }
+    b.lift *= 0.65;
+    if (b.lift < 0.01) b.lift = 0;
     const surf = t.surfaceY(Math.round(b.fx));
     let gx = b.fx;
     let gy = b.fy;
@@ -2818,7 +2899,12 @@ export class World {
         const d = Math.hypot(prey.x - b.fx, prey.y - b.fy);
         if (b.flung === 0 && b.flingCd === 0 && d > FLING_MIN * 3 && d < FLING_MAX * 2.5 && rng.next() < 0.1 && this.lineClear(b.fx, b.fy, prey.x, prey.y)) fling(b, b.fx, b.fy, prey.x, prey.y, 3);
         // A dragon spits flaming blood at it: a volley of burning gore, lobbed, from its jaws.
-        if (b.kind === BeastKind.Dragon && b.spitCd === 0 && d < DRAGON_SPIT_RANGE && d > DRAGON_R * 2 && this.lineClear(pts[0], pts[1], prey.x, prey.y)) this.dragonSpit(b, pts[0], pts[1], prey.x, prey.y);
+        // Or it stops, and roars, and spits its brood at them: crawlers, out of its throat.
+        if (b.kind === BeastKind.Dragon && b.brood === 0 && b.flung === 0 && d < DRAGON_BROOD_RANGE && d > DRAGON_R * 3 && this.broodRoom(pts[0], pts[1]) && this.lineClear(pts[0], pts[1], prey.x, prey.y)) {
+          b.rear = 1;
+          b.brood = DRAGON_BROOD_CD + rng.int(30 * 4);
+          b.spitCd = Math.max(b.spitCd, DRAGON_ROAR + 20);
+        } else if (b.kind === BeastKind.Dragon && b.spitCd === 0 && d < DRAGON_SPIT_RANGE && d > DRAGON_R * 2 && this.lineClear(pts[0], pts[1], prey.x, prey.y)) this.dragonSpit(b, pts[0], pts[1], prey.x, prey.y);
       } else if (--b.frenzy <= 0) {
         // Nothing left: down into the deep, to sleep.
         b.frenzy = 0;

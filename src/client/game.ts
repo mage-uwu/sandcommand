@@ -1320,7 +1320,11 @@ export class Game implements FrameHandler {
         v.cur = b.pts;
         v.prevLift = v.lift;
         // Rearing up: it hisses.
-        if (v.lift < 0.05 && b.lift >= 0.05) this.sfx?.hiss(b.pts[0], b.pts[1], b.kind === 0);
+        if (v.lift < 0.05 && b.lift >= 0.05) {
+          // (A dragon's jaws flung wide: it roars, and spits its brood.)
+          if (b.kind === BeastKind.Dragon) this.sfx?.roar(b.pts[0], b.pts[1]);
+          else this.sfx?.hiss(b.pts[0], b.pts[1], b.kind === 0);
+        }
         v.lift = b.lift;
         // An asp hurt: its goo spatters (more, the harder it was hit).
         if (b.kind === BeastKind.Spider && b.hp < v.hp) ichorSplat(this.particles, b.pts[0], b.pts[1], Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
