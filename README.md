@@ -2630,7 +2630,7 @@ Four heavier guns are in the spawn pool too:
   (splash 30 against 90).
 - **Gatling:** the barrels spin up for half a second before it fires (and
   spin down when you let go). Then it pours out 100 heavy rounds (24
-  wounds each, against the rifle's 16), loose (spread 0.08 against 0.035),
+  wounds each, against the rifle's 19), loose (spread 0.08 against 0.035),
   with steady recoil.
 - **Laser:** hold the trigger to charge, up to 8 s (a ring round the
   crosshair fills, and the muzzle glows); let go to fire. The beam is
@@ -2663,7 +2663,7 @@ Five more, the newest:
 - **Light Rifle** (M1 Garand style). Semi-automatic: one round per pull,
   as fast as you can pull (up to 480 rpm, faster than the rifle). Seven
   rounds to an en-bloc clip. Its full-power round flies at 1100 cells/s
-  and wounds 26 a layer (the rifle's 16), and it's precise (spread 0.012
+  and wounds 30 a layer (the rifle's 19), and it's precise (spread 0.012
   against 0.035), with a 220-cell scope. It mixes precise damage with a
   modest clip.
 - **SMG** (Type 05 style). A suppressed bullpup that hoses out 900 rpm of
@@ -2909,9 +2909,11 @@ How each field works:
 ### Inventory and weapons on the ground
 
 You don't carry every weapon. Each clone spawns with a random kit
-(`spawnLoadout` in `src/shared/items.ts`): always a primary (rifle, sniper or
-bazooka), a digger, a materializer, a radio and a repair kit. It often has grenades too, and
-sometimes a second gun. You carry up to seven items, each with its own
+(`spawnLoadout` in `src/shared/items.ts`): always a primary (any of the guns), a digger, a materializer, a radio and a repair kit. It often has grenades too, and
+sometimes a second gun. The explosive heavies (bazooka, grenade launcher
+and autocannon) turn up at 0.6 the odds of any other gun, in kits and in
+the loot left in bunkers, vaults and the labyrinth alike (`SPAWN_WEIGHT`,
+`weightedPick` in `src/shared/weapons.ts`), so rifles carry most fights. You carry up to seven items, each with its own
 magazine. **1/2** cycle through them, **4** throws the one in hand, and **3**
 picks up the nearest weapon in reach. With full hands, picking up swaps the
 held weapon for the new one. Dying spills the whole kit where you fell, so

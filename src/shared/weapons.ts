@@ -82,7 +82,7 @@ export interface ProjDef {
 }
 
 export const PROJ: readonly ProjDef[] = [
-  { gravity: 0.15, life: 40, damage: 16, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
+  { gravity: 0.15, life: 40, damage: 19, mass: 0.5, sharp: 0.8, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true },
   { gravity: 0.2, life: 120, damage: 30, mass: 2, sharp: 0.6, carveR: 20, coreR: 9, splashR: 34, splashDamage: 70, debris: 48, bounce: 0, ballistic: false },
   { gravity: 1, life: 66, damage: 0, mass: 0.6, sharp: 0.1, carveR: 26, coreR: 12, splashR: 42, splashDamage: 90, debris: 64, bounce: 0.45, ballistic: false },
   // Heavy sniper slug: near-instant (it crosses the map in about five
@@ -113,8 +113,8 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.12, life: 40, damage: 24, mass: 0.7, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.3 },
   // AT missile: slow off the tube, then it burns up to cruise and homes on the nearest hot enemy vehicle.
   { gravity: 0, life: 150, damage: 120, mass: 6, sharp: 0.6, carveR: 20, coreR: 9, splashR: 36, splashDamage: 110, debris: 56, bounce: 0, ballistic: false, seek: 2.4, cruise: 430, antiArmor: 0.46 },
-  // Light rifle round: a full-power cartridge. Through a vest and well into the torso: 26 a layer (the rifle's 16).
-  { gravity: 0.12, life: 40, damage: 26, mass: 0.55, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.2 },
+  // Light rifle round: a full-power cartridge. Through a vest and well into the torso: 30 a layer (the rifle's 19).
+  { gravity: 0.12, life: 40, damage: 30, mass: 0.55, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.2 },
   // SMG round: light and short-lived (a close-quarters gun), still through a vest at close range.
   { gravity: 0.2, life: 22, damage: 10, mass: 0.36, sharp: 0.8, carveR: 1, coreR: 0, splashR: 0, splashDamage: 0, debris: 1, bounce: 0, ballistic: true, knock: 0.7 },
   // Autocannon shell: slow and heavy, solid shot. Through any armour, 70 a layer (a limb or a head
@@ -279,6 +279,30 @@ export const WEAPONS: readonly WeaponDef[] = [
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
+/**
+ * How likely a weapon is to turn up, relative to the rest (1 unless listed),
+ * wherever one is drawn at random: a clone's kit, the loot left in bunkers,
+ * vaults and the labyrinth. The explosive heavies (bazooka, grenade
+ * launcher, autocannon) are rarer, so the rifles carry most fights.
+ */
+export const SPAWN_WEIGHT: Readonly<Partial<Record<number, number>>> = {
+  [WeaponId.Bazooka]: 0.6,
+  [WeaponId.GrenadeLauncher]: 0.6,
+  [WeaponId.Autocannon]: 0.6,
+};
+
+/** One of `list` by SPAWN_WEIGHT, from a roll in [0, 1). */
+export function weightedPick(list: readonly number[], roll: number): number {
+  let total = 0;
+  for (const w of list) total += SPAWN_WEIGHT[w] ?? 1;
+  let r = roll * total;
+  for (const w of list) {
+    r -= SPAWN_WEIGHT[w] ?? 1;
+    if (r < 0) return w;
+  }
+  return list[list.length - 1];
+}
+
 export function fireInterval(def: WeaponDef): number {
   return (60 * TICK_RATE) / def.rpm;
 }

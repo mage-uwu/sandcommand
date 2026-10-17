@@ -2,7 +2,7 @@ import { WORLD_H, WORLD_W } from './constants.ts';
 import { Mat } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
 import { TANK_H, TANK_W } from './tank.ts';
-import { WeaponId } from './weapons.ts';
+import { WeaponId, weightedPick } from './weapons.ts';
 
 /**
  * Extraction's map: one massive labyrinth under a high desert, built from
@@ -389,7 +389,7 @@ export function generateDungeon(m: Uint8Array, heights: Int32Array, seed: number
         if (shaftDown && Math.abs(mx - (x + CW / 2)) < SHAFT_HALF + 5) mx = x + ROOM_L + 6;
         traps.push({ id: traps.length, kind: TrapKind.Mine, x: mx, y: fy, w: 8, dir: 0, c, r });
       }
-      if (v < 0.07) loot.push({ x: x + CW / 2 + (k < 0.5 ? -14 : 14), y: fy - 3, weapon: LOOT[Math.floor(k * LOOT.length) % LOOT.length] });
+      if (v < 0.07) loot.push({ x: x + CW / 2 + (k < 0.5 ? -14 : 14), y: fy - 3, weapon: weightedPick(LOOT, k) });
       else if (v < 0.13 && !inRegion) {
         const gx = k < 0.5 ? x + ROOM_L : x + ROOM_R - 6;
         fill(gx, fy - 3, gx + 6, fy, Mat.Gold);

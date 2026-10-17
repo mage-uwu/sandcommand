@@ -2,7 +2,7 @@ import { WORLD_H, WORLD_W } from './constants.ts';
 import { Mat, isSoil } from './materials.ts';
 import { Rng } from './rng.ts';
 import { type Box, type Complex, DOOR_H, HOLE_W, MOD_H, MOD_W, SCALE, SLAB, Style, WALL, fill } from './structures.ts';
-import { WeaponId } from './weapons.ts';
+import { WeaponId, weightedPick } from './weapons.ts';
 
 /**
  * The works around the bunkers, built into the map after them (with their own
@@ -172,7 +172,7 @@ function strongroom(m: Uint8Array, c: Complex, team: number, rng: Rng): void {
   c.strongroom = box;
   (c.vaults ??= []).push(box);
   const heavy = [WeaponId.Gatling, WeaponId.ATCannon, WeaponId.Autocannon, WeaponId.Laser];
-  (c.loot ??= []).push({ x: (gx0 + gx1) >> 1, y: fy - 16, weapon: heavy[rng.int(heavy.length)] });
+  (c.loot ??= []).push({ x: (gx0 + gx1) >> 1, y: fy - 16, weapon: weightedPick(heavy, rng.next()) });
 }
 
 /** The first solid cell down each column. */

@@ -1,7 +1,7 @@
 import { ACTOR_H, WORLD_H, WORLD_W } from './constants.ts';
 import { Mat } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
-import { WeaponId } from './weapons.ts';
+import { WeaponId, weightedPick } from './weapons.ts';
 
 /**
  * Bunker complexes on the surface, built on a modular grid as part of map
@@ -404,7 +404,7 @@ export function buildComplex(m: Uint8Array, heights: Int32Array, x0: number, len
       halls.push({ x0: hx0, y0: hy0, x1: hx1, y1: floor });
       const heavy = [WeaponId.Gatling, WeaponId.Shotgun, WeaponId.GrenadeLauncher, WeaponId.Laser, WeaponId.ATCannon, WeaponId.Autocannon];
       // (Once in a long while, a Stoneburner left in the hall instead: rolled off the generator's state, not drawn from it, so the rest of the map is as it was.)
-      const pick = heavy[rng.int(heavy.length)];
+      const pick = weightedPick(heavy, rng.next());
       loot.push({ x: (hx0 + hx1) >> 1, y: floor - 2, weapon: hash2(hx0, floor, rng.state) % 50 === 0 ? WeaponId.Stoneburner : pick });
     }
   }

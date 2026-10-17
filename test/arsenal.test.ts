@@ -6,7 +6,7 @@ import { spawnLoadout, PRIMARIES, INV_MAX } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { Team, quantizeAim } from '../src/shared/protocol.ts';
 import { Rng } from '../src/shared/rng.ts';
-import { PROJ, ProjKind, PROJ_MINE, WEAPONS, WeaponId, projName } from '../src/shared/weapons.ts';
+import { PROJ, ProjKind, PROJ_MINE, WEAPONS, WeaponId, projName, weightedPick } from '../src/shared/weapons.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -118,6 +118,25 @@ describe('new weapons', () => {
     }
     for (const w of [WeaponId.LightRifle, WeaponId.Smg, WeaponId.Autocannon, WeaponId.Blaster, WeaponId.Mine]) expect(seen.has(w)).toBe(true);
     expect(PRIMARIES).toContain(WeaponId.Autocannon);
+  });
+
+  it('the explosive heavies (bazooka, grenade launcher, autocannon) spawn moderately less often than the other guns', () => {
+    const rng = new Rng(11);
+    const n = new Map<number, number>();
+    for (let k = 0; k < 20000; k++) {
+      const w = spawnLoadout(rng)[0].weapon;
+      n.set(w, (n.get(w) ?? 0) + 1);
+    }
+    const rifles = ((n.get(WeaponId.Rifle) ?? 0) + (n.get(WeaponId.LightRifle) ?? 0)) / 2;
+    for (const w of [WeaponId.Bazooka, WeaponId.GrenadeLauncher, WeaponId.Autocannon]) {
+      const r = (n.get(w) ?? 0) / rifles;
+      expect(r).toBeGreaterThan(0.45);
+      expect(r).toBeLessThan(0.75);
+    }
+    // (Every pick from a list stays in it, the whole roll through.)
+    const list = [WeaponId.Bazooka, WeaponId.Rifle];
+    expect(weightedPick(list, 0)).toBe(WeaponId.Bazooka);
+    expect(weightedPick(list, 0.999)).toBe(WeaponId.Rifle);
   });
 });
 

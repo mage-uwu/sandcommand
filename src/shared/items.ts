@@ -1,7 +1,7 @@
 import { GRAVITY } from './constants.ts';
 import { type Rng, hash2 } from './rng.ts';
 import type { Terrain } from './terrain.ts';
-import { WEAPONS, WeaponId } from './weapons.ts';
+import { WEAPONS, WeaponId, weightedPick } from './weapons.ts';
 
 /**
  * Inventories and weapons lying on the ground, Cortex Command style.
@@ -55,14 +55,14 @@ export function newItem(weapon: number): InvItem {
  * second gun (or an AT cannon).
  */
 export function spawnLoadout(rng: Rng): InvItem[] {
-  const primary = PRIMARIES[rng.int(PRIMARIES.length)];
+  const primary = weightedPick(PRIMARIES, rng.next());
   const inv = [newItem(primary)];
   // Grenades, often; now and then a pair of landmines instead.
   if (rng.next() < 0.6) inv.push(newItem(WeaponId.Grenade));
   else if (rng.next() < 0.4) inv.push(newItem(WeaponId.Mine));
   if (rng.next() < 0.25) {
     const others = PRIMARIES.filter((w) => w !== primary);
-    inv.push(newItem(others[rng.int(others.length)]));
+    inv.push(newItem(weightedPick(others, rng.next())));
   } else if (rng.next() < 0.15) {
     // ...or, now and then, an AT cannon as the backup instead, for the tanks.
     inv.push(newItem(WeaponId.ATCannon));
