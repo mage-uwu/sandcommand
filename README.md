@@ -2356,12 +2356,13 @@ humanoid and stays as it was). Every part's wound limit is 1.4 times its
 base, so a head, helmet, vest or limb takes 1.4 times the wounds to come
 off, and every hit costs 1/1.4 of the health it would (`World.damage`).
 Penetration is unchanged: a round that gets through armour still does. The
-result is far fewer one-shot deaths. The table below includes it.
+result is far fewer one-shot deaths; the heavy sniper is the exception
+(its slug was raised to match). The table below includes it.
 
 | Hit | Energy | Result |
 | --- | --- | --- |
 | Rifle round (0.5 × 0.8 × 880) | 352 | Through a helmet (140) or vest (160) and into flesh: three headshots kill, or about six in the body; four take an arm off |
-| Sniper slug (0.069 × 0.95 × 24000) | ~1570 | Through any armour (but a king's crown) with energy to spare; 80 wounds per layer: one headshot kills a scout or a medium (a heavy takes two), one body shot leaves a scout or a medium badly hurt and a second kills, a limb hit takes the limb off. It shoves 2.4× its momentum |
+| Sniper slug (0.069 × 0.95 × 24000) | ~1570 | Through any armour (but a king's crown) with energy to spare; 112 wounds per layer (raised from 80 to keep pace with the clones' toughness): one headshot kills anyone, a heavy in its helmet included; one body shot kills a scout or a medium (a heavy lives through it, badly hurt); a limb hit takes the limb off. It shoves 2.4× its momentum |
 | Shrapnel (0.5 × 0.85 × ~460–760) | ~200–320 | Bullet-grade: through a helmet or vest, 12 wounds a layer. A grenade throws 56 fragments, a rocket 36, as tracers |
 | Debris grain (0.25 × 0.15 × 300) | ~11 | Bruises and shoves, rarely wounds |
 

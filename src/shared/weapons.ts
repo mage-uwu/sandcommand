@@ -88,8 +88,9 @@ export const PROJ: readonly ProjDef[] = [
   // Heavy sniper slug: near-instant (it crosses the map in about five
   // ticks), dead flat, punches through armour. Light for its speed, so its
   // energy (mass x speed) and knockback stay what they were at 1500 cells/s.
-  // 80 wounds a layer: through a scout's or a medium's torso, any head (helmet and all), any limb.
-  { gravity: 0.04, life: 10, damage: 80, mass: (1.1 * 1500) / 24000, sharp: 0.95, carveR: 3, coreR: 1, splashR: 0, splashDamage: 0, debris: 3, bounce: 0, ballistic: true, knock: 2.4 },
+  // 112 wounds a layer (80 before clones got HUMANOID_TOUGH, raised to match): through a scout's or a
+  // medium's torso, any head (helmet and all), any limb, in one.
+  { gravity: 0.04, life: 10, damage: 112, mass: (1.1 * 1500) / 24000, sharp: 0.95, carveR: 3, coreR: 1, splashR: 0, splashDamage: 0, debris: 3, bounce: 0, ballistic: true, knock: 2.4 },
   // Tank cannon shell: a heavy lobbed high-explosive round.
   { gravity: 0.35, life: 120, damage: 50, mass: 3, sharp: 0.6, carveR: 24, coreR: 11, splashR: 40, splashDamage: 90, debris: 56, bounce: 0, ballistic: false },
   // Tank vulcan: a rifle round, a touch lighter.

@@ -65,26 +65,12 @@ describe('sniper slug', () => {
     return { s, out };
   };
 
-  it('one round through the body leaves a scout or a medium badly hurt; a second kills', () => {
-    for (const cls of [ClassId.Scout, ClassId.Medium]) {
-      const s = newBodyState(cls);
-      const out = newStrike();
-      strike(s, Part.Torso, energy, slug.damage, out);
-      expect(out.vital).toBe(false);
-      expect(out.hp).toBeGreaterThan(60);
-      strike(s, Part.Torso, energy, slug.damage, out);
-      expect(out.vital).toBe(true);
-    }
+  it('one round through the body kills a scout or a medium outright', () => {
+    for (const cls of [ClassId.Scout, ClassId.Medium]) expect(hit(cls, Part.Torso).out.vital).toBe(true);
   });
 
-  it('a headshot kills a scout or a medium; a heavy in his helmet takes two', () => {
-    for (const cls of [ClassId.Scout, ClassId.Medium]) expect(hit(cls, Part.Head).out.vital).toBe(true);
-    const s = newBodyState(ClassId.Heavy);
-    const out = newStrike();
-    strike(s, Part.Head, energy, slug.damage, out);
-    expect(out.vital).toBe(false);
-    strike(s, Part.Head, energy, slug.damage, out);
-    expect(out.vital).toBe(true);
+  it('a headshot kills anyone, a heavy in his helmet included', () => {
+    for (const cls of [ClassId.Scout, ClassId.Medium, ClassId.Heavy]) expect(hit(cls, Part.Head).out.vital).toBe(true);
   });
 
   it('a heavy survives one in the chest, badly hurt; limbs come off', () => {
