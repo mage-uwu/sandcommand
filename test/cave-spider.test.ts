@@ -42,7 +42,7 @@ describe('the cave spider', () => {
   it('a crawler, about a clone in size (a head and a fat abdomen), tougher than an asp', () => {
     expect(crawler(BeastKind.Spider)).toBe(true);
     expect(BEAST_BUILD[BeastKind.Spider].hp).toBe(CSPIDER_HP);
-    expect(CSPIDER_HP).toBeGreaterThan(ASP_HP * 2);
+    expect(CSPIDER_HP).toBeGreaterThan(ASP_HP);
     const { world } = cave();
     putSpider(world, 1150, 440, 1);
     expect(world.beastPts[1].length).toBe(4);
@@ -63,7 +63,7 @@ describe('the cave spider', () => {
     void a;
   });
 
-  it('prey in sight: it wakes and runs at them, far faster than a millipede hunts, and bites: a heavy bite and a shove', () => {
+  it('prey in sight: it wakes and runs at them, far faster than a millipede hunts, and bites: a bite and a shove', () => {
     const { world, a } = cave();
     const b = putSpider(world, 1220, 440, -1);
     b.frozen = 30 * 60;
@@ -81,7 +81,7 @@ describe('the cave spider', () => {
       hold(a);
       const hp = a.hp;
       world.step();
-      if (a.hp < hp - 10) {
+      if (a.hp < hp - 5) {
         bitten = true;
         expect(Math.abs(a.body.vx)).toBeGreaterThan(30);
       }
@@ -131,7 +131,7 @@ describe('the cave spider', () => {
     expect(leapt).toBe(true);
   });
 
-  it('unarmoured but tough for its size: it takes well over a dozen rifle rounds', () => {
+  it('unarmoured, a little tough for its size: it takes several rifle rounds', () => {
     const { world, a } = cave();
     putSpider(world, 1100, 440, -1);
     world.beasts[1]!.frozen = 30 * 600;
@@ -147,8 +147,8 @@ describe('the cave spider', () => {
       a.hp = 100;
     }
     expect(world.beasts[1]).toBe(null);
-    expect(shots).toBeGreaterThan(12);
-    expect(shots).toBeLessThan(40);
+    expect(shots).toBeGreaterThan(5);
+    expect(shots).toBeLessThan(20);
   });
 
   it('they come up in the caves among the millipedes and asps', () => {

@@ -171,7 +171,7 @@ export const ASP_WANDER = 30 * 5;
 export const CSPIDER_SEGS = 2;
 export const CSPIDER_GAP = 4;
 export const CSPIDER_R = 3;
-export const CSPIDER_HP = 260;
+export const CSPIDER_HP = 130;
 /** Its pace: wandering, and running at prey (cells/s; sprinting, twice that). */
 export const CSPIDER_CRAWL = 45;
 export const CSPIDER_HUNT = 140;
@@ -188,7 +188,7 @@ export const CSPIDER_SENSE = 260;
 export const CSPIDER_SENSE_FROZEN = 340;
 /** Its bite: reach (cells), harm, ticks between bites, the shove. */
 export const CSPIDER_BITE_R = 7;
-export const CSPIDER_BITE = 24;
+export const CSPIDER_BITE = 12;
 export const CSPIDER_BITE_CD = 16;
 export const CSPIDER_SHOVE = 90;
 /**
@@ -196,8 +196,8 @@ export const CSPIDER_SHOVE = 90;
  * CSPIDER_RIP of the time it tears it clean off; otherwise it mauls it
  * (CSPIDER_MAUL wound points into it), so the next bite likely takes it.
  */
-export const CSPIDER_RIP = 0.5;
-export const CSPIDER_MAUL = 30;
+export const CSPIDER_RIP = 0.25;
+export const CSPIDER_MAUL = 15;
 /**
  * They hunt in **packs** of CSPIDER_PACK_MIN to CSPIDER_PACK_MAX, out of a
  * **web nest** of their own: a mass of silk on the cave roof (or a wall)
