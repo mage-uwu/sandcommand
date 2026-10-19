@@ -2415,7 +2415,7 @@ heavy, 7% droid), shown on the sprite and in the HUD:
 | Scout | green army helmet, no vest; armour 0.7× as hard | 1.15× thrust, 0.8× fuel use | 1.12× |
 | Medium | helmet and vest (the standard clone) | 1× | 1× |
 | Heavy | metal plate over everything: armour 3× as hard, every part takes 2.5× the wounds, blasts, fire and falls do 0.4× | 0.6× thrust (it still lifts, slowly), 1.5× fuel use | 0.85× |
-| Droid | no clone at all (see below): a fifth of a tank or so (`DROID_TOUGH` 0.7) | none: it climbs instead | 1.45× |
+| Droid | no clone at all (see below): about 4× a medium against rifles (`DROID_TOUGH` 0.7) | none: it climbs instead | 1.45× |
 
 **The spider droid** (`ClassId.Droid`) is a body class of its own, not
 anthropomorphic: gritty war-surplus pixel art, one pixel to a world cell
@@ -2452,8 +2452,11 @@ leg struts, its dead-eyed head, rusted plates.
 - **Toughness.** It has 70% of its parts' base durability
   (`DROID_TOUGH` in `src/shared/body.ts`, where a clone has 1.4). Every
   part takes 0.7 times the wounds to come off, and every hit (and its
-  bleeding, headless) costs it 1/0.7 as much health. All told it's about a
-  fifth of a tank: some 80 rifle rounds to the body. Killed,
+  bleeding, headless) costs it 1/0.7 as much health. Its plating stops a
+  rifle round, but the blow still bruises: about 23 rifle rounds to the
+  body kill it (a medium clone takes 6), 11 SMG rounds, 40 light-rifle
+  rounds and 11 sniper slugs. Its turret comes off after about 10 rifle
+  rounds, and then it bleeds out in about 8 s. Killed,
   it's scrapped into flying legs, plates and its turret dome.
 - **Movement.** Fast (1.45×, faster than a scout) and **extremely flexible
   on steep terrain**. It takes big steps in its stride, and pushing
