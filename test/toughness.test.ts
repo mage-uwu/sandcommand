@@ -15,10 +15,10 @@ function room() {
 }
 
 describe('humanoid clones are about 40% tougher', () => {
-  it('every humanoid class (bots and humans alike) is; the spider droid is not', () => {
+  it('every humanoid class (bots and humans alike) is; the spider droid is 70% as durable instead', () => {
     expect(HUMANOID_TOUGH).toBeCloseTo(1.4);
     for (const cls of [ClassId.Scout, ClassId.Medium, ClassId.Heavy]) expect(newBodyState(cls).tough).toBeCloseTo(1.4);
-    expect(newBodyState(ClassId.Droid).tough).toBe(1);
+    expect(newBodyState(ClassId.Droid).tough).toBeCloseTo(0.7);
     const s = newBodyState(ClassId.Droid);
     resetBody(s, ClassId.Medium);
     expect(s.tough).toBeCloseTo(1.4);

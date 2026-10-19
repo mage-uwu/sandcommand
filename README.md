@@ -2415,7 +2415,7 @@ heavy, 7% droid), shown on the sprite and in the HUD:
 | Scout | green army helmet, no vest; armour 0.7× as hard | 1.15× thrust, 0.8× fuel use | 1.12× |
 | Medium | helmet and vest (the standard clone) | 1× | 1× |
 | Heavy | metal plate over everything: armour 3× as hard, every part takes 2.5× the wounds, blasts, fire and falls do 0.4× | 0.6× thrust (it still lifts, slowly), 1.5× fuel use | 0.85× |
-| Droid | no clone at all (see below): about a quarter of a tank | none: it climbs instead | 1.45× |
+| Droid | no clone at all (see below): a fifth of a tank or so (`DROID_TOUGH` 0.7) | none: it climbs instead | 1.45× |
 
 **The spider droid** (`ClassId.Droid`) is a body class of its own, not
 anthropomorphic: gritty war-surplus pixel art, one pixel to a world cell
@@ -2441,16 +2441,19 @@ leg struts, its dead-eyed head, rusted plates.
   ten part slots, and the same mask bits on the wire, with its own
   meanings, so nothing that carries part masks had to change:
   - the turret (the head's slot): shoot it off and it can't fire, and it
-    **bleeds out fast** (9 HP a second, about 11 seconds from full) through
+    **bleeds out fast** (about 8 seconds from full) through
     the torn socket, which spits sparks and boils dark smoke;
   - the chassis (the torso's): vital, and its wounds are the droid's HP;
   - armour plating over the chassis;
   - six legs (the arms', legs', helmet's and vest's slots).
-- **Legs.** Each leg is durable (170 wounds) and comes off on its own as a
+- **Legs.** Each leg is durable (170 wounds at base, 119 with its 0.7 toughness) and comes off on its own as a
   spinning tin strut, in sparks, not blood. On four legs or more it
   scuttles, on two or three it limps, on fewer it drags itself.
-- **Toughness.** All told it's about **a quarter of a tank**: some 120
-  rifle rounds to the body (117 is a quarter of a tank's hull). Killed,
+- **Toughness.** It has 70% of its parts' base durability
+  (`DROID_TOUGH` in `src/shared/body.ts`, where a clone has 1.4). Every
+  part takes 0.7 times the wounds to come off, and every hit (and its
+  bleeding, headless) costs it 1/0.7 as much health. All told it's about a
+  fifth of a tank: some 80 rifle rounds to the body. Killed,
   it's scrapped into flying legs, plates and its turret dome.
 - **Movement.** Fast (1.45×, faster than a scout) and **extremely flexible
   on steep terrain**. It takes big steps in its stride, and pushing

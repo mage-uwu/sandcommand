@@ -227,10 +227,12 @@ export interface BodyState {
 /**
  * How much tougher a humanoid clone (scout, medium, heavy; bot or human
  * alike) is than its parts' base numbers: about 40%, so fewer one-shot
- * deaths. The spider droid (not humanoid) stays as it is.
+ * deaths. The spider droid (not humanoid) has its own, DROID_TOUGH.
  */
 export const HUMANOID_TOUGH = 1.4;
-export const toughOf = (cls: number) => (cls === ClassId.Droid ? 1 : HUMANOID_TOUGH);
+/** The spider droid: 70% as durable as its parts' base numbers (its legs, turret and chassis come apart sooner, and hits cost it more). */
+export const DROID_TOUGH = 0.7;
+export const toughOf = (cls: number) => (cls === ClassId.Droid ? DROID_TOUGH : HUMANOID_TOUGH);
 
 export function newBodyState(cls: number = ClassId.Medium): BodyState {
   return { mask: CLASSES[cls].mask, wounds: new Float32Array(PART_COUNT), cls, faction: 0, tough: toughOf(cls) };

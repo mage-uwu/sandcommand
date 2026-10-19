@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BTN_RIGHT, BTN_UP, newBody, stepBody } from '../src/shared/actor.ts';
-import { CLASSES, ClassId, DROID_LEGS, DROID_MASK, DroidPart, has, mobility, newBodyState, newStrike, partAt, resetBody, rollClass, strike, harm, DROID_HEADLESS_BLEED, headless } from '../src/shared/body.ts';
+import { CLASSES, ClassId, DROID_LEGS, DROID_MASK, DroidPart, has, mobility, newBodyState, newStrike, partAt, resetBody, rollClass, strike, harm, DROID_HEADLESS_BLEED, DROID_TOUGH, headless } from '../src/shared/body.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 import { ACTOR_H, DT, WORLD_W } from '../src/shared/constants.ts';
@@ -79,7 +79,7 @@ describe('the spider droid', () => {
     expect(b.y).toBeLessThan(FLOOR - ACTOR_H - 70);
   });
 
-  it('is about a quarter of a tank: well over a hundred rifle rounds to the body', () => {
+  it('is a fraction of a tank: dozens of rifle rounds to the body (70% as many as its base: DROID_TOUGH)', () => {
     const s = newBodyState(ClassId.Droid);
     let hp = 100;
     let rounds = 0;
@@ -89,11 +89,11 @@ describe('the spider droid', () => {
       hp -= r.hp;
       rounds++;
     }
-    expect(rounds).toBeGreaterThan(90);
-    expect(rounds).toBeLessThan(160);
+    expect(rounds).toBeGreaterThan(60);
+    expect(rounds).toBeLessThan(110);
     // (Its health is the chassis's: gone when the chassis is.)
     expect(hp).toBeLessThan(5);
-    // A quarter of a tank's hull, in rifle rounds: 7500 / 16 / 4 = 117.
+    // (Near a quarter of a tank's hull in rifle rounds, 7500 / 19 / 4 = 99, less its 30%.)
     expect(Math.abs(rounds - TANK_HP / PROJ[ProjKind.Bullet].damage / 4)).toBeLessThan(40);
   });
 
@@ -139,8 +139,9 @@ describe('the spider droid', () => {
       t++;
     }
     expect(a.alive).toBe(false);
-    expect(t / 30).toBeGreaterThan(100 / DROID_HEADLESS_BLEED - 2);
-    expect(t / 30).toBeLessThan(100 / DROID_HEADLESS_BLEED + 2);
+    // (Its bleeding costs it more, as every hit does: DROID_TOUGH.)
+    expect(t / 30).toBeGreaterThan((100 * DROID_TOUGH) / DROID_HEADLESS_BLEED - 2);
+    expect(t / 30).toBeLessThan((100 * DROID_TOUGH) / DROID_HEADLESS_BLEED + 2);
     expect(b.alive).toBe(true);
     expect(b.hp).toBe(100);
     expect(headless(a.parts.mask, ClassId.Droid)).toBe(true);
