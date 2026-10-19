@@ -990,7 +990,8 @@ and very hard to kill.
 
 **The dragon** is the basilisk three times over: three times its girth
 (it bores tunnels a tank could drive down), each of its segments three
-times the size, and three times its health; and it has twice as many
+times the size, and twelve times its health (three for its size, then four
+times as strong again); and it has twice as many
 segments (30), so it's six times as long. Laid out in a den near the map's
 edge, its body folds back on itself in the rock. It sleeps, wakes and hunts just as a basilisk does, with
 everything scaled up: wake range, how far it hears, its stirring, its dive,
@@ -2332,6 +2333,37 @@ embers) and is authoritative for the results.
   and sand you undercut onto someone credits you. The kill feed shows
   `[Debris]`, `[Fire]`, "was buried" and "burned". Self-inflicted particle
   damage is halved.
+
+### Visible wounds
+
+Damage shows on whatever took it (`src/client/wounds.ts`). It's drawn on
+each client from what the server already sends, with nothing new on the
+wire, so every player sees the same wounds:
+
+- **Clones.** Every hit on a clone is already broadcast with where it
+  struck and how hard (`R_HIT`). Each client pins a wound there in the
+  body's own frame (from its hip, as it faces), so the wound moves, leans
+  and turns with the body.
+  - Size depends on the hit: a graze is a speck, a slug a gaping hole. A
+    hit near an old wound opens it wider. A fresh wound is wet and bright
+    for a moment.
+  - A clone shows only as many wounds as its missing health allows, so as a
+    repair kit heals it, the oldest close first. They're gone when it dies.
+    Open wounds drip blood now and then.
+  - The Legion (synthetic) leaks dark oil instead, and the spider droid
+    takes scorched dents with a hot ember in fresh ones. Neither drips.
+- **Creatures.** Their health is sent as a fraction. Their scars follow
+  from how far it has fallen from the most this client has seen of it (so a
+  lair beast starting at half strength starts unmarked) and from the
+  creature's seed, which decides which segments are cut, where and how
+  deep.
+  - The same seed and damage give the same scars on every client, and more
+    damage only adds and deepens them.
+  - Each scar is a ragged pixel gash raked across a segment, kept within
+    the body: torn hide at the rim and a dark wet core. The worst show
+    flesh: a basilisk's red, a spider's pale ichor, an asp's teal goo.
+  - A dragon's deep rents glow with its molten, burning blood, pulsing.
+    Badly hurt, it trails fire, blood and smoke from its worst wounds.
 
 ### Modular bodies: sharpness, mass and wounds
 

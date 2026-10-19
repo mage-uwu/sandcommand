@@ -1,4 +1,6 @@
 import { ACTOR_H, ACTOR_RUN_SPEED, ACTOR_W, ACTOR_MAX_FUEL, ACTOR_MAX_HP, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, CHUNKS_Y, VIEW_HALF_H, VIEW_HALF_W, WORLD_H, WORLD_W, TICK_RATE, GRAVITY } from '../shared/constants.ts';
+import { FACTIONS } from '../shared/factions.ts';
+import { type Wound, beastDamage, beastScars } from './wounds.ts';
 import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, VOTE_MODES, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, TEAMS_IN_MODE, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
@@ -30,7 +32,7 @@ import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, dr
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
-import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
+import { BEAST_BUILD, BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -425,6 +427,78 @@ export class Renderer {
         if (v.gem) drawAspGem(ctx, game.terrain, gemOf, pts, v.seed, now);
         else drawAsp(ctx, game.terrain, pts, v.seed, lift, now);
       } else drawMillipede(ctx, game.terrain, this.groundColor, pts, v.seed, lift, v.frozen, now);
+      // Its wounds (wounds.ts): how hurt it is, as everyone sees it.
+      if (!v.gem && v.kind !== BeastKind.Web && v.kind !== BeastKind.Nest && v.kind !== BeastKind.Seeder) this.drawScars(ctx, v.kind, pts, v.seed, beastDamage(v.hp, v.top), now);
+    }
+  }
+
+  /**
+   * A creature's wounds (beastScars: which segments are cut, how badly):
+   * pixel gashes slashed across its segments, a dark wet core in a rim of
+   * its own blood; the bad ones wider, flesh showing in them. A dragon's
+   * are its own: deep rents through the plates, its burning blood glowing
+   * molten in the worst of them (and pulsing, in its frenzy of pain).
+   */
+  private drawScars(ctx: CanvasRenderingContext2D, kind: number, pts: readonly number[], seed: number, dmg: number, now: number): void {
+    if (dmg <= 0.04 || pts.length < 4) return;
+    const segs = pts.length >> 1;
+    const r = BEAST_BUILD[kind].r;
+    const dragon = kind === BeastKind.Dragon;
+    // Its blood: [rim, core, what shows in the deep ones].
+    const [rim, core, deep] = dragon
+      ? ['#a0242a', '#2a0406', '#e8601a']
+      : kind === BeastKind.Basilisk
+        ? ['#7a0c0a', '#240406', '#e8c8a0']
+        : kind === BeastKind.Spider
+          ? ['#8aa040', '#2a3010', '#e0e8b0']
+          : kind === BeastKind.Asp
+            ? ['#3a8a7a', '#0c2420', '#c8f0e0']
+            : ['#6a3a10', '#201006', '#e8c890'];
+    const hot = dragon ? 0.55 + 0.3 * Math.sin(now / 130) : 1;
+    for (const s of beastScars(seed, segs, dmg)) {
+      const i = s.seg;
+      const j = i < segs - 1 ? i + 1 : i - 1;
+      const a = Math.atan2(pts[i * 2 + 1] - pts[j * 2 + 1], pts[i * 2] - pts[j * 2]);
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      // Where on the segment: off to one side of its spine, a little along it.
+      const off = s.side * r * 0.22;
+      const along = (s.at - 0.5) * r * 0.6;
+      const cx = pts[i * 2] + ca * along - sa * off;
+      const cy = pts[i * 2 + 1] + sa * along + ca * off;
+      // A gash across the body, raked back: a ragged lens, longer and gaping wider the worse it is
+      // (kept within the body: no longer than it's thick).
+      const g = a + Math.PI / 2 + s.side * 0.55;
+      const gx = Math.cos(g);
+      const gy = Math.sin(g);
+      // (Its whole length within the body's girth, however it's raked.)
+      const halfL = Math.max(0.8, Math.min(r * 0.58, r * (0.22 + s.sev * 0.4)));
+      const halfW = Math.max(0.6, halfL * (0.14 + s.sev * 0.14));
+      const box = Math.ceil(halfL) + 1;
+      const x0 = Math.round(cx);
+      const y0 = Math.round(cy);
+      for (let py = -box; py <= box; py++) {
+        for (let px = -box; px <= box; px++) {
+          const dx = x0 + px + 0.5 - cx;
+          const dy = y0 + py + 0.5 - cy;
+          const u = dx * gx + dy * gy;
+          const w = -dx * gy + dy * gx;
+          if (Math.abs(u) > halfL) continue;
+          // (Tapered to its ends, the edges torn: a little in and out along it.)
+          const jag = 0.75 + 0.5 * (((Math.imul(seed + i * 31 + Math.round(u * 2), 2654435761) >>> 24) & 255) / 255);
+          const hw = halfW * (1 - (u / halfL) ** 2) * jag;
+          if (hw <= 0.15 || Math.abs(w) > hw + 0.35) continue;
+          const t = Math.abs(w) / (hw + 0.35);
+          ctx.fillStyle = t > 0.72 ? rim : core;
+          if (t <= 0.22 && s.sev > 0.7 && Math.abs(u) < halfL * 0.6) {
+            // The worst: what's under it shows (flesh; a dragon's burning blood, pulsing).
+            ctx.fillStyle = deep;
+            if (dragon) ctx.globalAlpha = hot;
+          }
+          ctx.fillRect(x0 + px, y0 + py, 1, 1);
+          ctx.globalAlpha = 1;
+        }
+      }
     }
   }
   /**
@@ -961,7 +1035,7 @@ export class Renderer {
       const info = game.players.get(v.id);
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
-      this.drawActor(ctx, v.x, v.y, aimR, this.fireFlags(game, v.flags, v.weapon, v.id, now), info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id);
+      this.drawActor(ctx, v.x, v.y, aimR, this.fireFlags(game, v.flags, v.weapon, v.id, now), info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id, v.hp);
       const coral = game.coralIn.get(v.id);
       if (coral) this.drawCoral(ctx, v.x, v.y, aimR, v.stance, v.parts, coral, v.id, now);
       // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
@@ -992,7 +1066,8 @@ export class Renderer {
         (reloading ? F_RELOAD : 0) |
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId);
+      game.myLeft = Math.cos(myAim) < 0;
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId, game.hp);
       if (game.myCoral.length) this.drawCoral(ctx, selfX, selfY, myAim, b.stance, game.parts, game.myCoral, game.myId, now);
       if (game.laserCharge > 0) {
         const m = WEAPONS[WeaponId.Laser].muzzle;
@@ -1952,6 +2027,44 @@ export class Renderer {
     if (k !== 1) ctx.restore();
   }
 
+  /**
+   * A clone's wounds, in pixels on its body where it was hit (its hip
+   * frame: `posed`): a dark core in a ragged red rim, fresh ones wet and
+   * bright for a moment, the big ones a darker gash. A synthetic (the Legion)
+   * leaks oil and shows bare circuitry; a droid takes scorched dents, a hot
+   * ember in a fresh one.
+   */
+  private drawWounds(
+    ctx: CanvasRenderingContext2D,
+    wounds: readonly Wound[],
+    posed: (dx: number, dy: number) => number[],
+    face: number,
+    droid: boolean,
+    synthetic: boolean,
+    now: number,
+  ): void {
+    const [core, rim, wet] = droid ? ['#120c08', '#3a2a1e', '#ff9a30'] : synthetic ? ['#0c0e10', '#2a3a44', '#7ad0ff'] : ['#3a0406', '#8c1010', '#e8343a'];
+    for (const w of wounds) {
+      const [wx, wy] = posed(w.u * face, w.v);
+      const x = Math.round(wx);
+      const y = Math.round(wy);
+      const fresh = now - w.at < 450;
+      ctx.fillStyle = rim;
+      if (w.r >= 1.2) {
+        ctx.fillRect(x - 1, y, 3, 1);
+        ctx.fillRect(x, y - 1, 1, 3);
+      }
+      if (w.r >= 2) ctx.fillRect(x - 1, y - 1, 3, 3);
+      ctx.fillStyle = core;
+      ctx.fillRect(x, y, 1, 1);
+      if (w.r >= 2) ctx.fillRect(x, y + 1, 1, 1);
+      if (fresh) {
+        ctx.fillStyle = wet;
+        ctx.fillRect(x + (w.u > 0 ? 1 : -1), y - (w.r >= 1.2 ? 1 : 0), 1, 1);
+      }
+    }
+  }
+
   private drawActor(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -1967,8 +2080,10 @@ export class Renderer {
     lean = 0,
     faction = 0,
     kick = 0,
-    /** Who it is (a droid's feet are remembered per droid). */
+    /** Who it is (a droid's feet are remembered per droid; its wounds are its own). */
     id = -1,
+    /** Its health (0..ACTOR_MAX_HP): how many of its wounds show. */
+    hp = ACTOR_MAX_HP,
   ): void {
     const left = Math.cos(aim) < 0;
     const face = left ? -1 : 1;
@@ -2010,6 +2125,9 @@ export class Renderer {
       ctx.drawImage(sprite!, 0, 0, 10, 11, -5.5, -11, 10, 11);
       ctx.restore();
     }
+
+    // Its wounds, where it was hit (wounds.ts), riding its pose.
+    if (id >= 0 && hp < ACTOR_MAX_HP && this.game) this.drawWounds(ctx, this.game.wounds.shown(id, (hp / ACTOR_MAX_HP) * 100), posed, face, droid, !!FACTIONS[faction]?.synthetic, now);
 
     // A king wears the crown on the head.
     if (!droid && has(parts, Part.Crown)) {

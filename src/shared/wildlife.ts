@@ -449,7 +449,8 @@ export const DRAGON_SEGS = BASILISK_SEGS * 2;
 export const DRAGON_RATTLE = 6;
 export const DRAGON_GAP = BASILISK_GAP * DRAGON_SCALE;
 export const DRAGON_R = BASILISK_R * DRAGON_SCALE;
-export const DRAGON_HP = BASILISK_HP * 3;
+/** Three times a basilisk's health for its size, and four times that again: twelve basilisks' worth. */
+export const DRAGON_HP = BASILISK_HP * 12;
 /** How often a wild basilisk's turn brings a dragon instead. */
 export const DRAGON_ODDS = 0.25;
 /** Its spit: how far off it'll spit at what it's hunting (cells), ticks between volleys, globs in one, and their speed (cells/s). */

@@ -1,7 +1,8 @@
 import { type Decor, placeDecor } from './decor.ts';
-import { BTN_FIRE, type Body, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { BTN_FIRE, type Body, HIP_X, HIP_Y, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { WoundBook, beastDamage, beastScars } from './wounds.ts';
 import type { Reader } from '../shared/codec.ts';
-import { ACTOR_H, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
+import { ACTOR_H, ACTOR_MAX_HP, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, type BurnerState, type FootState, applyFrameRecords } from '../shared/frame.ts';
 import { BURNER_FUSE, BurnerPhase, FOOT_LIFE, beepAt } from '../shared/stoneburner.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
@@ -214,6 +215,8 @@ export interface BeastView {
   kind: number;
   seed: number;
   hp: number;
+  /** The most of its health this client has seen (its wounds are measured from it: wounds.ts). */
+  top: number;
   lift: number;
   prevLift: number;
   attached: boolean;
@@ -240,6 +243,10 @@ function pushBeastSnap(v: BeastView, tick: number): void {
 
 export class Game implements FrameHandler {
   readonly terrain = new Terrain();
+  /** Every clone's wounds, where they were hit (wounds.ts). */
+  readonly wounds = new WoundBook();
+  /** Which way we face (the renderer keeps it: our wounds are pinned as we face). */
+  myLeft = false;
   readonly loaded = new Uint8Array(CHUNK_COUNT);
   /**
    * Highest solid cell ever seen per column: everything below it is
@@ -638,6 +645,7 @@ export class Game implements FrameHandler {
     }
     if (this.alive && this.parts !== ALL_PARTS && this.body.cls !== ClassId.Droid) stumpDrip(this.particles, this.body.x, this.body.y, this.parts, FACTIONS[this.body.faction]?.synthetic);
     if (this.alive && headless(this.parts, this.body.cls)) droidSocket(this.particles, this.body.x, this.body.y);
+    this.woundDrips();
     // A dead creature's segments tumbling: gravity, a bounce off the ground, rest; settled a while, worked into the ground.
     for (let k = this.segmentGibs.length - 1; k >= 0; k--) {
       const g = this.segmentGibs[k];
@@ -865,6 +873,7 @@ export class Game implements FrameHandler {
     this.alive = (s.flags & F_ALIVE) !== 0;
     // Fragged means we were alive and now we're not; never on yet (loading in, waiting to deploy) isn't that.
     if (wasAlive && !this.alive) this.fragged = true;
+    if (!this.alive) this.wounds.clear(this.myId);
     else if (this.alive) this.fragged = false;
     this.hp = s.hp;
     this.respawnTicks = s.respawn;
@@ -1330,6 +1339,7 @@ export class Game implements FrameHandler {
         if (b.kind === BeastKind.Spider && b.hp < v.hp) ichorSplat(this.particles, b.pts[0], b.pts[1], Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
         if (b.kind === BeastKind.Asp && b.hp < v.hp) gooSplat(this.particles, b.pts[0], b.pts[1], b.seed, Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
         v.hp = b.hp;
+        v.top = Math.max(v.top, b.hp);
         v.attached = b.attached;
         v.frozen = b.frozen;
         v.coiled = b.coiled;
@@ -1350,7 +1360,7 @@ export class Game implements FrameHandler {
           this.buzzAt = performance.now();
           this.sfx?.buzz(b.pts[0], b.pts[1]);
         }
-        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, carry: b.carry, prev: b.pts, cur: b.pts, snaps: [] };
+        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, top: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, carry: b.carry, prev: b.pts, cur: b.pts, snaps: [] };
         pushBeastSnap(nv, this.frameTick);
         this.beastViews.set(b.slot, nv);
       }
@@ -1473,6 +1483,7 @@ export class Game implements FrameHandler {
       if (!s) this.snaps.set(a.id, (s = []));
       s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts, stance: a.stance, faction: a.faction });
       if (s.length > 12) s.shift();
+      if (!(a.flags & F_ALIVE)) this.wounds.clear(a.id);
       if (a.flags & F_FIRING && a.weapon === WeaponId.Digger && a.id !== this.myId) {
         // (At the digger's nozzle, as drawn: never the clone's middle.)
         const m = this.drawnMuzzle(a.id, WEAPONS[WeaponId.Digger].muzzle, a.aim);
@@ -2035,7 +2046,52 @@ export class Game implements FrameHandler {
     }
   }
 
+  /**
+   * Wounds bleed (wounds.ts): now and then a drop off a clone's open wounds
+   * (not a droid's, nor the Legion's oil), and off a hurt creature's worst
+   * cuts, more the worse it is; a badly hurt dragon's leak burning blood
+   * and smoke. Cosmetic, on each client, from what it already knows.
+   */
+  private woundDrips(): void {
+    for (const [id, s] of this.snaps) {
+      const last = s[s.length - 1];
+      if (!last || !(last.flags & F_ALIVE) || last.hp >= ACTOR_MAX_HP || classOfFlags(last.flags) === ClassId.Droid || FACTIONS[last.faction]?.synthetic) continue;
+      const shown = this.wounds.shown(id, (last.hp / ACTOR_MAX_HP) * 100);
+      if (!shown.length || Math.random() > 0.02 * shown.length) continue;
+      const w = shown[Math.floor(Math.random() * shown.length)];
+      const face = Math.cos(dequantizeAim(last.aim)) < 0 ? -1 : 1;
+      bloodSplat(this.particles, last.x + HIP_X + 0.5 + w.u * face, last.y + HIP_Y + w.v, 1, 6 + w.r * 6);
+    }
+    for (const [, v] of this.beastViews) {
+      const dmg = beastDamage(v.hp, v.top);
+      if (dmg < 0.15 || v.gem || v.cur.length < 4 || Math.random() > dmg * 0.25) continue;
+      const scars = beastScars(v.seed, v.cur.length >> 1, dmg).filter((c) => c.sev > 0.45);
+      if (!scars.length) continue;
+      const c = scars[Math.floor(Math.random() * scars.length)];
+      const x = v.cur[c.seg * 2];
+      const y = v.cur[c.seg * 2 + 1];
+      if (v.kind === BeastKind.Dragon) {
+        if (c.sev > 0.7) fireSpitTrail(this.particles, x, y, 0, 30);
+        else bloodSplat(this.particles, x, y, 2, 20);
+      } else if (v.kind === BeastKind.Spider) ichorSplat(this.particles, x, y, 1, 10);
+      else if (v.kind === BeastKind.Asp) gooSplat(this.particles, x, y, v.seed, 1, 10);
+      else if (v.kind === BeastKind.Basilisk || v.kind === BeastKind.Millipede) bloodSplat(this.particles, x, y, 1, 10);
+    }
+  }
+
   hit(victim: number, x: number, y: number, amount: number): void {
+    // A wound where it struck, pinned in the body's own frame (from its hip, as it faces).
+    const last = this.snaps.get(victim)?.at(-1);
+    const me = victim === this.myId;
+    const bx = me ? this.body.x : last?.x;
+    const by = me ? this.body.y : last?.y;
+    if (bx !== undefined && by !== undefined) {
+      const face = (me ? this.myLeft : Math.cos(dequantizeAim(last!.aim)) < 0) ? -1 : 1;
+      const u = (x - (bx + HIP_X + 0.5)) * face;
+      const v = y - (by + HIP_Y);
+      // (A hit well off the body (a blast's centre): on the nearest of it.)
+      this.wounds.hit(victim, Math.max(-3.5, Math.min(3.5, u)), Math.max(-9, Math.min(5, v)), amount, performance.now());
+    }
     // (A droid sparks where it's hit; anything else bleeds.)
     if (this.isDroid(victim)) droidHit(this.particles, x, y, amount);
     else bloodSplat(this.particles, x, y, Math.min(24, 3 + amount / 3), 60 + amount * 1.5);
