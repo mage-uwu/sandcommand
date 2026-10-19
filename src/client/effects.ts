@@ -23,7 +23,7 @@ export const GIB_MEAT = [7, 8, 9];
 export const GIB_HEAD = 10;
 export const GIB_VEST = 11;
 export const GIB_CROWN = 16;
-/** The spider droid's scrap: a leg strut, its turret dome, a chassis plate. */
+/** The spider droid's scrap: a leg strut, its head, a chassis plate (sprites.ts DROID_GIB0). */
 export const GIB_DROID_LEG = 17;
 export const GIB_DROID_TURRET = 18;
 export const GIB_DROID_PLATE = 19;

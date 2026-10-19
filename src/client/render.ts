@@ -36,6 +36,8 @@ import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
 import { drawDecor } from './decor-art.ts';
 import type { Terrain } from '../shared/terrain.ts';
+import { DroidArt } from './droid-art.ts';
+import { DPAL } from './droid-grids.ts';
 import { RACK_MOUTHS, RACK_PIVOT, TarantulaArt } from './tarantula-sprites.ts';
 import { Backdrop } from './backdrop.ts';
 import { type BodyFrame, CROWN, SpriteCache, TANK_SPRITE_TOP, MOLE_FRILL_AT, WALK_CYCLE } from './sprites.ts';
@@ -1675,6 +1677,7 @@ export class Renderer {
   /** Each droid's feet, planted in the world, by player id (see droidFeet). */
   private readonly droidGaits = new Map<number, DroidGait>();
   private readonly tArt = new TarantulaArt();
+  private readonly dArt = new DroidArt();
 
   /**
    * Where a droid's six feet are this frame (world cells), spider style.
@@ -1836,20 +1839,19 @@ export class Renderer {
     // Droid-local (as facing right, from the hitbox's top-left) to world.
     const X = (dx: number) => (left ? x + ACTOR_W - dx : x + dx);
     const Y = (dy: number) => y + dy;
-    const GUN = '#4d5359';
-    const GUN_DK = '#30353a';
-    const TIN = '#b9bfc4';
-    const TIN_DK = '#7d858c';
-    const K = '#121518';
+    const side = left ? -1 : 1;
+    const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
+    const K = hex(DPAL.K);
     // Legs first (behind the chassis), each a two-bone limb with its foot
     // planted in the world (see droidFeet): a short thigh rising steeply from
     // the hip to a high, sharp knee, and a long shin down to the foot, set
-    // wide of the body.
+    // wide of the body. Drawn in whole pixels: an outlined drab strut for the
+    // thigh, a bare rod for the shin, a rusted bolt at the knee.
     const bob = feet.bob;
     const HIP_Y = 9.6 + bob;
     // The body pitches with the ground (feet.tilt) about the middle of its
-    // hip line: the chassis, the hips and the rack on it; the head stays on
-    // the gun's pivot (where shots leave), its neck bending to reach it.
+    // hip line: the chassis and the hips; the head stays on the gun's pivot
+    // (where shots leave), its neck bending to reach it.
     const tilt = feet.tilt;
     const tc = Math.cos(tilt);
     const ts = Math.sin(tilt);
@@ -1859,33 +1861,29 @@ export class Renderer {
     // The body's up (its knees bend that way).
     const upX = ts;
     const upY = -tc;
-    const strut = (x1: number, y1: number, x2: number, y2: number, wa: number, wb: number) => {
-      const len = Math.hypot(x2 - x1, y2 - y1) || 1;
-      const nx = -(y2 - y1) / len;
-      const ny = (x2 - x1) / len;
-      ctx.beginPath();
-      ctx.moveTo(x1 + nx * wa, y1 + ny * wa);
-      ctx.lineTo(x2 + nx * wb, y2 + ny * wb);
-      ctx.lineTo(x2 - nx * wb, y2 - ny * wb);
-      ctx.lineTo(x1 - nx * wa, y1 - ny * wa);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+    // A pixel strut from (x0, y0) to (x1, y1), `wa` pixels thick tapering to `wb`, in colour `c`.
+    const strut = (x0: number, y0: number, x1: number, y1: number, wa: number, wb: number, c: string) => {
+      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+      ctx.fillStyle = c;
+      for (let i = 0; i <= n; i++) {
+        const f = i / n;
+        const w = Math.max(1, Math.round(wa + (wb - wa) * f));
+        ctx.fillRect(Math.round(x0 + (x1 - x0) * f - w / 2), Math.round(y0 + (y1 - y0) * f - w / 2), w, w);
+      }
     };
-    ctx.lineJoin = 'miter';
-    ctx.miterLimit = 8;
-    ctx.lineWidth = 0.35;
-    ctx.strokeStyle = K;
-    for (let leg = 0; leg < 6; leg++) {
+    // The far legs (every other one) first, in shadow; then the near ones.
+    for (const leg of [1, 4, 0, 2, 3, 5]) {
       const part = DROID_LEGS[leg];
       const [hx, hy] = rot(X(DROID_HIP_X[leg]), Y(HIP_Y));
       if (!has(parts, part)) {
-        // A sparking socket where the leg was.
+        // A sparking socket where the leg was, a torn wire hanging.
         ctx.fillStyle = K;
-        ctx.fillRect(hx - 0.6, hy - 0.4, 1.2, 1.2);
+        ctx.fillRect(Math.round(hx) - 1, Math.round(hy), 2, 1);
+        ctx.fillStyle = hex(DPAL.R);
+        ctx.fillRect(Math.round(hx), Math.round(hy) + 1, 1, 1);
         if ((now / 90 + part) % 4 < 1) {
-          ctx.fillStyle = '#ffd060';
-          ctx.fillRect(hx - 0.4, hy + 0.8, 0.8, 0.8);
+          ctx.fillStyle = (now / 45) % 2 < 1 ? '#ffd060' : '#fff6c0';
+          ctx.fillRect(Math.round(hx) - side, Math.round(hy) + 2, 1, 1);
         }
         continue;
       }
@@ -1904,155 +1902,53 @@ export class Renderer {
       const k2x = hx + Math.cos(a + bend) * DROID_THIGH;
       const k2y = hy + Math.sin(a + bend) * DROID_THIGH;
       const [kx, ky] = (k1x - hx) * upX + (k1y - hy) * upY > (k2x - hx) * upX + (k2y - hy) * upY ? [k1x, k1y] : [k2x, k2y];
-      // The far legs (every other one) a shade darker.
       const far = leg === 1 || leg === 4;
-      ctx.fillStyle = far ? TIN_DK : TIN;
-      strut(hx, hy, kx, ky, 0.85, 0.55); // thigh, narrowing to the knee
-      ctx.fillStyle = far ? '#5d656c' : TIN_DK;
-      strut(kx, ky, fx, fy, 0.6, 0.05); // shin, to a needle point
-      // The knee: a hard angular joint at the peak.
+      // A dark line under each (its shadow side); the thigh a drab plate two pixels thick, worn
+      // bright along its top; the shin a bare rod, to a steel point.
+      strut(hx, hy + 1, kx, ky + 1, 2, 2, K);
+      strut(kx + 1, ky, fx + 1, fy, 1, 1, K);
+      strut(hx, hy, kx, ky, 2, 2, hex(far ? DPAL.d : DPAL.m));
+      strut(hx, hy - 1, kx, ky - 1, 1, 1, hex(far ? DPAL.m : DPAL.h));
+      strut(kx, ky, fx, fy, 1, 1, hex(far ? DPAL.m : DPAL.l));
+      ctx.fillStyle = hex(far ? DPAL.l : DPAL.w);
+      ctx.fillRect(Math.round(fx), Math.round(fy) - 1, 1, 1); // (the steel point it stands on)
+      // The knee: a rusted bolt through the joint, a glint on it.
       ctx.fillStyle = K;
-      ctx.beginPath();
-      ctx.moveTo(kx, ky - 0.8);
-      ctx.lineTo(kx + 0.6, ky);
-      ctx.lineTo(kx, ky + 0.6);
-      ctx.lineTo(kx - 0.6, ky);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(Math.round(kx) - 1, Math.round(ky) - 1, 2, 2);
+      ctx.fillStyle = hex(far ? DPAL.r : DPAL.R);
+      ctx.fillRect(Math.round(kx) - 1, Math.round(ky) - 1, 1, 1);
     }
-    ctx.miterLimit = 10; // (back to the canvas defaults)
-    // The chassis: a squat armoured pod slung low between the legs, wider
-    // than it is tall; the head (the turret, with the gun) stands up above it
-    // on a neck, so the gun is its face. (The gun pivots at the shoulder
-    // point, where the shots leave: the head is built round it.)
+    // The chassis (the grids in droid-grids.ts), pitched with the ground about its hip line;
+    // stripped of its plating, a scorched frame that spits sparks.
     const plated = has(parts, DroidPart.Plating);
-    ctx.save();
-    ctx.translate(pivX, pivY);
-    ctx.rotate(tilt);
-    ctx.translate(-pivX, -pivY);
-    const x0 = Math.min(X(-1.5), X(9.5));
-    const cy0 = Y(8.2 + bob);
-    ctx.fillStyle = K;
-    ctx.fillRect(x0, cy0, 11, 4);
-    ctx.fillRect(x0 + 1, cy0 - 0.8, 9, 5.6);
-    ctx.fillStyle = plated ? GUN : '#3a3530';
-    ctx.fillRect(x0 + 1, cy0 + 0.4, 9, 3);
-    ctx.fillStyle = plated ? GUN_DK : '#251f1a';
-    ctx.fillRect(x0 + 1, cy0 + 2.4, 9, 1);
-    // Tin trim along the top, rivets; the plating gone, scorched seams instead.
-    ctx.fillStyle = plated ? TIN : '#5a4a3a';
-    ctx.fillRect(x0 + 1.5, cy0 + 0.4, 8, 0.7);
-    ctx.fillStyle = K;
-    for (const rx of [2.5, 7.5]) ctx.fillRect(x0 + rx, cy0 + 1.8, 0.6, 0.6);
+    const body = this.dArt.chassis(team, left, plated, tilt);
+    ctx.drawImage(body.c, Math.round(pivX) - body.r, Math.round(pivY) - body.r);
     if (!plated && (now / 110) % 5 < 1) {
-      ctx.fillStyle = '#ffb040';
-      ctx.fillRect(x0 + 2 + ((now / 50) % 7), cy0 + 1.6, 0.8, 0.8);
+      const [sx, sy] = rot(X(1 + ((now / 50) % 7)), Y(HIP_Y + 1));
+      ctx.fillStyle = (now / 40) % 2 < 1 ? '#ffb040' : '#fff0b0';
+      ctx.fillRect(Math.round(sx), Math.round(sy), 1, 1);
     }
-    // Its owner's colour on a running light at the front of the chassis.
-    ctx.fillStyle = `#${team.toString(16).padStart(6, '0')}`;
-    ctx.fillRect(X(8.2) - 0.7, Y(9.6), 1.4, 0.9);
+    // On the move, its exhaust stack coughs: dark puffs rising off the back, thinning as they go.
+    if (moving) {
+      const [ex, ey] = rot(X(-1.5), Y(6.4 + bob));
+      for (let p = 0; p < 2; p++) {
+        const ph = ((now / 85 + p * 4) % 8) / 8;
+        ctx.fillStyle = `rgba(34,30,24,${(0.7 * (1 - ph)).toFixed(2)})`;
+        const w = ph > 0.5 ? 2 : 1;
+        ctx.fillRect(Math.round(ex - side * ph * 3), Math.round(ey - 1 - ph * 6), w, w);
+      }
+    }
+    // The head on its neck: a short pixel post from the chassis's back up to the gun's mount.
     const head = has(parts, DroidPart.Turret);
-    ctx.restore();
-    // A filled, outlined polygon in droid-local cells (mirrored with the facing).
-    const poly = (pts: readonly (readonly [number, number])[], fill: string) => {
-      ctx.beginPath();
-      ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
-      for (let k = 1; k < pts.length; k++) ctx.lineTo(X(pts[k][0]), Y(pts[k][1]));
-      ctx.closePath();
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.stroke();
-    };
-    ctx.lineJoin = 'miter';
-    ctx.lineWidth = 0.4;
-    ctx.strokeStyle = K;
-    // The head on a narrow steel T: a thin stem up from the chassis to a
-    // crossbar (the header), and on it the camera, the gun mounted along it.
-    // (Just a stub of the stem, the head shot off.)
-    // (Its foot on the tilted chassis, its top under the head.)
-    const neck: [number, number][] = [[X(3.55), Y(head ? 6.6 : 7.3)], [X(4.45), Y(head ? 6.6 : 7.3)], rot(X(4.6), Y(8.4 + bob)), rot(X(3.4), Y(8.4 + bob))];
-    ctx.beginPath();
-    ctx.moveTo(neck[0][0], neck[0][1]);
-    for (const [nx, ny] of neck.slice(1)) ctx.lineTo(nx, ny);
-    ctx.closePath();
-    ctx.fillStyle = TIN_DK;
-    ctx.fill();
-    ctx.stroke();
+    const [nx, ny] = rot(X(4), Y(8.4 + bob));
+    const topY = head ? Y(4.5) : ny - 1.5;
+    strut(nx + side, ny, X(4) + side, topY, 1, 1, K);
+    strut(nx, ny, X(4), topY, 1, 1, hex(DPAL.l));
     if (head) {
-      // (The header leans with the body, about the gun's mount.)
-      ctx.save();
-      ctx.translate(X(4), Y(4));
-      ctx.rotate(tilt * 0.6);
-      ctx.translate(-X(4), -Y(4));
-      // The header: a flat steel crossbar across the top of the stem.
-      // (Below the gun's mount, so the T shows: stem, bar, then camera and gun.)
-      poly(
-        [
-          [1, 5.8],
-          [7, 5.8],
-          [6.5, 6.7],
-          [1.5, 6.7],
-        ],
-        GUN,
-      );
-      ctx.fillStyle = TIN;
-      ctx.fillRect(Math.min(X(1.6), X(6.4)), Y(5.95), 4.8, 0.3);
-      ctx.restore();
-      // The camera: its flat face to the front, looking where the gun points
-      // (it pivots with the aim, on the gun's mount), the body tapering away
-      // behind it, ]< . Drawn in the aim's own frame: +x along the barrel,
-      // -y up (mirrored aiming left, so it stays the right way up).
-      const px = X(4);
-      const py = Y(4);
-      ctx.save();
-      ctx.translate(px, py);
-      ctx.rotate(aim);
-      if (left) ctx.scale(1, -1);
-      ctx.lineWidth = 0.4;
-      ctx.strokeStyle = K;
-      const cam = (pts: readonly (readonly [number, number])[], fill: string) => {
-        ctx.beginPath();
-        ctx.moveTo(pts[0][0], pts[0][1]);
-        for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
-        ctx.closePath();
-        ctx.fillStyle = fill;
-        ctx.fill();
-        ctx.stroke();
-      };
-      // Body: the flat face at the front, a box behind it, tapering to the back.
-      cam(
-        [
-          [3.4, -3.5],
-          [3.4, -0.2],
-          [0.2, -0.2],
-          [-3.2, -1.3],
-          [-3.2, -2.5],
-          [0.2, -3.5],
-        ],
-        GUN,
-      );
-      // A darker underside, a tin highlight along the top edge.
-      cam(
-        [
-          [3.4, -1.1],
-          [3.4, -0.2],
-          [0.2, -0.2],
-          [-3.2, -1.3],
-          [-3.2, -1.6],
-          [0.2, -1.1],
-        ],
-        GUN_DK,
-      );
-      ctx.fillStyle = TIN;
-      ctx.fillRect(0.4, -3.3, 2.8, 0.35);
-      // The flat face: a steel bezel round the red lens, looking out along the gun.
-      ctx.fillStyle = K;
-      ctx.fillRect(3, -3.3, 0.9, 2.9);
-      ctx.fillStyle = (now / 150) % 6 < 5 ? '#ff3a28' : '#801408';
-      ctx.fillRect(3.2, -2.6, 0.8, 1.4);
-      ctx.restore();
+      // The head turns with the aim (the gun mounted under its chin): its eye flickers now and then.
+      const h = this.dArt.head(aim, left, (now / 150) % 6 >= 5);
+      ctx.drawImage(h.c, Math.round(X(4)) - h.r, Math.round(Y(4)) - h.r);
     }
-    ctx.miterLimit = 10;
     if (k !== 1) ctx.restore();
   }
 

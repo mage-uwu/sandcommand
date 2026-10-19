@@ -7,6 +7,7 @@ import { ENGINE_NOZZLE_Y, HULL_H, HULL_TOP, HULL_W, HULL_X, SHIP_H, SHIP_W } fro
  */
 
 import { ALL_CRAFT_PARTS, craftPartAt } from '../shared/craft.ts';
+import { DPAL } from './droid-grids.ts';
 
 type Grid = readonly string[];
 
@@ -371,6 +372,9 @@ const GUNS: GunDef[] = [
   },
 ];
 
+/** The first of the spider droid's gib pieces (effects.ts GIB_DROID_LEG; then its head, a plate). */
+const DROID_GIB0 = 17;
+
 // Gib pieces (center-anchored), indexed by the GIB_* ids in effects.ts.
 const GIBS: Grid[] = [
   ['.KKK.', 'KLLHK', 'KHVVK', '.KKK.'], // helmet with visor
@@ -391,9 +395,10 @@ const GIBS: Grid[] = [
   ['KGK', 'GGK', 'GK.'], // rocket fin
   ['KDDK', 'DMMD', 'KDDK'], // rocket nozzle
   ['Y.Y.Y', 'YYYYY', 'yYrYy'], // a king's crown, knocked off
-  ['KLH.', '.KLH', '..KH', '..KL'], // a droid's leg: a bent tin strut
-  ['.KMMK.', 'KGMMGK', 'KMMMMK'], // a droid's turret dome
-  ['KGGGK', 'GMMMG', 'KGGGK'], // a droid's chassis plate
+  // (The spider droid's scrap, in its own palette: droid-grids.ts DPAL.)
+  ['Kh..', 'KmhK', '.KRm', '..Km', '..Kl'], // a droid's leg: a bent drab strut, a rusted knee bolt
+  ['.K....', 'KhKKKK', 'KlhKxK', 'KmrKvK', '.KKKKK'], // a droid's head, its red eye dead
+  ['KhhwK', 'mRmmy', 'KgdrK'], // a droid's chassis plate, rusted, hazard paint on its edge
   // Flora (tinted by the plant: T its colour, t its shade, h its light):
   ['hT', 'Tt', 'Tt', 'tK'], // a length of stalk
   ['h..', 'Th.', '.Tt', '..t'], // a frond or branch tip
@@ -922,7 +927,7 @@ export class SpriteCache {
     if (!c) {
       let grid = GIBS[piece];
       for (let i = 0; i < rot; i++) grid = rotate90(grid);
-      this.gibs.set(key, (c = bake(grid, this.pal(team))));
+      this.gibs.set(key, (c = bake(grid, piece >= DROID_GIB0 && piece < DROID_GIB0 + 3 ? DPAL : this.pal(team))));
     }
     return c;
   }

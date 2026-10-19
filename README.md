@@ -2377,15 +2377,24 @@ heavy, 7% droid), shown on the sprite and in the HUD:
 | Droid | no clone at all (see below): about a quarter of a tank | none: it climbs instead | 1.45× |
 
 **The spider droid** (`ClassId.Droid`) is a body class of its own, not
-anthropomorphic: a squat gunmetal chassis slung low between **six tin
-legs**, three either side, and above it on a narrow steel **T** (a thin
-stem up to a crossbar header) **its head: the turret**, a camera shape with
-**any gun** slung under it. Its flat face, with a red lens in a steel
-bezel, looks out along the gun, the body tapering away behind (`]<`). It
-pivots with the aim, so the camera is always looking where the gun points,
-and the gun is its face (it carries, picks up,
-switches and reloads like any clone). The head is built round the point the
-shots leave from, so it fires exactly from its face.
+anthropomorphic: gritty war-surplus pixel art, one pixel to a world cell
+like the clones (`src/client/droid-grids.ts`, baked by `droid-art.ts`). A
+squat armoured pod in drab olive gone dull, rust bleeding from its seams
+and rivets, grime caked low, a hazard-striped nose, an exhaust stack at its
+back that coughs dark puffs on the move, a vent glowing orange in its belly
+and its team light under the nose. It is slung low between **six legs**,
+three either side, drawn in whole pixels: drab thighs worn bright along
+the top, bare rods for shins, a rusted bolt at each knee. Above it, on a
+short post, sits **its head**: a welded box with a bent antenna, a bolted
+cheek plate and one red eye in a heavy bezel (it flickers now and then),
+with **any gun** mounted under its chin. The head turns with the aim, so
+the eye always looks where the gun points (it carries, picks up, switches
+and reloads like any clone), and it's built round the point the shots
+leave from, so it fires exactly from its face. The chassis pitches with the
+ground and the head turns with the aim, both rotated nearest-neighbour so
+they stay on the pixel grid. Stripped of its plating, the pod shows a
+scorched frame that spits sparks. Shot apart, it scatters drab scrap: bent
+leg struts, its dead-eyed head, rusted plates.
 
 - **Its parts** (`DROID_PARTS` in `src/shared/body.ts`). It reuses the
   ten part slots, and the same mask bits on the wire, with its own

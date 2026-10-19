@@ -19,7 +19,7 @@ const flipY = (g: Grid): Grid => [...g].reverse();
 const step = (a: number) => ((Math.round((a / (Math.PI * 2)) * ANGLE_STEPS) % ANGLE_STEPS) + ANGLE_STEPS) % ANGLE_STEPS;
 
 /** Rotate a grid about a pivot onto a square canvas, nearest-neighbour (crisp). */
-function bakeRotated(g: Grid, pal: Record<string, number>, angle: number, px: number, py: number): { c: HTMLCanvasElement; r: number } {
+export function bakeRotated(g: Grid, pal: Record<string, number>, angle: number, px: number, py: number): { c: HTMLCanvasElement; r: number } {
   const h = g.length;
   const w = g[0].length;
   let r = 0;
