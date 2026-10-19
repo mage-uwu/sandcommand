@@ -1360,6 +1360,8 @@ export class Game implements FrameHandler {
           this.buzzAt = performance.now();
           this.sfx?.buzz(b.pts[0], b.pts[1]);
         }
+        // (Another creature in its slot now: the one before is gone (its death, if it died, follows).)
+        if (v && (v.kind !== b.kind || v.seed !== b.seed)) this.beastsGone.set(b.slot, v);
         const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, top: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, carry: b.carry, prev: b.pts, cur: b.pts, snaps: [] };
         pushBeastSnap(nv, this.frameTick);
         this.beastViews.set(b.slot, nv);
@@ -1401,10 +1403,13 @@ export class Game implements FrameHandler {
     return { pts: out, lift: a.lift + (c.lift - a.lift) * t, vx: ((c.pts[0] - a.pts[0]) / span) * TICK_RATE, vy: ((c.pts[1] - a.pts[1]) / span) * TICK_RATE };
   }
 
-  beastDie(slot: number, _kind: number, _seed: number): void {
-    // (Most often it's already gone from the list, in the same frame: it was dropped from view as it died.)
-    const v = this.beastViews.get(slot) ?? this.beastsGone.get(slot);
-    if (!v) return;
+  beastDie(slot: number, kind: number, _seed: number): void {
+    // The one that just left that slot (the death comes after the frame's list, which it's already gone
+    // from). Never what's in the slot now: the server reuses a slot at once, and that's a newborn (a
+    // lair's restock, a brood): taking it for the dead would gib it, and drop it while the server, thinking
+    // we have it, sends only that it's unchanged (a millipede lying in wait would stay invisible).
+    const v = this.beastsGone.get(slot);
+    if (!v || v.kind !== kind) return;
     this.beastsGone.delete(slot);
     // Where it's drawn, not where it last was.
     v.cur = [...this.beastPose(v).pts];
