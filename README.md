@@ -998,11 +998,20 @@ everything scaled up: wake range, how far it hears, its stirring, its dive,
 its jaws' reach, its bore, and how hard its body batters. For its size
 it's a little quicker and turns a little slower (`wyrm`, `wyrmScale`;
 `World.stepBasilisk` runs both).
-- **It spits flaming blood.** Hunting something it can see within 700
-  cells, it lobs a volley of four globs of burning gore on the arc that
-  lands, fanned out a little, every couple of seconds
-  (`ProjKind.FireSpit`). Each bursts into blood and a gout of fire that
-  burns whoever it reaches.
+- **It breathes burning blood.** Hunting something it can see within 700
+  cells, it gapes and pours out a sustained shotgun blast of burning blood
+  and fire: for two-thirds of a second, two globs a tick fanned across a
+  cone (±0.2 rad), re-aimed at its prey every tick, each on the arc that
+  lands on them. It slows while it breathes, then waits about three
+  seconds (`DRAGON_BREATH_*`, `World.dragonBreath`, `ProjKind.FireSpit`).
+  - Each glob is lighter than the old volley's: a small blast and a scorch
+    where it lands, and fire thrown out that burns whoever it reaches. A
+    clone caught in the cone takes many of them.
+  - It looks like a Stoneburner's meltdown: a gout of flame, sparks and
+    blood pours from its jaws. Each glob streams flame and white-hot sparks
+    and drips burning blood. Each bursts like a small meltdown: a ball of
+    flame, a storm of sparks, burning blood flung arcing, the air shoved,
+    and smoke.
 - **It spits its brood.** Every 14–18 seconds, with its prey in sight
   within 560 cells, it stops dead and roars, its jaws flung wide (the
   gape is sent in its `lift`; the client opens the head in steps and plays

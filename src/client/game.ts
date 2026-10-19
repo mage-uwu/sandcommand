@@ -27,7 +27,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { dragonBreathGout, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -2063,6 +2063,8 @@ export class Game implements FrameHandler {
       bloodSplat(this.particles, last.x + HIP_X + 0.5 + w.u * face, last.y + HIP_Y + w.v, 1, 6 + w.r * 6);
     }
     for (const [, v] of this.beastViews) {
+      // A dragon breathing (its jaws held part open, not flung wide roaring): fire pouring from its mouth.
+      if (v.kind === BeastKind.Dragon && v.frenzy && v.lift > 0.3 && v.lift < 0.8 && v.cur.length >= 4) dragonBreathGout(this.particles, v.cur[0], v.cur[1], Math.atan2(v.cur[1] - v.cur[3], v.cur[0] - v.cur[2]));
       const dmg = beastDamage(v.hp, v.top);
       if (dmg < 0.15 || v.gem || v.cur.length < 4 || Math.random() > dmg * 0.25) continue;
       const scars = beastScars(v.seed, v.cur.length >> 1, dmg).filter((c) => c.sev > 0.45);

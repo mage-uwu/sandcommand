@@ -3,7 +3,7 @@ import { ClassId, resetBody } from '../src/shared/body.ts';
 import { ACTOR_H, WORLD_H, WORLD_W } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { ProjKind, projName } from '../src/shared/weapons.ts';
-import { BASILISK_HP, BASILISK_R, BEAST_BUILD, BeastKind, DRAGON_HP, DRAGON_R, DRAGON_BROOD_MAX, DRAGON_BROOD_MIN, DRAGON_RATTLE, DRAGON_ROAR, bodyPoints, burrows, newBeast, wyrm } from '../src/shared/wildlife.ts';
+import { BASILISK_HP, BASILISK_R, BEAST_BUILD, BeastKind, DRAGON_HP, DRAGON_R, DRAGON_BREATH_PER, DRAGON_BREATH_TICKS, DRAGON_BROOD_MAX, DRAGON_BROOD_MIN, DRAGON_RATTLE, DRAGON_ROAR, bodyPoints, burrows, newBeast, wyrm } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -109,6 +109,32 @@ describe('the dragon', () => {
     }
     const near = brood().filter((c) => Math.hypot(c!.fx - a.cx, c!.fy - a.cy) < 200 || Math.hypot(c!.x - a.cx, c!.y - a.cy) < 200);
     expect(near.length).toBeGreaterThan(0);
+  });
+
+  it('its breath is a sustained shotgun blast: dozens of globs of burning blood over a second, fanned out, re-aimed at the clone', () => {
+    const { world, a, b } = lair();
+    world.hurtBeast(world.beasts.indexOf(b), 1, 255);
+    b.brood = 1e9; // (its breath alone)
+    const shots: { t: number; vx: number; vy: number }[] = [];
+    const w = world as unknown as { spawnProj: (...args: number[]) => unknown };
+    const real = w.spawnProj.bind(world);
+    let t = 0;
+    w.spawnProj = (id: number, kind: number, owner: number, x: number, y: number, vx: number, vy: number, ...rest: number[]) => {
+      if (kind === ProjKind.FireSpit) shots.push({ t, vx, vy });
+      return real(id, kind, owner, x, y, vx, vy, ...rest);
+    };
+    for (; t < 30 * 25 && shots.length < DRAGON_BREATH_TICKS * DRAGON_BREATH_PER; t++) {
+      a.hp = 100;
+      a.body.x = 1900;
+      a.body.y = Math.min(a.body.y, SURF - ACTOR_H);
+      world.step();
+    }
+    expect(shots.length).toBeGreaterThanOrEqual(DRAGON_BREATH_TICKS * DRAGON_BREATH_PER);
+    const breath = shots.slice(0, DRAGON_BREATH_TICKS * DRAGON_BREATH_PER);
+    // (Poured out over the breath's ticks, not all at once; fanned out, not one line.)
+    expect(breath[breath.length - 1].t - breath[0].t).toBeGreaterThanOrEqual(DRAGON_BREATH_TICKS - 2);
+    const angles = breath.map((s) => Math.atan2(s.vy, s.vx));
+    expect(Math.max(...angles) - Math.min(...angles)).toBeGreaterThan(0.2);
   });
 
   it("it bores a tunnel three times a basilisk's", () => {

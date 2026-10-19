@@ -759,20 +759,47 @@ export function moltenCore(p: Particles, x: number, y: number, heat: number): vo
   }
 }
 
-/** A dragon's spit in flight: flame streaming off it, drops of burning blood falling away, a little smoke. */
+/**
+ * A glob of a dragon's breath in flight, after a Stoneburner's meltdown
+ * (moltenCore, stoneburnBlast): flame licking off it, white-hot sparks
+ * streaking away, drops of burning blood falling off it, a little smoke.
+ * Dozens of them to a breath: together, a sustained shotgun blast of blood
+ * and fire.
+ */
 export function fireSpitTrail(p: Particles, x: number, y: number, vx: number, vy: number): void {
-  p.spawn(PK.Flame, x + rnd(-1.5, 1.5), y + rnd(-1.5, 1.5), vx * 0.15 + rnd(-20, 20), vy * 0.15 + rnd(-30, 10), rnd(6, 12));
-  if (Math.random() < 0.4) p.spawn(PK.Blood, x, y, vx * 0.1 + rnd(-15, 15), vy * 0.1 + rnd(-10, 10), 40);
-  if (Math.random() < 0.25) p.spawn(PK.Smoke, x, y, rnd(-10, 10), rnd(-20, 0), rnd(30, 60));
+  for (let k = 0; k < 2; k++) p.spawn(PK.Flame, x + rnd(-2.5, 2.5), y + rnd(-2.5, 2.5), vx * 0.3 + rnd(-35, 35), vy * 0.3 + rnd(-55, 10), rnd(10, 20));
+  if (Math.random() < 0.75) p.spawn(PK.Spark, x, y, vx * 0.5 + rnd(-90, 90), vy * 0.5 + rnd(-90, 60), rnd(8, 16));
+  if (Math.random() < 0.45) p.spawn(PK.Blood, x, y, vx * 0.15 + rnd(-25, 25), vy * 0.15 + rnd(-20, 10), 40);
+  if (Math.random() < 0.15) p.spawn(PK.Smoke, x, y, rnd(-10, 10), rnd(-25, 0), rnd(40, 80));
 }
 
-/** A dragon's spit bursting: a splash of blood and a gout of flame thrown up off it. */
-export function fireSpitBurst(p: Particles, x: number, y: number): void {
-  bloodSplat(p, x, y, 18, 120);
-  for (let k = 0; k < 30; k++) {
-    const a = -Math.PI * Math.random();
-    const s = rnd(60, 260);
-    p.spawn(PK.Flame, x + rnd(-3, 3), y + rnd(-3, 2), Math.cos(a) * s, Math.sin(a) * s, rnd(14, 34));
+/** A dragon's breath at its jaws (head at x, y, facing `a`): a gout of flame, sparks and blood pouring out. */
+export function dragonBreathGout(p: Particles, x: number, y: number, a: number): void {
+  const mx = x + Math.cos(a) * 22;
+  const my = y + Math.sin(a) * 22;
+  for (let k = 0; k < 4; k++) {
+    const d = a + rnd(-0.3, 0.3);
+    const s = rnd(220, 480);
+    p.spawn(k < 3 ? PK.Flame : PK.Spark, mx + rnd(-3, 3), my + rnd(-3, 3), Math.cos(d) * s, Math.sin(d) * s, rnd(8, 18));
   }
-  burst(p, PK.Smoke, x, y - 4, 14, 60, 90);
+  if (Math.random() < 0.6) p.spawn(PK.Blood, mx, my, Math.cos(a) * rnd(150, 320), Math.sin(a) * rnd(150, 320), 40);
+  if (Math.random() < 0.3) p.spawn(PK.Smoke, mx, my, Math.cos(a) * 60, Math.sin(a) * 60 - 20, rnd(40, 80));
+}
+
+/**
+ * A glob of it bursting, a Stoneburner's meltdown in little: a ball of
+ * flame and a storm of sparks thrown out, burning blood flung arcing, the
+ * air shoved, a splash of blood, smoke rolling up.
+ */
+export function fireSpitBurst(p: Particles, x: number, y: number): void {
+  p.blast(x, y, 22, 120);
+  burst(p, PK.Flame, x, y - 2, 24, 200, 18);
+  burst(p, PK.Spark, x, y - 2, 18, 380, 18);
+  for (let k = 0; k < 8; k++) {
+    const a = -Math.PI * (0.1 + 0.8 * Math.random());
+    const s = rnd(90, 300);
+    p.spawn(PK.Flame, x + rnd(-3, 3), y + rnd(-3, 2), Math.cos(a) * s, Math.sin(a) * s, rnd(20, 45));
+  }
+  bloodSplat(p, x, y, 8, 110);
+  burst(p, PK.Smoke, x, y - 4, 6, 50, 90);
 }

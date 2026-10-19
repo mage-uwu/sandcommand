@@ -361,7 +361,9 @@ import {
   DRAGON_SPIT_CD,
   DRAGON_SPIT_RANGE,
   DRAGON_SPIT_SPEED,
-  DRAGON_SPIT_VOLLEY,
+  DRAGON_BREATH_PER,
+  DRAGON_BREATH_SPREAD,
+  DRAGON_BREATH_TICKS,
   DRAGON_BROOD_CD,
   DRAGON_BROOD_CROWD,
   DRAGON_BROOD_FLING,
@@ -2697,21 +2699,25 @@ export class World {
   }
 
   /**
-   * A dragon spits: a volley of flaming blood from its jaws at (tx, ty),
-   * each glob on the arc that lands near it (fanned out a little: a spray,
-   * not a shot), then a while before the next.
+   * One tick of a dragon's breath: burning blood blasted from its jaws at
+   * (tx, ty), DRAGON_BREATH_PER globs fanned across the cone round the arc
+   * that lands on them (a shotgun's spread, sustained: it's re-aimed every
+   * tick). Its last tick: a while before the next.
    */
-  private dragonSpit(b: Beast, hx: number, hy: number, tx: number, ty: number): void {
+  private dragonBreath(b: Beast, hx: number, hy: number, tx: number, ty: number): void {
     const rng = this.beastRng;
     const g = GRAVITY * PROJ[ProjKind.FireSpit].gravity;
     const sol = ballisticAim(hx, hy, { x: tx, y: ty, vx: 0, vy: 0 }, DRAGON_SPIT_SPEED, g);
     const a0 = sol ? sol.aim : Math.atan2(ty - hy, tx - hx) - 0.35;
-    for (let k = 0; k < DRAGON_SPIT_VOLLEY; k++) {
-      const a = a0 + rng.range(-0.12, 0.12);
-      const sp = DRAGON_SPIT_SPEED * rng.range(0.9, 1.08);
+    for (let k = 0; k < DRAGON_BREATH_PER; k++) {
+      const a = a0 + rng.range(-DRAGON_BREATH_SPREAD, DRAGON_BREATH_SPREAD);
+      const sp = DRAGON_SPIT_SPEED * rng.range(0.8, 1.15);
       this.spawnProj(this.nextProjId++, ProjKind.FireSpit, NO_OWNER, hx + Math.cos(a) * 20, hy + Math.sin(a) * 20, Math.cos(a) * sp, Math.sin(a) * sp);
     }
-    b.spitCd = DRAGON_SPIT_CD + rng.int(30);
+    if (--b.breath <= 0) {
+      b.breath = 0;
+      b.spitCd = DRAGON_SPIT_CD + rng.int(30);
+    }
   }
 
   /** Room for a dragon's brood by its head at (hx, hy): free slots, and not DRAGON_BROOD_CROWD crawlers about it already. */
@@ -2848,7 +2854,8 @@ export class World {
       bodyPoints(t, b, pts);
       return;
     }
-    b.lift *= 0.65;
+    // (Its jaws gape while it breathes, else close.)
+    b.lift += ((b.breath > 0 ? 0.6 : 0) - b.lift) * 0.35;
     if (b.lift < 0.01) b.lift = 0;
     const surf = t.surfaceY(Math.round(b.fx));
     let gx = b.fx;
@@ -2889,6 +2896,7 @@ export class World {
       const lair = this.lairHome.has(b);
       const prey = lair ? this.lairPrey(b.fx, b.fy) : this.basiliskPrey(b.fx, b.fy, sc);
       speed = BASILISK_HUNT * pace;
+      if (!prey) b.breath = 0;
       if (prey) {
         b.frenzy = BASILISK_CALM;
         const via = lair ? this.basiliskRoute(b, prey.x, prey.y) : null;
@@ -2904,7 +2912,12 @@ export class World {
           b.rear = 1;
           b.brood = DRAGON_BROOD_CD + rng.int(30 * 4);
           b.spitCd = Math.max(b.spitCd, DRAGON_ROAR + 20);
-        } else if (b.kind === BeastKind.Dragon && b.spitCd === 0 && d < DRAGON_SPIT_RANGE && d > DRAGON_R * 2 && this.lineClear(pts[0], pts[1], prey.x, prey.y)) this.dragonSpit(b, pts[0], pts[1], prey.x, prey.y);
+        } else if (b.kind === BeastKind.Dragon && (b.breath > 0 || (b.spitCd === 0 && d < DRAGON_SPIT_RANGE && d > DRAGON_R * 2)) && this.lineClear(pts[0], pts[1], prey.x, prey.y)) {
+          // Its breath: a sustained blast of burning blood at them (slowing as it pours it out).
+          if (b.breath === 0) b.breath = DRAGON_BREATH_TICKS;
+          this.dragonBreath(b, pts[0], pts[1], prey.x, prey.y);
+          speed *= 0.35;
+        } else b.breath = 0;
       } else if (--b.frenzy <= 0) {
         // Nothing left: down into the deep, to sleep.
         b.frenzy = 0;
@@ -4600,12 +4613,13 @@ export class World {
     const seed = this.rng.nextU32();
     // A dragon's flaming blood, bursting: the fire it throws out (it burns whoever it reaches), and the blood.
     if (kind === ProjKind.FireSpit) {
-      for (let n = 0; n < 26; n++) {
+      // (One of dozens in a breath: a small burst each.)
+      for (let n = 0; n < 9; n++) {
         const a = -Math.PI * this.rng.next();
         const sp = 60 + this.rng.next() * 200;
         this.grains.spawn(PK.Flame, x + this.rng.range(-4, 4), y + this.rng.range(-4, 2), Math.cos(a) * sp, Math.sin(a) * sp, 20 + this.rng.int(30), 0, 0, NO_OWNER);
       }
-      for (let n = 0; n < 10; n++) this.grains.spawn(PK.Blood, x, y, this.rng.range(-120, 120), this.rng.range(-160, 20), 40, 0, 0, NO_OWNER);
+      for (let n = 0; n < 4; n++) this.grains.spawn(PK.Blood, x, y, this.rng.range(-120, 120), this.rng.range(-160, 20), 40, 0, 0, NO_OWNER);
     }
     if (detonate) {
       if (def.carveR > 0 && (actor < 0 || !def.ballistic)) {

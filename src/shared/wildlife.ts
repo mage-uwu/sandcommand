@@ -453,11 +453,19 @@ export const DRAGON_R = BASILISK_R * DRAGON_SCALE;
 export const DRAGON_HP = BASILISK_HP * 12;
 /** How often a wild basilisk's turn brings a dragon instead. */
 export const DRAGON_ODDS = 0.25;
-/** Its spit: how far off it'll spit at what it's hunting (cells), ticks between volleys, globs in one, and their speed (cells/s). */
+/**
+ * Its breath: a sustained shotgun blast of burning blood. In range (cells)
+ * of what it's hunting, it gapes and pours it out for DRAGON_BREATH_TICKS,
+ * DRAGON_BREATH_PER globs a tick fanned out across DRAGON_BREATH_SPREAD
+ * either side of its aim (re-aimed at them every tick), at about
+ * DRAGON_SPIT_SPEED; then DRAGON_SPIT_CD ticks before the next.
+ */
 export const DRAGON_SPIT_RANGE = 700;
-export const DRAGON_SPIT_CD = 30 * 2;
-export const DRAGON_SPIT_VOLLEY = 4;
+export const DRAGON_SPIT_CD = 30 * 3;
 export const DRAGON_SPIT_SPEED = 520;
+export const DRAGON_BREATH_TICKS = 20;
+export const DRAGON_BREATH_PER = 2;
+export const DRAGON_BREATH_SPREAD = 0.2;
 /**
  * Its brood: now and then, prey in sight, it stops dead and roars, jaws
  * gaping (DRAGON_ROAR ticks, the gape held at its widest); at the top of it
@@ -598,6 +606,8 @@ export interface Beast {
   /** A basilisk (or dragon) holding a clone in its jaws (their id, or -1), and ticks into it. */
   hold: number;
   holdT: number;
+  /** A dragon breathing burning blood: ticks of it left. */
+  breath: number;
 }
 
 /** A millipede taking hold at (x, y) (an open cell), going `dir` (-1, 1) along the floor. */
@@ -667,6 +677,7 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     bored: 0,
     carry: 0,
     limbs: 0,
+    breath: 0,
     hold: -1,
     holdT: 0,
   };
