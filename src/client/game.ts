@@ -1939,8 +1939,15 @@ export class Game implements FrameHandler {
       venomSplash(this.particles, x, y);
       return;
     }
-    // A dragon's flaming blood: it bursts into fire and gore (and goes off as below).
-    if (kind === ProjKind.FireSpit) fireSpitBurst(this.particles, x, y);
+    // A dragon's flaming blood: it bursts into fire and gore, in pixels, and that's all (no round
+    // flash, no grenade's fireball: there are dozens to a breath). A quiet boom now and then, a little shake.
+    if (kind === ProjKind.FireSpit) {
+      fireSpitBurst(this.particles, x, y);
+      if (Math.random() < 0.25) this.sfx?.explode(x, y, PROJ[kind].splashR * 0.6);
+      const d = Math.hypot(this.body.x - x, this.body.y - y);
+      this.shake = Math.max(this.shake, Math.max(0, 1 - d / 300) * 2.5);
+      return;
+    }
     if (PROJ[kind].ballistic) {
       bulletImpact(this.particles, x, y, this.dustColorAt(x, y));
       return;
