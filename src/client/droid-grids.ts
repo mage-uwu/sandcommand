@@ -34,21 +34,20 @@ export const DDIM: Record<string, number> = { ...DPAL, x: 0x6a1008, X: 0x9a2a1a 
 /**
  * The chassis, facing right: a squat armoured pod, the exhaust stack at its
  * back, the hazard-striped nose at its front, a vent glowing in its belly,
- * the team light under the nose. Local x -3..12, y 6.4..14.4 (the clone
- * box's frame); its hip line (where the legs join, and it pitches) at CHASSIS_PIVOT.
+ * the team light under the nose. Local x -2..11, y 6..12 (the clone box's
+ * frame): carried up on its legs, its belly a couple of cells clear of the
+ * ground. Its hip line (where the legs join, and it pitches) at CHASSIS_PIVOT.
  */
 export const CHASSIS: Grid = [
-  '.KKK...........',
-  'KEEEK.KKKKKKK..',
-  'KeKeKKhhlhwhhK.',
-  'KeKKlllmlllRyyK',
-  'KmmwmmRmmmwmKyK',
-  'KdmmrRRmmdmmyKK',
-  'KgdgddoOoddgtK.',
-  '.KKKKKKKKKKKKK.',
+  '.KK..........',
+  'KEEKKKKKKKKK.',
+  'KeKhhlhwhlyyK',
+  'KmmwmRRmmmKyK',
+  'KgdrdoOodgtKK',
+  '.KKKKKKKKKKK.',
 ];
-/** The chassis's pivot (grid cells): local (4, 9.6); the grid's top-left at local (-3, 6.4). */
-export const CHASSIS_PIVOT = [7, 3.2] as const;
+/** The chassis's pivot (grid cells): local (4, 9.6); the grid's top-left at local (-2, 6). */
+export const CHASSIS_PIVOT = [6, 3.6] as const;
 
 /**
  * The head, in the aim's frame (+x along the gun, up is -y): a welded box,

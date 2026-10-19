@@ -2382,7 +2382,7 @@ like the clones (`src/client/droid-grids.ts`, baked by `droid-art.ts`). A
 squat armoured pod in drab olive gone dull, rust bleeding from its seams
 and rivets, grime caked low, a hazard-striped nose, an exhaust stack at its
 back that coughs dark puffs on the move, a vent glowing orange in its belly
-and its team light under the nose. It is slung low between **six legs**,
+and its team light under the nose. It is carried up on **six legs**, its belly clear of the ground,
 three either side, drawn in whole pixels: drab thighs worn bright along
 the top, bare rods for shins, a rusted bolt at each knee. Above it, on a
 short post, sits **its head**: a welded box with a bent antenna, a bolted

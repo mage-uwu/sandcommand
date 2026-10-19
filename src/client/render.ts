@@ -1930,7 +1930,7 @@ export class Renderer {
     }
     // On the move, its exhaust stack coughs: dark puffs rising off the back, thinning as they go.
     if (moving) {
-      const [ex, ey] = rot(X(-1.5), Y(6.4 + bob));
+      const [ex, ey] = rot(X(-0.5), Y(6 + bob));
       for (let p = 0; p < 2; p++) {
         const ph = ((now / 85 + p * 4) % 8) / 8;
         ctx.fillStyle = `rgba(34,30,24,${(0.7 * (1 - ph)).toFixed(2)})`;
