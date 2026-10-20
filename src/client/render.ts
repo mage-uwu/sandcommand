@@ -11,9 +11,10 @@ import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, lockReach } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, pieceCode, pieceOf, snapPiece } from '../shared/build.ts';
-import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
+import { type CraftView, type Game, type PlayerInfo, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
-import { bannerLines, layoutSub } from './banner.ts';
+import { layoutSub } from './banner.ts';
+import { fit as fitText, keyChip, panel, rankBadge, rrect, track, uiFont, withAlpha } from './hud-ui.ts';
 import type { InputState } from './input.ts';
 import type { Link } from './net.ts';
 import type { Coach } from './tutorial.ts';
@@ -3292,6 +3293,10 @@ export class Renderer {
     // HUD scale: device pixels per CSS pixel, shrunk on small (phone) screens.
     const s = dpr * Math.min(1, innerHeight / 560, innerWidth / 1000);
     const touch = input.touch;
+    this.bannerBottom = 0;
+    this.deathShown = false;
+    this.teamRects.length = 0;
+    this.respawnMax = game.alive ? 0 : Math.max(this.respawnMax, game.respawnTicks);
     ctx.textAlign = 'left';
     ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
 
@@ -3533,7 +3538,7 @@ export class Renderer {
 
     // Last Man Standing: the round, and what's happening to us in it.
     const rs = game.roundState;
-    if (rs) this.drawRound(game, rs, s, W, H);
+    if (rs) this.drawRound(game, rs, input.touch, s, W, H);
     this.voteRects.length = 0;
     if (rs?.vote && rs.phase === Phase.Victory) this.drawVote(rs.vote, Math.ceil(rs.timer / TICK_RATE), input.touch, s, W, H);
 
@@ -3597,17 +3602,8 @@ export class Renderer {
         if (!(ride.parts & (1 << CraftPart.Nose))) status.push('NOSE LOST');
         ctx.fillStyle = status.length > 1 || ride.hp < 70 ? '#ff9060' : '#a0ffa0';
         ctx.fillText(status.join('   '), W / 2, 84 * s);
-      } else {
-        const cause = !game.myCraft() && game.deathCause ? game.deathCause : '';
-        ctx.fillRect(W / 2 - 220 * s, H / 2 - 40 * s, 440 * s, (cause ? 76 : 60) * s);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(game.myCraft() ? 'Drop rocket inbound…' : secs > 0 ? `New clone in ${secs}…` : 'Launching drop rocket…', W / 2, H / 2 - 2 * s);
-        if (cause) {
-          // How we died, under it.
-          ctx.fillStyle = '#ff8070';
-          ctx.fillText(cause, W / 2, H / 2 + 22 * s);
-        }
-      }
+      } else if (game.myCraft()) this.drawBanner('INBOUND', 'drop rocket on its way', '#ffd34a', s, W, H);
+      else this.drawDeath(game, { title: 'FRAGGED', color: '#ff4d3d', status: secs > 0 ? 'new clone in' : 'launching drop rocket', secs: secs > 0 ? secs : null, watching: null, touch: input.touch, teams: 0 }, s, W, H);
     }
 
     // Dead, or between rounds: our K/D and the leaderboard.
@@ -3615,10 +3611,9 @@ export class Renderer {
     const piloting = game.ride?.passenger === game.myId;
     // (Not over the ballot while the vote's up: Tab still shows the scoreboard.)
     const ballot = !!rs?.vote && rs.phase === Phase.Victory;
-    if (!input.scoreboard && !ballot && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
+    if (!input.scoreboard && !ballot && !this.deathShown && game.myId >= 0 && (between || (!game.alive && !piloting))) this.drawKd(game, s, W, H);
     // Dead in a team mode: the choice of side.
-    this.teamRects.length = 0;
-    if (!input.scoreboard && !between && !game.alive && !piloting && rs && rs.phase === Phase.Live && TEAMS_IN_MODE[rs.mode] >= 2 && !game.isKing(game.myId)) this.drawTeamPick(game, TEAMS_IN_MODE[rs.mode], input.touch, s, W, H);
+    if (!input.scoreboard && !this.deathShown && !between && !game.alive && !piloting && rs && rs.phase === Phase.Live && TEAMS_IN_MODE[rs.mode] >= 2 && !game.isKing(game.myId)) this.drawTeamPick(game, TEAMS_IN_MODE[rs.mode], input.touch, s, W, H);
 
     if (input.scoreboard) this.drawScoreboard(game, s, W, H);
     else if (!between) this.drawObjective(game, views, s, W, H);
@@ -3690,8 +3685,11 @@ export class Renderer {
   }
 
   /**
-   * The K/D card: this session's kills, deaths and K/D for us, our career
-   * record, and the top clones by K/D (with our rank if we're not among them).
+   * The standings: dead or between rounds, under the death card or the
+   * round's message. Our numbers as tiles (kills, deaths, K/D, career K/D),
+   * then the top clones by K/D (with our own row if we're not among them),
+   * each with its rank badge, its colour, and its K, D and K/D. As many rows
+   * as there's room for above the team picker.
    */
   private drawKd(game: Game, s: number, W: number, H: number): void {
     const ctx = this.ctx;
@@ -3700,55 +3698,97 @@ export class Renderer {
     const kd = (p: { kills: number; deaths: number }) => kdRatio(p.kills, p.deaths);
     const rows = [...game.players.values()].sort((a, b) => kd(b) - kd(a) || b.kills - a.kills || a.deaths - b.deaths);
     const rank = rows.findIndex((p) => p.id === game.myId);
-    const top = rows.slice(0, 8);
-    const lineH = 15 * s;
-    const w = 340 * s;
-    const h = (top.length + (rank >= top.length ? 2 : 0) + 4) * lineH + 16 * s;
-    const x0 = W / 2 - w / 2;
-    const y0 = Math.min(H - h - 70 * s, H * 0.5 + 34 * s);
-    ctx.fillStyle = 'rgba(4,8,6,0.8)';
-    ctx.fillRect(x0, y0, w, h);
-    ctx.strokeStyle = 'rgba(160,255,160,0.22)';
-    ctx.lineWidth = Math.max(1, s);
-    ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
-    ctx.fillStyle = 'rgba(160,255,160,0.6)';
-    ctx.fillRect(x0, y0, w, Math.max(1, Math.round(2 * s)));
+    const w = Math.min(420 * s, W * 0.92);
+    const pad = 14 * s;
+    const rowH = 22 * s;
+    const headH = 30 * s;
+    const tileH = 46 * s;
+    const colH = 20 * s;
+    const x0 = (W - w) / 2;
+    const y0 = Math.max(this.bannerBottom + 14 * s, H * 0.2);
+    // (Room for the rows: down to just over the team picker.)
+    const room = H - 128 * s - y0 - (headH + tileH + colH + pad * 2);
+    const fit = Math.max(3, Math.min(8, Math.floor(room / rowH) - (rank >= 8 ? 1 : 0)));
+    const top = rows.slice(0, fit);
+    const extra = rank >= top.length;
+    const h = pad + headH + tileH + 8 * s + colH + (top.length + (extra ? 1 : 0)) * rowH + (extra ? 8 * s : 0) + pad * 0.6;
+    panel(ctx, x0, y0, w, h, s);
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    // The header: what this is, and where we stand.
+    let y = y0 + pad + headH / 2 - 4 * s;
     ctx.textAlign = 'left';
-    ctx.font = `bold ${Math.round(13 * s)}px ui-monospace, monospace`;
-    const lx = x0 + 14 * s;
-    let y = y0 + 8 * s + lineH;
-    ctx.fillStyle = '#fff';
-    ctx.fillText(`YOU   K ${me.kills}   D ${me.deaths}   K/D ${kd(me).toFixed(2)}   #${rank + 1}/${rows.length}`, lx, y);
-    y += lineH;
-    ctx.font = `${Math.round(11 * s)}px ui-monospace, monospace`;
-    ctx.fillStyle = '#9fe89f';
+    ctx.font = uiFont(12 * s, 800);
+    track(ctx, 2 * s);
+    ctx.fillStyle = '#e9e4da';
+    ctx.fillText('MATCH STANDINGS', x0 + pad, y);
+    ctx.textAlign = 'right';
+    ctx.font = uiFont(12 * s, 700);
+    track(ctx, 1 * s);
+    ctx.fillStyle = '#ffc23d';
+    ctx.fillText(`#${rank + 1}`, x0 + w - pad - ctx.measureText(` OF ${rows.length}`).width, y);
+    ctx.fillStyle = '#9aa0a8';
+    ctx.fillText(` OF ${rows.length}`, x0 + w - pad, y);
+    // Our numbers, as tiles.
     const c = game.career;
-    ctx.fillText(`career  ${c.kills} kills · ${c.deaths} deaths · K/D ${kdRatio(c.kills, c.deaths).toFixed(2)}`, lx, y);
-    y += lineH * 1.4;
-    ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
-    ctx.fillStyle = '#999';
-    ctx.fillText('LEADERBOARD          K    D    K/D', lx, y);
-    const row = (p: (typeof rows)[number], i: number) => {
-      y += lineH;
-      ctx.fillStyle = p.id === game.myId ? '#fff' : p.color;
-      const name = `${String(i + 1).padStart(2)}. ${p.name}`.padEnd(19).slice(0, 19);
-      ctx.fillText(`${name} ${String(p.kills).padStart(3)}  ${String(p.deaths).padStart(3)}  ${kd(p).toFixed(2).padStart(5)}`, lx, y);
-    };
-    top.forEach(row);
-    if (rank >= top.length) {
-      y += lineH * 0.8;
-      ctx.fillStyle = '#666';
-      ctx.fillText('  ...', lx, y);
-      y -= lineH * 0.2;
-      row(me, rank);
+    const tiles: [string, string][] = [
+      ['KILLS', String(me.kills)],
+      ['DEATHS', String(me.deaths)],
+      ['K/D', kd(me).toFixed(2)],
+      ['CAREER K/D', kdRatio(c.kills, c.deaths).toFixed(2)],
+    ];
+    const tg = 6 * s;
+    const tw = (w - pad * 2 - tg * (tiles.length - 1)) / tiles.length;
+    const ty = y0 + pad + headH;
+    tiles.forEach(([label, value], i) => {
+      const tx = x0 + pad + i * (tw + tg);
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      rrect(ctx, tx, ty, tw, tileH, 6 * s);
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.font = uiFont(19 * s, 800);
+      track(ctx, 0);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(value, tx + tw / 2, ty + tileH * 0.4);
+      ctx.font = uiFont(8.5 * s, 700);
+      track(ctx, 1.2 * s);
+      ctx.fillStyle = '#8f959d';
+      ctx.fillText(label, tx + tw / 2, ty + tileH * 0.78);
+    });
+    // The table.
+    const cR = x0 + w - pad;
+    const cD = cR - 44 * s;
+    const cK = cD - 44 * s;
+    y = ty + tileH + 8 * s + colH / 2;
+    ctx.font = uiFont(9 * s, 700);
+    track(ctx, 1.2 * s);
+    ctx.fillStyle = '#7d838b';
+    ctx.textAlign = 'left';
+    ctx.fillText('PLAYER', x0 + pad + 30 * s, y);
+    ctx.textAlign = 'right';
+    ctx.fillText('K', cK, y);
+    ctx.fillText('D', cD, y);
+    ctx.fillText('K/D', cR, y);
+    y += colH / 2;
+    const row = (p: (typeof rows)[number], i: number, k: number) => this.drawStandingRow(game, p, i + 1, k, x0 + pad, y + k * rowH, w - pad * 2, rowH, s);
+    top.forEach((p, i) => row(p, i, i));
+    if (extra) {
+      ctx.fillStyle = '#5c6168';
+      ctx.textAlign = 'center';
+      ctx.font = uiFont(10 * s, 700);
+      ctx.fillText('• • •', x0 + w / 2, y + top.length * rowH + 4 * s);
+      y += 8 * s;
+      row(me, rank, top.length);
     }
+    track(ctx, 0);
+    ctx.restore();
   }
 
   /**
    * Last Man Standing banners: waiting, the countdown, clones left, who you're
    * watching once you're out, and the winner of each wave.
    */
-  private drawRound(game: Game, rs: RoundState, s: number, W: number, H: number): void {
+  private drawRound(game: Game, rs: RoundState, touch: boolean, s: number, W: number, H: number): void {
     const ctx = this.ctx;
     const secs = Math.ceil(rs.timer / TICK_RATE);
     const name = (id: number) => (id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '???'));
@@ -3880,10 +3920,11 @@ export class Renderer {
       } else parts.push({ t: `${rs.left} LEFT`, c: '#e8ecef' });
       this.drawMatchCard(`WAVE ${rs.wave} · ${modeName}`, clock, secs <= 30 ? '#ff8070' : '#ffd34a', parts, extra, s);
       if (!game.alive && !game.ride && !game.myCraft()) {
-        const watching = game.spectate !== 255 ? `spectating ${name(game.spectate)} · click for next` : 'spectating';
-        // (How we died leads: who, with what; or what happened.)
-        const cause = game.deathCause ? `${game.deathCause} · ` : '';
-        if (rs.out) big('FRAGGED', `${cause}out for this wave · ${watching}`, '#ff4d3d');
+        const watching = game.spectate !== 255 ? game.spectate : null;
+        const sides = rs.phase === Phase.Live && TEAMS_IN_MODE[rs.mode] >= 2 && !game.isKing(game.myId) ? TEAMS_IN_MODE[rs.mode] : 0;
+        const dead = (status: string, secs: number | null) => this.drawDeath(game, { title: 'FRAGGED', color: '#ff4d3d', status, secs, watching, touch, teams: sides }, s, W, H);
+        const spectating = watching !== null ? `spectating ${name(watching)} · ${touch ? 'tap' : 'click'} for next` : 'spectating';
+        if (rs.out) dead('out for this wave', null);
         else if (rs.inWave && !game.fragged) {
           // Not on yet (just loaded in, or waiting for our rocket): loading out, not fragged.
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
@@ -3891,9 +3932,9 @@ export class Renderer {
           big('LOADING OUT', `${side}${back > 1 ? `deploying in ${back}s` : 'drop rocket on its way'}`, teams && game.myTeam !== Team.None ? teamCss(game.myTeam) : '#ffd34a');
         } else if ((regicide || extraction || pvp || siege || exterm) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
-          big('FRAGGED', back > 0 ? `${cause}redeploying in ${Math.floor(back / 60)}:${String(back % 60).padStart(2, '0')} · ${watching}` : `${cause}drop rocket inbound · ${watching}`, '#ff4d3d');
+          dead(back > 0 ? 'redeploying in' : 'drop rocket inbound', back > 0 ? back : null);
         }
-        else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${watching}`, '#c8d0d8');
+        else if (!rs.inWave) big('STAND BY', `wave in progress · you're in the next one · ${spectating}`, '#c8d0d8');
         else if (teams && game.myTeam !== Team.None) big('INBOUND', `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · drop rocket on its way`, teamCss(game.myTeam));
         else big('INBOUND', 'drop rocket on its way', '#ffd34a');
       }
@@ -3958,16 +3999,13 @@ export class Renderer {
   /** When the current big message first showed (it slides in each time it changes). */
   private bannerKey = '';
   private bannerAt = 0;
+  /** This frame: the bottom of the big message or death card (device px), so what's under it can stack below. */
+  private bannerBottom = 0;
+  /** This frame: the death card is up (it holds the standings and the team switch itself). */
+  private deathShown = false;
+  /** The longest wait to come back we've seen since we died (ticks): the death card's bar fills toward it. */
+  private respawnMax = 0;
 
-  /**
-   * A big centre-screen message, retro console style but tidy: the title
-   * in block letters made of █ (banner.ts), glowing in the message's colour
-   * over a hard drop shadow, on a dark band with faint scanlines that fades
-   * out at its edges, edged with thin rules in that colour. Under it, a
-   * terminal prompt: the status line (the subtitle's first segment) with a
-   * blinking cursor, and the hints in dim phosphor green, wrapped to fit
-   * the screen. Everything is sized to fit; each new message slides in.
-   */
   /** Team buttons (Renderer.teamHit), device px, by team. */
   private readonly teamRects: { x: number; y: number; w: number; h: number; i: number }[] = [];
 
@@ -3981,44 +4019,87 @@ export class Renderer {
   }
 
   /**
-   * Dead, in a team mode: a row of the sides (each in its colour, ours lit),
-   * to switch to one (a click or tap, or C for the next), down by the
-   * bottom of the screen, out of the way of the leaderboard.
+   * Dead, in a team mode: a card for each side (its colour, its name, how
+   * many fight for it; ours lit and tagged), to switch to one with a click
+   * or tap (or C for the next), down by the bottom of the screen, under the
+   * standings.
    */
   private drawTeamPick(game: Game, n: number, touch: boolean, s: number, W: number, H: number): void {
     const ctx = this.ctx;
-    const MONO = 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
-    const bw = 92 * s;
-    const bh = 24 * s;
-    const gap = 6 * s;
-    const label = 74 * s;
-    const total = label + n * bw + (n - 1) * gap;
+    const gap = 8 * s;
+    const bw = Math.min(150 * s, (W * 0.92 - gap * (n - 1)) / n);
+    const bh = 54 * s;
+    const total = n * bw + (n - 1) * gap;
     const x0 = (W - total) / 2;
-    const y0 = H - 96 * s;
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(x0 - 8 * s, y0 - 6 * s, total + 16 * s, bh + 12 * s);
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
-    ctx.font = `bold ${Math.round(11 * s)}px ${MONO}`;
-    ctx.fillStyle = '#b8c2ca';
-    ctx.fillText(touch ? 'TEAM' : 'TEAM (C)', x0, y0 + bh / 2);
-    ctx.textAlign = 'center';
+    const y0 = H - 112 * s;
+    const counts = new Array<number>(n).fill(0);
+    for (const p of game.players.values()) {
+      const t = game.teamOf[p.id] ?? Team.None;
+      if (t < n) counts[t]++;
+    }
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    // The heading: what this is, and how.
+    ctx.textAlign = 'left';
+    ctx.font = uiFont(10.5 * s, 800);
+    track(ctx, 2 * s);
+    const head = touch ? 'TAP A TEAM TO SWITCH' : 'SWITCH TEAM';
+    const hw = ctx.measureText(head).width + (touch ? 0 : 8 * s + 24 * s);
+    const hy = y0 - 14 * s;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillText(head, W / 2 - hw / 2 + s, hy + s);
+    ctx.fillStyle = '#d9dde2';
+    ctx.fillText(head, W / 2 - hw / 2, hy);
+    if (!touch) keyChip(ctx, 'C', W / 2 - hw / 2 + ctx.measureText(head).width + 8 * s, hy, 10 * s, s);
     for (let t = 0; t < n; t++) {
-      const x = x0 + label + t * (bw + gap);
+      const x = x0 + t * (bw + gap);
       const mine = game.myTeam === t;
-      ctx.fillStyle = mine ? teamCss(t) : 'rgba(255,255,255,0.06)';
-      ctx.globalAlpha = mine ? 0.45 : 1;
+      const col = teamCss(t);
+      panel(ctx, x, y0, bw, bh, s, undefined, 0.8);
+      // Its colour washing up from the bottom: strong on ours.
+      ctx.save();
+      rrect(ctx, x, y0, bw, bh, 8 * s);
+      ctx.clip();
+      const g = ctx.createLinearGradient(0, y0 + bh, 0, y0);
+      g.addColorStop(0, withAlpha(col, mine ? 0.55 : 0.2));
+      g.addColorStop(1, withAlpha(col, mine ? 0.12 : 0.02));
+      ctx.fillStyle = g;
       ctx.fillRect(x, y0, bw, bh);
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = teamCss(t);
-      ctx.lineWidth = Math.max(1, (mine ? 2 : 1) * s);
-      ctx.strokeRect(x + 0.5, y0 + 0.5, bw - 1, bh - 1);
-      ctx.fillStyle = mine ? '#fff' : teamCss(t);
-      ctx.fillText(`${mine ? '▸ ' : ''}${TEAM_NAMES[t]}`, x + bw / 2, y0 + bh / 2);
+      ctx.fillStyle = col;
+      ctx.fillRect(x, y0 + bh - 3 * s, bw, 3 * s);
+      ctx.restore();
+      if (mine) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2 * s;
+        rrect(ctx, x + s, y0 + s, bw - 2 * s, bh - 2 * s, 7 * s);
+        ctx.stroke();
+      }
+      ctx.textAlign = 'left';
+      ctx.font = uiFont(16 * s, 900, true);
+      track(ctx, 1.5 * s);
+      ctx.fillStyle = mine ? '#ffffff' : col;
+      ctx.fillText(TEAM_NAMES[t], x + 12 * s, y0 + bh * 0.4);
+      ctx.font = uiFont(10 * s, 600);
+      track(ctx, 0.5 * s);
+      ctx.fillStyle = mine ? 'rgba(255,255,255,0.85)' : '#9aa0a8';
+      ctx.fillText(`${counts[t]} ${counts[t] === 1 ? 'clone' : 'clones'}`, x + 12 * s, y0 + bh * 0.72);
+      if (mine) {
+        // (Tagged: you're here.)
+        ctx.font = uiFont(8 * s, 800);
+        track(ctx, 1 * s);
+        const tag = 'YOURS';
+        const tw2 = ctx.measureText(tag).width + 10 * s;
+        ctx.fillStyle = col;
+        rrect(ctx, x + bw - tw2 - 8 * s, y0 + 8 * s, tw2, 14 * s, 7 * s);
+        ctx.fill();
+        ctx.fillStyle = '#0d0d10';
+        ctx.textAlign = 'center';
+        ctx.fillText(tag, x + bw - tw2 / 2 - 8 * s, y0 + 15 * s);
+      }
       this.teamRects.push({ x, y: y0, w: bw, h: bh, i: t });
     }
+    track(ctx, 0);
     ctx.restore();
   }
 
@@ -4088,127 +4169,500 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawBanner(text: string, sub: string, color: string, s: number, W: number, H: number): void {
+  /**
+   * A big title across the screen at `top` (device px): heavy italic caps,
+   * spaced, lit from above in its colour with a glow, over a hard shadow,
+   * an accent bar drawing out under it. Sized to fit; `ease` (0..1) slides
+   * and fades it in. Returns the bottom of the bar.
+   */
+  private drawTitle(text: string, color: string, top: number, ease: number, s: number, W: number): number {
     const ctx = this.ctx;
-    const now = performance.now();
-    if (text !== this.bannerKey) {
-      this.bannerKey = text;
-      this.bannerAt = now;
+    const maxW = W * 0.86;
+    let size = 58 * s;
+    ctx.font = uiFont(size, 900, true);
+    track(ctx, size * 0.08);
+    const wanted = ctx.measureText(text.toUpperCase()).width;
+    if (wanted > maxW) {
+      size *= maxW / wanted;
+      ctx.font = uiFont(size, 900, true);
+      track(ctx, size * 0.08);
     }
-    const t = Math.min(1, (now - this.bannerAt) / 260);
-    const ease = 1 - (1 - t) * (1 - t) * (1 - t);
-    const maxW = W * 0.84;
-    const MONO = 'ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
-    // The title in block letters, sized so the whole banner fits (monospace cells are ~0.6em wide).
-    const lines = bannerLines(text);
-    const cols = Math.max(1, lines[0].length);
-    const px = Math.max(4, Math.min(13 * s, maxW / (cols * 0.6)));
-    const bw = cols * px * 0.6;
-    const titleH = lines.length * px;
-    // The prompt: status line and hints, wrapped to fit.
-    const hp = Math.max(10, Math.round(14 * s));
-    const sp = Math.max(9, Math.round(12 * s));
-    ctx.font = `${sp}px ${MONO}`;
-    const lay = layoutSub(sub, maxW, (x) => ctx.measureText(x).width);
-    const head = lay.head ? `> ${lay.head.toUpperCase()}` : '';
-    const headH = head ? hp * 1.8 : 0;
-    const hintH = sp * 1.45;
-    const padY = 14 * s;
-    const bandH = padY * 2 + titleH + (head || lay.hints.length ? 8 * s : 0) + headH + lay.hints.length * hintH;
-    const top = H * 0.17;
+    const label = text.toUpperCase();
+    const k = 1 + (1 - ease) * 0.12;
+    const cy = top + size * 0.55;
     ctx.save();
-    ctx.globalAlpha = ease;
-    // The band, fading out toward the sides, with faint scanlines.
-    const g = ctx.createLinearGradient(0, 0, W, 0);
-    g.addColorStop(0, 'rgba(4,8,6,0)');
-    g.addColorStop(0.2, 'rgba(4,8,6,0.78)');
-    g.addColorStop(0.8, 'rgba(4,8,6,0.78)');
-    g.addColorStop(1, 'rgba(4,8,6,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, top, W, bandH);
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    const step = Math.max(2, Math.round(3 * s));
-    for (let y = top + 1; y < top + bandH; y += step) ctx.fillRect(W * 0.12, y, W * 0.76, 1);
-    // Rules top and bottom, in the message's colour, drawing out from the centre.
-    const rw = W * 0.6 * ease;
-    const rule = ctx.createLinearGradient(W / 2 - rw / 2, 0, W / 2 + rw / 2, 0);
-    rule.addColorStop(0, 'rgba(0,0,0,0)');
-    rule.addColorStop(0.5, color);
-    rule.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = rule;
-    const rh = Math.max(1, Math.round(2 * s));
-    ctx.fillRect(W / 2 - rw / 2, top, rw, rh);
-    ctx.fillRect(W / 2 - rw / 2, top + bandH - rh, rw, rh);
-    // The title: a soft glow in its colour, a hard drop shadow, then the letters.
-    ctx.font = `${px}px ${MONO}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    const x0 = W / 2 - bw / 2 + (1 - ease) * -40 * s;
-    const y0 = top + padY;
-    const off = Math.max(1, Math.round(px * 0.18));
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    for (let r = 0; r < lines.length; r++) ctx.fillText(lines[r], x0 + off, y0 + r * px + off);
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 16 * s;
-    ctx.fillStyle = color;
-    for (let r = 0; r < lines.length; r++) ctx.fillText(lines[r], x0, y0 + r * px);
-    ctx.shadowBlur = 0;
-    // The prompt.
-    let y = y0 + titleH + 8 * s;
+    ctx.translate(W / 2, cy);
+    ctx.scale(k, k);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    if (head) {
-      let hw = hp;
-      ctx.font = `bold ${hw}px ${MONO}`;
-      const cursor = Math.floor(now / 500) % 2 ? '_' : ' ';
-      while (hw > 8 && ctx.measureText(head + '_').width > maxW) {
-        hw--;
-        ctx.font = `bold ${hw}px ${MONO}`;
-      }
-      y += headH / 2;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillText(head + cursor, W / 2 + s, y + s);
-      ctx.fillStyle = '#e8ffe8';
-      ctx.fillText(head + cursor, W / 2, y);
-      y += headH / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillText(label, 3 * s, 4 * s);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 28 * s;
+    const g = ctx.createLinearGradient(0, -size / 2, 0, size / 2);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.55, color);
+    g.addColorStop(1, color);
+    ctx.fillStyle = g;
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+    track(ctx, 0);
+    // The accent bar, drawing out from the middle, brightest at its centre.
+    const by = top + size * 1.12;
+    const bw = Math.min(maxW, 260 * s) * ease;
+    const bar = ctx.createLinearGradient(W / 2 - bw / 2, 0, W / 2 + bw / 2, 0);
+    bar.addColorStop(0, withAlpha(color, 0));
+    bar.addColorStop(0.5, color);
+    bar.addColorStop(1, withAlpha(color, 0));
+    ctx.fillStyle = bar;
+    ctx.fillRect(W / 2 - bw / 2, by, bw, Math.max(2, 3 * s));
+    return by + 3 * s;
+  }
+
+  /** When the current message, or death card, first showed (each slides in as it changes). */
+  private easeIn(key: string): number {
+    const now = performance.now();
+    if (key !== this.bannerKey) {
+      this.bannerKey = key;
+      this.bannerAt = now;
     }
-    ctx.font = `${sp}px ${MONO}`;
-    ctx.fillStyle = 'rgba(150,232,150,0.85)';
+    const t = Math.min(1, (now - this.bannerAt) / 320);
+    return 1 - (1 - t) * (1 - t) * (1 - t);
+  }
+
+  /** A soft dark band behind a message, from `y0` to `y1`, fading out at its edges (so it reads over anything). */
+  private shade(y0: number, y1: number, a: number, W: number): void {
+    const ctx = this.ctx;
+    const pad = (y1 - y0) * 0.35 + 20;
+    const g = ctx.createLinearGradient(0, y0 - pad, 0, y1 + pad);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.25, `rgba(6,6,10,${0.55 * a})`);
+    g.addColorStop(0.75, `rgba(6,6,10,${0.55 * a})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y0 - pad, W, y1 - y0 + pad * 2);
+  }
+
+  /**
+   * A big centre-screen message ("WAVE 3", "RED WINS", "LOADING OUT"): the
+   * title (drawTitle), then the status (the subtitle's first segment) in
+   * spaced caps and the hints under it, dimmer, wrapped to fit (banner.ts).
+   */
+  private drawBanner(text: string, sub: string, color: string, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    const ease = this.easeIn(text);
+    const maxW = W * 0.84;
+    ctx.font = uiFont(13 * s, 500);
+    const lay = layoutSub(sub, maxW, (x) => ctx.measureText(x).width);
+    const top = H * 0.15;
+    // (The band first, sized from a guess at the title's height.)
+    const est = top + 58 * s * 1.2 + (lay.head ? 30 * s : 0) + lay.hints.length * 19 * s + 10 * s;
+    ctx.save();
+    ctx.globalAlpha = ease;
+    this.shade(top, est, 1, W);
+    let y = this.drawTitle(text, color, top, ease, s, W) + 14 * s;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (lay.head) {
+      let hs = 15 * s;
+      ctx.font = uiFont(hs, 700);
+      track(ctx, 2 * s);
+      while (hs > 8 && ctx.measureText(lay.head.toUpperCase()).width > maxW) {
+        hs--;
+        ctx.font = uiFont(hs, 700);
+      }
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillText(lay.head.toUpperCase(), W / 2 + s, y + 8 * s + s);
+      ctx.fillStyle = '#f4f4f6';
+      ctx.fillText(lay.head.toUpperCase(), W / 2, y + 8 * s);
+      y += 26 * s;
+      track(ctx, 0);
+    }
+    ctx.font = uiFont(13 * s, 500);
+    ctx.fillStyle = 'rgba(214,220,228,0.78)';
     for (const line of lay.hints) {
-      y += hintH / 2;
-      ctx.fillText(line, W / 2, y);
-      y += hintH / 2;
+      ctx.fillText(line, W / 2, y + 8 * s);
+      y += 19 * s;
     }
     ctx.restore();
+    this.bannerBottom = Math.max(this.bannerBottom, y);
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
   }
 
+  /**
+   * One row of the standings at (x, y), `w` wide, `rowH` tall: rank badge,
+   * colour, name, K, D and K/D; ours lit (`k` odd rows striped).
+   */
+  private drawStandingRow(game: Game, p: PlayerInfo, rank: number, k: number, x: number, y: number, w: number, rowH: number, s: number): void {
+    const ctx = this.ctx;
+    const mine = p.id === game.myId;
+    if (mine) {
+      ctx.fillStyle = 'rgba(255,194,61,0.14)';
+      rrect(ctx, x - 6 * s, y + 1 * s, w + 12 * s, rowH - 2 * s, 4 * s);
+      ctx.fill();
+    } else if (k % 2) {
+      ctx.fillStyle = 'rgba(255,255,255,0.025)';
+      ctx.fillRect(x - 6 * s, y, w + 12 * s, rowH);
+    }
+    const my = y + rowH / 2;
+    const cR = x + w;
+    const cD = cR - 44 * s;
+    const cK = cD - 44 * s;
+    const fs = Math.min(12.5 * s, rowH * 0.58);
+    ctx.textBaseline = 'middle';
+    rankBadge(ctx, rank, x + 9 * s, my, Math.min(8 * s, rowH * 0.38));
+    ctx.fillStyle = p.color;
+    ctx.fillRect(x + 22 * s, my - rowH * 0.27, 3 * s, rowH * 0.54);
+    ctx.textAlign = 'left';
+    ctx.font = uiFont(fs, mine ? 800 : 600);
+    track(ctx, 0);
+    ctx.fillStyle = mine ? '#ffd56a' : '#e8e8ea';
+    ctx.fillText(fitText(ctx, mine ? `${p.name} (you)` : p.name, cK - 30 * s - (x + 30 * s)), x + 30 * s, my);
+    ctx.textAlign = 'right';
+    ctx.font = uiFont(fs, 700);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(String(p.kills), cK, my);
+    ctx.fillStyle = '#b9bec5';
+    ctx.fillText(String(p.deaths), cD, my);
+    ctx.fillStyle = mine ? '#ffd56a' : '#ffffff';
+    ctx.fillText(kdRatio(p.kills, p.deaths).toFixed(2), cR, my);
+  }
+
+  /** A small spaced-caps label at (x, y) (its left, middle). Returns its width. */
+  private label(text: string, x: number, y: number, s: number, color = '#9aa0a8', size = 9): number {
+    const ctx = this.ctx;
+    ctx.font = uiFont(size * s, 800);
+    track(ctx, 1.8 * s);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+    const w = ctx.measureText(text).width;
+    track(ctx, 0);
+    return w;
+  }
+
+  /**
+   * The death card: the screen's edges stained red, the title, and under it
+   * one card with everything a dead clone needs, in order: who killed us
+   * (their name in their colour, their score, the weapon in a tag) or what
+   * did; the way back (redeploying, the time left, a bar filling toward
+   * it; or out for the wave); where we stand (our place and numbers, and the
+   * top of the standings, as many rows as there's room for); in a team mode
+   * the sides, to switch to one (a click or tap, or C); and along its foot,
+   * who we're watching and how to watch the next.
+   */
+  private drawDeath(game: Game, d: { title: string; color: string; status: string; secs: number | null; watching: number | null; touch: boolean; teams: number }, s: number, W: number, H: number): void {
+    const ctx = this.ctx;
+    this.deathShown = true;
+    const ease = this.easeIn(d.title + '·death');
+    const now = performance.now();
+    ctx.save();
+    // The edges of the view, stained red, breathing.
+    const pulse = 0.85 + 0.15 * Math.sin(now / 520);
+    const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+    v.addColorStop(0, 'rgba(90,0,0,0)');
+    v.addColorStop(1, `rgba(110,6,6,${0.42 * ease * pulse})`);
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = ease;
+    const top = H * 0.07;
+    const titleBottom = this.drawTitle(d.title, d.color, top, ease, s, W);
+    const cw = Math.min(460 * s, W * 0.94);
+    const cx = (W - cw) / 2;
+    const cy = titleBottom + 12 * s;
+    const pad = 16 * s;
+    const iw = cw - pad * 2;
+    const ix = cx + pad;
+    // What goes in it, and how tall each part is.
+    const killer = game.deathBy ? game.players.get(game.deathBy.id) : undefined;
+    const cause = game.deathCause.replace(/ \[(.*)\]$/, ' · $1');
+    const whoH = killer ? 62 * s : cause ? 50 * s : 0;
+    const backH = 40 * s;
+    const teamH = d.teams >= 2 ? 50 * s : 0;
+    const footH = d.watching !== null ? 34 * s : 0;
+    const me = game.players.get(game.myId);
+    const kd = (p: { kills: number; deaths: number }) => kdRatio(p.kills, p.deaths);
+    const rows = [...game.players.values()].sort((a, b) => kd(b) - kd(a) || b.kills - a.kills || a.deaths - b.deaths);
+    const rank = rows.findIndex((p) => p.id === game.myId);
+    const rowH = 21 * s;
+    const fixed = whoH + backH + teamH + footH + pad * 0.5;
+    // (The standings take what room is left above the inventory bar: up to five rows, ours always among them.)
+    const room = H - 60 * s - cy - fixed - 30 * s;
+    const nRows = me ? Math.max(0, Math.min(5, Math.floor(room / rowH))) : 0;
+    const standH = nRows > 0 ? 30 * s + nRows * rowH + 8 * s : 0;
+    const ch = fixed + standH;
+    panel(ctx, cx, cy, cw, ch, s, killer?.color ?? d.color, 0.9);
+    let y = cy + 6 * s;
+    const divider = () => {
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      ctx.fillRect(ix, y, iw, Math.max(1, s));
+    };
+    // Who, or what.
+    if (killer && game.deathBy) {
+      this.label('KILLED BY', ix + 4 * s, y + 13 * s, s);
+      ctx.font = uiFont(10 * s, 800);
+      track(ctx, 1.2 * s);
+      const wl = game.deathBy.weapon.toUpperCase();
+      const ww = ctx.measureText(wl).width + 16 * s;
+      const wy = y + 24 * s;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      rrect(ctx, ix + iw - ww, wy - 11 * s, ww, 22 * s, 11 * s);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = Math.max(1, s);
+      rrect(ctx, ix + iw - ww + 0.5, wy - 11 * s + 0.5, ww - 1, 22 * s - 1, 11 * s);
+      ctx.stroke();
+      ctx.fillStyle = '#f2f2f2';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(wl, ix + iw - ww / 2, wy);
+      track(ctx, 0);
+      ctx.textAlign = 'left';
+      ctx.font = uiFont(21 * s, 800);
+      ctx.fillStyle = killer.color;
+      ctx.fillText(fitText(ctx, killer.name, iw - ww - 12 * s), ix + 4 * s, y + 32 * s);
+      ctx.font = uiFont(10.5 * s, 600);
+      ctx.fillStyle = '#b4b9c0';
+      ctx.fillText(`${killer.kills} kills · ${killer.deaths} deaths · K/D ${kd(killer).toFixed(2)}`, ix + 4 * s, y + 51 * s);
+      y += whoH;
+      divider();
+    } else if (cause) {
+      this.label('CAUSE OF DEATH', ix + 4 * s, y + 13 * s, s);
+      ctx.font = uiFont(16 * s, 700);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(fitText(ctx, cause.charAt(0).toUpperCase() + cause.slice(1), iw - 4 * s), ix + 4 * s, y + 33 * s);
+      y += whoH;
+      divider();
+    }
+    // The way back.
+    const ry = y + 15 * s;
+    this.label(d.status.toUpperCase(), ix + 4 * s, ry, s, '#e6e8eb', 10.5);
+    if (d.secs !== null) {
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.font = uiFont(15 * s, 800);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`${Math.floor(d.secs / 60)}:${String(d.secs % 60).padStart(2, '0')}`, ix + iw, ry);
+    }
+    const barY = ry + 12 * s;
+    ctx.fillStyle = 'rgba(255,255,255,0.09)';
+    rrect(ctx, ix, barY, iw, 4 * s, 2 * s);
+    ctx.fill();
+    const prog = d.secs === null ? (d.status.startsWith('out') ? 0 : 1) : this.respawnMax > 0 ? Math.max(0, Math.min(1, 1 - game.respawnTicks / this.respawnMax)) : 0;
+    if (prog > 0) {
+      ctx.fillStyle = d.color;
+      rrect(ctx, ix, barY, Math.max(4 * s, iw * prog), 4 * s, 2 * s);
+      ctx.fill();
+    }
+    y += backH;
+    // Where we stand.
+    if (nRows > 0 && me) {
+      divider();
+      const hy = y + 15 * s;
+      this.label('STANDINGS', ix + 4 * s, hy, s);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.font = uiFont(10.5 * s, 700);
+      const tail = `  of ${rows.length}   ·   ${me.kills} K   ${me.deaths} D   ${kd(me).toFixed(2)} K/D`;
+      ctx.fillStyle = '#9aa0a8';
+      ctx.fillText(tail, ix + iw, hy);
+      ctx.fillStyle = '#ffc23d';
+      ctx.font = uiFont(10.5 * s, 800);
+      ctx.fillText(`#${rank + 1}`, ix + iw - (ctx.measureText(tail).width + 0), hy);
+      y += 30 * s;
+      // (The top, with ours in the last place if it isn't up there.)
+      const list = rows.slice(0, nRows).map((p, i) => ({ p, r: i + 1 }));
+      if (rank >= nRows) list[nRows - 1] = { p: me, r: rank + 1 };
+      list.forEach((e, k) => this.drawStandingRow(game, e.p, e.r, k, ix + 4 * s, y + k * rowH, iw - 8 * s, rowH, s));
+      y += nRows * rowH + 8 * s;
+    }
+    // The sides.
+    if (d.teams >= 2) {
+      divider();
+      const ty = y + 10 * s;
+      const th = 30 * s;
+      const lw = this.label('TEAM', ix + 4 * s, ty + th / 2, s);
+      let bx = ix + 4 * s + lw + 8 * s;
+      if (!d.touch) bx += keyChip(ctx, 'C', bx, ty + th / 2, 9 * s, s) + 10 * s;
+      const gap = 6 * s;
+      const bw = (ix + iw - bx - gap * (d.teams - 1)) / d.teams;
+      const counts = new Array<number>(d.teams).fill(0);
+      for (const p of game.players.values()) {
+        const t = game.teamOf[p.id] ?? Team.None;
+        if (t < d.teams) counts[t]++;
+      }
+      for (let t = 0; t < d.teams; t++) {
+        const x = bx + t * (bw + gap);
+        const col = TEAM_COLORS[t]?.css ?? '#fff';
+        const mine = game.myTeam === t;
+        ctx.fillStyle = withAlpha(col, mine ? 0.5 : 0.12);
+        rrect(ctx, x, ty, bw, th, 6 * s);
+        ctx.fill();
+        ctx.strokeStyle = withAlpha(col, mine ? 1 : 0.55);
+        ctx.lineWidth = Math.max(1, (mine ? 2 : 1) * s);
+        rrect(ctx, x + 0.5, ty + 0.5, bw - 1, th - 1, 6 * s);
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = uiFont(Math.min(12 * s, bw / 6), 900, true);
+        track(ctx, 1 * s);
+        ctx.fillStyle = mine ? '#ffffff' : col;
+        ctx.fillText(`${TEAM_NAMES[t]}${bw > 90 * s ? `  ${counts[t]}` : ''}`, x + bw / 2, ty + th / 2);
+        track(ctx, 0);
+        this.teamRects.push({ x, y: ty, w: bw, h: th, i: t });
+      }
+      y += teamH;
+    }
+    // Along its foot: who we're watching.
+    if (d.watching !== null) {
+      ctx.save();
+      rrect(ctx, cx, cy, cw, ch, 8 * s);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(cx, cy + ch - footH, cw, footH);
+      ctx.restore();
+      const fy = cy + ch - footH / 2;
+      const who = game.players.get(d.watching);
+      const lw = this.label('SPECTATING', ix + 4 * s, fy, s);
+      ctx.font = uiFont(12.5 * s, 700);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = who?.color ?? '#fff';
+      ctx.font = uiFont(10 * s, 700);
+      const nextW = ctx.measureText('NEXT').width;
+      ctx.font = uiFont(12.5 * s, 700);
+      const chipW = (d.touch ? 28 : 42) * s;
+      ctx.fillText(fitText(ctx, who ? who.name : '—', iw - lw - 30 * s - chipW - nextW), ix + 4 * s + lw + 10 * s, fy);
+      ctx.textAlign = 'right';
+      ctx.font = uiFont(10 * s, 700);
+      ctx.fillStyle = '#c9cdd3';
+      ctx.fillText('NEXT', ix + iw, fy);
+      const label = d.touch ? 'TAP' : 'CLICK';
+      ctx.font = uiFont(9 * s, 700);
+      track(ctx, 0.5 * s);
+      const kw = Math.max(9 * s * 1.7, ctx.measureText(label).width + 9 * s * 0.9);
+      track(ctx, 0);
+      keyChip(ctx, label, ix + iw - nextW - 6 * s - kw, fy, 9 * s, s);
+    }
+    ctx.restore();
+    this.bannerBottom = Math.max(this.bannerBottom, cy + ch);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+  }
+
+  /**
+   * The scoreboard (held Tab): every clone, ranked by wins, then kills,
+   * then gold; rank badge, colour, wins, kills, deaths, K/D; ours lit. Two
+   * columns when they won't fit in one; if they still don't, the last line
+   * says how many more there are (and ours is always shown).
+   */
   private drawScoreboard(game: Game, s: number, W: number, H: number): void {
     const ctx = this.ctx;
     const rows = [...game.players.values()].sort((a, b) => b.wins * 1000 + b.kills * 10 + b.gold - (a.wins * 1000 + a.kills * 10 + a.gold));
-    const lineH = 16 * s;
-    const cols = rows.length > 32 ? 2 : 1;
-    const perCol = Math.ceil(rows.length / cols);
-    const colW = 360 * s;
-    const w = colW * cols + 20 * s;
-    const h = (perCol + 2) * lineH + 20 * s;
-    const x0 = W / 2 - w / 2;
-    const y0 = Math.max(10 * s, H / 2 - h / 2);
-    ctx.fillStyle = 'rgba(8,8,12,0.85)';
-    ctx.fillRect(x0, y0, w, h);
-    ctx.font = `${Math.round(12 * s)}px ui-monospace, monospace`;
-    ctx.textAlign = 'left';
-    for (let c = 0; c < cols; c++) {
-      const cx = x0 + 10 * s + c * colW;
-      ctx.fillStyle = '#999';
-      ctx.fillText('CLONE              WINS KILLS DEATHS', cx, y0 + 20 * s);
-      rows.slice(c * perCol, (c + 1) * perCol).forEach((p, i) => {
-        ctx.fillStyle = p.id === game.myId ? '#fff' : p.color;
-        const name = p.name.padEnd(18).slice(0, 18);
-        ctx.fillText(`${name} ${String(p.wins).padStart(4)} ${String(p.kills).padStart(5)} ${String(p.deaths).padStart(6)}`, cx, y0 + 20 * s + (i + 1) * lineH);
-      });
+    const pad = 16 * s;
+    const headH = 44 * s;
+    const colH = 20 * s;
+    const avail = H - 40 * s - headH - colH - pad * 2;
+    const perOne = Math.max(1, Math.floor(avail / (22 * s)));
+    const cols = rows.length > perOne && W > 760 * s ? 2 : 1;
+    const perCol = Math.min(Math.ceil(rows.length / cols), perOne);
+    // (What fits: everyone, or all but the last line, which counts the rest; ours swapped in if it fell off.)
+    const cap = cols * perCol;
+    const list = rows.map((p, i) => ({ p, rank: i + 1 }));
+    let shown = list;
+    let more = 0;
+    if (list.length > cap) {
+      shown = list.slice(0, cap - 1);
+      const mine = list.findIndex((e) => e.p.id === game.myId);
+      if (mine >= cap - 1) shown[cap - 2] = list[mine];
+      more = list.length - shown.length;
     }
+    const rowH = Math.min(24 * s, Math.max(14 * s, avail / Math.max(1, perCol)));
+    const colW = Math.min(440 * s, (W * 0.94 - pad * 2 - (cols - 1) * 18 * s) / cols);
+    const w = colW * cols + (cols - 1) * 18 * s + pad * 2;
+    const h = pad * 2 + headH + colH + perCol * rowH;
+    const x0 = (W - w) / 2;
+    const y0 = Math.max(20 * s, (H - h) / 2);
+    panel(ctx, x0, y0, w, h, s, undefined, 0.92);
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = uiFont(20 * s, 900, true);
+    track(ctx, 2 * s);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('SCOREBOARD', x0 + pad, y0 + pad + 12 * s);
+    ctx.textAlign = 'right';
+    ctx.font = uiFont(11 * s, 700);
+    track(ctx, 1.2 * s);
+    ctx.fillStyle = '#9aa0a8';
+    ctx.fillText(`${rows.length} ${rows.length === 1 ? 'CLONE' : 'CLONES'}`, x0 + w - pad, y0 + pad + 12 * s);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(x0 + pad, y0 + pad + headH - 8 * s, w - pad * 2, Math.max(1, s));
+    for (let c = 0; c < cols; c++) {
+      const cx = x0 + pad + c * (colW + 18 * s);
+      const cR = cx + colW - 6 * s;
+      const cD = cR - 58 * s;
+      const cK = cD - 62 * s;
+      const cW = cK - 52 * s;
+      let y = y0 + pad + headH + colH / 2;
+      ctx.font = uiFont(9 * s, 700);
+      track(ctx, 1.2 * s);
+      ctx.fillStyle = '#7d838b';
+      ctx.textAlign = 'left';
+      ctx.fillText('PLAYER', cx + 32 * s, y);
+      ctx.textAlign = 'right';
+      ctx.fillText('WINS', cW, y);
+      ctx.fillText('KILLS', cK, y);
+      ctx.fillText('DEATHS', cD, y);
+      ctx.fillText('K/D', cR, y);
+      y += colH / 2;
+      shown.slice(c * perCol, (c + 1) * perCol).forEach(({ p, rank }, i) => {
+        const ry = y + i * rowH;
+        const my = ry + rowH / 2;
+        const mine = p.id === game.myId;
+        if (mine) {
+          ctx.fillStyle = 'rgba(255,194,61,0.14)';
+          rrect(ctx, cx - 4 * s, ry + s, colW + 4 * s, rowH - 2 * s, 4 * s);
+          ctx.fill();
+        } else if (i % 2) {
+          ctx.fillStyle = 'rgba(255,255,255,0.025)';
+          ctx.fillRect(cx - 4 * s, ry, colW + 4 * s, rowH);
+        }
+        rankBadge(ctx, rank, cx + 9 * s, my, Math.min(8 * s, rowH * 0.38));
+        ctx.fillStyle = p.color;
+        ctx.fillRect(cx + 22 * s, my - rowH * 0.28, 3 * s, rowH * 0.56);
+        ctx.textAlign = 'left';
+        ctx.font = uiFont(Math.min(12.5 * s, rowH * 0.56), mine ? 800 : 600);
+        track(ctx, 0);
+        ctx.fillStyle = mine ? '#ffd56a' : '#e8e8ea';
+        ctx.fillText(fitText(ctx, p.name, cW - 40 * s - (cx + 32 * s)), cx + 32 * s, my);
+        ctx.textAlign = 'right';
+        ctx.font = uiFont(Math.min(12.5 * s, rowH * 0.56), 700);
+        ctx.fillStyle = '#ffd56a';
+        ctx.fillText(String(p.wins), cW, my);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(String(p.kills), cK, my);
+        ctx.fillStyle = '#b9bec5';
+        ctx.fillText(String(p.deaths), cD, my);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(kdRatio(p.kills, p.deaths).toFixed(2), cR, my);
+      });
+      if (more && c === cols - 1) {
+        const ry = y + (shown.length - c * perCol) * rowH;
+        ctx.textAlign = 'center';
+        ctx.font = uiFont(Math.min(11 * s, rowH * 0.5), 700);
+        track(ctx, 1.2 * s);
+        ctx.fillStyle = '#7d838b';
+        ctx.fillText(`+${more} MORE`, cx + colW / 2, ry + rowH / 2);
+        track(ctx, 0);
+      }
+    }
+    track(ctx, 0);
+    ctx.restore();
   }
 }
 

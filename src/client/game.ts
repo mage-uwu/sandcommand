@@ -1759,6 +1759,7 @@ export class Game implements FrameHandler {
     this.fragged = false;
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
+    this.deathBy = null;
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
     this.flora = lastFlora;
     this.valley = lastValley;
@@ -1996,6 +1997,8 @@ export class Game implements FrameHandler {
   /** Died since we last came down (and not yet back): the banner says FRAGGED, not LOADING OUT. */
   fragged = false;
 
+  /** Who killed us last, and with what (the death card), when it was another clone's own hand; else null. */
+  deathBy: { id: number; weapon: string } | null = null;
   /** Our career record, across sessions (kept in this browser). */
   readonly career = loadCareer();
 
@@ -2033,6 +2036,7 @@ export class Game implements FrameHandler {
       this.fragged = true; // (even killed on the way down, before we were ever on the ground)
     }
     const droid = this.isDroid(victim);
+      this.deathBy = killer !== victim && killer !== 255 && this.deathCause.startsWith('killed by ') ? { id: killer, weapon: weapon === W_LASER ? 'Laser' : how } : null;
     if (droid) text += ' (droid scrapped)';
     else if (!has(k.parts, Part.Head)) text += ' (headshot)';
     else if (!has(k.parts, Part.Torso)) text += ' (torn apart)';

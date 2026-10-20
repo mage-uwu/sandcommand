@@ -5,7 +5,7 @@ import { MOD_H, MOD_W, SLAB, Style, TOWER_W } from '../src/shared/structures.ts'
 import { Terrain } from '../src/shared/terrain.ts';
 import { Biome, generateWorld, lastBiome, lastComplexes } from '../src/shared/worldgen.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
-import { bannerLines, layoutSub } from '../src/client/banner.ts';
+import { layoutSub } from '../src/client/banner.ts';
 
 /** Air cells reachable from (x, y) inside a box (4-connected flood fill; through the steel doors, which open for their own side). */
 function flood(t: Terrain, x: number, y: number, x0: number, y0: number, x1: number, y1: number): Uint8Array {
@@ -191,13 +191,6 @@ describe('centre-screen banners', () => {
     expect(l.head).toBe('extraction');
     for (const h of l.hints) expect(h.length).toBeLessThanOrEqual(24);
     expect(l.hints.join(' ').replace(/ +· +/g, ' ')).toContain('bring the golden idol up from the bottom of the labyrinth'.split(' ').slice(0, 3).join(' '));
-  });
-  it('spell the title in five even rows of block letters', () => {
-    const rows = bannerLines('Fragged 3!');
-    expect(rows.length).toBe(5);
-    expect(new Set(rows.map((r) => r.length)).size).toBe(1);
-    expect(rows.join('')).toContain('█');
-    expect(bannerLines('ab')[0].length).toBeGreaterThan(bannerLines('a')[0].length);
   });
   it('handle an empty subtitle', () => {
     expect(layoutSub('', 50, measure)).toEqual({ head: '', hints: [] });

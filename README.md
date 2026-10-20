@@ -306,12 +306,30 @@ aim line show the snap. Teammates are ignored, and so are tools aimed at
 the ground or at friends (digger, materializer, radio, repair kit).
 **V** turns it off or on for the mouse, and the choice is remembered.
 
-**K/D.** While you're dead, and between rounds, a card shows your kills,
-deaths and K/D for the session, your rank, and your **career** record. The
-career record is your lifetime kills and deaths, kept in this browser
-(`sc.career`). Under it is a leaderboard of the top eight clones by K/D,
-with your own row added if you're not among them. **Tab** still shows the
-full scoreboard. Clones gib on
+**The death card.** Dead, everything you need is on one card under the
+FRAGGED title:
+- **Who killed you:** their name in their colour, their score so far, and
+  the weapon in a tag. If no clone did it, the cause instead ("Devoured by
+  a dragon", "Crushed by falling rock · Rex brought it down").
+- **The way back:** REDEPLOYING IN with the time left and a bar filling
+  toward it, or OUT FOR THIS WAVE.
+- **Standings:** your place, your kills, deaths and K/D, and the top
+  clones by K/D (up to five, as many as the screen has room for, your own
+  row swapped in if you're not among them).
+- **Team** (team modes only): the sides, to switch to (see below).
+- **Spectating** along its foot: who you're watching, and CLICK (TAP) for
+  the next.
+
+The edges of the screen stain red while you're down. Between rounds the
+standings show on a panel of their own, with your **career** K/D too (your
+lifetime kills and deaths, kept in this browser: `sc.career`). **Tab** shows
+the full scoreboard: every clone ranked by wins, kills and gold, in two
+columns if need be, with a "+N MORE" line if even that won't fit (your row
+is always shown). These are all drawn in one style (`src/client/hud-ui.ts`):
+dark glass panels with rounded corners, a coloured accent, a clean sans,
+key chips for the controls, rank badges in gold, silver and bronze.
+
+Clones gib on
 death and spill half their GEMMs as GEMM grit that anyone can dig up.
 
 **On phones and tablets** (`src/client/touch.ts`) touch controls switch on
@@ -361,9 +379,11 @@ The screen splits down the middle:
 **Humans.** Other human players (not bots) wear a tiny gold star over
 their name tag.
 
-**Changing team.** Dead in a team mode, a row of the sides comes up at the
-bottom of the screen (TEAM: RED, GREEN, and in Extraction BLUE and GOLD,
-ours lit): click or tap one, or press C for the next.
+**Changing team.** Dead in a team mode, the death card has a row of the
+sides (RED, GREEN, and in Extraction BLUE and GOLD, each with how many
+fight for it, ours lit): click or tap one, or press C for the next. Waiting
+to come in (LOADING OUT), the sides show as cards of their own at the
+bottom of the screen.
 - **Respawn modes** (Regicide, Siege, Extraction): at once, and you come
   back on the new side. To keep the sides even, one of its bots crosses
   over to your old one; with no bot to trade, you can only move to a side
@@ -541,14 +561,12 @@ Every room plays Last Man Standing waves (`stepRound` in `src/server/world.ts`):
    and beneath them how the sides stand (kings, clones left, the PvP
    leader). If time runs out, the survivor with
    the most kills that wave wins, so nobody wins by hiding in a bunker.
-   Big messages (WAVE 3 IN 2, FRAGGED, HAWKINS WINS) are retro console
-   banners: block letters made of █, glowing in the message's colour. They
-   slide in on a dark, scanlined band edged in that colour. Under the title
-   is a terminal prompt with a blinking cursor: the status line, then dim
-   green hints. Dead, the status line is how you died, in the kill feed's
-   terms (`> KILLED BY REX [SNIPER]_`, `> BURIED IN A CAVE-IN_`, `> CRUSHED
-   BY FALLING ROCK [REX BROUGHT IT DOWN]_`), and the countdown to your next
-   clone comes after it (`causeOfDeath` in `src/client/game.ts`). Everything is sized and
+   Big messages (WAVE 3 IN 2, HAWKINS WINS) are heavy italic caps,
+   glowing in the message's colour over a soft dark band, with an accent
+   bar drawing out under them. Under the title come the status line in
+   spaced caps and dimmer hints. They slide in and settle as each changes.
+   Dead, it's the death card (above), with how you died worked out from the
+   kill (`causeOfDeath` in `src/client/game.ts`). Everything is sized and
    wrapped to fit any screen (`src/client/banner.ts`).
 5. **A new wave on a fresh map.** The next wave gets a new seed: new
    terrain, with nothing carried over (rockets, dropped weapons, debris in
