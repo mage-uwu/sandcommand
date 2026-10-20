@@ -1000,8 +1000,8 @@ and very hard to kill.
 
 **The dragon** is the basilisk three times over: three times its girth
 (it bores tunnels a tank could drive down), each of its segments three
-times the size, and twelve times its health (three for its size, then four
-times as strong again); and it has twice as many
+times the size, and twenty-four times its health (three for its size, then
+eight times as strong again); and it has twice as many
 segments (30), so it's six times as long. Laid out in a den near the map's
 edge, its body folds back on itself in the rock. It sleeps, wakes and hunts just as a basilisk does, with
 everything scaled up: wake range, how far it hears, its stirring, its dive,

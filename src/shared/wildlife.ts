@@ -461,8 +461,8 @@ export const DRAGON_SEGS = BASILISK_SEGS * 2;
 export const DRAGON_RATTLE = 6;
 export const DRAGON_GAP = BASILISK_GAP * DRAGON_SCALE;
 export const DRAGON_R = BASILISK_R * DRAGON_SCALE;
-/** Three times a basilisk's health for its size, and four times that again: twelve basilisks' worth. */
-export const DRAGON_HP = BASILISK_HP * 12;
+/** Three times a basilisk's health for its size, and eight times that again: twenty-four basilisks' worth. */
+export const DRAGON_HP = BASILISK_HP * 24;
 /** How often a wild basilisk's turn brings a dragon instead. */
 export const DRAGON_ODDS = 0.25;
 /**

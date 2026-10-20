@@ -32,9 +32,9 @@ function lair() {
 }
 
 describe('the dragon', () => {
-  it('is the basilisk three times over (three times the girth and each segment), twice as many segments, and twelve times the health', () => {
+  it('is the basilisk three times over (three times the girth and each segment), twice as many segments, and twenty-four times the health', () => {
     expect(DRAGON_R).toBeCloseTo(BASILISK_R * 3);
-    expect(DRAGON_HP).toBe(BASILISK_HP * 12); // (three times, for its size; then four times as strong)
+    expect(DRAGON_HP).toBe(BASILISK_HP * 24); // (three times, for its size; then eight times as strong)
     expect(BEAST_BUILD[BeastKind.Dragon].gap).toBe(BEAST_BUILD[BeastKind.Basilisk].gap * 3);
     // (And twice the segments: six times as long, the last of them its rattle.)
     expect(BEAST_BUILD[BeastKind.Dragon].segs).toBe(BEAST_BUILD[BeastKind.Basilisk].segs * 2);
