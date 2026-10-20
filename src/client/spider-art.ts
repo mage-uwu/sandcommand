@@ -32,6 +32,10 @@ const ROCK: readonly (readonly number[])[] = [
   [58, 54, 64],
 ];
 const OUTLINE = '#140e10';
+/** A torn spider's insides: its pale ichor, wet and catching the light, and the dark within. */
+const ICHOR_WET = '#7a9a32';
+const ICHOR_LIGHT = '#c4d878';
+const GUTS = '#2a3a12';
 const FANG = '#d8ccb0';
 
 /** Legs, back to front (hips along the head, cells from its centre; where each foot rests, cells along the body from its middle). */
@@ -241,7 +245,7 @@ function line(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number,
  * grit; the abdomen with a dark folium (chevrons) down it, the head with a
  * ridge. `rim`: its outline (gone when it lies in wait).
  */
-function body(ctx: CanvasRenderingContext2D, x: number, y: number, tx: number, ty: number, ux: number, uy: number, len: number, w: number, base: readonly number[], seed: number, part: number, rim: boolean): void {
+function body(ctx: CanvasRenderingContext2D, x: number, y: number, tx: number, ty: number, ux: number, uy: number, len: number, w: number, base: readonly number[], seed: number, part: number, rim: boolean, tear = 0): void {
   const R = Math.ceil(Math.max(len, w)) + 1;
   for (let py = Math.floor(y - R); py <= Math.ceil(y + R); py++) {
     for (let px = Math.floor(x - R); px <= Math.ceil(x + R); px++) {
@@ -254,6 +258,23 @@ function body(ctx: CanvasRenderingContext2D, x: number, y: number, tx: number, t
       const e = (u / len) ** 2 + (v / ww) ** 2;
       if (e > 1) continue;
       const h = hsh(px, py, seed + part * 17);
+      if (tear) {
+        // Torn off at that end (`tear` +1 its front, -1 its back): a ragged edge across it, wet with
+        // pale ichor, the dark of its insides just within; nothing past it.
+        const edge = len * 0.1 + (hsh(Math.round(v * 2), seed, part + 5) - 0.5) * len * 0.7;
+        const over = u * tear - edge;
+        if (over > 0) continue;
+        if (over > -1.1) {
+          ctx.fillStyle = h < 0.5 ? ICHOR_WET : ICHOR_LIGHT;
+          ctx.fillRect(px, py, 1, 1);
+          continue;
+        }
+        if (over > -2 && h < 0.6) {
+          ctx.fillStyle = GUTS;
+          ctx.fillRect(px, py, 1, 1);
+          continue;
+        }
+      }
       if (rim && e > 0.72) {
         ctx.fillStyle = OUTLINE;
         ctx.fillRect(px, py, 1, 1);
@@ -528,10 +549,22 @@ export function drawSpiderGib(ctx: CanvasRenderingContext2D, x: number, y: numbe
   const ty = Math.sin(a);
   const base = ROCK[1];
   if (i < 2) {
-    body(ctx, x, y, tx, ty, -ty, tx, i === 0 ? 2.9 : 4.4, i === 0 ? 2.4 : 3.4, base, seed, i, true);
-    // Torn open: the wet inside showing at one end.
-    ctx.fillStyle = '#6a8a3a';
-    ctx.fillRect(Math.round(x - tx * (i === 0 ? 2 : 3.4)), Math.round(y - ty * (i === 0 ? 2 : 3.4)), 2, 2);
+    // Its head or abdomen, torn from the other where they joined (the head's back, the abdomen's
+    // front): broken leg stubs still on the head, a drip of ichor off the tear.
+    const len = i === 0 ? 3.2 : 4.6;
+    const tear = i === 0 ? -1 : 1;
+    if (i === 0) {
+      for (const [k, s] of [[0, -1], [1, 1], [2, 1]] as const) {
+        const la = a + Math.PI / 2 * s + (hsh(seed, k, 9) - 0.5) * 0.8;
+        ctx.fillStyle = css(base, 0.62);
+        line(ctx, x - tx * k * 0.6, y - ty * k * 0.6, x - tx * k * 0.6 + Math.cos(la) * 3.4, y - ty * k * 0.6 + Math.sin(la) * 3.4);
+      }
+    }
+    body(ctx, x, y, tx, ty, -ty, tx, len, i === 0 ? 2.6 : 3.4, base, seed, i, true, tear);
+    const ex = x + tx * tear * len * 0.15;
+    const ey = y + ty * tear * len * 0.15;
+    ctx.fillStyle = ICHOR_WET;
+    ctx.fillRect(Math.round(ex), Math.round(ey) + 1, 1, 1 + Math.round(hsh(seed, i, 4) * 2));
     return;
   }
   // A leg, bent at the knee.
