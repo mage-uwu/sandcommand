@@ -441,26 +441,36 @@ per-session seed, so every session's variation differs.
 
 ## Sound effects
 
-Every sound is synthesized too, from noise bursts and swept oscillators
-(`src/client/sfx.ts`):
+The guns and the explosions are **recorded samples**, all CC0 (public
+domain: free for commercial use, no attribution required), in `public/sfx/`
+with their sources and authors in `public/sfx/CREDITS.md`. The rest is
+synthesized from noise bursts and swept oscillators (`src/client/sfx.ts`).
+The samples load once, when the sound starts; until they're in (or if one
+fails to load) the synthesized version plays instead.
 
 | Source | Sound |
 |---|---|
-| **Rifle** | A sharp crack over a short, punchy body. |
-| **Light rifle** | A bigger, full-power crack with a rolling report. |
-| **SMG** | A dull, quick suppressed "thup". |
-| **Autocannon** | A hard, deep "dunk" with a mechanical clank. |
-| **Blaster** | A bright, falling "pew". |
-| **Gatling, tank and dropship guns** | A lower, chunkier report, thinned out at full rate. |
-| **Shotgun** | One big, wide boom per shell, not nine. |
-| **Sniper** | A .50-cal supersonic crack, a deep boom, an echo rolling back, and a hard strike where it lands. |
-| **Bazooka and tank cannon** | A thump and a roaring whoosh. |
-| **Grenade launcher** | A hollow "thoomp". |
-| **Thrown grenades, bombs, darts** | A swish, a bomb-bay clunk, a blowpipe "fft". |
-| **Laser** | A zap sweeping down, fuller the longer it charged, with a rising whine while you charge it. |
-| **Explosions** | A crack, a roar and a sub-bass thump, sized by blast radius, then debris pattering down. |
-| **Gore** | Meaty thwacks on hits, a bone crack and a wet tear for a lost limb, and squelches, cracking bones and a thud for a gibbing. Synthetic mercenaries clank and spark instead. |
-| **Thrusters** | Dropship pods, drop rockets and runaway engines roar; jetpacks and tank jets hiss. |
+| **Rifle** | A recorded AR-15. |
+| **Light rifle** | A recorded SKS: a bigger, rolling report. |
+| **SMG** | A recorded PPSh. |
+| **Gatling** | A recorded AK-47, thinned out at full rate. Tank, mole and dropship guns are the same, played slower and heavier. |
+| **Shotgun** | A recorded Benelli Nova: one boom per shell, not nine. |
+| **Sniper** | A recorded Mosin Nagant, played a touch slow, carrying furthest of all. |
+| **Autocannon** | A recorded Springfield 1917, slowed to a deep thud. |
+| **Explosions** | A recorded blast picked by size: one of four small bangs (bomblets, mines), three mid-sized blasts (grenades, rockets, shells), or two big ones (bombs). A take is picked at random and pitched a little lower the bigger the blast, with a synthesized sub-bass thump under it. |
+| **Stoneburner** | A recorded ship's destruction, slowed, over the synthesized crack and seconds-long rumble. |
+| **Blaster** | Synthesized: a bright, falling "pew". |
+| **Bazooka and tank cannon** | Synthesized: a thump and a roaring whoosh. |
+| **Grenade launcher** | Synthesized: a hollow "thoomp". |
+| **Thrown grenades, bombs, darts** | Synthesized: a swish, a bomb-bay clunk, a blowpipe "fft". |
+| **Laser** | Synthesized: a zap sweeping down, fuller the longer it charged, with a rising whine while you charge it. |
+| **Gore** | Synthesized: meaty thwacks on hits, a bone crack and a wet tear for a lost limb, and squelches, cracking bones and a thud for a gibbing. Synthetic mercenaries clank and spark instead. |
+| **Thrusters** | Synthesized: dropship pods, drop rockets and runaway engines roar; jetpacks and tank jets hiss. |
+
+Each sample was trimmed to its first shot or blast, high-passed at 35 Hz,
+peak-normalised and faded out, and is a small 48 kHz mono MP3 (about
+570 KB for all 17). Every shot plays at a slightly different pitch, so a
+burst doesn't sound like one clip repeating.
 
 Sounds are placed in the world. They fade and lose their highs with
 distance from the clone you're playing or watching, and pan to the side

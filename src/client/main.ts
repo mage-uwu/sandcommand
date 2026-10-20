@@ -157,6 +157,7 @@ function startMusic(): void {
     music.onSong = (name) => game?.feed.push({ text: `♪ now playing: ${name}`, color: '#b8a0ff', at: performance.now() });
     music.start();
     sfx = new Sfx(music.ctx);
+    sfx.loadSamples();
     if (storageGet('sc.sfx') === 'off') sfx.toggle();
     if (game) game.sfx = sfx;
     applyMute();

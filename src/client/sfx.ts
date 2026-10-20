@@ -1,11 +1,24 @@
 import { ProjKind } from '../shared/weapons.ts';
 
 /**
- * Sound effects, all synthesized with Web Audio (no samples): every gun's
- * report, explosions, gore, and the thrusters' roar. Sounds are placed in
- * the world: they fade and lose their highs with distance from the ear (the
- * clone we're playing or watching) and pan left or right of it.
+ * Sound effects, with Web Audio. The guns and the explosions are recorded
+ * samples (public/sfx, all CC0: see public/sfx/CREDITS.md), loaded once
+ * the sound starts; until they've arrived, and for everything else (gore,
+ * the creatures, the thrusters' roar, the laser), they're synthesized.
+ * Sounds are placed in the world: they fade and lose their highs with
+ * distance from the ear (the clone we're playing or watching) and pan left
+ * or right of it.
  */
+
+/** The samples (public/sfx/<name>.mp3). */
+export const SAMPLES = ['rifle', 'lightrifle', 'smg', 'mg', 'sniper', 'shotgun', 'cannon', 'boom_s1', 'boom_s2', 'boom_s3', 'boom_s4', 'boom_m1', 'boom_m2', 'boom_m3', 'boom_l1', 'boom_l2', 'stoneburn'] as const;
+type SampleName = (typeof SAMPLES)[number];
+/** An explosion's samples by size: a bomblet's pop, a grenade or rocket, a bomb. */
+const BOOMS = {
+  s: ['boom_s1', 'boom_s2', 'boom_s3', 'boom_s4'],
+  m: ['boom_m1', 'boom_m2', 'boom_m3'],
+  l: ['boom_l1', 'boom_l2'],
+} as const satisfies Record<string, readonly SampleName[]>;
 
 /** How far (in cells) a gunshot carries. */
 const RANGE = 1700;
@@ -26,6 +39,24 @@ interface Bed {
   tone: BiquadFilterNode;
   osc?: OscillatorNode;
 }
+
+/**
+ * Which guns have a recorded report: the sample, its loudness, how far it
+ * carries (as voice()'s reach), and the rate it plays at (below 1: heavier
+ * than the gun it was, a vehicle's gun or a cannon).
+ */
+const SHOT_SAMPLES: Partial<Record<number, { name: SampleName; gain: number; reach: number; rate: number }>> = {
+  [ProjKind.Bullet]: { name: 'rifle', gain: 0.5, reach: 1, rate: 1 },
+  [ProjKind.LightRound]: { name: 'lightrifle', gain: 0.6, reach: 1.1, rate: 1 },
+  [ProjKind.SmgRound]: { name: 'smg', gain: 0.32, reach: 0.9, rate: 1.05 },
+  [ProjKind.Heavy]: { name: 'mg', gain: 0.42, reach: 1, rate: 1 },
+  [ProjKind.TankBullet]: { name: 'mg', gain: 0.5, reach: 1.1, rate: 0.85 },
+  [ProjKind.ShipGun]: { name: 'mg', gain: 0.5, reach: 1.1, rate: 0.85 },
+  [ProjKind.MoleRound]: { name: 'mg', gain: 0.5, reach: 1.1, rate: 0.9 },
+  [ProjKind.Pellet]: { name: 'shotgun', gain: 0.7, reach: 1.1, rate: 1 },
+  [ProjKind.Slug]: { name: 'sniper', gain: 0.85, reach: 1.5, rate: 0.95 },
+  [ProjKind.AutoShell]: { name: 'cannon', gain: 0.7, reach: 1.2, rate: 0.75 },
+};
 
 export class Sfx {
   readonly ctx: BaseAudioContext;
@@ -49,6 +80,8 @@ export class Sfx {
   private calmHi: Bed | null = null;
   private calmLevel = 0;
   private nextDrip = 0;
+  /** The recorded samples, as they arrive (loadSamples). */
+  private samples = new Map<SampleName, AudioBuffer>();
 
   constructor(ctx: BaseAudioContext) {
     this.ctx = ctx;
@@ -74,6 +107,17 @@ export class Sfx {
     this.noise = c.createBuffer(1, n, c.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  }
+
+  /** Fetch and decode the samples (from `base`), each as it comes; one that fails stays synthesized. */
+  loadSamples(base = '/sfx/'): void {
+    for (const name of SAMPLES) {
+      fetch(`${base}${name}.mp3`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+        .then((buf) => this.ctx.decodeAudioData(buf))
+        .then((b) => this.samples.set(name, b))
+        .catch(() => {});
+    }
   }
 
   /** Sound effects on or off; returns the new state. */
@@ -105,6 +149,14 @@ export class Sfx {
     if (now - prev < gap) return;
     this.last.set(key, now);
     if (this.last.size > 512) this.last.clear();
+    // A recorded report, where there is one for this gun (the rest, and these until they've loaded, synthesized).
+    const rec = SHOT_SAMPLES[kind];
+    if (rec && this.samples.has(rec.name)) {
+      const b = this.samples.get(rec.name)!;
+      const v = this.voice(x, y, rec.gain, b.duration / rec.rate, rec.reach, kind === ProjKind.Slug);
+      if (v) this.sample(v, rec.name, rec.rate * (0.96 + Math.random() * 0.08), 1);
+      return;
+    }
     switch (kind) {
       case ProjKind.Bullet: {
         // Rifle: a sharp crack over a short punchy body.
@@ -293,6 +345,8 @@ export class Sfx {
     const v = this.voice(x, y, 1, 10, 30, true);
     if (!v) return;
     const late = Math.min(2.5, dist / 1400);
+    // The recording of it, slowed (the biggest thing anyone's heard), over the synthesized crack and rumble.
+    if (this.samples.has('stoneburn')) this.sample(v, 'stoneburn', 0.8, 1.4, late);
     this.burst(v, late, 0.18, 'lowpass', 9000, 0.6, 1.3);
     this.tone(v, late, 3.2, 'sine', 58, 16, 1.8);
     this.tone(v, late + 0.02, 2.6, 'sawtooth', 44, 20, 0.5);
@@ -313,6 +367,17 @@ export class Sfx {
   /** A blast; `radius` sizes it (a bomblet pops, a dropship bomb shakes the ground). */
   explode(x: number, y: number, radius: number): void {
     const s = clamp(radius / 40, 0.4, 2.5);
+    // Recorded, if they're in: a pop, a blast or a bomb by size (one of a few takes, pitched a little lower the bigger it is), and the synthesized thump under it for weight.
+    const set = radius < 26 ? BOOMS.s : radius < 60 ? BOOMS.m : BOOMS.l;
+    const name = set[Math.floor(Math.random() * set.length)];
+    const b = this.samples.get(name);
+    if (b) {
+      const v = this.voice(x, y, 0.9 * Math.sqrt(s), b.duration, 1 + s * 0.4, true);
+      if (!v) return;
+      this.sample(v, name, (1.06 - 0.06 * s) * (0.95 + Math.random() * 0.1), 1);
+      this.tone(v, 0, 0.4 + s * 0.35, 'sine', 70, 22, 0.7);
+      return;
+    }
     const v = this.voice(x, y, 0.75 * Math.sqrt(s), 1 + s * 0.8, 1 + s * 0.4, true);
     if (!v) return;
     this.burst(v, 0, 0.07, 'lowpass', 7000, 0.6, 1);
@@ -493,6 +558,20 @@ export class Sfx {
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(f).connect(g).connect(v.dest);
     src.start(t, Math.random() * 1.5, dur + 0.05);
+  }
+
+  /** A recorded sample into voice `v`, `at` seconds in, played at `rate`. */
+  private sample(v: Voice, name: SampleName, rate: number, gain: number, at = 0): void {
+    const b = this.samples.get(name);
+    if (!b) return;
+    const c = this.ctx;
+    const src = c.createBufferSource();
+    src.buffer = b;
+    src.playbackRate.value = rate;
+    const g = c.createGain();
+    g.gain.value = gain;
+    src.connect(g).connect(v.dest);
+    src.start(v.t + at);
   }
 
   /** A long low roll of noise (looped: longer than the noise buffer), the filter falling from `f0` to `f1` as it dies away over `dur`. */
