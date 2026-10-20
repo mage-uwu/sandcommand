@@ -1977,6 +1977,13 @@ export class Game implements FrameHandler {
       venomSplash(this.particles, x, y);
       return;
     }
+    // A mole's plasma burning out where it digs: a lick of flame, sparks, dust off the face. No blast,
+    // no boom, no shake: there are twenty a second (the generic burst made the whole view judder).
+    if (kind === ProjKind.Plasma) {
+      plasmaTrail(this.particles, x, y, 0, 0);
+      digDust(this.particles, x, y, this.dustColorAt(x, y), 1);
+      return;
+    }
     // A dragon's flaming blood: it bursts into fire and gore, in pixels, and that's all (no round
     // flash, no grenade's fireball: there are dozens to a breath). A quiet boom now and then, a little shake.
     if (kind === ProjKind.FireSpit) {
