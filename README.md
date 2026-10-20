@@ -1694,7 +1694,9 @@ each watchdog, each tarantula, in that order. **Shift+P** goes the other way.
     - **Missiles.** An **automatic missile launcher**: a twin-tube rack on
       its back that turns all the way round. It fires a stream of
       straight-flying missiles, about two a second from alternating tubes
-      (`ProjKind.SpiderMissile`). Each has a **hand grenade's blast**.
+      (`ProjKind.SpiderMissile`). Each hits **half as hard again as a hand
+      grenade**: 135 blast damage over a slightly wider radius (46 cells),
+      and 55 on a direct hit.
     - **Laser.** A **laser** in its head fires thin instant beams like the
       laser rifle's, five a second, automatically. Each beam does three
       times its old damage. It goes through every clone in its way and

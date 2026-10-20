@@ -254,10 +254,10 @@ describe('the tarantula, upgraded', () => {
     expect(centre(spider)).toBeGreaterThan(wx); // (and it's gone on through it)
   });
 
-  it('three times the laser, missiles with a grenade\'s blast', () => {
+  it('three times the laser, missiles with half as much again as a grenade\'s blast', () => {
     expect(SPIDER_BEAM_WOUND).toBe(66);
-    expect(PROJ[ProjKind.SpiderMissile].splashDamage).toBe(PROJ[ProjKind.Grenade].splashDamage);
-    expect(PROJ[ProjKind.SpiderMissile].splashR).toBeGreaterThanOrEqual(PROJ[ProjKind.Grenade].splashR - 2);
+    expect(PROJ[ProjKind.SpiderMissile].splashDamage).toBe(PROJ[ProjKind.Grenade].splashDamage * 1.5);
+    expect(PROJ[ProjKind.SpiderMissile].splashR).toBeGreaterThan(PROJ[ProjKind.Grenade].splashR);
     expect(PROJ[ProjKind.SpiderMissile].carveR).toBeGreaterThanOrEqual(PROJ[ProjKind.Grenade].carveR - 2);
   });
 
