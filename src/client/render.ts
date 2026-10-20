@@ -11,7 +11,7 @@ import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
 import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, lockReach } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, pieceCode, pieceOf, snapPiece } from '../shared/build.ts';
-import { type CraftView, type Game, type PlayerInfo, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
+import { type CraftView, type Game, type PlayerInfo, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio, scoreOf } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
 import { layoutSub } from './banner.ts';
 import { fit as fitText, keyChip, panel, rankBadge, rrect, track, uiFont, withAlpha } from './hud-ui.ts';
@@ -4555,14 +4555,16 @@ export class Renderer {
   }
 
   /**
-   * The scoreboard (held Tab): every clone, ranked by wins, then kills,
-   * then gold; rank badge, colour, wins, kills, deaths, K/D; ours lit. Two
+   * The scoreboard (held Tab): every clone, ranked by wins, then score
+   * (scoreOf: clones and creatures killed, less a point a teamkill), then
+   * gold; rank badge, colour, wins, score, kills, wildlife, deaths, K/D;
+   * ours lit. Two
    * columns when they won't fit in one; if they still don't, the last line
    * says how many more there are (and ours is always shown).
    */
   private drawScoreboard(game: Game, s: number, W: number, H: number): void {
     const ctx = this.ctx;
-    const rows = [...game.players.values()].sort((a, b) => b.wins * 1000 + b.kills * 10 + b.gold - (a.wins * 1000 + a.kills * 10 + a.gold));
+    const rows = [...game.players.values()].sort((a, b) => b.wins - a.wins || scoreOf(b) - scoreOf(a) || b.gold - a.gold);
     const pad = 16 * s;
     const headH = 44 * s;
     const colH = 20 * s;
@@ -4582,7 +4584,7 @@ export class Renderer {
       more = list.length - shown.length;
     }
     const rowH = Math.min(24 * s, Math.max(14 * s, avail / Math.max(1, perCol)));
-    const colW = Math.min(440 * s, (W * 0.94 - pad * 2 - (cols - 1) * 18 * s) / cols);
+    const colW = Math.min(500 * s, (W * 0.94 - pad * 2 - (cols - 1) * 18 * s) / cols);
     const w = colW * cols + (cols - 1) * 18 * s + pad * 2;
     const h = pad * 2 + headH + colH + perCol * rowH;
     const x0 = (W - w) / 2;
@@ -4605,9 +4607,11 @@ export class Renderer {
     for (let c = 0; c < cols; c++) {
       const cx = x0 + pad + c * (colW + 18 * s);
       const cR = cx + colW - 6 * s;
-      const cD = cR - 58 * s;
-      const cK = cD - 62 * s;
-      const cW = cK - 52 * s;
+      const cD = cR - 50 * s;
+      const cB = cD - 54 * s;
+      const cK = cB - 62 * s;
+      const cS = cK - 44 * s;
+      const cW = cS - 52 * s;
       let y = y0 + pad + headH + colH / 2;
       ctx.font = uiFont(9 * s, 700);
       track(ctx, 1.2 * s);
@@ -4616,7 +4620,9 @@ export class Renderer {
       ctx.fillText('PLAYER', cx + 32 * s, y);
       ctx.textAlign = 'right';
       ctx.fillText('WINS', cW, y);
+      ctx.fillText('SCORE', cS, y);
       ctx.fillText('KILLS', cK, y);
+      ctx.fillText('WILDLIFE', cB, y);
       ctx.fillText('DEATHS', cD, y);
       ctx.fillText('K/D', cR, y);
       y += colH / 2;
@@ -4644,8 +4650,15 @@ export class Renderer {
         ctx.font = uiFont(Math.min(12.5 * s, rowH * 0.56), 700);
         ctx.fillStyle = '#ffd56a';
         ctx.fillText(String(p.wins), cW, my);
+        const sc = scoreOf(p);
+        ctx.font = uiFont(Math.min(12.5 * s, rowH * 0.56), 800);
+        ctx.fillStyle = sc < 0 ? '#ff7a6a' : '#ffffff';
+        ctx.fillText(String(sc), cS, my);
+        ctx.font = uiFont(Math.min(12.5 * s, rowH * 0.56), 700);
         ctx.fillStyle = '#ffffff';
         ctx.fillText(String(p.kills), cK, my);
+        ctx.fillStyle = '#8fd8ee';
+        ctx.fillText(String(p.beasts), cB, my);
         ctx.fillStyle = '#b9bec5';
         ctx.fillText(String(p.deaths), cD, my);
         ctx.fillStyle = '#ffffff';

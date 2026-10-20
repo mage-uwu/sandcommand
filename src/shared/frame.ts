@@ -332,7 +332,7 @@ export interface FrameHandler {
   projEnd(id: number, x: number, y: number, kind: number, detonate: boolean, seed: number): void;
   kill(k: KillInfo): void;
   roster(id: number, present: boolean, name: string): void;
-  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void;
+  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number; beasts: number; teamKills: number }[]): void;
   /** FFA round state, every frame. */
   round(s: RoundState): void;
   /** A laser beam fired (seq: to drop the copy sent for its other end). */
@@ -770,7 +770,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       case R_SCORES: {
         const n = r.u8();
         const list = [];
-        for (let i = 0; i < n; i++) list.push({ id: r.u8(), kills: r.u16(), deaths: r.u16(), gold: r.u16(), wins: r.u16() });
+        for (let i = 0; i < n; i++) list.push({ id: r.u8(), kills: r.u16(), deaths: r.u16(), gold: r.u16(), wins: r.u16(), beasts: r.u16(), teamKills: r.u16() });
         h.scores(list);
         break;
       }

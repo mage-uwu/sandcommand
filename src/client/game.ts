@@ -44,6 +44,10 @@ export interface PlayerInfo {
   deaths: number;
   gold: number;
   wins: number;
+  /** Creatures killed. */
+  beasts: number;
+  /** Clones of their own side killed (each a point off). */
+  teamKills: number;
   bot: boolean;
   color: string;
   rgb: number;
@@ -205,6 +209,8 @@ function saveCareer(c: { kills: number; deaths: number }): void {
 }
 
 /** Kills per death (kills alone while deathless). */
+/** A clone's score: clones killed, plus creatures killed, less a point for each of its own side it killed. */
+export const scoreOf = (p: { kills: number; beasts: number; teamKills: number }) => p.kills + p.beasts - p.teamKills;
 export const kdRatio = (kills: number, deaths: number) => kills / Math.max(1, deaths);
 
 /** A creature in view, as the client keeps it (Game.beastViews). */
@@ -2073,10 +2079,10 @@ export class Game implements FrameHandler {
     }
     const c = TEAM_COLORS[this.teamOf[id]] ?? playerColor(id);
     name = inert(name, 20);
-    this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, wins: 0, bot: name.startsWith('BOT '), color: c.css, rgb: c.rgb });
+    this.players.set(id, { id, name, kills: 0, deaths: 0, gold: 0, wins: 0, beasts: 0, teamKills: 0, bot: name.startsWith('BOT '), color: c.css, rgb: c.rgb });
   }
 
-  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number }[]): void {
+  scores(list: { id: number; kills: number; deaths: number; gold: number; wins: number; beasts: number; teamKills: number }[]): void {
     for (const s of list) {
       const p = this.players.get(s.id);
       if (p) {
@@ -2084,6 +2090,8 @@ export class Game implements FrameHandler {
         p.deaths = s.deaths;
         p.gold = s.gold;
         p.wins = s.wins;
+        p.beasts = s.beasts;
+        p.teamKills = s.teamKills;
       }
     }
   }

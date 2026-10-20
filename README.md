@@ -323,9 +323,15 @@ FRAGGED title:
 The edges of the screen stain red while you're down. Between rounds the
 standings show on a panel of their own, with your **career** K/D too (your
 lifetime kills and deaths, kept in this browser: `sc.career`). **Tab** shows
-the full scoreboard: every clone ranked by wins, kills and gold, in two
+the full scoreboard: every clone's wins, SCORE, kills, WILDLIFE (creatures
+killed), deaths and K/D, ranked by wins, then score, then gold. In two
 columns if need be, with a "+N MORE" line if even that won't fit (your row
-is always shown). These are all drawn in one style (`src/client/hud-ui.ts`):
+is always shown).
+- **Score** is clones killed plus creatures killed, less a point for every
+  clone of your own side you kill (`scoreOf`). A teamkill isn't a kill: it
+  doesn't count toward your kills, your K/D or the wave's kill count.
+- **A creature kill** goes to whoever dealt the last blow, or if nobody did
+  (a fall of rock, its own fire), whoever last hurt it. Webs don't count. These are all drawn in one style (`src/client/hud-ui.ts`):
 dark glass panels with rounded corners, a coloured accent, a clean sans,
 key chips for the controls, rank badges in gold, silver and bronze.
 

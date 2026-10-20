@@ -552,7 +552,12 @@ export class Player {
   prevButtons = 0;
   respawn = 1;
   firing = false;
+  /** Clones of the other side (or anyone, with no sides) killed. */
   kills = 0;
+  /** Creatures killed (anything wild but a web). */
+  beastKills = 0;
+  /** Clones of our own side killed: each costs a point (the scoreboard's SCORE). */
+  teamKills = 0;
   deaths = 0;
   /** Gold banked: dug up, picked from the dead, spent on fortifications. Starts with enough for a bunker. */
   gold = STARTING_GOLD;
@@ -3551,6 +3556,11 @@ export class World {
     }
     if (b.hp > 0) return;
     this.killBeast(k);
+    // Credit: whoever dealt the last blow, else whoever last hurt it (shot, then finished by a fall of rock).
+    if (b.kind !== BeastKind.Web) {
+      const credit = by < MAX_PLAYERS && this.players[by] ? this.players[by] : b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
+      if (credit) credit.beastKills++;
+    }
     if (wyrm(b.kind)) this.basiliskAt = this.tick + BASILISK_RESPAWN;
     const w = this.broadcast;
     w.u8(R_BEAST_DIE);
@@ -4620,8 +4630,12 @@ export class World {
     victim.deaths++;
     const killer = this.players[attacker];
     if (killer && killer !== victim) {
-      killer.kills++;
-      killer.waveKills++;
+      // (One of our own: no kill, a point off.)
+      if (killer.team !== Team.None && killer.team === victim.team) killer.teamKills++;
+      else {
+        killer.kills++;
+        killer.waveKills++;
+      }
     }
     // The clone gibs. Gibs are cosmetic and simulated by each client from this
     // record; the gold it spills is real terrain, thrown from `seed` so clients
@@ -7737,6 +7751,8 @@ export class World {
         w.u16(p.deaths);
         w.u16(Math.min(65535, p.gold));
         w.u16(p.wins);
+        w.u16(Math.min(65535, p.beastKills));
+        w.u16(Math.min(65535, p.teamKills));
       }
       scores = w.finish();
     }
