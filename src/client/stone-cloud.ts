@@ -5,10 +5,10 @@
  *
  * Each frame it renders into its own small canvas, one texel per world cell
  * (so it sits in the game's pixels, not over them), and the renderer draws
- * that into the scene behind the ground. It is a dome of fire swelling out
- * of the ground in a fraction of a second: boiling, glowing white-hot at its
- * heart, orange and red out to its rim, the rim already turning to soot and
- * dust. It lifts a little as it burns, cools from the outside in to smoke,
+ * that over the scene. It is a ball of fire swelling out from ground zero in
+ * a fraction of a second, every way at once (into the ground as much as the
+ * sky: it engulfs the crater): boiling, glowing white-hot at its heart,
+ * orange and red out to its rim, the rim already turning to soot and dust. It lifts a little as it burns, cools from the outside in to smoke,
  * and is gone in a few seconds. What's left is the molten core boring down
  * into the crater, and the plume of smoke rising off it (game.ts: the
  * particles). Grain and a coarse colour ramp keep it gritty.
@@ -17,13 +17,13 @@
  * still play out).
  */
 
-/** The canvas it renders into: cells wide and tall (ground zero at the middle of its bottom edge, a little up). */
-export const CLOUD_W = 720;
-export const CLOUD_H = 480;
+/** The canvas it renders into: cells wide and tall (ground zero in the middle, a little below centre: it rises as it burns). */
+export const CLOUD_W = 800;
+export const CLOUD_H = 760;
 /** How long the dome lasts (ms): it doesn't linger. */
 export const DOME_MS = 5000;
-/** Ground zero is this far up from the canvas's bottom edge (room for the skirt to roll out under the horizon). */
-const BASE = 40;
+/** Ground zero is this far up from the canvas's bottom edge. */
+const BASE = 340;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -99,7 +99,7 @@ void main() {
   vec2 p = vec2(cell.x - uSize.x * 0.5, cell.y - uBase);
   float t = uT;
   float R = domeR(t);
-  // The dome: a little wider than tall, lifting off the ground as it burns (hot air rises).
+  // The ball: a little wider than tall, centred on ground zero, lifting as it burns (hot air rises).
   float lift = 14.0 * t * t / (1.0 + t);
   vec2 q = vec2(p.x / (R * 1.12), (p.y - lift) / R);
   // Boiling: the noise moves up and out with it, rolling over its surface.
@@ -107,15 +107,15 @@ void main() {
   vec3 warp = vec3(fbm(np + vec3(3.1, 0.0, 0.0), 3), fbm(np + vec3(0.0, 7.7, 0.0), 3), 0.0) - 0.5;
   float n = fbm(np + warp * 1.4, 5);
   float r = length(q);
-  // (A ragged, billowing edge; flattened at the ground.)
+  // (A ragged, billowing edge.)
   float edge = 1.0 - r + (n - 0.5) * 0.42;
-  if (edge <= 0.0 || p.y < -6.0) {
+  if (edge <= 0.0) {
     outColor = vec4(0.0);
     return;
   }
   float L = life(t);
-  // The heat: white at the heart, low down where it came out of the ground; out to red at the rim.
-  float heart = exp(-dot(q * vec2(1.0, 1.7) - vec2(0.0, 0.15), q * vec2(1.0, 1.7) - vec2(0.0, 0.15)) * 2.2);
+  // The heat: white at the heart, out to red at the rim, all the way round.
+  float heart = exp(-dot(q, q) * 3.2);
   float body = smoothstep(0.0, 0.45, edge);
   float T = clamp((heart * 1.0 + body * 0.45) * (0.55 + 0.9 * n) * L * 1.5, 0.0, 1.0);
   // The smoke: the rim first, then all of it as it cools (from the outside in).
@@ -123,7 +123,7 @@ void main() {
   float soot = clamp(rim * 1.2 + (1.0 - L) * 1.1, 0.0, 1.0) * (0.55 + 0.7 * n);
   vec3 fire = blackbody(clamp(T * 1.3 + 0.08, 0.0, 1.0));
   // Soot and dust: dark below, a dusty tan up top where the daylight catches it; lit by the fire inside.
-  vec3 smoke = mix(vec3(0.09, 0.07, 0.06), vec3(0.46, 0.40, 0.34), clamp(q.y * 0.7 + 0.25, 0.0, 1.0));
+  vec3 smoke = mix(vec3(0.09, 0.07, 0.06), vec3(0.46, 0.40, 0.34), clamp(q.y * 0.5 + 0.4, 0.0, 1.0));
   smoke += fire * T * 0.7;
   float sm = clamp(soot - T * 0.9, 0.0, 1.0);
   vec3 col = mix(fire * (1.1 + 0.9 * T), smoke, sm);
@@ -155,20 +155,20 @@ function glowDisc(ctx: CanvasRenderingContext2D, x: number, y: number, r: number
 }
 
 /**
- * The light the dome gives off, behind it in the sky (drawn before it): a
- * great glow round it, and a glare off the ground at its foot, flickering,
- * dying as fast as the fire does.
+ * The light the fireball gives off (drawn before it): a great glow round
+ * it, every way from its heart, over sky and ground alike, flickering, dying
+ * as fast as the fire does.
  */
 export function drawCloudHalo(ctx: CanvasRenderingContext2D, x: number, y: number, t: number): void {
   if (t < 0 || t * 1000 > DOME_MS) return;
   const h = lifeOf(t);
   const R = domeR(t);
+  const cy = y - (14 * t * t) / (1 + t);
   const op = ctx.globalCompositeOperation;
   ctx.globalCompositeOperation = 'lighter';
   const flick = 0.9 + 0.1 * Math.sin(t * 13.1) * Math.sin(t * 5.3);
-  glowDisc(ctx, x, y - R * 0.35, R * 2.2, '255,130,50', 0.55 * h * flick);
-  glowDisc(ctx, x, y - R * 0.2, R * 1.1, '255,220,160', 0.4 * h * h * flick);
-  glowDisc(ctx, x, y - 6, R * 1.4, '255,150,70', 0.35 * h * flick);
+  glowDisc(ctx, x, cy, R * 2.2, '255,130,50', 0.5 * h * flick);
+  glowDisc(ctx, x, cy, R * 1.2, '255,220,160', 0.4 * h * h * flick);
   ctx.globalCompositeOperation = op;
 }
 
@@ -225,7 +225,7 @@ export function drawCloudWash(ctx: CanvasRenderingContext2D, x: number, y: numbe
   if (t < 0 || t * 1000 > DOME_MS) return;
   const h = lifeOf(t);
   if (h < 0.02) return;
-  const cy = y - domeR(t) * 0.4;
+  const cy = y - (14 * t * t) / (1 + t);
   const r = Math.max(view.x1 - view.x0, view.y1 - view.y0) * 1.4 + Math.hypot(x - (view.x0 + view.x1) / 2, cy - (view.y0 + view.y1) / 2);
   const op = ctx.globalCompositeOperation;
   ctx.globalCompositeOperation = 'lighter';
@@ -291,7 +291,7 @@ export class StoneCloud {
   }
 
   /**
-   * Draw the dome over a strike at (x, y) (world cells; `t` seconds since it
+   * Draw the fireball over a strike at (x, y) (world cells; `t` seconds since it
    * landed) into `ctx`, which is in world space (one unit a cell). Only the
    * part inside `view` (world cells) is worked out: the shader is the costly
    * part, and a player close by sees only a piece of the cloud.
@@ -321,7 +321,6 @@ export class StoneCloud {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.SCISSOR_TEST);
     drawCloudHalo(ctx, x, y, t);
-    drawShock(ctx, x, y, t);
     const smooth = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = false;
     const w = cx1 - cx0;

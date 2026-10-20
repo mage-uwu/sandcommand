@@ -2884,29 +2884,30 @@ for the story mode too.
 
     All of that is cosmetic, on each client; the server's own debris is
     what hurts.
-  - a **fireball dome** swells out of the crater: a boiling hemisphere of
-    fire, white-hot at its heart, orange through its body, its rim
-    browning to soot as it cools from the outside in. It's over in about
+  - a **fireball** swells out from ground zero every way at once,
+    engulfing the crater and the ground round it as much as the sky: a
+    boiling ball of fire, white-hot at its heart, orange through its body,
+    its rim browning to soot as it cools from the outside in. It's drawn
+    over the scene, with its glow spreading radially round it. It's over in about
     5 s (`DOME_MS`), thinning away into the sky.
   - after it, a **plume of smoke** rises off the glowing molten core as it
     bores down, with embers riding up in it. It thins as the core cools and
     is gone after 40 s (`CLOUD_MS`).
 
-    The dome is a WebGL2 fragment shader (`src/client/stone-cloud.ts`) that
-    only runs while a dome is alive:
-    - **The shape:** a hemisphere growing fast, then slowly, lifting a
-      little as it goes. Its edge is eaten into by domain-warped fractal
+    The fireball is a WebGL2 fragment shader (`src/client/stone-cloud.ts`)
+    that only runs while one is alive:
+    - **The shape:** a ball centred on ground zero, growing fast, then
+      slowly, lifting a little as it goes. Its edge is eaten into by domain-warped fractal
       noise, so it boils.
     - **The heat:** hottest at its heart, cooling with age and toward the
       rim, shown as blackbody fire through the soot.
-    - **The light:** a glow bleeds into the sky round it, with a glare on
-      the ground below (`drawCloudHalo`). A warm wash over everything in
+    - **The light:** a glow spreads out round its heart, over sky and
+      ground alike (`drawCloudHalo`). A warm wash over everything in
       view fades as it cools (`drawCloudWash`). Both are drawn additively.
     - **Grit:** a coarse colour ramp and dithered alpha. It renders at one
-      texel per world cell, so it sits in the game's pixels, drawn behind
-      the ground like a sprite.
+      texel per world cell, so it sits in the game's pixels like a sprite.
     - **Cost:** only the part of it in view is computed.
-    - **No WebGL2:** no dome. The plume and everything else still play
+    - **No WebGL2:** no fireball. The plume and everything else still play
       out.
 - **On the wire.** Beacons and cores go out every frame while any exist
   (`R_BURNERS`), then once more when they're gone.

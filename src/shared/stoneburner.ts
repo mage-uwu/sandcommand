@@ -20,7 +20,7 @@ import { TICK_RATE } from './constants.ts';
  *   for up to FOOT_LIFE ticks, searing whoever goes near it, then sets as
  *   slag.
  *
- * Everyone in the room sees it: the flash, the shaking, the fireball dome
+ * Everyone in the room sees it: the flash, the shaking, the fireball
  * over the site (World broadcasts it; the client draws it all from that).
  */
 
