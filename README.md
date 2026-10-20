@@ -1384,18 +1384,30 @@ minutes (the wave runs twenty-four). Humans with the anti-tank cannons make the 
 Extermination's other ground (`MapKind.Dune`, chosen half the time by the
 map's seed in `World.mapKindFor`): a massive barren desert. No bunkers, no
 caves, no craters, gem caverns, geysers or plants. Nothing lives on it.
-- **The sand.** Towering dunes march across it (`duneHeight` in
+- **The dunes.** Towering dunes march across it (`duneHeight` in
   `src/shared/worldgen.ts`). Each has a long windward slope up to its crest
   and a steep slip face down the lee, with crests of different heights
-  (up to some 150 cells) and lesser dunes over the great ones. A deep crust
-  of loose rust sand, 70 to 160 cells, lies over solid ground, with no
-  rock or ore breaking it.
+  (up to some 150 cells) and lesser dunes over the great ones.
+  - They're made of **limestone** (`Mat.Limestone`): pale cream and tan,
+    bedded in layers that roll with the dunes, with darker seams, fine
+    cracks and the odd fossil fleck.
+  - The limestone runs 70 to 160 cells deep over solid ground, under just a
+    skin of loose rust sand (two to five cells).
+  - Limestone holds its shape, so a dragon boring through it leaves a
+    tunnel, not a landslide. Measured over 20 s of a dragon boring, loose
+    grains in motion averaged about 500 against about 11,000 when the dunes
+    were sand (which filled the grain pool).
+  - It's soft rock: blasts, diggers and dragons all cut it.
 - **Two dragons** lie under the sand (`DUNE_DRAGONS`, 150 cells down),
   awake from the start. They hear everyone on the sand, however far, and
   come up after them. When nobody is about they prowl just under the
   surface, and they never go back down to sleep. They have the lair
   dragon's health (half a wild one's) and everything a dragon does: its
   jaws, its breath of burning blood, its brood.
+  - A dragon (anywhere, not just here) takes no harm from what nobody did:
+    sand, debris and the ground, or its own burning blood landing round it.
+    Only a clone or a clone's weapon can hurt it, though anything still
+    wakes it.
 - **The heavy weapons** (bazookas, AT cannons, autocannons) lie out on the
   sand at four spots across it (`DUNE_CACHES`).
 - Kill both and everyone wins; respawns, vehicles and time are as in the

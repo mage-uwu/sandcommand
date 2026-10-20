@@ -361,9 +361,12 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   for (let x = 0; x < WORLD_W; x++) {
     const n = fbm(x, 0, 160, seed ^ 0x77, 2);
     dune[x] = duneMap
-      ? 70 + n * 90 // (DUNE: sand all the way down to the bones of the land)
+      ? 70 + n * 90 // (DUNE: the dunes' limestone, all the way down to the bones of the land)
       : biome === Biome.Dunes ? 10 + Math.max(0, n - 0.45) * 160 : biome === Biome.Meadows ? 2 + Math.max(0, n - 0.6) * 40 : 0;
   }
+  // (DUNE's sand: just a skin, two to five cells.)
+  const duneSkin = new Int32Array(WORLD_W);
+  if (duneMap) for (let x = 0; x < WORLD_W; x++) duneSkin[x] = 2 + Math.floor(fbm(x, 3, 50, seed ^ 0x5c1, 2) * 4);
   const rockBias = biome === Biome.Highlands ? 0.09 : biome === Biome.Canyons ? 0.04 : 0;
   const canyonFloor = WORLD_H * 0.3 + 40;
 
@@ -407,7 +410,10 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
         // lenses (loose pockets that cave in when undercut) > sand / dirt.
         if (dead && depth < crust[x]) v = crustCell(x, y, depth, crust[x], seed, ashN.at(x, y), gritN.at(x, y));
         else if (valley && y - crustTop[x] < crust[x]) v = crustCell(x, y, y - crustTop[x], crust[x], seed, ashN.at(x, y), gritN.at(x, y));
-        else if (duneMap && depth < dune[x]) v = Mat.RustSand; // (DUNE: no rock or ore breaking its crust)
+        // DUNE: a thin skin of rust sand over dunes of bedded limestone (it holds: a dragon's tunnel
+        // through it stays a tunnel, not a landslide); no rock or ore breaking it.
+        else if (duneMap && depth < duneSkin[x]) v = Mat.RustSand;
+        else if (duneMap && depth < dune[x]) v = Mat.Limestone;
         else if (!valley && !duneMap && depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
         else if (depth > 50 && gold.at(x, y) > 0.8 - Math.min(depth, 500) / 6000) v = Mat.Gold;
         else if (depth > (rockBias ? 2 : 6) && rock.at(x, y) > 0.66 - rockBias) v = Mat.Rock;

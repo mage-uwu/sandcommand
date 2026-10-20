@@ -14,7 +14,7 @@ const until = (world: World, cond: () => boolean, max = 3000) => {
 };
 
 describe('DUNE', () => {
-  it('a vast barren desert: towering dunes of loose sand, nothing built, no caves, no life', () => {
+  it('a vast barren desert: towering dunes of limestone under a thin skin of sand, nothing built, no caves, no life', () => {
     const t = new Terrain();
     generateWorld(t, 4242, MapKind.Dune);
     expect(lastComplexes.length).toBe(0);
@@ -24,16 +24,26 @@ describe('DUNE', () => {
     let hi = -Infinity;
     let air = 0;
     let sand = 0;
+    let lime = 0;
+    let skin = 0;
     for (let x = 20; x < WORLD_W - 20; x += 7) {
       const s = t.surfaceY(x);
       lo = Math.min(lo, s);
       hi = Math.max(hi, s);
-      if (t.get(x, s + 3) === Mat.RustSand) sand++;
+      if (t.get(x, s) === Mat.RustSand) sand++;
+      if (t.get(x, s + 10) === Mat.Limestone && t.get(x, s + 40) === Mat.Limestone) lime++;
+      // (The sand only a skin: a few cells.)
+      let d = 0;
+      while (t.get(x, s + d) === Mat.RustSand) d++;
+      skin = Math.max(skin, d);
       // (No cave under it: solid ground from the surface down, all the way.)
       for (let y = s + 2; y < WORLD_H - 12; y += 5) if (!t.isSolid(x, y)) air++;
     }
     expect(hi - lo).toBeGreaterThan(120); // (towering dunes)
-    expect(sand / ((WORLD_W - 40) / 7)).toBeGreaterThan(0.95);
+    const cols = (WORLD_W - 40) / 7;
+    expect(sand / cols).toBeGreaterThan(0.9);
+    expect(lime / cols).toBeGreaterThan(0.95);
+    expect(skin).toBeLessThanOrEqual(6);
     expect(air).toBe(0);
   });
 
@@ -96,5 +106,27 @@ describe('DUNE', () => {
     expect(surfaced).toBe(true);
     expect(hurt || near < 120).toBe(true);
     for (const b of ws) expect(b!.frenzy).toBeGreaterThan(0);
+  });
+
+  it("a dragon boring through the dunes leaves a tunnel, not a landslide; and nothing that's nobody's hurts it", () => {
+    const world = new World(seedFor(900, MapKind.Dune), { mode: 'ffa', rotation: [GameMode.Extermination], tanks: false, bots: 0 });
+    world.addPlayer('a', { send() {} });
+    world.addPlayer('b', { send() {} });
+    until(world, () => world.phase === Phase.Live);
+    const k = world.beasts.findIndex((b) => b && b.kind === BeastKind.Dragon);
+    const b = world.beasts[k]!;
+    const hp = b.hp;
+    // Nobody's harm (the sand, its own burning blood): none taken. A clone's: taken.
+    world.hurtBeast(k, 5000, 255);
+    expect(b.hp).toBe(hp);
+    world.hurtBeast(k, 100, 0);
+    expect(b.hp).toBe(hp - 100);
+    // A while of it boring about: hardly any loose sand on the move.
+    let loose = 0;
+    for (let t = 0; t < 30 * 20; t++) {
+      world.step();
+      if (t % 30 === 0) loose = Math.max(loose, world.grains.n);
+    }
+    expect(loose).toBeLessThan(3000);
   });
 });

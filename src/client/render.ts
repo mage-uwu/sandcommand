@@ -159,6 +159,24 @@ function petrifiedColor(t: Terrain, x: number, y: number): number {
   return gemRgb(re, gr, bl);
 }
 
+/**
+ * DUNE's limestone: pale cream and tan in bedded layers that roll a little
+ * with the dunes, a darker seam now and then, fine cracks down it, the odd
+ * fossil fleck; the face open to the air bleached paler.
+ */
+function limestoneColor(t: Terrain, x: number, y: number): number {
+  const bed = y + Math.sin(x * 0.011) * 6 + Math.sin(x * 0.047) * 2;
+  const layer = Math.floor(bed / 7);
+  let k = 0.86 + hu(layer, 0, 0x11e) * 0.18;
+  if (((bed % 7) + 7) % 7 < 0.9) k *= 0.86; // (a bedding seam)
+  if (hu(Math.floor(x / 3), layer, 0x5ea) > 0.93 && ((x * 13 + y * 7) & 7) === 0) k *= 0.8; // (a crack)
+  k *= 0.97 + hu(x, y, 0x3a1) * 0.06;
+  if (t.get(x, y - 1) === Mat.Air || t.get(x, y - 2) === Mat.Air) k *= 1.08;
+  const fossil = hu(x, y, 0xf05) > 0.996;
+  const [r, g, b] = fossil ? [168, 150, 126] : [214, 196, 158];
+  return gemRgb(r * k, g * k, b * k);
+}
+
 /** A hash of (x, y) in [0, 1) (salted by `s`). */
 const hu = (x: number, y: number, s: number) => (hash2(x, y, s) >>> 0) / 4294967296;
 
@@ -677,6 +695,7 @@ export class Renderer {
         else if (m === Mat.Rust) c = rustColor(t, wx, wy);
         else if (m === Mat.Pour) c = pourColor(t, wx, wy);
         else if (m === Mat.Petrified) c = petrifiedColor(t, wx, wy);
+        else if (m === Mat.Limestone) c = limestoneColor(t, wx, wy);
         else {
           const exposed = wy > 0 && t.mat[row + x - WORLD_W] === Mat.Air;
           c = soilColor(m, wx, wy, PALETTE[m * 8 + (hash2(wx, wy) & 3) + (exposed ? 4 : 0)]);

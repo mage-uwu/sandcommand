@@ -3528,7 +3528,9 @@ export class World {
   hurtBeast(k: number, dmg: number, by: number): void {
     const b = this.beasts[k];
     if (!b || dmg <= 0) return;
-    b.hp -= dmg;
+    // A dragon takes no harm from what nobody did: sand and debris, the ground, its own burning
+    // blood landing round it. Only a clone (or a clone's weapon) can hurt it. (It still feels it: it wakes.)
+    if (!(b.kind === BeastKind.Dragon && by === NO_OWNER)) b.hp -= dmg;
     if (by < MAX_PLAYERS && this.players[by]) b.hurtBy = by;
     // Hurt, it thaws; hurt hard enough while it holds someone, it lets them go.
     b.frozen = 0;
