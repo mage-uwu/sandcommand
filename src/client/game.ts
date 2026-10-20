@@ -4,7 +4,7 @@ import { WoundBook, beastDamage, beastScars } from './wounds.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_MAX_HP, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, type BurnerState, type FootState, applyFrameRecords } from '../shared/frame.ts';
-import { BURNER_FUSE, BurnerPhase, FOOT_LIFE, beepAt } from '../shared/stoneburner.ts';
+import { BURNER_FUSE, BurnerPhase, CLOUD_MS, FOOT_LIFE, beepAt } from '../shared/stoneburner.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
@@ -27,7 +27,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { dragonBreathGout, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { dragonBreathGout, stonePlume, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -1128,7 +1128,7 @@ export class Game implements FrameHandler {
   /** Stoneburner beacons and molten cores about (R_BURNERS). */
   burnerList: BurnerState[] = [];
   footList: FootState[] = [];
-  /** Stoneburner strikes seen: where, when (performance.now ms), and their seed (the cloud over each hangs for CLOUD_MS). */
+  /** Stoneburner strikes seen: where, when (performance.now ms), and their seed (its fireball, then the plume off its core, for CLOUD_MS). */
   readonly stoneBurns: { x: number; y: number; at: number; seed: number }[] = [];
   /** When the last strike's flash went off (performance.now ms; the screen whites out, then fades). */
   stoneFlashAt = -1e9;
@@ -1167,8 +1167,9 @@ export class Game implements FrameHandler {
 
   /**
    * A Stoneburner strike lands: the whole room sees it. The world whites
-   * out and fades back to the fireball, the mushroom cloud starts to climb
-   * over the site, everything shakes (worst near it, but everyone feels it),
+   * out and fades back to the fireball, a dome of fire swelling up over the
+   * site and gone in seconds (the plume of smoke off its molten core rising
+   * long after), everything shakes (worst near it, but everyone feels it),
    * and the roar of it reaches everyone.
    */
   stoneBurn(x: number, y: number, _by: number, seed: number): void {
@@ -1197,6 +1198,23 @@ export class Game implements FrameHandler {
       this.quake *= 0.985;
     } else this.quake = 0;
     for (const f of this.footList) moltenCore(this.particles, f.x, f.y, f.life / FOOT_LIFE);
+    // The plume: smoke rising off each strike's molten core as it bores down (thinning as it cools).
+    const now = performance.now();
+    for (const sb of this.stoneBurns) {
+      const age = (now - sb.at) / CLOUD_MS;
+      if (age < 0 || age >= 1) continue;
+      // (The core: where its sludge is, pooled and sinking in the crater; else the crater itself.)
+      let cx = 0;
+      let cy = 0;
+      let n = 0;
+      for (const f of this.footList) {
+        if (Math.abs(f.x - sb.x) > 220) continue;
+        cx += f.x;
+        cy = Math.max(cy, f.y);
+        n++;
+      }
+      stonePlume(this.particles, n ? cx / n : sb.x, n ? cy : sb.y, 1 - age);
+    }
     // The ejecta: falling, trailing fire and then smoke as they cool, till they hit the ground.
     for (let i = this.ejecta.length - 1; i >= 0; i--) {
       const e = this.ejecta[i];

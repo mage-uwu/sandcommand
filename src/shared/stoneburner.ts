@@ -20,7 +20,7 @@ import { TICK_RATE } from './constants.ts';
  *   for up to FOOT_LIFE ticks, searing whoever goes near it, then sets as
  *   slag.
  *
- * Everyone in the room sees it: the flash, the shaking, the mushroom cloud
+ * Everyone in the room sees it: the flash, the shaking, the fireball dome
  * over the site (World broadcasts it; the client draws it all from that).
  */
 
@@ -68,8 +68,8 @@ export const SLUDGE_BLOBS = 44;
 export const SLUDGE_R = 3;
 /** How many ticks between a hot blob's bites of the ground it touches (cooling, it bites less often). */
 export const SLUDGE_BITE = 5;
-/** How long the mushroom cloud hangs over the site (ms, on the client). */
-export const CLOUD_MS = 70_000;
+/** How long a strike's aftermath shows on clients (ms): the fireball's few seconds, then the plume of smoke off the molten core, as long as it burns. */
+export const CLOUD_MS = 40_000;
 
 /**
  * The beacon's light at `left` ticks to go: on or off this tick. It blinks

@@ -581,7 +581,7 @@ export class Renderer {
   private assistSight = false;
   private readonly particleLayer = new ParticleLayer();
   zoom = 3;
-  /** The Stoneburner's mushroom cloud (a shader, set up the first time one's drawn). */
+  /** The Stoneburner's fireball dome (a shader, set up the first time one's drawn). */
   private readonly stoneCloud = new StoneCloud();
   camX = WORLD_W / 2;
   /** Debug only (?debug, window.sc): pin the view to a world point. */
@@ -946,7 +946,7 @@ export class Renderer {
     // Now and then, on a cave's back wall: a trace of whoever was here first.
     if (game.relics.length) drawRelics(ctx, game.relics, camX - halfW, camY - halfH, camX + halfW, camY + halfH);
 
-    // A Stoneburner strike's mushroom cloud, over the site (behind the ground: it rises out of the crater; stone-cloud.ts).
+    // A Stoneburner strike's fireball dome, over the site (behind the ground: it swells out of the crater; stone-cloud.ts).
     for (let i = game.stoneBurns.length - 1; i >= 0; i--) {
       const sb = game.stoneBurns[i];
       const t = (now - sb.at) / 1000;

@@ -2884,39 +2884,30 @@ for the story mode too.
 
     All of that is cosmetic, on each client; the server's own debris is
     what hurts.
-  - a **mushroom cloud** towers over the site for 70 s. First the
-    fireball. Then comes a glowing, smoking
-    pillar, white-hot up its core, pouring into a wide cap. Inside the cap
-    the rolling vortex ring burns orange through the soot, and the cap's
-    belly glows from below. It cools slowly, still glowing half a minute
-    on, to embers in a dark, ragged cloud that drifts and thins. A skirt of
-    dust rolls out along the ground at its foot. It's a WebGL2 fragment
-    shader (`src/client/stone-cloud.ts`) that only runs while a cloud is
-    alive:
-    - **The smoke:** a density field, the cloud's shape (fireball, pillar,
-      cap, skirt) eaten into and frayed by domain-warped fractal noise. The
-      noise boils up the pillar and rolls round the cap. Ridged detail
-      makes the billows read as cauliflower folds. A few steps toward the
-      light give it self-shadowing, and a short step gives each billow's
-      sunlit face.
-    - **The heat:** a temperature field with these sources:
-      - the fireball;
-      - the vortex ring inside the cap, the hottest part;
-      - the cap's belly;
-      - the pillar's core;
-      - the burning crater.
+  - a **fireball dome** swells out of the crater: a boiling hemisphere of
+    fire, white-hot at its heart, orange through its body, its rim
+    browning to soot as it cools from the outside in. It's over in about
+    5 s (`DOME_MS`), thinning away into the sky.
+  - after it, a **plume of smoke** rises off the glowing molten core as it
+    bores down, with embers riding up in it. It thins as the core cools and
+    is gone after 40 s (`CLOUD_MS`).
 
-      It flickers with the turbulence and cools slowly (`hotness`). The
-      fire shows through where the smoke thins and lights the soot around
-      it orange.
-    - **The light:** a halo bleeds into the sky behind the cap, pillar and
-      crater (`drawCloudHalo`). A warm wash over everything in view fades
-      as it cools (`drawCloudWash`). Both are drawn additively.
-    - **Grit:** per-cell grain, a coarse colour ramp and stepped alpha. It
-      renders at one texel per world cell, so it sits in the game's pixels,
-      drawn behind the ground like a sprite.
+    The dome is a WebGL2 fragment shader (`src/client/stone-cloud.ts`) that
+    only runs while a dome is alive:
+    - **The shape:** a hemisphere growing fast, then slowly, lifting a
+      little as it goes. Its edge is eaten into by domain-warped fractal
+      noise, so it boils.
+    - **The heat:** hottest at its heart, cooling with age and toward the
+      rim, shown as blackbody fire through the soot.
+    - **The light:** a glow bleeds into the sky round it, with a glare on
+      the ground below (`drawCloudHalo`). A warm wash over everything in
+      view fades as it cools (`drawCloudWash`). Both are drawn additively.
+    - **Grit:** a coarse colour ramp and dithered alpha. It renders at one
+      texel per world cell, so it sits in the game's pixels, drawn behind
+      the ground like a sprite.
     - **Cost:** only the part of it in view is computed.
-    - **No WebGL2:** no cloud. Everything else still plays out.
+    - **No WebGL2:** no dome. The plume and everything else still play
+      out.
 - **On the wire.** Beacons and cores go out every frame while any exist
   (`R_BURNERS`), then once more when they're gone.
 

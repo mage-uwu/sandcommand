@@ -6,7 +6,7 @@ import { BURNER_FUSE, BURNER_STRIKE, BurnerPhase, FOOT_LIFE, STRIKE_HEIGHT, blin
  * winking ever faster, with a red targeting line up into the sky as its
  * last seconds run out; the missile's white-hot streak down out of orbit;
  * the strike's molten core glowing in its pit; and the flash that whites
- * out every screen in the room. (The mushroom cloud is a shader of its own:
+ * out every screen in the room. (The fireball dome is a shader of its own:
  * stone-cloud.ts.)
  */
 

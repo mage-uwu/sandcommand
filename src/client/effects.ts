@@ -760,6 +760,22 @@ export function moltenCore(p: Particles, x: number, y: number, heat: number): vo
 }
 
 /**
+ * The plume off a Stoneburner strike's molten core (x, y: where it's
+ * boring down; `heat` 1 fresh, 0 cold), one tick of it: smoke rising off it
+ * in a column, drifting as it climbs, and embers riding up in it, all
+ * thinning as it cools.
+ */
+export function stonePlume(p: Particles, x: number, y: number, heat: number): void {
+  const n = heat * 5.5 + 0.8;
+  const count = Math.floor(n) + (Math.random() < n % 1 ? 1 : 0);
+  for (let k = 0; k < count; k++) {
+    p.spawn(PK.Smoke, x + rnd(-10, 10), y - rnd(0, 8), rnd(-16, 16), -rnd(55, 120) * (0.6 + 0.4 * heat), rnd(170, 300));
+  }
+  if (Math.random() < 0.5 * heat) p.spawn(PK.Spark, x + rnd(-5, 5), y - 2, rnd(-25, 25), -rnd(90, 190), rnd(18, 40));
+  if (Math.random() < 0.35 * heat) p.spawn(PK.Flame, x + rnd(-4, 4), y - 1, rnd(-12, 12), -rnd(60, 130), rnd(10, 20));
+}
+
+/**
  * A glob of a dragon's breath in flight, after a Stoneburner's meltdown
  * (moltenCore, stoneburnBlast): flame licking off it, white-hot sparks
  * streaking away, drops of burning blood falling off it, a little smoke.
