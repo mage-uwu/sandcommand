@@ -1,6 +1,7 @@
 import { MAT_COLOR } from '../shared/materials.ts';
 import { PK, type Particles } from '../shared/particles.ts';
 import type { SpriteCache } from './sprites.ts';
+import { CRAB_BLUE } from './effects.ts';
 
 /**
  * Every particle the field engine owns is drawn by writing pixels straight
@@ -125,6 +126,8 @@ export class ParticleLayer {
         case PK.Blood:
           // (Red, unless it's some creature's own: an asp's gem-coloured goo.)
           buf[o] = color[i] ? fromRgb(color[i]) : BLOOD;
+          // (An animal's blue: gritty, every other drop with a dark grain on its diagonal, dithered.)
+          if ((i & 1) === 0 && cx + 1 < w && cy + 1 < h && (color[i] === CRAB_BLUE[1] || color[i] === CRAB_BLUE[2])) buf[o + w + 1] = CRAB_DARK;
           break;
         case PK.Stone: {
           // A chunk of dripstone: two cells square, lit top left, dark bottom right.
@@ -161,6 +164,8 @@ export class ParticleLayer {
 }
 
 /** Source-over composite of an RGBA colour onto a buffer pixel. */
+const CRAB_DARK = fromRgb(CRAB_BLUE[0]);
+
 function blendOver(buf: Uint32Array, o: number, r: number, g: number, b: number, a: number): void {
   if (a <= 0) return;
   const d = buf[o];

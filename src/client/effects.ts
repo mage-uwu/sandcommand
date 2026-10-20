@@ -642,6 +642,39 @@ export function gooSplat(p: Particles, x: number, y: number, gem: number, count:
   }
 }
 
+/**
+ * Every animal's blood, under whatever else it bleeds: blue, like a
+ * horseshoe crab's. Gritty, not smooth: each drop one of a few shades, deep
+ * to milky, so a spatter (and the stain it leaves) comes out dithered; the
+ * darkest marks a grain beside some drops (particle-layer.ts).
+ */
+export const CRAB_BLUE = [0x0b4f78, 0x1290c8, 0x18c8ff, 0x8ad8ee] as const;
+const crabShade = () => {
+  const r = Math.random();
+  return CRAB_BLUE[r < 0.25 ? 0 : r < 0.55 ? 1 : r < 0.85 ? 2 : 3];
+};
+/** An animal hurt: a spatter of its blue blood (`count` drops, flung up to `speed`). */
+export function crabBloodSplat(p: Particles, x: number, y: number, count: number, speed: number): void {
+  for (let k = 0; k < count; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = speed * Math.random();
+    p.spawn(PK.Blood, x, y, Math.cos(a) * s, Math.sin(a) * s - speed * 0.3, 60, 0, crabShade());
+  }
+}
+/** An animal killed: gobbets of its blue blood off its whole body, and a great spatter. */
+export function crabBloodGibs(p: Particles, pts: readonly number[]): void {
+  for (let i = 0; i < pts.length; i += 2) {
+    const x = pts[i];
+    const y = pts[i + 1];
+    if (Math.random() < 0.6) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 30 + Math.random() * 100;
+      p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 60, rnd(400, 650), GIB_SAC | GIB_INORGANIC, Math.random() < 0.5 ? CRAB_BLUE[0] : CRAB_BLUE[1]);
+    }
+    crabBloodSplat(p, x, y, 10, 100);
+  }
+}
+
 /** A cave spider's ichor: a pale, sickly green. */
 const ICHOR = 0x6a8a32;
 const ICHOR_HI = 0xc0d878;

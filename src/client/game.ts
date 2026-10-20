@@ -27,7 +27,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { dragonBreathGout, stonePlume, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { dragonBreathGout, crabBloodGibs, crabBloodSplat, stonePlume, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -1357,6 +1357,8 @@ export class Game implements FrameHandler {
         v.lift = b.lift;
         // An asp hurt: its goo spatters (more, the harder it was hit).
         if (b.kind === BeastKind.Spider && b.hp < v.hp) ichorSplat(this.particles, b.pts[0], b.pts[1], Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
+        // Any creature hurt: its blue blood (more, the harder it was hit).
+        if (b.hp < v.hp && b.kind !== BeastKind.Nest && b.kind !== BeastKind.Web) crabBloodSplat(this.particles, b.pts[0], b.pts[1], Math.min(24, 3 + Math.round((v.hp - b.hp) / 5)), 80);
         if (b.kind === BeastKind.Asp && b.hp < v.hp) gooSplat(this.particles, b.pts[0], b.pts[1], b.seed, Math.min(20, 4 + Math.round((v.hp - b.hp) / 4)), 70);
         v.hp = b.hp;
         v.top = Math.max(v.top, b.hp);
@@ -1441,6 +1443,7 @@ export class Game implements FrameHandler {
     else if (v.kind === BeastKind.Asp) aspGibs(this.particles, v.cur, v.seed);
     else if (v.kind === BeastKind.Spider) spiderGibs(this.particles, v.cur);
     else beastGibs(this.particles, v.cur);
+    if (v.kind !== BeastKind.Nest && v.kind !== BeastKind.Web) crabBloodGibs(this.particles, v.cur);
     // Every segment flung off whole (a nest in shards; a seeder's wings torn off it).
     const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Web ? 8 + 2 * Math.min(24, Math.round(v.lift * 255)) : v.kind === BeastKind.Seeder ? 3 : v.kind === BeastKind.Spider ? 10 : v.cur.length >> 1;
     for (let i = 0; i < n; i++) {
@@ -1756,10 +1759,10 @@ export class Game implements FrameHandler {
     this.mapKind = kind;
     this.caves = lastCaves !== null;
     this.deathCause = '';
+    this.deathBy = null;
     this.fragged = false;
     this.relics = placeRelics(this.terrain, seed, this.backdrop, this.caves);
     this.doors = lastComplexes.flatMap((c) => c.doors ?? []);
-    this.deathBy = null;
     this.decor = placeDecor(this.terrain, lastComplexes, seed);
     this.flora = lastFlora;
     this.valley = lastValley;
@@ -1994,11 +1997,11 @@ export class Game implements FrameHandler {
 
   /** How we died last (the death banner's headline): "killed by Rex [Sniper]", "buried in a cave-in"... */
   deathCause = '';
+  /** Who killed us last, and with what (the death card), when it was another clone's own hand; else null. */
+  deathBy: { id: number; weapon: string } | null = null;
   /** Died since we last came down (and not yet back): the banner says FRAGGED, not LOADING OUT. */
   fragged = false;
 
-  /** Who killed us last, and with what (the death card), when it was another clone's own hand; else null. */
-  deathBy: { id: number; weapon: string } | null = null;
   /** Our career record, across sessions (kept in this browser). */
   readonly career = loadCareer();
 
@@ -2033,10 +2036,10 @@ export class Game implements FrameHandler {
     else text = `${kn} [${how}] ${vn}`;
     if (victim === this.myId) {
       this.deathCause = causeOfDeath(kn, killer, victim, weapon, how);
+      this.deathBy = killer !== victim && killer !== 255 && this.deathCause.startsWith('killed by ') ? { id: killer, weapon: weapon === W_LASER ? 'Laser' : how } : null;
       this.fragged = true; // (even killed on the way down, before we were ever on the ground)
     }
     const droid = this.isDroid(victim);
-      this.deathBy = killer !== victim && killer !== 255 && this.deathCause.startsWith('killed by ') ? { id: killer, weapon: weapon === W_LASER ? 'Laser' : how } : null;
     if (droid) text += ' (droid scrapped)';
     else if (!has(k.parts, Part.Head)) text += ' (headshot)';
     else if (!has(k.parts, Part.Torso)) text += ' (torn apart)';
@@ -2117,6 +2120,8 @@ export class Game implements FrameHandler {
       } else if (v.kind === BeastKind.Spider) ichorSplat(this.particles, x, y, 1, 10);
       else if (v.kind === BeastKind.Asp) gooSplat(this.particles, x, y, v.seed, 1, 10);
       else if (v.kind === BeastKind.Basilisk || v.kind === BeastKind.Millipede) bloodSplat(this.particles, x, y, 1, 10);
+      // (And its blue, from every wound.)
+      if (v.kind !== BeastKind.Nest && v.kind !== BeastKind.Web) crabBloodSplat(this.particles, x, y, 1, 10);
     }
   }
 

@@ -709,6 +709,17 @@ The planet's own creatures (`src/shared/wildlife.ts`). Nobody drives them,
 ever: the server thinks for them, and they fight everyone alike, bots
 included.
 
+**Blue blood.** Every animal (not the nests or the webs, and never a clone
+or a bot) bleeds blue, like a horseshoe crab, under whatever else it bleeds
+(an asp's gem-coloured goo, a cave spider's ichor, a dragon's fire). It's
+gritty, not smooth: each drop is one of a few shades from deep to milky,
+with a dark grain beside some, so spatters and the stains they leave come
+out dithered. A hit spatters it, more the harder the hit; a badly hurt
+animal drips it from its wounds; killed, it comes apart in gobbets of it
+and a great spatter (`crabBloodSplat` and `crabBloodGibs` in
+`src/client/effects.ts`). It's all on each client, worked out from the
+animal's health.
+
 **Where they live.** Every map, in every mode (only the tutorial has none):
 PvP, Regicide's fortresses, Siege, Extraction's labyrinth and the rest.
 - **A mix, always.** The first crawlers to come up on any map are one of
