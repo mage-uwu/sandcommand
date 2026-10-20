@@ -34,7 +34,7 @@ export const MILLI_R = 3.6;
  * the energy to get through its plates (World: TANK_INTEGRITY) does its full
  * harm, anything weaker a fifth of it; blasts hurt it by distance.
  */
-export const MILLI_HP = 2400;
+export const MILLI_HP = 1680;
 /**
  * Its head is its weak spot: half as tough as the plated segments behind
  * it, so whatever hits it there (a round, a beam, the nearest point of a
@@ -111,8 +111,8 @@ export const MILLI_NECK = 5;
  */
 export const MILLI_COIL_R = 9;
 export const MILLI_COIL_TICKS = 30;
-export const MILLI_COIL_KILL = 45;
-export const MILLI_COIL_DROID = 35;
+export const MILLI_COIL_KILL = 32;
+export const MILLI_COIL_DROID = 25;
 export const MILLI_FLING = 460;
 export const MILLI_COIL_BREAK = MILLI_HP * 0.06;
 export const MILLI_COIL_SEGS = 8;
@@ -523,7 +523,7 @@ export const flies = (kind: number) => kind === BeastKind.Seeder;
 export const rooted = (kind: number) => kind === BeastKind.Nest || kind === BeastKind.Web;
 
 /** Venom: a dose (harm it does in all), the most the blood holds, the harm a tick. */
-export const VENOM_DOSE = 36;
+export const VENOM_DOSE = 25;
 export const VENOM_MAX = 110;
 export const VENOM_RATE = 0.2;
 

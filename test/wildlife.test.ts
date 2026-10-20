@@ -324,11 +324,11 @@ describe('millipedes in the world', () => {
     return shots;
   };
 
-  it('armoured: it takes dozens of slugs to kill', () => {
-    // Armoured like a spider mech: it takes dozens of sniper slugs to the body.
+  it('armoured: it takes a dozen and more slugs to kill', () => {
+    // Armoured like a spider mech: it takes a dozen and more sniper slugs to the body.
     const shots = slugsToKill(5);
-    expect(shots).toBeGreaterThan(20);
-    expect(shots).toBeLessThan(45);
+    expect(shots).toBeGreaterThan(12);
+    expect(shots).toBeLessThan(32);
   });
 
   it('its head is its weak spot: half as tough, so slugs to the head kill it in about half as many', () => {

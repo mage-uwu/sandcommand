@@ -754,8 +754,8 @@ terrain cell to a pixel).
   ground and taking the one that gets it nearer.
 - **It coils, writhes, bites and flings.** The clone its head reaches, it
   wraps round like a rope and writhes with, dragging them about, for a
-  second. Then it bites (45 harm and a dose of venom; a droid's frame
-  takes 35) and flings them far, away from its body and up, at 460 cells a
+  second. Then it bites (32 harm and a dose of venom; a droid's frame
+  takes 25) and flings them far, away from its body and up, at 460 cells a
   second: it's the landing, or the wall, that hurts. Hurt hard enough while
   it holds someone (6% of its health), it lets go. After that it lies
   still a while.
@@ -767,20 +767,20 @@ terrain cell to a pixel).
   splashes, shards of crystal in the GEMM colours (pink, turquoise,
   emerald) fly out of the blood.
 - **Venom lingers.** A glob does little harm on the hit. The venom it leaves
-  in the blood does the real damage: 36 hit points a dose, a little each
-  tick for about six seconds. Doses stack (up to 110), and the coil's bite
+  in the blood does the real damage: 25 hit points a dose, a little each
+  tick for about four seconds. Doses stack (up to 110), and the coil's bite
   adds a dose too. A poisoned clone weeps blood, and your own HUD marks
   the harm still to come on the health bar, pulsing, with the edges of the
   view stained red. Only the repair kit's health wave washes the venom out.
-- **Armoured like a spider mech.** It has 2400 hit points. Like a vehicle's
+- **Armoured like a spider mech.** It has 1680 hit points. Like a vehicle's
   armour, a round with the energy to get through its plates does its full
-  harm, and anything weaker a fifth. That's dozens of sniper slugs, so
+  harm, and anything weaker a fifth. That's 15 sniper slugs to the body, so
   explosions (1.5 times their blast, by distance), lasers and shaped
   charges are the better bet.
 - **Its head is its weak spot.** The head is half as tough as the plated
   segments, so anything that hits it there (a round, a beam, the nearest
-  point of a blast) does double. About 15 sniper slugs to the head kill it,
-  against 30 to the body.
+  point of a blast) does double. About 8 sniper slugs to the head kill it,
+  against 15 to the body.
 - **It gibs.** Killed, every segment flies off whole, in its own
   camouflage, tumbling and bouncing until it comes to rest and fades, in a
   spray of blood and gem shards.

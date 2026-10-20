@@ -135,7 +135,7 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.12, life: 40, damage: 22, mass: 0.65, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1 },
   // Millipede venom: a wet glob lobbed on an arc; it splashes on whatever it hits (no hole), the
   // harm's mostly in the venom it leaves in the blood (World: Player.venom).
-  { gravity: 0.6, life: 75, damage: 6, mass: 0.25, sharp: 0.4, carveR: 0, coreR: 0, splashR: 0, splashDamage: 0, debris: 0, bounce: 0, ballistic: true, knock: 0.3 },
+  { gravity: 0.6, life: 75, damage: 4, mass: 0.25, sharp: 0.4, carveR: 0, coreR: 0, splashR: 0, splashDamage: 0, debris: 0, bounce: 0, ballistic: true, knock: 0.3 },
   // Dragon spit: a glob of burning blood, dozens to a breath (World.dragonBreath), each on an arc. It
   // bursts where it lands (a small blast, a scorch), and the fire it throws out burns on (World.onProjEnd).
   { gravity: 0.55, life: 120, damage: 18, mass: 0.8, sharp: 0.3, carveR: 4, coreR: 1, splashR: 14, splashDamage: 24, debris: 3, bounce: 0, ballistic: false, knock: 0.4 },
