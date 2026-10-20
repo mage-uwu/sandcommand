@@ -68,6 +68,25 @@ export const SLUDGE_BLOBS = 44;
 export const SLUDGE_R = 3;
 /** How many ticks between a hot blob's bites of the ground it touches (cooling, it bites less often). */
 export const SLUDGE_BITE = 5;
+/**
+ * Its heat: everything within SLUDGE_SEAR_R cells of a blob (clones,
+ * creatures, vehicles) is seared, every SLUDGE_SEAR_EVERY ticks, worst up
+ * close and while it's fresh.
+ */
+export const SLUDGE_SEAR_R = 22;
+export const SLUDGE_SEAR_EVERY = 6;
+export const sludgeSear = (heat: number, d: number) => (d < SLUDGE_SEAR_R ? (4 + 14 * heat) * (1 - d / SLUDGE_SEAR_R) * 2 : 0);
+/**
+ * Now and then a blob flares (the server rolls it, and tells the clients,
+ * who burst into flame and sparks there): a gout of fire out to
+ * flareReach cells that burns everything it reaches. More often, further
+ * and fiercer while it's fresh (`heat` 1 fresh, 0 cold).
+ */
+export const flareChance = (heat: number) => 0.012 + 0.03 * heat;
+export const flareReach = (heat: number) => (10 + 10 * heat) * 1.6;
+export const flareHarm = (heat: number, d: number, reach: number) => (d < reach ? (10 + 30 * heat) * (1 - d / reach) : 0);
+/** A sludge blob's record on the wire: its life in the low bits, this bit set the tick it flares. */
+export const FOOT_FLARE = 0x8000;
 /** How long a strike's aftermath shows on clients (ms): the fireball's few seconds, then the plume of smoke off the molten core, as long as it burns. */
 export const CLOUD_MS = 40_000;
 

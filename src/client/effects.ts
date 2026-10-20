@@ -775,21 +775,25 @@ export function stoneburnBlast(p: Particles, x: number, y: number, impulse: numb
 
 /**
  * A blob of a Stoneburner's molten sludge, one tick of it (`heat` 1 fresh,
- * falling to 0 as it sets): flame licking off it all the time, and every
- * so often a grenade's worth of blast going off in it (flame, sparks,
- * smoke, the air shoved), more often while it's hot. Just the fire: no
- * fragments (they'd settle into this client's ground alone).
+ * falling to 0 as it sets): flame licking off it all the time, and smoke.
  */
 export function moltenCore(p: Particles, x: number, y: number, heat: number): void {
   if (Math.random() < 0.15 + 0.35 * heat) p.spawn(PK.Flame, x + rnd(-4, 4), y - 2, rnd(-20, 20), -rnd(30, 60 + 100 * heat), rnd(8, 12 + 10 * heat));
   if (Math.random() < 0.05) p.spawn(PK.Smoke, x + rnd(-4, 4), y - 5, rnd(-12, 12), -rnd(25, 60), rnd(90, 160));
-  if (Math.random() < 0.012 + 0.03 * heat) {
-    const r = 10 + 10 * heat;
-    p.blast(x, y, r * 1.6, 180);
-    burst(p, PK.Flame, x, y - 2, 22, r * 6, 12);
-    burst(p, PK.Spark, x, y - 2, 16, r * 12, 18);
-    burst(p, PK.Smoke, x, y - 4, 18, r * 3, 80);
-  }
+}
+
+/**
+ * A sludge blob flaring (the server rolls it, the moment it burns whatever
+ * this reaches: flareReach in stoneburner.ts): a grenade's worth of blast
+ * going off in it (flame, sparks, smoke, the air shoved). Just the fire: no
+ * fragments (they'd settle into this client's ground alone).
+ */
+export function coreFlare(p: Particles, x: number, y: number, heat: number): void {
+  const r = 10 + 10 * heat;
+  p.blast(x, y, r * 1.6, 180);
+  burst(p, PK.Flame, x, y - 2, 22, r * 6, 12);
+  burst(p, PK.Spark, x, y - 2, 16, r * 12, 18);
+  burst(p, PK.Smoke, x, y - 4, 18, r * 3, 80);
 }
 
 /**

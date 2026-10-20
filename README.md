@@ -2888,14 +2888,22 @@ for the story mode too.
     the sides, hard rock too), so it sinks, widens its pit, and seeps
     through into any cave or tunnel underneath;
   - it eats more slowly as it cools over up to 40 s;
-  - it sears anyone who gets near it, and sheds flame, sparks and acrid
-    smoke;
+  - its heat sears everything within 22 cells (`SLUDGE_SEAR_R`): clones,
+    creatures and vehicles alike, worst up close and while it's fresh, a
+    hazard to everyone whoever called it down. Slag eats through armour,
+    so a tank parked in it burns at full heat;
+  - every so often a blob **flares**: a gout of fire bursting out of it,
+    up to about 32 cells while fresh (`flareReach`), that burns every
+    clone, creature and vehicle it reaches and throws real flames that go
+    on burning what they touch. The server rolls each flare and tells the
+    clients that tick, so the burst you see is the one that hurts;
+  - it sheds flame, sparks and acrid smoke;
   - when it's spent, each blob sets as a few grains of glassy slag that
     settle as real ground.
 
   On screen it has no shape of its own, only fire and light: a fierce
   orange glow round each blob, added up where they pool. Flame licks off
-  it all the time, and every so often a grenade's worth of blast goes off
+  it all the time, and each flare is a grenade's worth of blast going off
   in it (flame, sparks, smoke, the air shoved), more often while it's hot.
   That's just the fire, without fragments, which would settle into one
   client's ground alone.

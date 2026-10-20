@@ -245,7 +245,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
+import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
@@ -3873,18 +3873,77 @@ export class World {
       }
       // Flame and smoke off it (more while it's fresh).
       if (this.rng.next() < 0.05 + 0.15 * heat) this.grains.spawn(PK.Flame, f.x + this.rng.range(-R, R), f.y - R, this.rng.range(-20, 20), -30 - 80 * heat * this.rng.next(), 8 + this.rng.int(10), 0, 0, owner);
+      // Now and then it flares: a gout of fire bursting out of it, burning whatever it reaches.
+      if (this.rng.next() < flareChance(heat)) {
+        f.flaredAt = this.tick;
+        this.footFlare(f, heat, owner);
+      }
     }
-    // Up close, its heat sears (through whatever's between or not).
-    if (this.tick % 6 === 0 && feet.length) {
+    // Up close, its heat sears (through whatever's between or not): clones, creatures, vehicles.
+    if (this.tick % SLUDGE_SEAR_EVERY === 0 && feet.length) {
+      const by = feet[0].owner === 255 ? NO_OWNER : feet[0].owner;
+      const worstAt = (x: number, y: number) => {
+        let worst = 0;
+        for (const f of feet) worst = Math.max(worst, sludgeSear(f.life / FOOT_LIFE, Math.hypot(x - f.x, y - f.y)));
+        return worst;
+      };
       for (const p of this.players) {
         if (!p || !p.alive) continue;
-        let worst = 0;
-        for (const f of feet) {
-          const d = Math.hypot(p.cx - f.x, p.cy - f.y);
-          if (d < 22) worst = Math.max(worst, (4 + 14 * (f.life / FOOT_LIFE)) * (1 - d / 22));
-        }
-        if (worst > 0) this.damage(p, worst * 2, feet[0].owner, W_STONEBURNER, true);
+        const worst = worstAt(p.cx, p.cy);
+        if (worst > 0) this.damage(p, worst, feet[0].owner, W_STONEBURNER, true);
       }
+      for (let k = 0; k < MAX_BEASTS; k++) {
+        if (!this.beasts[k]) continue;
+        const pts = this.beastPts[k];
+        let worst = 0;
+        for (let i = 0; i < pts.length; i += 2) worst = Math.max(worst, worstAt(pts[i], pts[i + 1]));
+        if (worst > 0) this.hurtBeast(k, worst, by);
+      }
+      for (let k = 0; k < this.tanks.length; k++) {
+        const t = this.tanks[k];
+        if (!t) continue;
+        // (Its tracks: the bottom middle, where it would be standing in the pool.)
+        const x = t.x + tankW(t) / 2;
+        const y = t.y + tankH(t);
+        const worst = Math.max(worstAt(x, y), worstAt(t.x, y), worstAt(t.x + tankW(t), y));
+        // (Slag eats through armour, whosever it is: the full heat, into the hull.)
+        if (worst > 0) this.hurtTankPart(k, TankPart.Hull, worst, by);
+      }
+    }
+  }
+
+  /**
+   * A sludge blob flaring (stepFeet): a gout of fire out to flareReach,
+   * burning every clone, creature and vehicle it reaches (worse nearer),
+   * and real flames thrown out that go on burning what they touch. The
+   * clients see it burst that same tick (FOOT_FLARE).
+   */
+  private footFlare(f: Foot, heat: number, owner: number): void {
+    const reach = flareReach(heat);
+    const by = owner;
+    for (const p of this.players) {
+      if (!p || !p.alive) continue;
+      const harm = flareHarm(heat, Math.hypot(p.cx - f.x, p.cy - f.y), reach);
+      if (harm > 0) this.damage(p, harm, f.owner, W_STONEBURNER);
+    }
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      if (!this.beasts[k]) continue;
+      const { d } = nearestPoint(this.beastPts[k], f.x, f.y);
+      const harm = flareHarm(heat, d, reach);
+      if (harm > 0) this.hurtBeast(k, harm, by);
+    }
+    for (let k = 0; k < this.tanks.length; k++) {
+      const t = this.tanks[k];
+      if (!t) continue;
+      const nx = Math.max(t.x, Math.min(t.x + tankW(t), f.x));
+      const ny = Math.max(t.y, Math.min(t.y + tankH(t), f.y));
+      const harm = flareHarm(heat, Math.hypot(nx - f.x, ny - f.y), reach);
+      if (harm > 0) this.hurtTankPart(k, TankPart.Hull, harm, by);
+    }
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI * this.rng.next();
+      const s = this.rng.range(0.3, 1) * reach * 4;
+      this.grains.spawn(PK.Flame, f.x, f.y - 2, Math.cos(a) * s, Math.sin(a) * s, 10 + this.rng.int(8), 0, 0, owner);
     }
   }
 
@@ -7821,7 +7880,7 @@ export class World {
         for (const f of this.feet.slice(0, 255)) {
           w.u16(clampU16(f.x));
           w.u16(clampU16(f.y + Y_BIAS));
-          w.u16(f.life);
+          w.u16(Math.min(FOOT_FLARE - 1, f.life) | (f.flaredAt === this.tick ? FOOT_FLARE : 0));
         }
       }
       if (p.minesSeen !== this.minesRev) {
@@ -8449,6 +8508,8 @@ interface Foot {
   vy: number;
   life: number;
   owner: number;
+  /** The tick it last flared (its fire burst out: stepFeet), so clients burst there that tick. */
+  flaredAt?: number;
 }
 /** At most this many blobs of sludge about at once (several strikes' worth). */
 const MAX_SLUDGE = 200;

@@ -1,3 +1,4 @@
+import { FOOT_FLARE } from './stoneburner.ts';
 import { Reader, rleDecode } from './codec.ts';
 import { PART_COUNT } from './body.ts';
 import { CRAFT_HP, CRAFT_PARTS } from './craft.ts';
@@ -181,11 +182,12 @@ export interface BurnerState {
   fuse: number;
   phase: number;
 }
-/** A Stoneburner strike's molten core: where, and ticks of burning left. */
+/** A Stoneburner strike's molten core: where, ticks of burning left, and whether it flared this tick (its fire burst out). */
 export interface FootState {
   x: number;
   y: number;
   life: number;
+  flare: boolean;
 }
 
 export interface MineState {
@@ -673,7 +675,12 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         for (let i = 0; i < nb; i++) beacons.push({ x: r.u16(), y: r.u16() - Y_BIAS, fuse: r.u16(), phase: r.u8() });
         const feet: FootState[] = [];
         const nf = r.u8();
-        for (let i = 0; i < nf; i++) feet.push({ x: r.u16(), y: r.u16() - Y_BIAS, life: r.u16() });
+        for (let i = 0; i < nf; i++) {
+          const x = r.u16();
+          const y = r.u16() - Y_BIAS;
+          const v = r.u16();
+          feet.push({ x, y, life: v & (FOOT_FLARE - 1), flare: (v & FOOT_FLARE) !== 0 });
+        }
         h.burners(beacons, feet);
         break;
       }

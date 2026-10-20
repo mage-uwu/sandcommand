@@ -6,7 +6,9 @@ import { INV_MAX, invByte } from '../src/shared/items.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { W_STONEBURNER } from '../src/shared/particles.ts';
-import { BURNER_FUSE, BURNER_STRIKE, BurnerPhase, FOOT_LIFE, STONE_CRATER_R, blinkOn, blinkPeriod } from '../src/shared/stoneburner.ts';
+import { BURNER_FUSE, BURNER_STRIKE, BurnerPhase, FOOT_LIFE, SLUDGE_SEAR_R, STONE_CRATER_R, blinkOn, blinkPeriod, flareReach } from '../src/shared/stoneburner.ts';
+import { applyFrameRecords, nullHandler, type FootState } from '../src/shared/frame.ts';
+import { bodyPoints, newMillipede } from '../src/shared/wildlife.ts';
 import { WeaponId } from '../src/shared/weapons.ts';
 import { newTank } from '../src/shared/tank.ts';
 import { type Player, World } from '../src/server/world.ts';
@@ -205,4 +207,55 @@ describe('the Stoneburner', () => {
     expect(glass).toBeGreaterThan(10);
   });
 
+
+});
+
+describe("the Stoneburner's molten sludge", () => {
+  const pool = (world: World, x: number, owner: number) => world.feet.push({ x, y: FLOOR - 3, vx: 0, vy: 0, life: FOOT_LIFE, owner });
+
+  it('sears creatures and vehicles near it, not just clones', () => {
+    const { world, ps, place } = range(1);
+    place(ps[0], 300);
+    pool(world, 2000, ps[0].id);
+    const m = newMillipede(world.terrain, 2010, FLOOR - 1, 1);
+    m.frozen = 1e9;
+    world.beasts[0] = m;
+    bodyPoints(world.terrain, m, world.beastPts[0]);
+    const hp0 = m.hp;
+    const k = newTank(3000, FLOOR - 24);
+    k.chute = false;
+    world.tanks[0] = k;
+    pool(world, 3000 + 10, ps[0].id);
+    const t0 = k.hp;
+    for (let n = 0; n < 12; n++) world.step();
+    expect(m.hp).toBeLessThan(hp0);
+    expect(k.hp).toBeLessThan(t0);
+  });
+
+  it('flares now and then: the clients see it that tick, and it burns what it reaches beyond the heat', () => {
+    const { world, ps, frames, place } = range(1);
+    place(ps[0], 300);
+    pool(world, 2000, ps[0].id);
+    // Out of the heat's reach, inside a fresh flare's.
+    const d = (SLUDGE_SEAR_R + flareReach(1)) / 2;
+    const m = newMillipede(world.terrain, 2000 + d, FLOOR - 1, 1);
+    m.frozen = 1e9;
+    world.beasts[0] = m;
+    bodyPoints(world.terrain, m, world.beastPts[0]);
+    const hp0 = m.hp;
+    let flared = 0;
+    const h = { ...nullHandler, burners: (_b: unknown, feet: FootState[]) => (flared += feet.filter((f) => f.flare).length) };
+    for (let n = 0; n < 30 * 10 && !flared; n++) {
+      world.step();
+      for (const f of frames.splice(0)) {
+        const r = new Reader(f);
+        r.u8();
+        r.u32();
+        r.u16();
+        applyFrameRecords(r, world.terrain, h);
+      }
+    }
+    expect(flared).toBeGreaterThan(0);
+    expect(world.beasts[0] ? world.beasts[0].hp : 0).toBeLessThan(hp0);
+  });
 });
