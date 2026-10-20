@@ -246,7 +246,7 @@ import {
 import { Rng } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
-import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, muzzlePoint } from '../shared/weapons.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastLair, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
@@ -5202,7 +5202,8 @@ export class World {
    */
   private lockedAim(p: Player, aim: number, speed: number, gravity: number, muzzle: number): number {
     const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, Math.cos(aim) < 0, this.shoulderPt);
-    return this.lockOnto(p, sh.x, sh.y, aim, speed, gravity, p.body.vx * 0.25, p.body.vy * 0.25, muzzle);
+    // (Only as far as the weapon's scope reaches: lockReach.)
+    return this.lockOnto(p, sh.x, sh.y, aim, speed, gravity, p.body.vx * 0.25, p.body.vy * 0.25, muzzle, false, lockReach(WEAPONS[p.weapon]));
   }
 
   /**
@@ -5239,7 +5240,7 @@ export class World {
   private lockPick: { x: number; y: number; vx: number; vy: number } | null = null;
 
   /** The aim from (ox, oy) set true on the target near it (see lockedAim). */
-  private lockOnto(p: Player, ox: number, oy: number, aim: number, speed: number, gravity: number, ovx: number, ovy: number, muzzle: number, off = false): number {
+  private lockOnto(p: Player, ox: number, oy: number, aim: number, speed: number, gravity: number, ovx: number, ovy: number, muzzle: number, off = false, reach = Infinity): number {
     this.lockPick = null;
     if (off) return aim;
     const own = { vx: ovx, vy: ovy };
@@ -5247,7 +5248,7 @@ export class World {
     let bestD = Infinity;
     const consider = (x: number, y: number, vx: number, vy: number) => {
       const dist = Math.hypot(x - ox, y - oy);
-      if (dist < 6) return;
+      if (dist < 6 || dist > reach) return;
       const b = speed > 0 ? ballisticAim(ox, oy, { x, y, vx, vy }, speed, gravity, own, muzzle) : null;
       const a = b ? b.aim : Math.atan2(y - oy, x - ox);
       // (How near the aim was: to the shot that would hit it, or straight at it, whichever, as a client may or may not lead.)

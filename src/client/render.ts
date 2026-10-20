@@ -9,7 +9,7 @@ import { BIOME_NAMES, Biome } from '../shared/worldgen.ts';
 import { VBack } from '../shared/valley.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
-import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MAX, PROJ, ProjKind, PROJ_BUILD, HEAL_R, HEAL_SPREAD, MEND_TICKS, laserWidth, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, lockReach } from '../shared/weapons.ts';
 import { BUILD_GRID, BUILD_REACH, BUILD_RESULT_TEXT, BuildResult, PIECES, pieceCode, pieceOf, snapPiece } from '../shared/build.ts';
 import { type CraftView, type Game, type RemoteView, type ShipView, type TankView, TEAM_COLORS, kdRatio } from './game.ts';
 import type { RoundState } from '../shared/frame.ts';
@@ -1630,9 +1630,11 @@ export class Renderer {
       ctx.textAlign = 'left';
     }
     if (this.scoped) {
-      // Scope: a dark vignette, a spotlight with a fine reticle in it. Locked
-      // onto someone, it's centred on them (wherever the pointer or thumb
-      // is), gliding over when the target changes; otherwise on the pointer.
+      // Scope: a fine reticle, nothing over the view. Locked onto someone,
+      // it's centred on them (wherever the pointer or thumb is), gliding
+      // over when the target changes; otherwise on the pointer. Under it,
+      // the range to what it's on, against how far the gun can lock on
+      // (lockReach, by its scope): LOCK on a target, red past its reach.
       const am = game.aimMark;
       const tx = am ? am.x * z + offX : input.mouseX * dpr;
       const ty = am ? am.y * z + offY : input.mouseY * dpr;
@@ -1642,24 +1644,42 @@ export class Renderer {
       this.spot.y += (ty - this.spot.y) * k;
       const mx = this.spot.x;
       const my = this.spot.y;
-      const r = Math.min(W, H) * 0.42;
-      const v = ctx.createRadialGradient(mx, my, r * 0.75, mx, my, r * 1.6);
-      v.addColorStop(0, 'rgba(0,0,0,0)');
-      v.addColorStop(1, 'rgba(0,0,0,0.78)');
-      ctx.fillStyle = v;
-      ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = 'rgba(160,255,160,0.55)';
+      const wx = (mx - offX) / z;
+      const wy = (my - offY) / z;
+      const dist = Math.hypot(wx - (game.body.x + ACTOR_W / 2), wy - (game.body.y + ACTOR_H / 2));
+      const reach = lockReach(WEAPONS[game.weapon]);
+      const out = !am && dist > reach;
+      const col = am ? 'rgba(255,90,90,0.9)' : out ? 'rgba(255,120,90,0.55)' : 'rgba(160,255,160,0.75)';
+      const arm = 14 * dpr;
+      const gap = 4 * dpr;
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = Math.max(1, dpr) * 3;
+      const cross = () => {
+        ctx.beginPath();
+        ctx.moveTo(mx - arm, my);
+        ctx.lineTo(mx - gap, my);
+        ctx.moveTo(mx + gap, my);
+        ctx.lineTo(mx + arm, my);
+        ctx.moveTo(mx, my - arm);
+        ctx.lineTo(mx, my - gap);
+        ctx.moveTo(mx, my + gap);
+        ctx.lineTo(mx, my + arm);
+        ctx.stroke();
+      };
+      cross();
+      ctx.strokeStyle = col;
       ctx.lineWidth = Math.max(1, dpr);
-      ctx.beginPath();
-      ctx.moveTo(mx - r * 0.3, my);
-      ctx.lineTo(mx - 6 * dpr, my);
-      ctx.moveTo(mx + 6 * dpr, my);
-      ctx.lineTo(mx + r * 0.3, my);
-      ctx.moveTo(mx, my - r * 0.3);
-      ctx.lineTo(mx, my - 6 * dpr);
-      ctx.moveTo(mx, my + 6 * dpr);
-      ctx.lineTo(mx, my + r * 0.3);
-      ctx.stroke();
+      cross();
+      ctx.fillStyle = col;
+      ctx.fillRect(Math.round(mx - dpr / 2), Math.round(my - dpr / 2), Math.max(1, dpr), Math.max(1, dpr));
+      ctx.font = `bold ${Math.round(10 * dpr)}px ui-monospace, monospace`;
+      ctx.textAlign = 'center';
+      const label = am ? `LOCK ${Math.round(dist / 10)}m` : out ? `${Math.round(dist / 10)}m · OUT OF RANGE` : `${Math.round(dist / 10)}m / ${Math.round(reach / 10)}m`;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillText(label, mx + dpr, my + arm + 13 * dpr + dpr);
+      ctx.fillStyle = col;
+      ctx.fillText(label, mx, my + arm + 13 * dpr);
+      ctx.textAlign = 'left';
     }
 
     this.spotWasScoped = this.scoped;
@@ -3909,7 +3929,7 @@ export class Renderer {
     }
   }
 
-  /** The scope's spotlight centre (canvas px), gliding toward the target; and whether we were scoped last frame. */
+  /** The scope's reticle centre (canvas px), gliding toward the target; and whether we were scoped last frame. */
   private spot: { x: number; y: number } | null = null;
   private spotWasScoped = false;
 

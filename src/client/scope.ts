@@ -43,7 +43,7 @@ const CENTRE = { lx: ACTOR_W / 2, ly: 6 };
  * them lets go (and the cone looks for someone else). Returns the aim to
  * fire on.
  */
-export function scopeLock(g: Game, ox: number, oy: number, aim: number, cone: number): number {
+export function scopeLock(g: Game, ox: number, oy: number, aim: number, cone: number, reach = Infinity): number {
   if (cone <= 0) {
     g.scopeLock = null;
     return aim;
@@ -61,8 +61,10 @@ export function scopeLock(g: Game, ox: number, oy: number, aim: number, cone: nu
   const angleTo = (v: RemoteView, lx: number, ly: number) => Math.atan2(v.y + ly - oy, v.x + lx - ox);
   const off = (a: number) => Math.abs(Math.atan2(Math.sin(aim - a), Math.cos(aim - a)));
   const inSight = (v: RemoteView, a: number) => lineOfFire(g, ox, oy, a, 2000).hit?.id === v.id;
+  // (Nobody further than the weapon's scope reaches: lockReach.)
+  const near = (v: RemoteView) => Math.hypot(v.x + ACTOR_W / 2 - ox, v.y + ACTOR_H / 2 - oy) <= reach;
   // The line itself on an enemy: lock exactly there.
-  if (lof.hit && lof.foe) {
+  if (lof.hit && lof.foe && near(lof.hit)) {
     g.scopeLock = along(lof.hit);
     return aim;
   }
@@ -72,7 +74,7 @@ export function scopeLock(g: Game, ox: number, oy: number, aim: number, cone: nu
     const v = g.remoteViews().find((r) => r.id === lock.id);
     if (v && v.flags & F_ALIVE) {
       const a = angleTo(v, lock.lx, lock.ly);
-      if (off(a) < cone + 0.2 && inSight(v, a)) return a;
+      if (off(a) < cone + 0.2 && near(v) && inSight(v, a)) return a;
     }
     g.scopeLock = null;
   }
@@ -83,6 +85,7 @@ export function scopeLock(g: Game, ox: number, oy: number, aim: number, cone: nu
   for (const v of g.remoteViews()) {
     if (!(v.flags & F_ALIVE) || v.id === g.myId || g.tankPilots.has(v.id)) continue;
     if (g.myTeam !== Team.None && g.teamOf[v.id] === g.myTeam) continue;
+    if (!near(v)) continue;
     const a = angleTo(v, CENTRE.lx, CENTRE.ly);
     const o = off(a);
     if (o < bestOff && inSight(v, a)) {

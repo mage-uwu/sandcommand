@@ -275,10 +275,17 @@ to. The snap is shown the way the scope shows a lock, scoped or not: a red
 laser runs from the gun to the target, brackets close on a snapped clone,
 and a LOCK tag marks it (on a dropship, at the hull or pod it picked).
 **Zoom and aim are one.** Snapped onto someone when you scope, the scope
-goes straight to them, however far out (past the weapon's usual scope
-distance), and the reticle stays on them. The scope's spotlight (the
-clear circle in its dark vignette) is centred on them too, wherever your
-pointer or thumb is, and glides over when the target changes. **It leads
+goes straight to them and the reticle stays on them, wherever your pointer
+or thumb is, gliding over when the target changes. Scoping no longer
+darkens the view: it's a fine reticle and nothing more.
+**Lock-on reach is the weapon's** (`lockReach` in `src/shared/weapons.ts`:
+100 cells plus twice its scope). The scope's lock, the aim assist's snap
+and the server's correction of a locked shot (`World.lockOnto`) all stop
+there. The SMG reaches 24 m, the rifle 32 m, the light rifle 54 m, the
+laser 90 m and the sniper 130 m. Vehicles' guns keep their own reach.
+Under the reticle, the range to what it's on is shown against that reach
+("19m / 130m"), or LOCK on a target, or OUT OF RANGE (red) when it's
+further than the weapon can lock on to. **It leads
 them:** the aim (and
 the laser) points where a moving target will be when the shot gets there,
 from their velocity and your round's speed (`ballisticAim` in

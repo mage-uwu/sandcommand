@@ -2,7 +2,7 @@ import { ACTOR_H, ACTOR_W, CHUNK_COUNT, GRAVITY, TICK_RATE } from '../shared/con
 import { applyCarve } from '../shared/particles.ts';
 import { CallKind, PROTOCOL_VERSION, Phase, TEAMS_IN_MODE, VOTE_MODES, quantizeAim } from '../shared/protocol.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_W, ShipPart, hasShipPart, shipPoint } from '../shared/dropship.ts';
-import { LASER_MIN, PROJ, ProjKind, WEAPONS, WeaponId } from '../shared/weapons.ts';
+import { LASER_MIN, PROJ, ProjKind, WEAPONS, WeaponId, lockReach } from '../shared/weapons.ts';
 import { F_ALIVE, Team } from '../shared/protocol.ts';
 import { SMG_SPEED, TANK_W, TANK_H, gunPivotY, isPet, isSpider, tankCoreY, tankW } from '../shared/tank.ts';
 import { ASSIST_CONE, ASSIST_RANGE, type AssistTarget, MOUSE_LOCK_BREAK, assistAim, autoTarget, ballisticAim } from './aim.ts';
@@ -521,8 +521,11 @@ function frame(now: number): void {
       let oy = flying ? flying.y + SHIP_H / 2 : dogged ? gunPivotY(dogged) : sh.y;
       let aim: number;
       mark.on = false;
-      // Scoped, the assist reaches as far as the scope sees.
-      const scopeReach = input.scoping ? 2000 : 0;
+      // How far the gun can lock on (its scope's reach: lockReach); scoped, the assist reaches all of it.
+      // (A vehicle's guns, flying or driving: their own reach, as before.)
+      const gunReach = flying || dogged ? Infinity : lockReach(WEAPONS[g.weapon]);
+      const scopeReach = input.scoping ? Math.min(2000, gunReach) : 0;
+      const cap = (r: number) => Math.min(r, gunReach);
       const st = input.aimStick;
       // Touch auto mode: no thumb on the fire pad, so the gun finds the
       // nearest enemy in sight by itself and stays on it: locked on, ready
@@ -532,7 +535,7 @@ function frame(now: number): void {
       const auto =
         // (Driving or flying too: the vehicle's guns find their own target.)
         input.touch && input.autoMode && !st && !input.pointAssist && g.alive && !g.building && !g.calling && (flying || dogged || !NO_ASSIST.has(g.weapon))
-          ? autoTarget(ox, oy, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), autoRange(g.weapon), lastG)
+          ? autoTarget(ox, oy, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), cap(autoRange(g.weapon)), lastG)
           : null;
       if (auto) {
         aim = Math.atan2(auto.t.y - oy, auto.t.x - ox);
@@ -550,7 +553,7 @@ function frame(now: number): void {
         // along the aim so the crosshair, the arm and the camera follow. A tap
         // or a hold stays on the target it's locked onto (anywhere it's
         // roughly that way); a swipe picks a new one, the way it swiped.
-        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark, st.swipe ? undefined : lastG, ASSIST_CONE);
+        aim = assistAim(ox, oy, Math.atan2(st.dy, st.dx), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), cap(Math.max(ASSIST_RANGE, scopeReach)), mark, st.swipe ? undefined : lastG, ASSIST_CONE);
         st.swipe = false;
         const r = Math.min(innerWidth, innerHeight) * 0.3;
         input.mouseX = ((ox - renderer.camX) * renderer.zoom) / dpr + innerWidth / 2 + Math.cos(aim) * r;
@@ -560,12 +563,12 @@ function frame(now: number): void {
         const kd = input.keyDir;
         // Arrow keys: the direction they point, snapped onto the enemy nearest that way.
         // (Held, it stays on its target; a new direction is a deliberate pick.)
-        if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark, kd.x === lastKey.x && kd.y === lastKey.y ? lastG : undefined, ASSIST_CONE);
+        if (kd) aim = assistAim(ox, oy, Math.atan2(kd.y, kd.x), assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), cap(Math.max(ASSIST_RANGE, scopeReach)), mark, kd.x === lastKey.x && kd.y === lastKey.y ? lastG : undefined, ASSIST_CONE);
         // (A tap on a spot is a deliberate pick too.)
-        else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), Math.max(ASSIST_RANGE, scopeReach), mark);
+        else if (input.pointAssist) aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), cap(Math.max(ASSIST_RANGE, scopeReach)), mark);
         else if (mouseAssist && (flying || dogged || !NO_ASSIST.has(g.weapon))) {
           // Mouse: snaps onto an enemy loosely under the line, out as far as the pointer reaches.
-          const reach = Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80)));
+          const reach = cap(Math.max(scopeReach, Math.min(900, Math.max(ASSIST_RANGE, Math.hypot(wx - ox, wy - oy) + 80))));
           // Locked on, it stays on them until the mouse swings well off them.
           aim = assistAim(ox, oy, aim, assistTargets(g), (x0, y0, x1, y1) => clearLine(g, x0, y0, x1, y1), reach, mark, lastG, MOUSE_LOCK_BREAK);
         }
@@ -576,7 +579,7 @@ function frame(now: number): void {
       lastG = mark.on ? mark.g : undefined;
       const raw = Math.atan2(wy - oy, wx - ox);
       // Scoped onto someone: the aim locks onto them.
-      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying && !dogged ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0);
+      aim = scopeLock(g, ox, oy, aim, input.scoping && g.alive && !g.drive && !flying && !dogged ? (WEAPONS[g.weapon]?.lockCone ?? 0) : 0, gunReach);
       // Locked or assisted onto someone: the arm and the aim line show the snap.
       g.lockAim = g.scopeLock || Math.abs(aim - raw) > 1e-4 ? aim : null;
       // The little target on what we're snapped to: the scope's lock (a clone) if any, else the assist's pick.

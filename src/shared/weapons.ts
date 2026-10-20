@@ -281,6 +281,15 @@ export const WEAPONS: readonly WeaponDef[] = [
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
 /**
+ * How far (cells) a weapon can lock on to a target: scoped lock, aim assist
+ * and the server's shot correction alike. Gauged by its scope: a close-in
+ * gun (SMG, shotgun) only locks on to what's near; a long gun reaches out as
+ * far as its scope looks (sniper, laser).
+ */
+export const LOCK_BASE = 100;
+export const lockReach = (def: WeaponDef | undefined) => LOCK_BASE + 2 * (def?.scope ?? 0);
+
+/**
  * How likely a weapon is to turn up, relative to the rest (1 unless listed),
  * wherever one is drawn at random: a clone's kit, the loot left in bunkers,
  * vaults and the labyrinth. The explosive heavies (bazooka, grenade
