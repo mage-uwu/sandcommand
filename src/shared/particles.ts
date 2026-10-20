@@ -1081,6 +1081,9 @@ interface FragmentDef {
   embers: number;
 }
 /** Explosion fragments by projectile kind (bullet, rocket, grenade). */
+/** A sticky charge (ProjKind.Sticky): plenty of fragments, but slow, so they fall short (it's a hard-target blast, not a crowd-clearer). */
+const STICKY_KIND = 25;
+const STICKY_FRAGMENTS: FragmentDef = { shrapnel: 40, speed: 220, embers: 16 };
 const FRAGMENTS: readonly FragmentDef[] = [
   { shrapnel: 0, speed: 0, embers: 0 },
   { shrapnel: 36, speed: 820, embers: 18 }, // rocket
@@ -1104,7 +1107,7 @@ const FRAGMENTS: readonly FragmentDef[] = [
  * seed (sent in the projectile-end record) to mirror the same shower.
  */
 export function explosionFragments(p: Particles, x: number, y: number, projKind: number, owner: number, rng: Rng): void {
-  const def = FRAGMENTS[projKind];
+  const def = projKind === STICKY_KIND ? STICKY_FRAGMENTS : FRAGMENTS[projKind];
   if (!def) return;
   for (let k = 0; k < def.shrapnel; k++) {
     // Direction from two uniforms, normalised: arithmetic only, no trig.

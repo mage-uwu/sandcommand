@@ -23,6 +23,7 @@ import { drawFlora, drawGeysers } from './flora-art.ts';
 import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '../shared/body.ts';
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { CLOUD_MS } from '../shared/stoneburner.ts';
+import { stickyBlink } from '../shared/sticky.ts';
 import { drawBeacons, drawFeet, drawStoneFlash } from './stoneburner-art.ts';
 import { StoneCloud, drawCloudWash, drawShock } from './stone-cloud.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
@@ -1030,6 +1031,24 @@ export class Renderer {
     // Stoneburner beacons (and the missile coming down on one), and the molten cores of strikes past.
     if (game.footList.length) drawFeet(ctx, game.footList, now);
     if (game.burnerList.length) drawBeacons(ctx, game.burnerList, now);
+    // Sticky charges: a small dark puck, a hazard stripe, and its red light blinking faster as it runs down.
+    for (const c of game.chargeList) {
+      const x = Math.round(c.x) - 2;
+      const y = Math.round(c.y) - 1;
+      ctx.fillStyle = '#14130f';
+      ctx.fillRect(x - 0.5, y - 0.5, 5, 3);
+      ctx.fillStyle = '#4a4c3a';
+      ctx.fillRect(x, y, 4, 2);
+      ctx.fillStyle = '#d8a428';
+      ctx.fillRect(x, y + 1, 4, 1);
+      const on = !c.stuck || c.fuse % stickyBlink(c.fuse) < stickyBlink(c.fuse) / 2;
+      if (on && c.stuck) {
+        ctx.fillStyle = 'rgba(255,40,30,0.35)';
+        ctx.fillRect(x - 1, y - 2, 6, 4);
+      }
+      ctx.fillStyle = on && c.stuck ? '#ff3b2a' : '#5a1410';
+      ctx.fillRect(x + 1.5, y - 0.5, 1, 1);
+    }
 
     // Tanks (behind the clones, so a clone walking past shows in front).
     const wmx = (input.mouseX * (W / innerWidth) - offX) / z;

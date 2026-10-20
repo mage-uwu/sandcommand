@@ -2973,6 +2973,38 @@ for the story mode too.
 
 Bots leave it alone.
 
+#### Sticky charge
+
+A single-use throwable, common in kits (`src/shared/sticky.ts`). It's a
+hard-target weapon, not a crowd-clearer.
+
+- **Thrown and stuck.** It's lobbed on a grenade's arc and is gone from the
+  inventory as it goes. It sticks to the first thing it touches: a clone, a
+  vehicle (tank, mole, watchdog, tarantula), a creature, or the ground. Stuck
+  to something, it rides along with it. If whatever it's on dies, is wrecked
+  or climbs into a vehicle, it drops off and sticks to whatever it lands on.
+- **Six seconds.** It goes off 6 s after it sticks (`STICKY_FUSE`). Its
+  red light blinks, and beeps, once a second at first and faster in the
+  last three seconds. One that never sticks to anything goes off anyway
+  after 10 s.
+- **The blast.**
+  - **The core**, within 10 cells: up to **four times a hand grenade**
+    (360 at the centre, falling off fast).
+  - **Further out**, to a grenade's reach: about **1.2 times a grenade**,
+    with slow fragments that fall short. A crowd a little way off barely
+    feels it.
+  - Vehicles, doors and creatures inside the core take a concentrated
+    blast besides.
+- **Whatever it's stuck to** takes the full charge on top of all that:
+  - a vehicle loses **45% of its whole hull** at a stroke;
+  - a creature takes a 2400-point wound (a millipede doesn't survive it);
+  - a clone takes 400, which kills anyone.
+- **Bots** carry them too. They throw one now and then at someone close by
+  who they can see, and far more readily at someone in a vehicle.
+- **On the wire.** Every charge goes out every frame while any exist
+  (`R_CHARGES`). The blast is a `ProjKind.Sticky` going off where it was
+  stuck, as a landmine's is, so every client sees and hears it.
+
 #### Landmines
 
 - **Who sets them off.** A mine is armed 1.5 s after it is laid. Then the

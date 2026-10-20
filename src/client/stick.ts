@@ -47,6 +47,8 @@ export const WHEEL_FREE: ReadonlySet<number> = new Set<number>([
   WeaponId.Mine,
   // (The Stoneburner's beacon is thrown at a spot, not a target.)
   WeaponId.Stoneburner,
+  // (A sticky charge is thrown at a target or a spot alike.)
+  WeaponId.Sticky,
   // (The laser charges as long as it's held, target or none: a thumb can't
   // otherwise get a charge going before a target turns up.)
   WeaponId.Laser,

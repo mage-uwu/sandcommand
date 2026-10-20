@@ -43,6 +43,7 @@ import {
   R_CORAL,
   R_BURNERS,
   R_STONEBURN,
+  R_CHARGES,
   BEAST_SCALE,
   BEAST_SAME,
   GameMode,
@@ -181,6 +182,13 @@ export interface BurnerState {
   y: number;
   fuse: number;
   phase: number;
+}
+/** A sticky charge: where, whether it's stuck (to anything), and ticks to go off once it is (sticky.ts). */
+export interface ChargeState {
+  x: number;
+  y: number;
+  stuck: boolean;
+  fuse: number;
 }
 /** A Stoneburner strike's molten core: where, ticks of burning left, and whether it flared this tick (its fire burst out). */
 export interface FootState {
@@ -349,6 +357,8 @@ export interface FrameHandler {
   burners(beacons: BurnerState[], feet: FootState[]): void;
   /** A Stoneburner strike lands (R_STONEBURN, to everyone). */
   stoneBurn(x: number, y: number, by: number, seed: number): void;
+  /** The sticky charges about (R_CHARGES): the whole list, every frame while there are any. */
+  charges(list: ChargeState[]): void;
   /** The map's geysers and their state (R_GEYSERS). */
   geysers(list: GeyserState[]): void;
   /** Geyser `i` blows (R_GEYSER_BLOW): mirror its burst from `seed`. */
@@ -684,6 +694,18 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         h.burners(beacons, feet);
         break;
       }
+      case R_CHARGES: {
+        const list: ChargeState[] = [];
+        const n = r.u8();
+        for (let i = 0; i < n; i++) {
+          const x = r.u16();
+          const y = r.u16() - Y_BIAS;
+          const fuse = r.u16();
+          list.push({ x, y, stuck: (r.u8() & 1) !== 0, fuse });
+        }
+        h.charges(list);
+        break;
+      }
       case R_STONEBURN: {
         const x = r.u16();
         const y = r.u16() - Y_BIAS;
@@ -984,6 +1006,7 @@ export const nullHandler: FrameHandler = {
   traps() {},
   mines() {},
   burners() {},
+  charges() {},
   stoneBurn() {},
   geysers() {},
   geyserBlow() {},

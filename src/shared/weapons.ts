@@ -50,6 +50,8 @@ export const ProjKind = {
   Venom: 23,
   /** A dragon's spit: a glob of flaming blood on an arc, bursting into fire (and burning gore) where it lands. */
   FireSpit: 24,
+  /** A sticky charge going off (sticky.ts): a small, ferocious blast where it was stuck. */
+  Sticky: 25,
 } as const;
 
 export interface ProjDef {
@@ -139,6 +141,9 @@ export const PROJ: readonly ProjDef[] = [
   // Dragon spit: a glob of burning blood, dozens to a breath (World.dragonBreath), each on an arc. It
   // bursts where it lands (a small blast, a scorch), and the fire it throws out burns on (World.onProjEnd).
   { gravity: 0.55, life: 120, damage: 18, mass: 0.8, sharp: 0.3, carveR: 4, coreR: 1, splashR: 14, splashDamage: 24, debris: 3, bounce: 0, ballistic: false, knock: 0.4 },
+  // Sticky charge going off where it was stuck (World.stepCharges spawns it, like a mine): a grenade's
+  // reach at 1.2 times its blast, a small deep hole; the ferocious core close in is sticky.ts's (World.onProjEnd).
+  { gravity: 0, life: 2, damage: 0, mass: 0.6, sharp: 0.1, carveR: 12, coreR: 8, splashR: 42, splashDamage: 108, debris: 18, bounce: 0, ballistic: false },
 ];
 
 /** WeaponDef.proj for tools that carve instead of shooting. */
@@ -157,6 +162,8 @@ export const PROJ_LASER = -6;
 export const PROJ_MINE = -7;
 /** WeaponDef.proj for the Stoneburner: throws its beacon (World.throwBurner), once; it's gone from the inventory as it goes. */
 export const PROJ_BURNER = -8;
+/** WeaponDef.proj for the sticky charge: thrown once (World.throwSticky); it's gone from the inventory as it goes. */
+export const PROJ_STICKY = -9;
 /** Laser: ticks to a full charge (8 s); the least charge that fires; and the beam at a given charge (0..1). */
 export const LASER_MAX = 30 * 8;
 export const LASER_MIN = 3;
@@ -212,6 +219,8 @@ export const WeaponId = {
   Blaster: 18,
   /** Stoneburner: a sticky beacon, thrown once; fifteen seconds later an orbital strike lands on it (stoneburner.ts). Ultra rare. */
   Stoneburner: 19,
+  /** Sticky charge: thrown once, it sticks to whatever it hits and goes off six seconds later (sticky.ts). A hard-target weapon. */
+  Sticky: 20,
 } as const;
 
 /**
@@ -277,6 +286,8 @@ export const WEAPONS: readonly WeaponDef[] = [
   { name: 'Blaster', proj: ProjKind.Bolt, muzzle: 14, rpm: 600, auto: true, speed: 1300, spread: 0.035, clip: 30, reload: 75, scope: 160, kick: 2, climb: 0.01, lockCone: 0.07 },
   // One beacon, thrown once (single use: no reload, it's gone once thrown).
   { name: 'Stoneburner', proj: PROJ_BURNER, muzzle: 6, rpm: 30, auto: false, speed: 0, spread: 0, clip: 1, reload: 0, scope: 120 },
+  // One charge, thrown once (single use, like the Stoneburner's beacon).
+  { name: 'Sticky Charge', proj: PROJ_STICKY, muzzle: 6, rpm: 30, auto: false, speed: 0, spread: 0, clip: 1, reload: 0, scope: 100 },
 ];
 
 /** Ticks between shots for a weapon (fractional; firing accumulates it so the average rate is exact). */
@@ -338,6 +349,7 @@ export function projName(kind: number): string {
   if (kind === ProjKind.SpiderMissile) return 'Tarantula';
   if (kind === ProjKind.Plasma) return 'Mole Plasma';
   if (kind === ProjKind.MoleRound) return 'Mole SMG';
+  if (kind === ProjKind.Sticky) return 'Sticky Charge';
   return weaponOfProj(kind)?.name ?? '';
 }
 

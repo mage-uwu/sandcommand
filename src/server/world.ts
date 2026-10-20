@@ -55,6 +55,7 @@ import {
   gunPivotY,
   tankCoreY,
   tankH,
+  tankMaxHp,
   isDog,
   TankKind,
   isPet,
@@ -193,6 +194,7 @@ import {
   R_VENOM,
   R_CORAL,
   R_BURNERS,
+  R_CHARGES,
   R_STONEBURN,
   BEAST_SCALE,
   BEAST_SAME,
@@ -245,8 +247,9 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
+import { STICKY_FUSE, STICKY_MAX_FLIGHT, STICKY_ON_BEAST, STICKY_ON_CLONE, STICKY_ON_VEHICLE, STICKY_THROW, stickyCore, STICKY_CORE_R } from '../shared/sticky.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
-import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
+import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, PROJ_STICKY, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
 import { type Dungeon, EVAC_H, EVAC_W, ROOM_B, ROOM_L, ROOM_R, ROOM_T, SPIKE_DEPTH, TrapKind, Y0, cellX, cellY } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
 import { MapKind, generateWorld, lastCaves, lastComplexes, lastDungeon, lastFlora, lastGeysers, lastLair, lastSiege, lastValley, lastWater } from '../shared/worldgen.ts';
@@ -537,6 +540,8 @@ export class Player {
   /** The mines revision this client last got. */
   minesSeen = -1;
   burnersSeen = -1;
+  /** chargesRev as last sent to this player. */
+  chargesSeen = -1;
   /** The geysers' state as this client last heard it (World.geysersRev). */
   geysersSeen = -1;
   /** The flora's state as this client last heard it (World.floraRev). */
@@ -705,6 +710,10 @@ export class World {
   readonly mines: Mine[] = [];
   /** Stoneburner beacons about (thrown, stuck, or their missile coming down), and the molten cores their strikes left (stoneburner.ts). */
   readonly burners: Burner[] = [];
+  /** The sticky charges about (sticky.ts): thrown, stuck, counting down. */
+  readonly charges: Charge[] = [];
+  /** Bumped whenever a charge is thrown, sticks, comes loose or goes off (they're sent while any exist, and once more after). */
+  chargesRev = 0;
   readonly feet: Foot[] = [];
   burnersRev = 0;
   minesRev = 0;
@@ -3717,6 +3726,169 @@ export class World {
     this.burnersRev++;
   }
 
+  /** A sticky charge, thrown (sticky.ts): on a grenade's arc, and gone from the inventory (single use). */
+  private throwSticky(p: Player): void {
+    const aim = dequantizeAim(p.aimQ);
+    const cos = Math.cos(aim);
+    const sin = Math.sin(aim);
+    const sh = shoulderAt(p.body.x, p.body.y, p.body.stance, cos < 0, this.shoulderPt);
+    const m = WEAPONS[WeaponId.Sticky].muzzle;
+    this.charges.push({
+      x: sh.x + cos * m,
+      y: sh.y + sin * m,
+      vx: cos * STICKY_THROW + p.body.vx * 0.5,
+      vy: sin * STICKY_THROW + p.body.vy * 0.5,
+      stuck: false,
+      fuse: STICKY_FUSE,
+      owner: p.id,
+      onPlayer: 255,
+      onTank: -1,
+      onBeast: -1,
+      ox: 0,
+      oy: 0,
+      age: 0,
+    });
+    this.chargesRev++;
+    p.inv.splice(p.slot, 1);
+    p.slot = Math.max(0, Math.min(p.slot, p.inv.length - 1));
+    this.invChanged(p);
+  }
+
+  /**
+   * The sticky charges: in flight until they stick to the first thing they
+   * touch (a clone, a vehicle, a creature: carried along with it, dropping
+   * off if it goes; or the ground); stuck, counting down STICKY_FUSE; then
+   * they go off (detonateSticky). One never stuck goes off anyway after
+   * STICKY_MAX_FLIGHT.
+   */
+  private stepCharges(): void {
+    const t = this.terrain;
+    for (let i = this.charges.length - 1; i >= 0; i--) {
+      const c = this.charges[i];
+      c.age++;
+      if (!c.stuck) {
+        c.vy = Math.min(600, c.vy + GRAVITY * DT);
+        const steps = Math.max(1, Math.ceil(Math.hypot(c.vx, c.vy) * DT));
+        for (let k = 0; k < steps && !c.stuck; k++) {
+          const nx = c.x + (c.vx * DT) / steps;
+          const ny = c.y + (c.vy * DT) / steps;
+          if (t.isSolid(Math.floor(nx), Math.floor(ny))) {
+            c.stuck = true;
+            c.vx = c.vy = 0;
+            break;
+          }
+          c.x = nx;
+          c.y = ny;
+          this.stickCharge(c);
+        }
+        if (c.y > WORLD_H || c.x < 0 || c.x >= WORLD_W) {
+          this.charges.splice(i, 1);
+          this.chargesRev++;
+          continue;
+        }
+        if (c.stuck) this.chargesRev++;
+      }
+      // Riding on something: carried with it; it gone (dead, wrecked, climbed into a vehicle), off it drops.
+      if (c.onPlayer !== 255) {
+        const q = this.players[c.onPlayer];
+        if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0) this.loosen(c);
+        else {
+          c.x = q.cx + c.ox;
+          c.y = q.cy + c.oy;
+        }
+      } else if (c.onTank >= 0) {
+        const k = this.tanks[c.onTank];
+        if (!k) this.loosen(c);
+        else {
+          c.x = k.x + tankW(k) / 2 + c.ox;
+          c.y = k.y + tankH(k) / 2 + c.oy;
+        }
+      } else if (c.onBeast >= 0) {
+        const pts = this.beastPts[c.onBeast];
+        if (!this.beasts[c.onBeast] || pts.length < 2) this.loosen(c);
+        else {
+          c.x = pts[0] + c.ox;
+          c.y = pts[1] + c.oy;
+        }
+      } else if (c.stuck && !this.solidNear(c.x, c.y)) {
+        // The ground it was stuck to dug or blown away: it falls again.
+        c.stuck = false;
+        this.chargesRev++;
+      }
+      // The countdown runs once it's stuck (and anyway, eventually).
+      if ((c.stuck && --c.fuse <= 0) || c.age > STICKY_MAX_FLIGHT + STICKY_FUSE) {
+        this.charges.splice(i, 1);
+        this.chargesRev++;
+        this.detonateSticky(c);
+      }
+    }
+  }
+
+  /** A flying charge touching a clone (not its thrower, the first moment), a vehicle or a creature: stuck to it. */
+  private stickCharge(c: Charge): void {
+    for (const q of this.players) {
+      if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0 || (q.id === c.owner && c.age < 12)) continue;
+      if (c.x < q.body.x - 1 || c.x > q.body.x + ACTOR_W + 1 || c.y < q.body.y - 1 || c.y > q.body.y + ACTOR_H + 1) continue;
+      c.stuck = true;
+      c.onPlayer = q.id;
+      c.ox = c.x - q.cx;
+      c.oy = c.y - q.cy;
+      return;
+    }
+    for (let k = 0; k < this.tanks.length; k++) {
+      const v = this.tanks[k];
+      if (!v || c.x < v.x || c.x > v.x + tankW(v) || c.y < v.y || c.y > v.y + tankH(v)) continue;
+      c.stuck = true;
+      c.onTank = k;
+      c.ox = c.x - (v.x + tankW(v) / 2);
+      c.oy = c.y - (v.y + tankH(v) / 2);
+      return;
+    }
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const b = this.beasts[k];
+      if (!b || b.kind === BeastKind.Web) continue;
+      const pts = this.beastPts[k];
+      const { d } = nearestPoint(pts, c.x, c.y);
+      if (d > BEAST_BUILD[b.kind].r + 1.5) continue;
+      c.stuck = true;
+      c.onBeast = k;
+      // (Held at its offset from the head: it rides wherever the creature goes.)
+      c.ox = c.x - pts[0];
+      c.oy = c.y - pts[1];
+      return;
+    }
+  }
+
+  private loosen(c: Charge): void {
+    c.onPlayer = 255;
+    c.onTank = -1;
+    c.onBeast = -1;
+    c.stuck = false;
+    this.chargesRev++;
+  }
+
+  /**
+   * A sticky charge goes off at (c.x, c.y): whatever it was stuck to takes
+   * the charge (a share of a vehicle's hull, a heavy wound to a creature or
+   * a clone); the blast itself (a grenade's reach at 1.2 times its harm,
+   * slow fragments that fall short) is a ProjKind.Sticky projectile going
+   * off there, as a mine's is, so every client sees it; its ferocious core
+   * close in is onProjEnd's (stickyCore).
+   */
+  private detonateSticky(c: Charge): void {
+    const owner = c.owner;
+    if (c.onTank >= 0) {
+      const k = this.tanks[c.onTank];
+      if (k) this.hurtTankPart(c.onTank, TankPart.Hull, tankMaxHp(k) * STICKY_ON_VEHICLE, owner);
+    } else if (c.onBeast >= 0) {
+      if (this.beasts[c.onBeast]) this.hurtBeast(c.onBeast, STICKY_ON_BEAST, owner < MAX_PLAYERS ? owner : NO_OWNER);
+    } else if (c.onPlayer !== 255) {
+      const q = this.players[c.onPlayer];
+      if (q && q.alive && !this.friendly(owner, q)) this.damage(q, STICKY_ON_CLONE, owner, ProjKind.Sticky);
+    }
+    this.spawnProj(this.nextProjId++, ProjKind.Sticky, owner, c.x, c.y, 0, 0);
+  }
+
   /**
    * The strike lands at (x, y): the crater (the hardest rock too, near the
    * middle), the heat and the blast (certain death close in; out to
@@ -4175,6 +4347,8 @@ export class World {
     this.burners.length = 0;
     this.feet.length = 0;
     this.burnersRev++;
+    this.charges.length = 0;
+    this.chargesRev++;
     this.grains.n = 0;
     this.projectiles.n = 0;
     this.pendingPixels.clear();
@@ -4832,6 +5006,14 @@ export class World {
         this.splashDoors(x, y, def.splashR, def.splashDamage, owner);
         this.splashShips(x, y, def.splashR, def.splashDamage, owner);
         this.splashBeasts(x, y, def.splashR, def.splashDamage, owner);
+        // A sticky charge's core: a shaped, concentrated blast that tears into whatever's right there (armour and hide too).
+        if (kind === ProjKind.Sticky) {
+          this.splashTanks(x, y, STICKY_CORE_R * 2, stickyCore(0) * 2, owner);
+          this.splashCrafts(x, y, STICKY_CORE_R * 2, stickyCore(0) * 2, owner);
+          this.splashShips(x, y, STICKY_CORE_R * 2, stickyCore(0) * 2, owner);
+          this.splashDoors(x, y, STICKY_CORE_R * 2, stickyCore(0) * 2, owner);
+          this.splashBeasts(x, y, STICKY_CORE_R * 2, stickyCore(0) * 2, owner);
+        }
         this.kickItems(x, y, def.splashR * 1.5);
         for (const p of this.players) {
           if (!p || !p.alive || this.shielded(p) || this.friendly(owner, p)) continue;
@@ -4842,7 +5024,8 @@ export class World {
             // Overpressure hits every part at once: armour soaks what it
             // covers, limbs can be blown clean off.
             const selfScale = p.id === owner ? 0.5 : 1;
-            const amt = def.splashDamage * (1 - d / def.splashR) * selfScale;
+            // (A sticky charge: its ferocious core close in, or its blast further out, whichever is worse.)
+            const amt = Math.max(def.splashDamage * (1 - d / def.splashR), kind === ProjKind.Sticky ? stickyCore(d) : 0) * selfScale;
             const res = this.strikeScratch;
             res.hp = 0;
             res.detached.length = 0;
@@ -4926,6 +5109,11 @@ export class World {
     }
     if (want && def.proj === PROJ_BURNER && p.cooldown <= 0) {
       this.throwBurner(p);
+      p.firing = true;
+      return;
+    }
+    if (want && def.proj === PROJ_STICKY && p.cooldown <= 0) {
+      this.throwSticky(p);
       p.firing = true;
       return;
     }
@@ -7606,6 +7794,7 @@ export class World {
     this.stepTraps();
     this.stepMines();
     this.stepBurners();
+    this.stepCharges();
     this.stepEvac();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
@@ -7881,6 +8070,17 @@ export class World {
           w.u16(clampU16(f.x));
           w.u16(clampU16(f.y + Y_BIAS));
           w.u16(Math.min(FOOT_FLARE - 1, f.life) | (f.flaredAt === this.tick ? FOOT_FLARE : 0));
+        }
+      }
+      if (this.charges.length || p.chargesSeen !== this.chargesRev) {
+        p.chargesSeen = this.chargesRev;
+        w.u8(R_CHARGES);
+        w.u8(Math.min(255, this.charges.length));
+        for (const c of this.charges.slice(0, 255)) {
+          w.u16(clampU16(c.x));
+          w.u16(clampU16(c.y + Y_BIAS));
+          w.u16(c.fuse);
+          w.u8(c.stuck ? 1 : 0);
         }
       }
       if (p.minesSeen !== this.minesRev) {
@@ -8496,6 +8696,22 @@ interface Burner {
   owner: number;
   onPlayer: number;
   onTank: number;
+  ox: number;
+  oy: number;
+  age: number;
+}
+/** A sticky charge (sticky.ts): where, how it's moving, stuck or not, its countdown, whose; what it's stuck to (a clone, a vehicle, a creature) and where on it; ticks since the throw. */
+interface Charge {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  stuck: boolean;
+  fuse: number;
+  owner: number;
+  onPlayer: number;
+  onTank: number;
+  onBeast: number;
   ox: number;
   oy: number;
   age: number;

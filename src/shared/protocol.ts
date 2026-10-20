@@ -146,6 +146,8 @@ export const R_CORAL = 44;
 export const R_BURNERS = 45;
 /** A Stoneburner strike lands (broadcast to everyone): u16 x, u16 y (+Y_BIAS), u8 who called it, u32 seed. */
 export const R_STONEBURN = 46;
+/** The sticky charges about (frame.ts ChargeState): every frame while there are any, once more when they're gone. */
+export const R_CHARGES = 47;
 /** Geyser flags: on a cave floor; rumbling (about to blow); venting its deadly smoke; choked (its vent dug away). */
 export const GF_CAVE = 1;
 export const GF_RUMBLE = 2;
@@ -168,7 +170,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 80;
+export const PROTOCOL_VERSION = 81;
 
 /** Last Man Standing round phases. */
 export const Phase = {

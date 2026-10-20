@@ -51,8 +51,8 @@ export function newItem(weapon: number): InvItem {
 
 /**
  * A fresh clone's kit: always a primary, a digger, a materializer, a
- * radio and a repair kit; often grenades (or landmines), sometimes a
- * second gun (or an AT cannon).
+ * radio and a repair kit; often grenades (or landmines) and a sticky
+ * charge, sometimes a second gun (or an AT cannon).
  */
 export function spawnLoadout(rng: Rng): InvItem[] {
   const primary = weightedPick(PRIMARIES, rng.next());
@@ -67,7 +67,10 @@ export function spawnLoadout(rng: Rng): InvItem[] {
     // ...or, now and then, an AT cannon as the backup instead, for the tanks.
     inv.push(newItem(WeaponId.ATCannon));
   }
+  // Often, a sticky charge too (rolled off the generator's state without drawing from it, so the rest of the kit is as it was).
+  if (hash2(rng.state, 0x571c) / 4294967296 < STICKY_ODDS) inv.push(newItem(WeaponId.Sticky));
   inv.push(newItem(WeaponId.Digger), newItem(WeaponId.Materializer), newItem(WeaponId.Radio), newItem(WeaponId.RepairKit));
+  if (inv.length > INV_MAX) inv.splice(inv.findIndex((it) => it.weapon === WeaponId.Sticky), 1);
   // Very, very rarely: a Stoneburner, in place of the grenades or mines (or in a spare slot).
   // (Rolled off the generator's state without drawing from it: everything else drawn from it stays as it was.)
   if (hash2(rng.state, 0x570e) / 4294967296 < STONEBURNER_ODDS) {
@@ -77,6 +80,9 @@ export function spawnLoadout(rng: Rng): InvItem[] {
   }
   return inv;
 }
+
+/** The odds a fresh clone's kit is dealt a sticky charge (sticky.ts): a common pick (a full kit has no room for it, so about two kits in five end up with one). */
+export const STICKY_ODDS = 0.55;
 
 /** The odds a fresh clone's kit holds a Stoneburner (stoneburner.ts): ultra rare. */
 export const STONEBURNER_ODDS = 1 / 400;

@@ -3,7 +3,8 @@ import { BTN_FIRE, type Body, HIP_X, HIP_Y, copyBody, newBody, shoulderAt, stepB
 import { WoundBook, beastDamage, beastScars } from './wounds.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_MAX_HP, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
-import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, type BurnerState, type FootState, applyFrameRecords } from '../shared/frame.ts';
+import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, type BurnerState, type FootState, type ChargeState, applyFrameRecords } from '../shared/frame.ts';
+import { STICKY_FUSE, stickyBeepAt } from '../shared/sticky.ts';
 import { BURNER_FUSE, BurnerPhase, CLOUD_MS, FOOT_LIFE, beepAt } from '../shared/stoneburner.ts';
 import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
@@ -1131,6 +1132,8 @@ export class Game implements FrameHandler {
     return this.tankViews().find((v) => isSpider(v) && v.owner === this.myId) ?? null;
   }
 
+  /** Sticky charges about (R_CHARGES). */
+  chargeList: ChargeState[] = [];
   /** Stoneburner beacons and molten cores about (R_BURNERS). */
   burnerList: BurnerState[] = [];
   footList: FootState[] = [];
@@ -1142,6 +1145,30 @@ export class Game implements FrameHandler {
   quake = 0;
   /** A strike's ejecta: burning chunks thrown high, trailing fire and smoke till they come down (just for show). */
   private readonly ejecta: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
+
+  /** The sticky charges about: each stuck one beeps as its light comes on (any tick of its countdown since we last heard of it). */
+  charges(list: ChargeState[]): void {
+    for (const c of list) {
+      if (!c.stuck) continue;
+      let prev: ChargeState | null = null;
+      let best = 30;
+      for (const o of this.chargeList) {
+        const d = Math.hypot(o.x - c.x, o.y - c.y);
+        if (o.stuck && d < best && o.fuse >= c.fuse) {
+          best = d;
+          prev = o;
+        }
+      }
+      const from = prev ? prev.fuse - 1 : c.fuse;
+      for (let f = from; f >= c.fuse && from - f < 30; f--) {
+        if (stickyBeepAt(f)) {
+          this.sfx?.beep(c.x, c.y, 1 - f / STICKY_FUSE);
+          break;
+        }
+      }
+    }
+    this.chargeList = list;
+  }
 
   burners(beacons: BurnerState[], feet: FootState[]): void {
     // A beacon beeps each time its light comes on: any tick of its countdown since we last heard of it

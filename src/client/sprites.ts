@@ -370,6 +370,17 @@ const GUNS: GunDef[] = [
     px: 1,
     py: 2,
   },
+  {
+    // Sticky charge in hand: a flat dark puck, a hazard stripe, its red light
+    grid: [
+      '....KKK..',
+      'KAAKGrGK.',
+      'KAAKYyYK.',
+      '.KKKKKKK.',
+    ],
+    px: 1,
+    py: 1,
+  },
 ];
 
 /** The first of the spider droid's gib pieces (effects.ts GIB_DROID_LEG; then its head, a plate). */

@@ -1,3 +1,4 @@
+import { STICKY_THROW } from '../shared/sticky.ts';
 import { BeastKind, wyrm } from '../shared/wildlife.ts';
 import { DEFENDERS } from '../shared/siege.ts';
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_SCOPE, BTN_UP } from '../shared/actor.ts';
@@ -32,6 +33,7 @@ const RANGE: Record<number, number> = {
   [WeaponId.Rifle]: 130,
   [WeaponId.Bazooka]: 170,
   [WeaponId.Grenade]: 110,
+  [WeaponId.Sticky]: 90,
   [WeaponId.Sniper]: 280,
   [WeaponId.Digger]: 0,
   [WeaponId.Shotgun]: 55,
@@ -144,6 +146,8 @@ export class BotBrain {
   private trigger = false;
   private seq = 0;
   private nadeUntil = 0;
+  /** Until when it has a sticky charge out to throw (sticky.ts): up close, mostly at someone in a vehicle. */
+  private stickyUntil = 0;
   /** Laying a landmine until this tick. */
   private mineUntil = 0;
   /** Not before this tick: a beat to get bearings after landing, and to react to a new target. */
@@ -571,6 +575,10 @@ export class BotBrain {
     const digSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Digger);
     if (nadeSlot >= 0 && dist < 150 && t > this.nadeUntil + 90 && rng.next() < 0.01) this.nadeUntil = t + 30;
     if (t < this.nadeUntil && nadeSlot >= 0) want = nadeSlot;
+    // A sticky charge: up close and in sight, now and then; far more readily at someone in a vehicle (what it's for).
+    const stickySlot = p.inv.findIndex((it) => it.weapon === WeaponId.Sticky);
+    if (stickySlot >= 0 && tgt && this.seeTarget && dist < 130 && t > this.stickyUntil + 120 && rng.next() < (tgt.tank >= 0 ? 0.05 : 0.006)) this.stickyUntil = t + 20;
+    if (t < this.stickyUntil && stickySlot >= 0) want = stickySlot;
     // Nobody about and on its feet: now and then, leave a landmine behind.
     const mineSlot = p.inv.findIndex((it) => it.weapon === WeaponId.Mine && it.ammo > 0);
     if (mineSlot >= 0 && p.body.onGround && (!tgt || (!this.seeTarget && dist > 200)) && t > this.mineUntil + 300 && rng.next() < 0.004) this.mineUntil = t + 12;
@@ -769,6 +777,11 @@ export class BotBrain {
       if (def.proj >= 0) ay -= 0.5 * GRAVITY * PROJ[def.proj].gravity * lead * lead;
       sweep = 0;
     }
+    // (A sticky charge is lobbed: aim high enough for its arc to come down on them.)
+    if (weapon === WeaponId.Sticky && !air && !beast) {
+      const lead = Math.hypot(ax - sx, ay - sy) / STICKY_THROW;
+      ay -= 0.5 * GRAVITY * lead * lead;
+    }
     const aim = Math.atan2(ay - sy, ax - sx) + sweep + (rng.next() - 0.5) * 2 * this.noise * skillOf(p).noise;
     cmd.aim = quantizeAim(aim);
 
@@ -779,6 +792,8 @@ export class BotBrain {
       ? t >= this.holdFire
       : weapon === WeaponId.Mine
         ? t < this.mineUntil && t > this.mineUntil - 8
+        : weapon === WeaponId.Sticky
+        ? t < this.stickyUntil && tgt !== null && this.seeTarget && dist < 160
         : weapon === WeaponId.RepairKit
         ? healing
         : weapon === WeaponId.Digger
