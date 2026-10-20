@@ -385,6 +385,10 @@ The screen splits down the middle:
 **Humans.** Other human players (not bots) wear a tiny gold star over
 their name tag.
 
+**Your own name tag.** Your clone wears your name over its head in bold
+white, outlined in black, so you can always pick yourself out of a crowd
+(everyone else's is in their colour).
+
 **Changing team.** Dead in a team mode, the death card has a row of the
 sides (RED, GREEN, and in Extraction BLUE and GOLD, each with how many
 fight for it, ours lit): click or tap one, or press C for the next. Waiting

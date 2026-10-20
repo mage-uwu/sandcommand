@@ -1591,6 +1591,22 @@ export class Renderer {
         ctx.fillRect(sx - w / 2, sy + 3 * dpr, (w * v.hp) / ACTOR_MAX_HP, 3 * dpr);
       }
     }
+    // Our own clone: our name over it in white, bold and outlined, so we can always pick ourselves out.
+    if (game.alive && !game.drive) {
+      const me = game.players.get(game.myId);
+      const sx = offX + (selfX + ACTOR_W / 2) * z;
+      const sy = offY + selfY * z - 8 * dpr;
+      const tag = game.isKing(game.myId) ? `♛ ${me?.name ?? 'YOU'}` : (me?.name ?? 'YOU');
+      ctx.save();
+      ctx.font = `bold ${Math.round(12 * dpr)}px ui-monospace, monospace`;
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3 * dpr;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.strokeText(tag, sx, sy);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(tag, sx, sy);
+      ctx.restore();
+    }
 
     // The aim assist's target: a small red reticle on whatever the aim has snapped to.
     const am = game.alive ? game.aimMark : null;
