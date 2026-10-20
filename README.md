@@ -1313,6 +1313,9 @@ In a headless 32-bot siege the attackers reached the walls and spent about
 
 ## Extermination
 
+Half the time (by the map's seed) it's fought in **the lair** below; the
+other half on **DUNE** (see below).
+
 Everyone fights on one side against **three basilisks and a dragon** (see
 Wildlife). The mode has its own map, **the lair** (`MapKind.Lair`, `src/shared/lair.ts`):
 **one giant cave** hollowed out deep under the map, nearly its whole width,
@@ -1375,6 +1378,28 @@ match that plays nothing else.
 In headless 8-bot waves the bots kill one or two of the four in twelve
 minutes (the wave runs twenty-four). Humans with the anti-tank cannons make the difference.
 
+
+### DUNE
+
+Extermination's other ground (`MapKind.Dune`, chosen half the time by the
+map's seed in `World.mapKindFor`): a massive barren desert. No bunkers, no
+caves, no craters, gem caverns, geysers or plants. Nothing lives on it.
+- **The sand.** Towering dunes march across it (`duneHeight` in
+  `src/shared/worldgen.ts`). Each has a long windward slope up to its crest
+  and a steep slip face down the lee, with crests of different heights
+  (up to some 150 cells) and lesser dunes over the great ones. A deep crust
+  of loose rust sand, 70 to 160 cells, lies over solid ground, with no
+  rock or ore breaking it.
+- **Two dragons** lie under the sand (`DUNE_DRAGONS`, 150 cells down),
+  awake from the start. They hear everyone on the sand, however far, and
+  come up after them. When nobody is about they prowl just under the
+  surface, and they never go back down to sleep. They have the lair
+  dragon's health (half a wild one's) and everything a dragon does: its
+  jaws, its breath of burning blood, its brood.
+- **The heavy weapons** (bazookas, AT cannons, autocannons) lie out on the
+  sand at four spots across it (`DUNE_CACHES`).
+- Kill both and everyone wins; respawns, vehicles and time are as in the
+  lair. The countdown banner names it.
 ## Extraction
 
 The fourth mode. **Four teams** (red, green, blue, gold) race down one

@@ -361,6 +361,8 @@ export class Game implements FrameHandler {
   gold = 0;
   /** The current map's biome (worldgen Biome). */
   biome = 0;
+  /** The current map's kind (worldgen.ts MapKind): DUNE's banner differs. */
+  mapKind = 0;
   /** Is the current map a cave map (a tunnel highway and citadels under it)? */
   caves = false;
   /** Traces of whoever was here first (relics.ts): rare, cosmetic. */
@@ -1733,6 +1735,7 @@ export class Game implements FrameHandler {
   wave(seed: number, hashes: Uint32Array, kind: number): void {
     generateWorld(this.terrain, seed, kind, this.backdrop);
     this.biome = lastBiome;
+    this.mapKind = kind;
     this.caves = lastCaves !== null;
     this.deathCause = '';
     this.fragged = false;

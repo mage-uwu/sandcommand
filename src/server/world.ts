@@ -243,7 +243,7 @@ import {
   dequantizeAim,
   quantizeAim,
 } from '../shared/protocol.ts';
-import { Rng } from '../shared/rng.ts';
+import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_LIFE, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
@@ -745,6 +745,8 @@ export class World {
   lairBeasts = 0;
   /** Extermination: each basilisk's den (where it goes back to sleep, calmed). */
   private readonly lairHome = new WeakMap<Beast, { x: number; y: number }>();
+  /** DUNE's dragons: they hear everyone on the sand, wherever, and never go back down to sleep. */
+  private readonly duneHunters = new WeakSet<Beast>();
   /** FFA: fill the room with bots up to this many clones (humans count first). */
   readonly botFill: number;
   /** Seed of the current map (each wave gets a new one). */
@@ -812,7 +814,9 @@ export class World {
   private mapKindFor(n: number): number {
     if (this.mode !== 'ffa') return MapKind.Plain;
     const mode = this.modeOfWave(n);
-    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : mode === GameMode.Siege ? MapKind.Siege : mode === GameMode.Extermination ? MapKind.Lair : MapKind.Plain;
+    // (Extermination: half the time the lair, half the time DUNE, by the map's seed.)
+    if (mode === GameMode.Extermination) return hash2(this.mapSeed & 0xffff, this.mapSeed >>> 16, 0xd0e5) & 1 ? MapKind.Dune : MapKind.Lair;
+    return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : mode === GameMode.Siege ? MapKind.Siege : MapKind.Plain;
   }
 
   /** Generate the map for `mapSeed` (fortresses or a labyrinth, by kind) and note what's in it. */
@@ -834,6 +838,15 @@ export class World {
           this.mapLoot.push({ x, y: this.terrain.surfaceY(x) - 6, weapon });
         });
       });
+    }
+    // DUNE: the same caches, out on the sand (there's nowhere else to put them).
+    if (kind === MapKind.Dune) {
+      for (const f of DUNE_CACHES) {
+        LAIR_CACHE.forEach((weapon, i) => {
+          const x = Math.round(f * WORLD_W) + i * 10;
+          this.mapLoot.push({ x, y: this.terrain.surfaceY(x) - 6, weapon });
+        });
+      }
     }
     this.doors = lastComplexes.flatMap((c) => (c.doors ?? []).map((d) => ({ ...d, open: 0, hp: DOOR_HP, broken: false })));
     // (Staggered, so they don't all go off on their own together early on.)
@@ -1227,9 +1240,23 @@ export class World {
         bodyPoints(this.terrain, b, this.beastPts[k]);
       });
     }
+    // DUNE: two dragons under the sand, awake from the start: they come up after whoever walks it.
+    if (this.mapKind === MapKind.Dune) {
+      DUNE_DRAGONS.forEach((f, k) => {
+        const x = Math.round(f * WORLD_W);
+        const y = Math.min(WORLD_H - 80, this.terrain.surfaceY(x) + DUNE_DRAGON_DEPTH);
+        const b = newBeast(this.terrain, BeastKind.Dragon, x, y, x < WORLD_W / 2 ? 1 : -1);
+        b.seed = this.beastRng.int(256);
+        b.hp = BEAST_BUILD[BeastKind.Dragon].hp * LAIR_HP;
+        this.duneHunters.add(b);
+        this.enrage(b);
+        this.beasts[k] = b;
+        bodyPoints(this.terrain, b, this.beastPts[k]);
+      });
+    }
     this.lairBeasts = this.basilisksLeft();
     // And its lesser life, there from the start.
-    for (let n = 0; n < LAIR_NESTS + LAIR_CRAWLERS + 8 && this.stockLair(); n++) {
+    for (let n = 0; n < LAIR_NESTS + LAIR_CRAWLERS + 8 && lair && this.stockLair(); n++) {
       // (stocking)
     }
   }
@@ -1787,7 +1814,7 @@ export class World {
       this.beastSpawnAt = this.tick + BEAST_RESPAWN;
       this.stockLair();
     }
-    if (!this.lair && this.tick >= this.beastSpawnAt) {
+    if (!this.lair && this.mapKind !== MapKind.Dune && this.tick >= this.beastSpawnAt) {
       this.beastSpawnAt = this.tick + BEAST_RESPAWN;
       const want = this.caves ? BEASTS_CAVES : BEASTS_PLAIN;
       const nests = this.beasts.filter((b) => b?.kind === BeastKind.Nest).length;
@@ -2683,9 +2710,9 @@ export class World {
   }
 
   /** A lair basilisk's prey: the nearest clone (or vehicle) within LAIR_HEAR of it, seen or not (it hears them in its cave). */
-  private lairPrey(hx: number, hy: number): { x: number; y: number } | null {
+  private lairPrey(hx: number, hy: number, hear = LAIR_HEAR): { x: number; y: number } | null {
     let best: { x: number; y: number } | null = null;
-    let bestD = LAIR_HEAR;
+    let bestD = hear;
     for (const p of this.players) {
       if (!p || !p.alive || p.pilot >= 0) continue;
       const tk = p.tank >= 0 ? this.tanks[p.tank] : null;
@@ -2980,7 +3007,8 @@ export class World {
       // In the lair: it hunts by ear, anyone anywhere in its cave, finding its way to them along
       // the cave's walls, floor and roof (basiliskRoute). Wild, it hunts what it sees up top.
       const lair = this.lairHome.has(b);
-      const prey = lair ? this.lairPrey(b.fx, b.fy) : this.basiliskPrey(b.fx, b.fy, sc);
+      const dune = this.duneHunters.has(b);
+      const prey = lair ? this.lairPrey(b.fx, b.fy) : dune ? this.lairPrey(b.fx, b.fy, Infinity) : this.basiliskPrey(b.fx, b.fy, sc);
       speed = BASILISK_HUNT * pace;
       if (!prey) b.breath = 0;
       if (prey) {
@@ -3004,8 +3032,8 @@ export class World {
           this.dragonBreath(b, pts[0], pts[1], prey.x, prey.y);
           speed *= 0.35;
         } else b.breath = 0;
-      } else if (--b.frenzy <= 0) {
-        // Nothing left: down into the deep, to sleep.
+      } else if (!dune && --b.frenzy <= 0) {
+        // Nothing left: down into the deep, to sleep. (DUNE's never rest: they prowl on, below.)
         b.frenzy = 0;
         b.still = 1;
         const home = this.lairHome.get(b);
@@ -8251,6 +8279,13 @@ const TANK_PERCH = 4;
 const EXTERMINATION_TICKS = 30 * 60 * 24;
 /** A lair basilisk hears anyone this near (cells), replans its way every so many ticks, and searches so many grid cells for it at most. */
 const LAIR_HEAR = 1400;
+/**
+ * DUNE: where its two dragons start (fractions across the map), how far
+ * under the sand (cells), and where its heavy weapons lie out on the sand.
+ */
+const DUNE_DRAGONS = [0.3, 0.7];
+const DUNE_DRAGON_DEPTH = 150;
+const DUNE_CACHES = [0.15, 0.4, 0.6, 0.85];
 /** A basilisk's body battering whoever it rolls into, awake and moving: harm a blow (and a vehicle's share of hull), and how often the same one can be struck. */
 const BAS_BODY_HARM = 22;
 const BAS_BODY_CRUSH = 0.08;

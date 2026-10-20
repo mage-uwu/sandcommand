@@ -1,3 +1,4 @@
+import { MapKind } from '../src/shared/worldgen.ts';
 import { describe, expect, it } from 'vitest';
 import { Reader } from '../src/shared/codec.ts';
 import { GameMode, Phase, VOTE_MODES } from '../src/shared/protocol.ts';
@@ -30,7 +31,9 @@ describe('the vote on the next mode', () => {
     expect(world.voteCounts()[VOTE_MODES.indexOf(GameMode.Extermination)]).toBe(2);
     nextWave(world);
     expect(world.waveMode).toBe(GameMode.Extermination);
-    expect(world.lair).not.toBe(null);
+    // (Built for it: the lair, or DUNE, by the map's seed.)
+    expect([MapKind.Lair, MapKind.Dune]).toContain(world.mapKind);
+    expect(world.lair !== null).toBe(world.mapKind === MapKind.Lair);
     until(world, () => world.phase === Phase.Live);
     expect(world.modeOfWave(world.wave)).toBe(GameMode.Extermination);
   });

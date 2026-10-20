@@ -31,7 +31,7 @@ export let lastLair: Lair | null = null;
  * Regicide's; never the labyrinth (it's underground already).
  */
 export function cavesOf(seed: number, kind: number): boolean {
-  if (kind === MapKind.Dungeon || kind === MapKind.Lair || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
+  if (kind === MapKind.Dungeon || kind === MapKind.Lair || kind === MapKind.Dune || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
   return hash2(seed & 0xffff, seed >>> 16, 0xca7e) % 100 < 40;
 }
 
@@ -68,7 +68,7 @@ export let lastMonuments: Monument[] = [];
 /** Which biome a map gets: any for an ordinary map; fortresses want gentle ground; the labyrinth is under a desert. */
 export function biomeOf(seed: number, kind: number): number {
   const r = (hash2(seed & 0xffff, seed >>> 16, 0x6b10) >>> 0) / 4294967296;
-  if (kind === MapKind.Dungeon) return Biome.Dunes;
+  if (kind === MapKind.Dungeon || kind === MapKind.Dune) return Biome.Dunes;
   // About one map in four (one in five of Regicide's) is deadland, by a roll of its own so the
   // marslike maps keep their seeds; Siege's megafortress wants marslike ground.
   const dead = (hash2(seed & 0xffff, seed >>> 16, 0xdead) >>> 0) / 4294967296;
@@ -89,7 +89,38 @@ export const MapKind = {
   Siege: 3,
   /** Extermination: the lair, four great dens under open ground, a basilisk asleep in each (lair.ts). */
   Lair: 4,
+  /**
+   * DUNE, Extermination's other ground (half the time): a vast barren desert
+   * of towering dunes, nothing built, no caves, no life but two dragons under
+   * the sand that come up after whoever walks it (World.startExtermination).
+   */
+  Dune: 5,
 } as const;
+
+/**
+ * DUNE's ground at column x: towering dunes marching across it, each with a
+ * long windward slope up to its crest and a steep slip face down the lee
+ * (the wind from the west), crests of different heights and spacings, small
+ * ripples over it all. Rows from the top (smaller is higher).
+ */
+function duneHeight(x: number, seed: number, p1: number, p2: number): number {
+  const base = WORLD_H * 0.47;
+  let lift = 0;
+  // Two trains of dunes, a great one and a lesser one over it.
+  for (const [len, amp, k] of [
+    [430, 150, 0x0d1],
+    [170, 34, 0x0d2],
+  ] as const) {
+    const pos = x / len + 0.3 * Math.sin(x * 0.0013 + p1);
+    const i = Math.floor(pos);
+    const u = pos - i;
+    const crest = 0.78; // (where along it the crest is: most of it windward slope)
+    const shape = u < crest ? Math.sin(((u / crest) * Math.PI) / 2) ** 1.6 : Math.cos((((u - crest) / (1 - crest)) * Math.PI) / 2) ** 1.4;
+    const tall = 0.55 + 0.45 * ((hash2(i, seed & 0xffff, k) >>> 0) / 4294967296);
+    lift += amp * tall * shape;
+  }
+  return base - lift + Math.sin(x * 0.07 + p2) * 1.5;
+}
 
 /** Level each span to its median height (by `k`), easing back into the land over 160 cells either side. */
 function levelSites(heights: Int32Array, sites: { x0: number; x1: number; k: number }[]): void {
@@ -268,6 +299,7 @@ function frost(m: Uint8Array, biome: number, seed: number): void {
 export function generateWorld(t: Terrain, seed: number, kind: number | boolean = MapKind.Plain, backdrop?: Uint8Array): void {
   const mapKind = kind === true ? MapKind.Fortress : kind === false ? MapKind.Plain : kind;
   const dungeon = mapKind === MapKind.Dungeon;
+  const duneMap = mapKind === MapKind.Dune;
   const biome = biomeOf(seed, mapKind);
   lastBiome = biome;
   const rng = new Rng(seed);
@@ -306,6 +338,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
       }
     } else if (biome === Biome.Meadows) {
       h = WORLD_H * 0.38 + Math.sin(x * 0.003 + p1) * 55 + Math.sin(x * 0.009 + p2) * 22 + (fbm(x, 0, 120, seed ^ 0x51, 3) - 0.5) * 30;
+    } else if (duneMap) {
+      h = duneHeight(x, seed, p1, p2);
     } else {
       // An Extraction desert sits high (the labyrinth under it is deep) and flatter.
       const amp = dungeon ? 0.25 : biome === Biome.Deadland ? 0.7 : 1;
@@ -326,8 +360,9 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   const dune = new Float64Array(WORLD_W);
   for (let x = 0; x < WORLD_W; x++) {
     const n = fbm(x, 0, 160, seed ^ 0x77, 2);
-    dune[x] =
-      biome === Biome.Dunes ? 10 + Math.max(0, n - 0.45) * 160 : biome === Biome.Meadows ? 2 + Math.max(0, n - 0.6) * 40 : 0;
+    dune[x] = duneMap
+      ? 70 + n * 90 // (DUNE: sand all the way down to the bones of the land)
+      : biome === Biome.Dunes ? 10 + Math.max(0, n - 0.45) * 160 : biome === Biome.Meadows ? 2 + Math.max(0, n - 0.6) * 40 : 0;
   }
   const rockBias = biome === Biome.Highlands ? 0.09 : biome === Biome.Canyons ? 0.04 : 0;
   const canyonFloor = WORLD_H * 0.3 + 40;
@@ -372,7 +407,8 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
         // lenses (loose pockets that cave in when undercut) > sand / dirt.
         if (dead && depth < crust[x]) v = crustCell(x, y, depth, crust[x], seed, ashN.at(x, y), gritN.at(x, y));
         else if (valley && y - crustTop[x] < crust[x]) v = crustCell(x, y, y - crustTop[x], crust[x], seed, ashN.at(x, y), gritN.at(x, y));
-        else if (!valley && depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
+        else if (duneMap && depth < dune[x]) v = Mat.RustSand; // (DUNE: no rock or ore breaking its crust)
+        else if (!valley && !duneMap && depth > 30 && caves.at(x, y) > 0.69 - Math.min(depth, 400) / 4000) v = Mat.Air;
         else if (depth > 50 && gold.at(x, y) > 0.8 - Math.min(depth, 500) / 6000) v = Mat.Gold;
         else if (depth > (rockBias ? 2 : 6) && rock.at(x, y) > 0.66 - rockBias) v = Mat.Rock;
         else if (biome === Biome.Canyons && surf > canyonFloor && depth < 6) v = Mat.Sand; // a sandy riverbed
@@ -416,6 +452,10 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     fortifyComplexes(m, lastComplexes, seed);
     if (backdrop) for (const c of lastComplexes) if (c.strongroom) markBox(backdrop, c.strongroom.x0, c.strongroom.y0, c.strongroom.x1, c.strongroom.y1, Backdrop.Steel);
     lastDungeon = null;
+  } else if (duneMap) {
+    // DUNE: nothing built, nothing dug. Sand.
+    lastComplexes = [];
+    lastDungeon = null;
   } else if (valley) {
     // The Valley of Souls: no bunkers. The dome, the warning, and the caves under it.
     carveValley(m, valley, seed, backdrop);
@@ -440,7 +480,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // (Not under the deadland: its citadels would be bunkers.)
   lastCaves = cavesOf(seed, mapKind) ? carveCaves(m, heights, seed, lastComplexes, backdrop) : null;
   // The works in the ground around the bunkers (trenches, dragon's teeth, sandbags, iron blocks); none round the ruins.
-  if (!dungeon && !dead && !valley) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
+  if (!dungeon && !dead && !valley && !duneMap) fortifyGround(m, lastComplexes, seed, lastSiege?.side);
   else clearWorks();
   if (lastCaves) lastComplexes = [...lastComplexes, ...lastCaves.citadels].sort((a, b) => a.x0 - b.x0);
   // The frosting: impact craters, gem caverns and geyser vents (not over the
@@ -459,9 +499,10 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   // (Nor in a cave citadel, natural ones included: the highway through it stays clear for a tarantula.)
   const citadelFloors = lastCaves ? lastCaves.caverns.map((c) => ({ x0: c.x - c.hw, x1: c.x + c.hw })) : [];
   const deep = [...spans, ...citadelFloors, ...(valley ? [{ x0: valley.calm.x0 - 60, x1: valley.calm.x1 + 60 }] : [])];
-  lastCraters = dungeon ? [] : placeCraters(m, seed, ground, dead);
-  lastGemCaverns = dungeon ? [] : placeGemCaverns(m, seed, deep);
-  lastGeysers = dungeon ? [] : placeGeysers(m, seed, [...(valley ? [...ground, ...deep] : ground), ...citadelFloors], lastCraters);
+  // (DUNE: barren. No craters, no caverns, no vents.)
+  lastCraters = dungeon || duneMap ? [] : placeCraters(m, seed, ground, dead);
+  lastGemCaverns = dungeon || duneMap ? [] : placeGemCaverns(m, seed, deep);
+  lastGeysers = dungeon || duneMap ? [] : placeGeysers(m, seed, [...(valley ? [...ground, ...deep] : ground), ...citadelFloors], lastCraters);
   // Stalactites and stalagmites through the natural caves.
   if (!dungeon) dripCaves(m, heights, seed);
   // Rare earth crystals, deep in the natural ground.
@@ -482,7 +523,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     }
   }
   // (The flora last: it grows on the ground as it ends up, frosting and all.)
-  lastFlora = placeFlora(m, seed, biome, lastGeysers, ground);
+  lastFlora = duneMap ? [] : placeFlora(m, seed, biome, lastGeysers, ground);
   if (valley) {
     // The valley's caves are calm: no blister coral there; its own life instead.
     const c = valley.calm;

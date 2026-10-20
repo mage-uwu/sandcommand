@@ -5,7 +5,7 @@ import { MAT_COLOR, Mat } from '../shared/materials.ts';
 import { CALL_COST, TARANTULA_COST, MOLE_COST, WATCHDOG_COST, CallKind, Evac, GameMode, Phase, VOTE_MODES, F_ALIVE, F_CLASS_SHIFT, F_FIRING, F_GROUND, F_JET, F_RELOAD, TEAM_NAMES, TEAMS_IN_MODE, Team, classOfFlags, dequantizeAim } from '../shared/protocol.ts';
 import { EVAC_H, EVAC_W, SPIKE_DEPTH, TrapKind } from '../shared/dungeon.ts';
 import { sightLine } from '../shared/scope.ts';
-import { BIOME_NAMES, Biome } from '../shared/worldgen.ts';
+import { BIOME_NAMES, Biome, MapKind } from '../shared/worldgen.ts';
 import { VBack } from '../shared/valley.ts';
 import { lineOfFire } from './scope.ts';
 import { hash2 } from '../shared/rng.ts';
@@ -3745,7 +3745,9 @@ export class Renderer {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
         // (The mode is the headline; the map's biome goes with the hints.)
-        (exterm
+        (exterm && game.mapKind === MapKind.Dune
+          ? 'extermination · DUNE · everyone together · a barren desert, and two dragons under the sand · they will come up for you · kill them both · respawns'
+          : exterm
           ? 'extermination · everyone together · three basilisks and a dragon hibernate in the giant cave below · kill them all · respawns'
           : siege
           ? 'siege · red holds the fortress and its king for 20 minutes · green has 300 lives to kill him'
@@ -3758,7 +3760,7 @@ export class Renderer {
           : teams
             ? 'last team standing · red vs green · one life each'
             : 'last man standing · one life each · every clone for itself') +
-          (extraction ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`),
+          (extraction || game.mapKind === MapKind.Dune ? '' : ` · ${BIOME_NAMES[game.biome]?.toLowerCase() ?? ''} map${game.caves ? ' · caves: a tunnel highway links the bunkers below' : ''}`),
         '#ffd34a',
       );
     } else if (rs.phase === Phase.Victory && extraction) {

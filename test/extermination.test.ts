@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Reader } from '../src/shared/codec.ts';
+import { seedFor } from './helpers.ts';
 import { CALL_COST, CallKind, GameMode, Phase, TEAMS_IN_MODE, Team } from '../src/shared/protocol.ts';
 import { MapKind } from '../src/shared/worldgen.ts';
 import { LAIR_DENS } from '../src/shared/lair.ts';
@@ -16,8 +17,8 @@ function until(world: World, cond: () => boolean, max = 3000): void {
 }
 /** The lair's quarry: its basilisks, and its dragon. */
 const basilisks = (world: World) => world.beasts.map((b, k) => ({ b, k })).filter((o) => o.b && wyrm(o.b.kind));
-const exterm = (seed: number, n: number, send?: (d: Uint8Array) => void, bots = 0) => {
-  const world = new World(seed, { mode: 'ffa', rotation: [GameMode.Extermination], tanks: false, bots });
+const exterm = (seed: number, n: number, send?: (d: Uint8Array) => void, bots = 0, kind: number = MapKind.Lair) => {
+  const world = new World(seedFor(seed, kind), { mode: 'ffa', rotation: [GameMode.Extermination], tanks: false, bots });
   const ps = Array.from({ length: n }, (_, i) => world.addPlayer(`p${i}`, { send: i === 0 && send ? send : () => {} })!);
   until(world, () => world.phase === Phase.Live);
   until(world, () => ps.every((p) => p.alive), 1200);
