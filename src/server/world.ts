@@ -418,6 +418,11 @@ import {
   CSPIDER_WANDER,
   CSPIDER_RIP,
   CSPIDER_MAUL,
+  CSPIDER_HOLD,
+  CSPIDER_HOLD_BITE,
+  CSPIDER_HOLD_BREAK,
+  CSPIDER_HOLD_DRAG,
+  CSPIDER_HOLD_FLING,
   CSPIDER_PACK_MIN,
   CSPIDER_PACK_MAX,
   CSPIDER_PACK_CALL,
@@ -2390,6 +2395,11 @@ export class World {
     const hx = pts.length ? pts[0] : b.x;
     const hy = pts.length ? pts[1] : b.y;
     if (b.coilCd > 0) b.coilCd--; // (its bite's cooldown)
+    // A clone in its jaws: nothing else, until it's done with them.
+    if (b.hold >= 0) {
+      this.spiderHold(k, b);
+      return;
+    }
     // Carrying a limb home: its jaws are full; it hunts nothing until it's worked it into the web.
     const web = this.webOf(b);
     if (b.carry > 0 && (!web || ++b.legAge > CSPIDER_CARRY_MAX)) b.carry = 0;
@@ -2528,6 +2538,15 @@ export class World {
           b.lunge = 0;
           break;
         }
+        // ...and it doesn't let go: it has them (unless something else already does).
+        if (torn >= 0 && p.tank < 0 && p.pilot < 0 && !this.beasts.some((o) => o && o !== b && (o.hold === p.id || o.coil === p.id))) {
+          b.hold = p.id;
+          b.holdT = 0;
+          b.coilHurt = 0;
+          b.lunge = 0;
+          b.turnAt = this.tick;
+          break;
+        }
         const s = Math.sign(p.cx - pts[0]) || 1;
         p.body.vx += s * CSPIDER_SHOVE;
         p.body.vy -= CSPIDER_SHOVE * 0.4;
@@ -2536,6 +2555,73 @@ export class World {
         break;
       }
     }
+  }
+
+  /**
+   * A cave spider with a clone in its jaws (CSPIDER_HOLD): it drags them
+   * along (home toward its web, if it has one, else on the way it was
+   * going), shaking them, biting again and again (each may take another
+   * limb); its time up, it hurls them off. Let go early if they die, get
+   * into a vehicle, or it's hurt enough (hurtBeast).
+   */
+  private spiderHold(k: number, b: Beast): void {
+    const t = this.terrain;
+    const pts = this.beastPts[k];
+    const v = this.players[b.hold];
+    const done = () => {
+      b.hold = -1;
+      b.holdT = 0;
+      b.coilCd = CSPIDER_BITE_CD * 3;
+      b.lift = 0;
+    };
+    if (!v || !v.alive || v.tank >= 0 || v.pilot >= 0) {
+      done();
+      return;
+    }
+    b.holdT++;
+    b.lift = 1; // (fangs in)
+    // Dragging them: crawling on (toward its web, the way it can best get there).
+    if (b.attached) {
+      const web = this.webOf(b) ? this.beastPts[b.home] : null;
+      if (web && this.tick >= b.turnAt) {
+        if (this.probeCrawl(b, true, web[0], web[1]) < this.probeCrawl(b, false, web[0], web[1]) - 4) turnRound(b);
+        b.turnAt = this.tick + 10;
+      }
+      b.owed += CSPIDER_HOLD_DRAG * DT;
+      while (b.owed >= 1 && b.attached) {
+        b.owed--;
+        crawlStep(t, b);
+        pushTrail(b);
+      }
+    } else {
+      const y0 = b.y;
+      fallStep(t, b, DT, GRAVITY);
+      for (let y = y0 + 1; y <= b.y; y++) {
+        b.y = y;
+        pushTrail(b);
+      }
+    }
+    bodyPoints(t, b, pts);
+    // In its jaws: hanging off its head, shaken about.
+    const shake = Math.sin(b.holdT * 1.3) * 2.5;
+    v.body.x = pts[0] + shake - ACTOR_W / 2;
+    v.body.y = pts[1] - (v.cy - v.body.y) + Math.cos(b.holdT * 1.9) * 1.5;
+    v.body.vx = 0;
+    v.body.vy = 0;
+    // Biting again and again.
+    if (b.holdT % CSPIDER_HOLD_BITE === 0) {
+      this.spiderBite(v, pts[0], pts[1]);
+      if (!v.alive) {
+        done();
+        return;
+      }
+    }
+    if (b.holdT < CSPIDER_HOLD) return;
+    // Done with them: hurled off, the way it was shaking them, and up.
+    const s = Math.sign(v.cx - pts[0]) || (b.hx >= 0 ? 1 : -1);
+    v.body.vx = s * CSPIDER_HOLD_FLING;
+    v.body.vy = -CSPIDER_HOLD_FLING * 0.5;
+    done();
   }
 
   /**
@@ -3427,6 +3513,12 @@ export class World {
     }
     if (wyrm(b.kind)) this.enrage(b);
     if (b.coil >= 0 && (b.coilHurt += dmg) >= MILLI_COIL_BREAK) this.uncoil(b);
+    // A cave spider hurt enough with a clone in its jaws: it lets go.
+    if (b.kind === BeastKind.Spider && b.hold >= 0 && (b.coilHurt += dmg) >= CSPIDER_HOLD_BREAK) {
+      b.hold = -1;
+      b.holdT = 0;
+      b.coilCd = CSPIDER_BITE_CD * 2;
+    }
     if (b.hp > 0) return;
     this.killBeast(k);
     if (wyrm(b.kind)) this.basiliskAt = this.tick + BASILISK_RESPAWN;

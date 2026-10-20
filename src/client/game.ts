@@ -1342,6 +1342,8 @@ export class Game implements FrameHandler {
         v.top = Math.max(v.top, b.hp);
         v.attached = b.attached;
         v.frozen = b.frozen;
+        // A cave spider grabbing a clone in its jaws: a hiss.
+        if (b.kind === BeastKind.Spider && !v.coiled && b.coiled) this.sfx?.hiss(b.pts[0], b.pts[1], false);
         v.coiled = b.coiled;
         v.gem = b.gem;
         // A basilisk woken: its roar.

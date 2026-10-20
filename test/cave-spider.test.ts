@@ -4,7 +4,7 @@ import { ACTOR_H } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { ProjKind } from '../src/shared/weapons.ts';
 import { W_SPIDER } from '../src/shared/particles.ts';
-import { ASP_HP, BEAST_BUILD, BeastKind, CSPIDER_FREEZE_MIN, CSPIDER_HP, CSPIDER_PACK_MAX, CSPIDER_PACK_MIN, MILLI_HUNT, bodyPoints, crawler, nestCentre, newBeast } from '../src/shared/wildlife.ts';
+import { ASP_HP, BEAST_BUILD, BeastKind, CSPIDER_FREEZE_MIN, CSPIDER_HOLD, CSPIDER_HOLD_BREAK, CSPIDER_HP, CSPIDER_PACK_MAX, CSPIDER_PACK_MIN, MILLI_HUNT, bodyPoints, crawler, nestCentre, newBeast } from '../src/shared/wildlife.ts';
 import { World } from '../src/server/world.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -110,6 +110,53 @@ describe('the cave spider', () => {
       expect(bites, `class ${cls}`).toBeLessThanOrEqual(8);
       expect(a.lastWeapon).toBe(W_SPIDER);
     }
+  });
+
+  it("a limb torn off, it doesn't let go: it drags the clone off in its jaws, shaking them, biting again and again, then hurls them away", () => {
+    const { world, a } = cave();
+    const limbs = [Part.GunArm, Part.OffArm, Part.LegB, Part.LegF];
+    // (Every limb all but off: its first bite takes one.)
+    for (const l of limbs) a.parts.wounds[l] = 1e3;
+    const b = putSpider(world, 1100, 440, -1);
+    let t = 0;
+    for (; t < 30 * 10 && b.hold < 0; t++) {
+      hold(a);
+      a.hp = 100;
+      world.step();
+    }
+    expect(b.hold).toBe(a.id);
+    for (const l of limbs) a.parts.wounds[l] = 0; // (from here, its bites only maul: they don't end it early)
+    const x0 = a.cx;
+    let bites = 0;
+    let held = 0;
+    let far = 0;
+    for (; held < CSPIDER_HOLD + 5 && b.hold === a.id; held++) {
+      const hp = (a.hp = 100);
+      world.step();
+      if (a.hp < hp) bites++;
+      far = Math.max(far, Math.abs(a.cx - x0));
+      // (Pinned in its jaws.)
+      if (b.hold === a.id) expect(Math.hypot(a.cx - world.beastPts[1][0], a.cy - world.beastPts[1][1])).toBeLessThan(10);
+    }
+    expect(b.hold).toBe(-1);
+    expect(held).toBeGreaterThanOrEqual(CSPIDER_HOLD - 1);
+    expect(bites).toBeGreaterThanOrEqual(4);
+    expect(far).toBeGreaterThan(20); // (dragged off)
+    expect(Math.abs(a.body.vx)).toBeGreaterThan(100); // (hurled away)
+  });
+
+  it('shot up badly enough while it has them, it lets go', () => {
+    const { world, a } = cave();
+    for (const l of [Part.GunArm, Part.OffArm, Part.LegB, Part.LegF]) a.parts.wounds[l] = 1e3;
+    const b = putSpider(world, 1100, 440, -1);
+    for (let t = 0; t < 30 * 10 && b.hold < 0; t++) {
+      hold(a);
+      a.hp = 100;
+      world.step();
+    }
+    expect(b.hold).toBe(a.id);
+    world.hurtBeast(1, CSPIDER_HOLD_BREAK + 1, a.id);
+    expect(b.hold).toBe(-1);
   });
 
   it('it closes the last stretch with a dash, or leaps at them through the air, fangs out', () => {

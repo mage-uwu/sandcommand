@@ -199,6 +199,18 @@ export const CSPIDER_SHOVE = 90;
 export const CSPIDER_RIP = 0.25;
 export const CSPIDER_MAUL = 15;
 /**
+ * A limb torn off, it doesn't let go: it grabs the clone in its jaws and
+ * drags them (home to its web, if it has one) for CSPIDER_HOLD ticks,
+ * shaking them and biting again every CSPIDER_HOLD_BITE ticks (each a bite
+ * like the first: harm, and maybe another limb), then hurls them off,
+ * CSPIDER_HOLD_FLING cells/s. Hurt CSPIDER_HOLD_BREAK meanwhile, it lets go.
+ */
+export const CSPIDER_HOLD = 80;
+export const CSPIDER_HOLD_BITE = 16;
+export const CSPIDER_HOLD_DRAG = 70;
+export const CSPIDER_HOLD_FLING = 260;
+export const CSPIDER_HOLD_BREAK = 55;
+/**
  * They hunt in **packs** of CSPIDER_PACK_MIN to CSPIDER_PACK_MAX, out of a
  * **web nest** of their own: a mass of silk on the cave roof (or a wall)
  * over where they came up. One that sees prey calls the rest of its pack

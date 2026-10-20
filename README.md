@@ -856,6 +856,16 @@ droid's (`src/client/spider-art.ts`).
   back and up, then the spider is away a moment (about half a second)
   before the next. No venom: a clone it catches is taken apart. The kill
   feed says "torn apart by a cave spider".
+- **It doesn't let go.** When a bite tears a limb off, the spider grabs
+  the clone in its jaws (unless something else already has them) and drags
+  them off for about 2.7 s. It drags them home toward its web if it has
+  one, otherwise on the way it was going.
+  - It shakes them about and bites again every half second. Each bite is
+    like the first (harm, and maybe another limb).
+  - Then it hurls them away and carries the torn limb home.
+  - It lets go early if they die or get into a vehicle, or if it takes 55
+    damage meanwhile (shoot it off them).
+  - It hisses as it grabs (`CSPIDER_HOLD_*`, `World.spiderHold`).
 - **Somewhat durable.** 130 hit points and no armour: it takes about seven
   rifle rounds. Hurt, it wakes. It bleeds a pale, sickly green ichor, and
   killed it bursts into gobbets of it, its head, abdomen and legs flung off
