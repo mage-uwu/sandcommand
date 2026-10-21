@@ -3,7 +3,7 @@
  * worker (`npm run dev`, or a deployed URL). Each bot decodes every frame and
  * maintains its own terrain replica, like a browser would.
  *
- *   BOTS=64 SECONDS=30 URL=http://127.0.0.1:8787 npm run loadtest
+ *   BOTS=64 SECONDS=30 URL=http://127.0.0.1:8787 FAKE_IPS=1 npm run loadtest
  */
 import { BTN_FIRE, BTN_LEFT, BTN_RIGHT, BTN_UP } from '../src/shared/actor.ts';
 import { invByte } from '../src/shared/items.ts';
@@ -16,6 +16,8 @@ const BOTS = Number(process.env.BOTS ?? 64);
 const SECONDS = Number(process.env.SECONDS ?? 20);
 const BASE = process.env.URL ?? 'http://127.0.0.1:8787';
 const ROOM = process.env.ROOM; // (ignored by the server now: there's one match, "main", for everyone)
+// Locally (wrangler dev), each bot its own address, past the per-address connection cap (Cloudflare's edge sets this itself in production).
+const FAKE_IPS = process.env.FAKE_IPS === '1';
 
 interface Bot {
   room: string;
@@ -32,7 +34,8 @@ async function runBot(i: number): Promise<Bot> {
   const room = ROOM ?? ((await (await fetch(`${BASE}/api/join`)).json()) as { room: string }).room;
   const bot: Bot = { room, frames: 0, bytes: 0, gaps: [], lastFrameAt: 0, rtt: [], rejected: false, errors: 0 };
   const terrain = new Terrain();
-  const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/ws?room=${room}&name=bot${i}`);
+  // (As a browser on the site's own page would: the server turns away any other Origin.)
+  const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/ws?room=${room}&name=bot${i}`, { headers: { Origin: new URL(BASE).origin, ...(FAKE_IPS ? { 'CF-Connecting-IP': `10.0.${i >> 8}.${i & 255}` } : {}) } } as never);
   ws.binaryType = 'arraybuffer';
   const w = new Writer(32);
   let seq = 0;
