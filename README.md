@@ -610,14 +610,14 @@ Regicide.
 - **The ballot.** The result stays up for 15 seconds with a ballot under it:
   Regicide, PvP, Last Team Standing, Siege, Extraction and Extermination
   (`VOTE_MODES`). Each button shows its votes so far, and your own vote is
-  lit gold. Vote with keys 1 to 6, or click or tap a mode.
+  lit gold. Vote with keys 1 to 7, or click or tap a mode.
 - **Changing your vote.** You can change it until the count. Once every
   human in the room has voted, the count comes two seconds later.
 - **The count.** The mode with the most votes plays next, and the map is
   built for it. A tie is drawn by lot between the leaders. If nobody votes,
   the rotation carries on.
 - **Who votes.** Only humans; bots don't vote. Rooms that play a single
-  mode (`?room=siege`, `?room=extermination`) have no vote.
+  mode (`?room=siege`, `?room=extermination`, `?room=infection`) have no vote.
 
 ## PvP
 
@@ -1498,6 +1498,46 @@ caves, no craters, gem caverns, geysers or plants. Nothing lives on it.
   sand at four spots across it (`DUNE_CACHES`).
 - Kill both and everyone wins; respawns, vehicles and time are as in the
   lair. The countdown banner names it.
+
+## Infection
+
+Everyone on one side (`GameMode.Infection`), holding a fortress against a
+coral crab hive (see the coral crab, under Wildlife). Survive fifteen
+minutes and you win, all of you, the fallen too.
+
+**The map** (`MapKind.Infection`):
+- **The fortress.** Siege's whole fortress, its outposts and sniper towers
+  at one end.
+- **The hive.** Under the far half, a lair (`carveHive`, `src/shared/lair.ts`):
+  four great chambers, with chutes up to the sky.
+- **The tunnel.** It's bored from the hive's near end right up under the
+  fortress's gate, coming out in a shaft just outside it.
+
+**The sides:**
+- **The defenders.** Every human and two thirds of the bots start at their
+  posts in the fortress, with its tanks and watchdogs drawn up in front.
+  Between them they have **100 respawns**: every death of a defender spends
+  one, and the dead come back by drop rocket to the fortress.
+- **The lost expedition.** The other third of the bots start on the floor
+  of the hive's deepest chamber, with **ten coral crabs awake** all round
+  them. They're on your side until the crabs get them, and they are where
+  the invasion comes from. They come back down there when they die, for
+  free.
+- **The hive's nests.** In each other chamber, a crab nest (a coral nest
+  gone to crystal, gem shards jutting from it) broods two crabs every 20
+  seconds, up to 24 about. Each hangs beside a wasps' nest, with
+  millipedes on the floor under it. In Infection none of the hive's
+  creatures go for the possessed.
+
+**How it plays.** The possessed (one mind; see possession) make for the
+fortress through the tunnel and the chutes, and every defender they claw
+down joins them. **You lose** if your respawns run out with none of you
+left standing: every defender dead or possessed (all of you possessed at
+once loses too, however many respawns are left). The match card shows the
+respawns left and how many are possessed. The objective pointer points
+you at the nearest of the possessed (or, possessed yourself, at everyone
+else). It's in the rotation and the vote, and **`?room=infection`** joins
+a room that plays nothing else.
 ## Extraction
 
 The fourth mode. **Four teams** (red, green, blue, gold) race down one

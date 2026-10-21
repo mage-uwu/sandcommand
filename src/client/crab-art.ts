@@ -195,3 +195,40 @@ export function drawPossessedMark(ctx: CanvasRenderingContext2D, x: number, y: n
   ctx.fillStyle = Math.sin(now / 180 + id) > 0 ? '#ff5a8a' : '#ff9ab8';
   dot(ctx, left ? ix + 1 : ix + w - 2, iy + 1);
 }
+
+/**
+ * A crab nest (Infection's hive): a coral nest (drawn first, drawNest) gone
+ * to crystal, gem shards jutting out all over its papery coral, and at its
+ * mouth, now and then, a crab's leg feeling its way out.
+ */
+export function drawCrabNestCrystals(ctx: CanvasRenderingContext2D, t: Terrain, x: number, y: number, seed: number, now: number): void {
+  const open = openWay(t, x, y);
+  const shards = 6;
+  for (let k = 0; k < shards; k++) {
+    const a = Math.atan2(open.y, open.x) + (k - (shards - 1) / 2) * 0.55 + (hsh(seed, k, 31) - 0.5) * 0.3;
+    const c = Math.cos(a);
+    const sn = Math.sin(a);
+    const [lit, dark] = CHIPS[(seed + k) % 3];
+    const base = 3 + hsh(seed, k, 32) * 2;
+    const len = 3 + Math.floor(hsh(seed, k, 33) * 4);
+    for (let d = 0; d < len; d++) {
+      const glint = d === len - 1 && Math.floor(now / 140 + k * 11 + seed) % 17 === 0;
+      ctx.fillStyle = glint ? '#ffffff' : d === len - 1 ? lit : d % 2 ? dark : lit;
+      dot(ctx, x + c * (base + d), y + sn * (base + d));
+      if (d < len - 2) {
+        ctx.fillStyle = dark;
+        dot(ctx, x + c * (base + d) - sn, y + sn * (base + d) + c);
+      }
+    }
+  }
+  // A leg out of its mouth, feeling about.
+  if (Math.sin(now / 400 + seed) > 0.4) {
+    ctx.fillStyle = LEG;
+    const mx = x + open.x * 7;
+    const my = y + open.y * 7;
+    const w = Math.sin(now / 90 + seed) * 2;
+    line(ctx, mx, my, mx + open.x * 3 - open.y * w, my + open.y * 3 + open.x * w);
+    ctx.fillStyle = KNEE;
+    dot(ctx, mx + open.x * 3 - open.y * w, my + open.y * 3 + open.x * w);
+  }
+}

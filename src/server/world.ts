@@ -570,6 +570,8 @@ export class Player {
   possessed = false;
   /** Ticks to its claws' next strike (possessed). */
   clawCd = 0;
+  /** Infection: one of the lost expedition, down at the bottom of the hive (fodder for the crabs; comes back there, for free). */
+  expedition = false;
   /** The tick it was last hurt (the possessed heal only a while after). */
   hurtTick = -1e9;
   /** Clones of the other side (or anyone, with no sides) killed. */
@@ -773,6 +775,8 @@ export class World {
   /** Siege: the map's layout (fortress end, landing zone, vehicle spots), and the attackers' lives left. */
   siege: SiegeMap | null = null;
   siegeLives = 0;
+  /** Infection: the defenders' respawns left (shared: every death of theirs spends one). */
+  infectionLives = 0;
   /** Extermination: the lair (its dens, and the tunnels down to them), and how many basilisks the wave began with. */
   lair: Lair | null = null;
   lairBeasts = 0;
@@ -849,6 +853,7 @@ export class World {
     const mode = this.modeOfWave(n);
     // (Extermination: half the time the lair, half the time DUNE, by the map's seed.)
     if (mode === GameMode.Extermination) return hash2(this.mapSeed & 0xffff, this.mapSeed >>> 16, 0xd0e5) & 1 ? MapKind.Dune : MapKind.Lair;
+    if (mode === GameMode.Infection) return MapKind.Infection;
     return mode === GameMode.Regicide ? MapKind.Fortress : mode === GameMode.Extraction ? MapKind.Dungeon : mode === GameMode.Siege ? MapKind.Siege : MapKind.Plain;
   }
 
@@ -1113,6 +1118,10 @@ export class World {
           this.stepExtermination(timeUp);
           break;
         }
+        if (this.modeOfWave(this.wave) === GameMode.Infection) {
+          this.stepInfection(timeUp);
+          break;
+        }
         if (this.remaining() <= 1 || timeUp) {
           let best: Player | null = null;
           for (const p of this.players) {
@@ -1256,6 +1265,143 @@ export class World {
   /** An Extermination wave is being fought right now. */
   get exterminationLive(): boolean {
     return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Extermination;
+  }
+
+  /** An Infection wave is being fought right now. */
+  get infectionLive(): boolean {
+    return this.mode === 'ffa' && this.phase === Phase.Live && this.modeOfWave(this.wave) === GameMode.Infection;
+  }
+
+  /** Infection: the defenders still holding out (not the expedition; not possessed), alive or on their way back. */
+  survivors(): number {
+    let n = 0;
+    for (const p of this.players) if (p && !p.expedition && this.inPlay(p) && !(p.alive && p.possessed)) n++;
+    return n;
+  }
+
+  /**
+   * Infection: hold out till the time's up and the defenders win (all of
+   * them, the fallen too). Their respawns all spent and none of them left
+   * (dead, or every last one possessed), the hive does.
+   */
+  private stepInfection(timeUp: boolean): void {
+    const left = this.survivors();
+    const lost = left === 0;
+    if (!lost && !timeUp) return;
+    this.winner = lost ? 255 : Team.Red;
+    if (!lost) for (const p of this.players) if (p && p.inWave && !p.expedition) p.wins++;
+    this.setPhase(Phase.Victory, this.rotation.length > 1 ? VOTE_TICKS : VICTORY_TICKS);
+  }
+
+  /** Where the lost expedition is, at the bottom of the hive: the den furthest from the fortress. */
+  private expeditionDen(): { floorX: number; floorY: number } | null {
+    const lair = this.lair;
+    const sg = this.siege;
+    if (!lair || !sg) return null;
+    return sg.side === 0 ? lair.dens[lair.dens.length - 1] : lair.dens[0];
+  }
+
+  /** An open spot on the expedition's den floor for a clone. */
+  private expeditionSpot(): { x: number; y: number } | null {
+    const d = this.expeditionDen();
+    if (!d) return null;
+    for (let n = 0; n < 16; n++) {
+      const x = Math.round(d.floorX + this.rng.range(-36, 36));
+      let y = d.floorY - ACTOR_H;
+      while (y > d.floorY - 60 && this.terrain.rectSolid(x - ACTOR_W / 2, y, x + ACTOR_W / 2 - 1, y + ACTOR_H - 1)) y--;
+      if (!this.terrain.rectSolid(x - ACTOR_W / 2, y, x + ACTOR_W / 2 - 1, y + ACTOR_H - 1)) return { x, y };
+    }
+    return { x: d.floorX, y: d.floorY - ACTOR_H };
+  }
+
+  /**
+   * Infection opening: everyone on one side. The defenders at their posts
+   * in the fortress, its tanks and watchdogs drawn up in front, 100
+   * respawns between them. A third of the bots are the lost expedition, on
+   * the floor of the hive's deepest den with coral crabs all round them
+   * (awake, and hungry). In the other dens, the hive's nests that brood
+   * more crabs, each hung beside a wasps' nest and guarded by millipedes.
+   */
+  private startInfection(): void {
+    this.infectionLives = INFECTION_LIVES;
+    this.beasts.fill(null);
+    const fort = this.fortresses[DEFENDERS];
+    const bots = this.players.filter((p): p is Player => !!p && !!p.bot);
+    for (let i = bots.length - 1; i > 0; i--) {
+      const j = this.rng.int(i + 1);
+      [bots[i], bots[j]] = [bots[j], bots[i]];
+    }
+    const lost = new Set(bots.slice(0, Math.floor(bots.length * INFECTION_EXPEDITION)));
+    for (const p of this.players) {
+      if (!p) continue;
+      p.expedition = lost.has(p);
+      p.pendingSpawn = false;
+      const spot = p.expedition ? this.expeditionSpot() : fort ? this.freeSpot(fort) : null;
+      if (!spot) {
+        p.pendingSpawn = true; // (no fortress or hive, can't happen: drop in instead)
+        continue;
+      }
+      this.placeClone(p, p.expedition ? spot.x - ACTOR_W / 2 : spot.x - ACTOR_W / 2 + this.rng.range(-3, 3), p.expedition ? spot.y : spot.y - ACTOR_H, 0, 0);
+    }
+    const sg = this.siege;
+    if (sg) {
+      for (const x of sg.defTanks) this.placeVehicle(x, -1);
+      for (const x of sg.defDogs) this.placeVehicle(x, DEFENDERS);
+    }
+    const lair = this.lair;
+    const home = this.expeditionDen();
+    if (lair && home) {
+      const rng = this.beastRng;
+      // The crabs round the expedition: awake, close, some on the floor beside them, some up the walls.
+      for (let n = 0; n < INFECTION_CRABS; n++) {
+        const side = n % 2 ? 1 : -1;
+        const x = Math.round(home.floorX + side * (70 + rng.int(110)));
+        this.placeCrab(x, home.floorY - 4);
+      }
+      // The hive's nests: in every other den, a crab nest and a wasps' nest hung from its roof, millipedes on its floor.
+      for (const d of lair.dens) {
+        if (d === home) continue;
+        this.hangNest(d.floorX - 40, lair, true);
+        this.hangNest(d.floorX + 50, lair, false);
+        for (let n = 0; n < INFECTION_GUARDS; n++) {
+          const slot = this.beasts.indexOf(null);
+          if (slot < 0) break;
+          const x = Math.round(d.floorX + (n % 2 ? 1 : -1) * (30 + rng.int(60)));
+          const b = newBeast(this.terrain, BeastKind.Millipede, x, d.floorY, rng.next() < 0.5 ? -1 : 1);
+          b.seed = rng.int(256);
+          b.turnAt = this.tick + 60;
+          this.beasts[slot] = b;
+          bodyPoints(this.terrain, b, this.beastPts[slot]);
+        }
+      }
+    }
+    this.teamsRev++;
+  }
+
+  /** A coral crab, awake, dropped in at (x, y) (it falls to whatever's under it). */
+  private placeCrab(x: number, y: number): void {
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return;
+    const b = newBeast(this.terrain, BeastKind.CoralCrab, x, y, this.beastRng.next() < 0.5 ? -1 : 1);
+    b.attached = false;
+    b.seed = this.beastRng.int(256);
+    b.turnAt = this.tick;
+    this.beasts[slot] = b;
+    bodyPoints(this.terrain, b, this.beastPts[slot]);
+  }
+
+  /** A nest hung from the hive's roof at column x (`crabs`: one of the hive's own, that broods coral crabs; else a wasps'). */
+  private hangNest(x: number, lair: Lair, crabs: boolean): void {
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return;
+    x = Math.max(lair.x0 + 10, Math.min(lair.x1 - 10, Math.round(x)));
+    let y = lair.floor[x] - 30;
+    while (y > lair.roof[x] - 4 && !this.terrain.isSolid(x, y - 1)) y--;
+    const b = newBeast(this.terrain, BeastKind.Nest, x, y, 1);
+    b.gem = crabs;
+    b.brood = this.tick + (crabs ? CRAB_NEST_CD / 2 : 0);
+    this.beasts[slot] = b;
+    nestCentre(b, this.beastPts[slot]);
   }
 
   /**
@@ -2035,7 +2181,8 @@ export class World {
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
       // (A coral crab leaves the possessed be: they're the coral's own.)
-      if (b.kind === BeastKind.CoralCrab && p.possessed) continue;
+      // (In Infection the whole hive is one: none of its creatures go for the possessed.)
+      if (p.possessed && (b.kind === BeastKind.CoralCrab || this.infectionLive)) continue;
       const d = Math.hypot(p.cx - hx, p.cy - hy);
       if (d < best && this.lineClear(hx, hy, p.cx, p.cy)) {
         best = d;
@@ -3426,6 +3573,13 @@ export class World {
     if (b.alarm > 0) b.alarm--;
     if (!this.holdOn(k, b)) return;
     if ((this.tick + k) % NEST_LOOK !== 0 || this.tick < b.brood) return;
+    // One of the hive's own: it broods coral crabs, two at a time, while there aren't too many about.
+    if (b.gem) {
+      b.brood = this.tick + CRAB_NEST_CD;
+      if (this.beasts.filter((o) => o?.kind === BeastKind.CoralCrab).length >= HIVE_CRABS_MAX) return;
+      for (let n = 0; n < CRAB_NEST_BROOD; n++) this.placeCrab(Math.round(pts[0] + this.beastRng.range(-4, 4)), Math.round(pts[1] + 6));
+      return;
+    }
     const danger = b.alarm > 0 || this.beastTarget(b, pts[0], pts[1]) >= 0;
     if (this.beasts.some((o) => o?.kind === BeastKind.Seeder && o.home === k)) return;
     // Quiet: now and then a few out to forage, while there aren't too many about.
@@ -4577,21 +4731,23 @@ export class World {
       p.spectate = 255;
       p.waveKills = 0;
       p.waveDeaths = 0;
+      p.expedition = false;
     }
     // One or two tanks come down by parachute for whoever gets to them first
     // (Extraction's tanks wait in the labyrinth instead).
     // (Extermination is fought on foot, mostly: just the one.)
-    if (this.tankDrops && mode !== GameMode.Extraction && mode !== GameMode.Siege) this.dropTanks(mode === GameMode.Extermination ? 1 : 1 + this.rng.int(2));
+    if (this.tankDrops && mode !== GameMode.Extraction && mode !== GameMode.Siege && mode !== GameMode.Infection) this.dropTanks(mode === GameMode.Extermination ? 1 : 1 + this.rng.int(2));
     if (mode === GameMode.Regicide) this.startRegicide();
     if (mode === GameMode.Siege) this.startSiege();
     if (mode === GameMode.Extraction) this.startExtraction();
     if (mode === GameMode.Extermination) this.startExtermination();
+    if (mode === GameMode.Infection) this.startInfection();
     // The bunkers' own weapons, lying where they were left (all wave long).
     for (const l of this.mapLoot) {
       this.spawnItem(l.weapon, WEAPONS[l.weapon].clip, l.x, l.y, 0, 0);
       this.items[this.items.length - 1].age = -30 * 60 * 15;
     }
-    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : mode === GameMode.Siege ? SIEGE_TICKS : mode === GameMode.Extermination ? EXTERMINATION_TICKS : WAVE_TICKS);
+    this.setPhase(Phase.Live, mode === GameMode.Regicide ? REGICIDE_TICKS : mode === GameMode.Extraction ? EXTRACTION_TICKS : mode === GameMode.Pvp ? PVP_TICKS : mode === GameMode.Siege ? SIEGE_TICKS : mode === GameMode.Extermination ? EXTERMINATION_TICKS : mode === GameMode.Infection ? INFECTION_TICKS : WAVE_TICKS);
   }
 
   /**
@@ -5126,6 +5282,14 @@ export class World {
     // PvP: everyone comes back, quickly. Siege: defenders come back; attackers
     // while their side has lives to spend (each death spends one).
     let back = (this.regicideLive && !this.isKing(victim)) || this.extractionLive || this.pvpLive || this.exterminationLive;
+    // Infection: the expedition always comes back (down in the hive); the defenders while they've respawns to spend.
+    if (this.infectionLive) {
+      if (victim.expedition) back = true;
+      else if (victim.inWave && this.infectionLives > 0) {
+        this.infectionLives--;
+        back = true;
+      }
+    }
     if (this.siegeLive && !this.isKing(victim)) {
       if (victim.team !== ATTACKERS) back = true;
       else if (victim.inWave && this.siegeLives > 0) {
@@ -6106,7 +6270,7 @@ export class World {
     // Teams come down on opposite sides of the map: red the left, green the right.
     let lo = 48 + CRAFT_W / 2;
     let span = WORLD_W - 96 - CRAFT_W;
-    const fort = (this.regicideLive && p.team !== Team.None) || (this.siegeLive && p.team === DEFENDERS) ? this.fortresses[p.team] : undefined;
+    const fort = (this.regicideLive && p.team !== Team.None) || ((this.siegeLive || this.infectionLive) && p.team === DEFENDERS) ? this.fortresses[p.team] : undefined;
     const lz = this.siegeLive && p.team === ATTACKERS ? this.siege?.lz : undefined;
     const well = this.extractionLive && this.dungeon && p.team < 4 ? this.dungeon.entrances[p.team] : undefined;
     if (lz) {
@@ -8004,7 +8168,14 @@ export class World {
       p.prevButtons = p.buttons;
       if (!p.alive) {
         // Every clone arrives by drop rocket; in FFA only once per wave.
-        if (p.delivering < 0 && (this.mode !== 'ffa' || p.pendingSpawn) && --p.respawn <= 0) this.launchCraft(p);
+        if (p.expedition && this.infectionLive && p.pendingSpawn && p.delivering < 0) {
+          // (The lost expedition comes back where it was lost: on the hive's floor.)
+          const at = --p.respawn <= 0 ? this.expeditionSpot() : null;
+          if (at) {
+            p.pendingSpawn = false;
+            this.placeClone(p, at.x - ACTOR_W / 2, at.y, 0, 0);
+          }
+        } else if (p.delivering < 0 && (this.mode !== 'ffa' || p.pendingSpawn) && --p.respawn <= 0) this.launchCraft(p);
         else if (this.mode === 'ffa' && p.delivering < 0) this.spectateFrom(p, prev);
         if (p.delivering >= 0) {
           const c = this.crafts[p.delivering];
@@ -8441,6 +8612,7 @@ export class World {
         w.u8(this.remaining(Team.Blue));
         w.u8(this.remaining(Team.Gold));
         if (this.waveMode === GameMode.Siege) w.u16(this.siegeLives);
+        if (this.waveMode === GameMode.Infection) w.u16(this.infectionLives);
         if (this.waveMode === GameMode.Pvp) {
           // PvP: who leads (and on how many kills), and our own kills and deaths this wave.
           let lead: Player | null = null;
@@ -8873,10 +9045,10 @@ const PVP_TICKS = 30 * 60 * 5;
 const PVP_RESPAWN_TICKS = 30 * 5;
 /**
  * Which modes the waves cycle through: Regicide, PvP and team waves (Last
- * Team Standing) by turns, with a Siege, an Extraction and an Extermination now and then. Last Man Standing
+ * Team Standing) by turns, with a Siege, an Extraction, an Extermination and an Infection now and then. Last Man Standing
  * stays out of the rotation (a room can still be given it).
  */
-const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction, GameMode.Extermination];
+const DEFAULT_ROTATION = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Extraction, GameMode.Extermination, GameMode.Infection];
 /** Siege attackers come back faster than anyone (their lives are what's counted). */
 const SIEGE_RESPAWN_TICKS = 30 * 6;
 /** The most cells of a speck a vehicle grinds out of its way (crushSpecks), and of one it's perched on. */
@@ -8884,6 +9056,17 @@ const TANK_SPECK = 12;
 const TANK_PERCH = 4;
 /** Extermination waves run twenty-four minutes. */
 const EXTERMINATION_TICKS = 30 * 60 * 24;
+/** Infection waves: fifteen minutes to hold out; the defenders' respawns between them; the share of the bots lost down in the hive. */
+const INFECTION_TICKS = 30 * 60 * 15;
+export const INFECTION_LIVES = 100;
+const INFECTION_EXPEDITION = 1 / 3;
+/** Infection's hive: the crabs round the expedition at the start, the millipedes guarding each nest den; how many crabs it keeps (at most). */
+const INFECTION_CRABS = 10;
+const INFECTION_GUARDS = 2;
+const HIVE_CRABS_MAX = 24;
+/** A crab nest: how often it broods (ticks), and how many each time. */
+const CRAB_NEST_CD = 30 * 20;
+const CRAB_NEST_BROOD = 2;
 /** A lair basilisk hears anyone this near (cells), replans its way every so many ticks, and searches so many grid cells for it at most. */
 const LAIR_HEAR = 1400;
 /**

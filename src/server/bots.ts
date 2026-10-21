@@ -557,7 +557,8 @@ export class BotBrain {
     else this.path = null;
     // Siege defenders hold their ground: the fortress and the ground in front
     // of it, the bolder ones out as far as the last outpost.
-    const sg = world.siegeLive && p.team === DEFENDERS ? world.siege : null;
+    // (Infection's defenders too: they hold the fortress against the hive; not the expedition, nor the possessed.)
+    const sg = (world.siegeLive && p.team === DEFENDERS) || (world.infectionLive && !p.expedition && !p.possessed) ? world.siege : null;
     if (sg && !nav) {
       const west = sg.side === 0;
       const front = sg.outposts.length ? (west ? Math.max(...sg.outposts.map((o) => o[1])) : Math.min(...sg.outposts.map((o) => o[0]))) : west ? sg.fort[1] : sg.fort[0];
@@ -1110,7 +1111,7 @@ export class BotBrain {
     if (!route) this.path = null;
     let goalX = route ? route.goalX : foe.x;
     // Siege defenders keep to the fortress and the ground before it.
-    const sg = world.siegeLive && p.team === DEFENDERS ? world.siege : null;
+    const sg = (world.siegeLive && p.team === DEFENDERS) || (world.infectionLive && !p.expedition && !p.possessed) ? world.siege : null;
     if (sg) {
       const west = sg.side === 0;
       goalX = west ? Math.max(sg.fort[0], Math.min(sg.fort[1] + 220, goalX)) : Math.min(sg.fort[1], Math.max(sg.fort[0] - 220, goalX));

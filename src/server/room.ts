@@ -109,7 +109,7 @@ export class GameRoom extends DurableObject<Env> {
     // Last Man Standing, with bots in every slot no human has.
     // The siege room plays nothing but Siege; any other, the usual rotation (from
     // somewhere new each time the room's brought up), or whatever the players vote for.
-    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : this.roomName === 'extermination' ? [GameMode.Extermination] : undefined, rotationStart: Math.floor(Math.random() * 64) });
+    this.world ??= new World(seedFromName(this.roomName), { mode: 'ffa', bots: MAX_PLAYERS, rotation: this.roomName === 'siege' ? [GameMode.Siege] : this.roomName === 'extermination' ? [GameMode.Extermination] : this.roomName === 'infection' ? [GameMode.Infection] : undefined, rotationStart: Math.floor(Math.random() * 64) });
     const world = this.world;
     const player = world.addPlayer(name, {
       send(data) {

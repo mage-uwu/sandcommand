@@ -14,7 +14,7 @@ export interface Env {
 /**
  * One room, one runtime: every player is gathered into the same match (one
  * Durable Object), whatever room a client asks for (bar ?room=siege, a
- * second match that plays nothing but Siege, and ?room=extermination, all Extermination). It holds 64; bots fill
+ * second match that plays nothing but Siege; ?room=extermination, all Extermination; ?room=infection, all Infection). It holds 64; bots fill
  * the slots no human has, and give theirs up as humans arrive. (Not
  * exported: the Workers runtime takes every export of this module for a handler.)
  */
@@ -23,6 +23,8 @@ const MAIN_ROOM = 'main';
 const SIEGE_ROOM = 'siege';
 /** And Extermination, all day (?room=extermination). */
 const EXTERMINATION_ROOM = 'extermination';
+/** And Infection, all day (?room=infection). */
+const INFECTION_ROOM = 'infection';
 
 /** The room board, as last fetched: every isolate serves it from here for a couple of seconds, so a flood of menu loads never reaches the Lobby. */
 const ROOMS_TTL_MS = 2000;
@@ -48,7 +50,7 @@ export default {
       }
       if (!originAllowed(request.headers.get('Origin'), url.host)) return new Response('forbidden', { status: 403 });
       const asked = url.searchParams.get('room');
-      const room = asked === SIEGE_ROOM || asked === EXTERMINATION_ROOM ? asked : MAIN_ROOM;
+      const room = asked === SIEGE_ROOM || asked === EXTERMINATION_ROOM || asked === INFECTION_ROOM ? asked : MAIN_ROOM;
       url.searchParams.set('room', room);
       const stub = env.ROOMS.get(env.ROOMS.idFromName(room));
       return stub.fetch(new Request(url, request));

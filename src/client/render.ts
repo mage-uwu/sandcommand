@@ -31,7 +31,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { drawCoralCrab, drawPossessedMark } from './crab-art.ts';
+import { drawCoralCrab, drawCrabNestCrystals, drawPossessedMark } from './crab-art.ts';
 import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
@@ -416,7 +416,7 @@ export const MENU_ROTATE = -2;
 export const MENU_MIRROR = -3;
 
 /** Each mode as the vote shows it (by GameMode). */
-const VOTE_NAMES = ['LAST MAN', 'TEAMS', 'REGICIDE', 'EXTRACTION', 'PVP', 'SIEGE', 'EXTERMINATION'];
+const VOTE_NAMES = ['LAST MAN', 'TEAMS', 'REGICIDE', 'EXTRACTION', 'PVP', 'SIEGE', 'EXTERMINATION', 'INFECTION'];
 
 export class Renderer {
   /** Scratch: the underground rects behind the terrain this frame (x, y, w, h). */
@@ -446,7 +446,11 @@ export class Renderer {
       else if (v.kind === BeastKind.Spider) drawCaveSpider(ctx, game.terrain, this.groundColor, slot, pts, v.seed, lift, v.frozen, v.attached, now, v.carry);
       else if (v.kind === BeastKind.Web) drawWebNest(ctx, game.terrain, pts[0], pts[1], v.seed, Math.round(v.lift * 255), now);
       else if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
-      else if (v.kind === BeastKind.Nest) drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
+      else if (v.kind === BeastKind.Nest) {
+        drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
+        // (One of the hive's: it broods coral crabs.)
+        if (v.gem) drawCrabNestCrystals(ctx, game.terrain, pts[0], pts[1], v.seed, now);
+      }
       else if (v.kind === BeastKind.CoralCrab) {
         if (v.gem) drawAspGem(ctx, game.terrain, gemOf, pts, v.seed, now);
         else drawCoralCrab(ctx, game.terrain, pts, v.seed, lift, v.coiled, now);
@@ -3838,15 +3842,18 @@ export class Renderer {
     const pvp = rs.mode === GameMode.Pvp;
     const siege = rs.mode === GameMode.Siege;
     const exterm = rs.mode === GameMode.Extermination;
+    const infection = rs.mode === GameMode.Infection;
     const teams = rs.mode === GameMode.Lts || regicide || extraction || siege;
     const teamCss = (t: number) => TEAM_COLORS[t]?.css ?? '#fff';
-    if (rs.phase === Phase.Waiting) big(exterm ? 'EXTERMINATION' : siege ? 'SIEGE' : extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
+    if (rs.phase === Phase.Waiting) big(infection ? 'INFECTION' : exterm ? 'EXTERMINATION' : siege ? 'SIEGE' : extraction ? 'EXTRACTION' : regicide ? 'REGICIDE' : pvp ? 'PVP' : teams ? 'LAST TEAM STANDING' : 'LAST MAN STANDING', 'waiting for players');
     else if (rs.phase === Phase.Countdown) {
       big(
         `WAVE ${rs.wave + 1} IN ${secs}`,
         // (The mode is the headline; the map's biome goes with the hints.)
         (exterm && game.mapKind === MapKind.Dune
           ? 'extermination · DUNE · everyone together · a barren desert, and two dragons under the sand · they will come up for you · kill them both · respawns'
+          : infection
+          ? 'infection · everyone together · hold the fortress for 15 minutes · a coral crab hive lies under the far side · 100 respawns between you'
           : exterm
           ? 'extermination · everyone together · three basilisks and a dragon hibernate in the giant cave below · kill them all · respawns'
           : siege
@@ -3867,6 +3874,9 @@ export class Renderer {
       const mine = game.myTeam !== Team.None && rs.winner === game.myTeam;
       if (rs.winner === 255) big('NOBODY GOT OUT', `the idol stays buried · wave ${rs.wave} · next wave in ${secs}`);
       else big(`${TEAM_NAMES[rs.winner]} EXTRACTED`, `${mine ? 'your team got' : 'team ' + TEAM_NAMES[rs.winner].toLowerCase() + ' got'} the golden idol out · next wave in ${secs}`, teamCss(rs.winner));
+    } else if (rs.phase === Phase.Victory && infection) {
+      if (rs.winner === 255) big('OVERRUN', `the hive took the fortress · wave ${rs.wave} · next wave in ${secs}`, '#ff7aa0');
+      else big('THE FORTRESS HOLDS', `you outlasted the infection · ${rs.lives ?? 0} respawns to spare · next wave in ${secs}`, '#80ff80');
     } else if (rs.phase === Phase.Victory && exterm) {
       if (rs.winner === 255) big('THE BEASTS WIN', `${rs.lair?.beasts.length ?? '?'} still alive · wave ${rs.wave} · next wave in ${secs}`, '#ff8070');
       else big('LAIR CLEARED', `every basilisk and the dragon dead · wave ${rs.wave} · next wave in ${secs}`, '#80ff80');
@@ -3921,6 +3931,14 @@ export class Renderer {
         else if (evac?.state === Evac.Landed) line += ' · EXTRACTION WAITING';
         else if (evac?.state === Evac.Moving) line += ' · EXTRACTION MOVING';
         extra = { t: line, c: color };
+      } else if (infection) {
+        modeName = 'INFECTION';
+        const lives = rs.lives ?? 0;
+        const taken = game.possessedIds.size;
+        parts.push({ t: `${lives} RESPAWNS`, c: lives <= 15 ? '#ff8070' : '#ffd34a' }, gap, { t: `${taken} POSSESSED`, c: taken > 0 ? '#ff7aa0' : '#9aa4ad' });
+        extra = game.possessedIds.has(game.myId)
+          ? { t: 'POSSESSED · you are the hive now · take the fortress', c: '#ff7aa0' }
+          : { t: 'SURVIVE · hold the fortress against the possessed until the clock runs out', c: '#c8d0d8' };
       } else if (exterm) {
         modeName = 'EXTERMINATION';
         const lair = rs.lair;
@@ -3970,7 +3988,7 @@ export class Renderer {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           const side = teams && game.myTeam !== Team.None ? `you fight for ${TEAM_NAMES[game.myTeam].toLowerCase()} · ` : '';
           big('LOADING OUT', `${side}${back > 1 ? `deploying in ${back}s` : 'drop rocket on its way'}`, teams && game.myTeam !== Team.None ? teamCss(game.myTeam) : '#ffd34a');
-        } else if ((regicide || extraction || pvp || siege || exterm) && rs.inWave) {
+        } else if ((regicide || extraction || pvp || siege || exterm || infection) && rs.inWave) {
           const back = Math.ceil(game.respawnTicks / TICK_RATE);
           dead(back > 0 ? 'redeploying in' : 'drop rocket inbound', back > 0 ? back : null);
         }

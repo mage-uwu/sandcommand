@@ -18,6 +18,8 @@ import type { Game } from './game.ts';
  *   straight up for the surface while it isn't down yet); a teammate
  *   carrying it, ESCORT them; an enemy, KILL them.
  * - **Extermination:** KILL the nearest beast left (the awake ones first).
+ * - **Infection:** KILL the nearest of the possessed (possessed yourself,
+ *   the nearest of everyone else).
  */
 export interface Objective {
   verb: string;
@@ -92,6 +94,10 @@ export function objective(game: Game, players: ReadonlyMap<number, { x: number; 
         return kill(nearestEnemy());
       }
       return p ? { verb: 'KILL', x: p.x, y: p.y, color: '#ffd34a' } : kill(nearestEnemy());
+    }
+    case GameMode.Infection: {
+      const me = game.possessedIds.has(game.myId);
+      return kill(nearest([...players].filter(([id]) => game.possessedIds.has(id) !== me).map(([, p]) => p)));
     }
     case GameMode.Extermination: {
       const beasts = rs.lair?.beasts ?? [];

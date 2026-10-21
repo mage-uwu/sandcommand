@@ -1,4 +1,4 @@
-import { type Lair, carveLair } from './lair.ts';
+import { type Lair, boreTunnel, carveLair } from './lair.ts';
 import { WORLD_H, WORLD_W } from './constants.ts';
 import { MAT_LOOSE, Mat, isSoil } from './materials.ts';
 import { Rng, hash2 } from './rng.ts';
@@ -31,7 +31,7 @@ export let lastLair: Lair | null = null;
  * Regicide's; never the labyrinth (it's underground already).
  */
 export function cavesOf(seed: number, kind: number): boolean {
-  if (kind === MapKind.Dungeon || kind === MapKind.Lair || kind === MapKind.Dune || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
+  if (kind === MapKind.Dungeon || kind === MapKind.Lair || kind === MapKind.Dune || kind === MapKind.Infection || biomeOf(seed, kind) === Biome.Deadland || biomeOf(seed, kind) === Biome.Valley) return false; // (the crust is solid debris; the valley has caves of its own)
   return hash2(seed & 0xffff, seed >>> 16, 0xca7e) % 100 < 40;
 }
 
@@ -73,7 +73,7 @@ export function biomeOf(seed: number, kind: number): number {
   // marslike maps keep their seeds; Siege's megafortress wants marslike ground.
   const dead = (hash2(seed & 0xffff, seed >>> 16, 0xdead) >>> 0) / 4294967296;
   if (kind === MapKind.Fortress && dead < 0.2) return Biome.Deadland;
-  if (kind === MapKind.Fortress || kind === MapKind.Siege || kind === MapKind.Lair) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
+  if (kind === MapKind.Fortress || kind === MapKind.Siege || kind === MapKind.Lair || kind === MapKind.Infection) return r < 0.5 ? Biome.Dunes : Biome.Meadows;
   if (dead < 0.25) return Biome.Deadland;
   // About one ordinary map in seven is the Valley of Souls (its own roll, too).
   if ((hash2(seed & 0xffff, seed >>> 16, 0x5011) >>> 0) / 4294967296 < 0.14) return Biome.Valley;
@@ -95,6 +95,12 @@ export const MapKind = {
    * the sand that come up after whoever walks it (World.startExtermination).
    */
   Dune: 5,
+  /**
+   * Infection: Siege's fortress (and its outposts and towers) at one end;
+   * under the far half, a coral crab hive (a lair, lair.ts), its chutes open
+   * to the sky, and a tunnel from it bored right up under the fortress's gate.
+   */
+  Infection: 6,
 } as const;
 
 /**
@@ -350,7 +356,7 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
     heights[x] = Math.max(80, Math.min(WORLD_H - 70, Math.floor(h)));
   }
   // Siege: level the fortress's site (and its outposts', towers' and the landing zone), easing into the land around.
-  if (mapKind === MapKind.Siege) levelSites(heights, siegeSites(seed));
+  if (mapKind === MapKind.Siege || mapKind === MapKind.Infection) levelSites(heights, siegeSites(seed));
   // The Valley of Souls: the canyon cut into the land.
   const valley = biome === Biome.Valley ? valleyHeights(heights, seed) : null;
   lastValley = valley;
@@ -451,10 +457,11 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   } else if (dungeon) {
     lastComplexes = [];
     lastDungeon = generateDungeon(m, heights, seed, backdrop);
-  } else if (mapKind === MapKind.Siege) {
+  } else if (mapKind === MapKind.Siege || mapKind === MapKind.Infection) {
     const sg = placeSiege(m, heights, seed, backdrop);
     lastComplexes = sg.complexes;
     lastSiege = sg.map;
+    if (mapKind === MapKind.Infection) lastLair = carveHive(m, heights, seed, sg.map);
     fortifyComplexes(m, lastComplexes, seed);
     if (backdrop) for (const c of lastComplexes) if (c.strongroom) markBox(backdrop, c.strongroom.x0, c.strongroom.y0, c.strongroom.x1, c.strongroom.y1, Backdrop.Steel);
     lastDungeon = null;
@@ -544,4 +551,31 @@ export function generateWorld(t: Terrain, seed: number, kind: number | boolean =
   lastWater = valley ? valleyWaters(m, valley) : [];
   for (const b of lastWater) b.level = solveLevel(t, b);
   paintWater(t, lastWater);
+}
+
+/** Infection's hive: how far from the fortress's end it starts, how far short of the far end it stops; its tunnel's bore. */
+const HIVE_FROM = 2150;
+const HIVE_MARGIN = 150;
+const HIVE_TUNNEL_R = 11;
+
+/**
+ * Infection's hive: a lair (four chambers, chutes to the sky) under the far
+ * half of the siege map, and a tunnel from its near end bored up under the
+ * fortress's gate, coming out in a shaft just outside it. The tunnel's mouth
+ * is counted among its chutes.
+ */
+function carveHive(m: Uint8Array, heights: Int32Array, seed: number, sg: SiegeMap): Lair {
+  const west = sg.side === 0;
+  const span: [number, number] = west ? [HIVE_FROM, WORLD_W - HIVE_MARGIN] : [HIVE_MARGIN, WORLD_W - HIVE_FROM];
+  const lair = carveLair(m, heights, seed, span);
+  // From the hive's near end (half way up it) to under the gate, then up to the surface.
+  const hx = west ? lair.x0 + 60 : lair.x1 - 60;
+  const hy = Math.round((lair.roof[hx] + lair.floor[hx]) / 2);
+  const gx = west ? sg.fort[1] + 46 : sg.fort[0] - 46;
+  const gy = heights[gx] + 90;
+  boreTunnel(m, hx, hy, gx, gy, HIVE_TUNNEL_R, seed);
+  boreTunnel(m, gx, gy, gx, heights[gx] - 4, HIVE_TUNNEL_R, seed ^ 1);
+  lair.mouths.push(gx);
+  lair.mouths.sort((a, b) => a - b);
+  return lair;
 }

@@ -77,12 +77,12 @@ const voteOpen = () => !!game?.roundState?.vote && game.roundState.phase === Pha
 function castVote(i: number): void {
   if (i >= 0 && i < VOTE_MODES.length) net?.vote(VOTE_MODES[i]);
 }
-// With the vote up, keys 1 to 6 vote (ahead of the inventory keys, which they'd otherwise be).
+// With the vote up, keys 1 to 7 vote (ahead of the inventory keys, which they'd otherwise be).
 addEventListener(
   'keydown',
   (e) => {
     if (!voteOpen() || input.typing || e.repeat) return;
-    const m = /^Digit([1-6])$/.exec(e.code);
+    const m = /^Digit([1-7])$/.exec(e.code);
     if (!m) return;
     castVote(Number(m[1]) - 1);
     e.preventDefault();
@@ -207,9 +207,9 @@ async function join(tutorial = false): Promise<void> {
   storageSet('sc.name', name);
   playBtn.disabled = true;
   tutorialBtn.disabled = true;
-  // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one; ?room=extermination, all Extermination).
+  // There's one match, and everyone joins it (or, with ?room=siege, the all-Siege one; ?room=extermination, all Extermination; ?room=infection, all Infection).
   const asked = new URLSearchParams(location.search).get('room');
-  const room = asked === 'siege' || asked === 'extermination' ? asked : 'main';
+  const room = asked === 'siege' || asked === 'extermination' || asked === 'infection' ? asked : 'main';
   statusEl.textContent = 'Connecting…';
   const g = new Game();
   g.sfx = sfx;

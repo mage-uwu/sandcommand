@@ -172,7 +172,7 @@ export const FACTION_SHIFT = 14;
 export const PARTS_MASK = (1 << STANCE_SHIFT) - 1;
 
 /** Bump whenever records change; clients on another version reload. */
-export const PROTOCOL_VERSION = 82;
+export const PROTOCOL_VERSION = 83;
 
 /** Last Man Standing round phases. */
 export const Phase = {
@@ -191,6 +191,7 @@ export const GameMode = {
   Pvp: 4, // all against all for five minutes with respawns: most kills wins
   Siege: 5, // red holds a massive fortress for twenty minutes, its king inside; green has 300 lives to kill him
   Extermination: 6, // everyone together against three basilisks and a dragon hibernating in a lair: kill them all (everyone respawns)
+  Infection: 7, // everyone together in a fortress over a coral crab hive: hold out against the possessed (100 respawns between them)
 } as const;
 
 export const Team = {
@@ -202,9 +203,9 @@ export const Team = {
 } as const;
 export const TEAM_NAMES = ['RED', 'GREEN', 'BLUE', 'GOLD'] as const;
 /** How many teams a wave of each mode splits into (0: every clone for itself). */
-export const TEAMS_IN_MODE = [0, 2, 2, 4, 0, 2, 1] as const;
-/** What the players can vote for at the end of a wave (in this order: keys 1 to 6). */
-export const VOTE_MODES = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Extraction, GameMode.Extermination] as const;
+export const TEAMS_IN_MODE = [0, 2, 2, 4, 0, 2, 1, 1] as const;
+/** What the players can vote for at the end of a wave (in this order: keys 1 to 7). */
+export const VOTE_MODES = [GameMode.Regicide, GameMode.Pvp, GameMode.Lts, GameMode.Siege, GameMode.Extraction, GameMode.Extermination, GameMode.Infection] as const;
 
 /** Extraction rocket states (R_ROUND). */
 export const Evac = {

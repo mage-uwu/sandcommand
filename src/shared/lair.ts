@@ -61,11 +61,11 @@ function bore(m: Uint8Array, cx: number, cy: number, r: number): void {
   }
 }
 
-/** Carve the lair into the map (`heights`: the surface at each column). */
-export function carveLair(m: Uint8Array, heights: Int32Array, seed: number): Lair {
+/** Carve the lair into the map (`heights`: the surface at each column), across the map or just `span` of it (Infection's hive). */
+export function carveLair(m: Uint8Array, heights: Int32Array, seed: number, span?: readonly [number, number]): Lair {
   const rng = new Rng(seed ^ 0x1a12);
-  const x0 = LAIR_MARGIN;
-  const x1 = WORLD_W - LAIR_MARGIN;
+  const x0 = span ? span[0] : LAIR_MARGIN;
+  const x1 = span ? span[1] : WORLD_W - LAIR_MARGIN;
   const roof = new Int16Array(WORLD_W).fill(-1);
   const floor = new Int16Array(WORLD_W).fill(-1);
   // The surface, smoothed (the cave's roof follows the lie of the land, not every bump in it).
@@ -173,4 +173,19 @@ export function carveLair(m: Uint8Array, heights: Int32Array, seed: number): Lai
     dens.push({ x, y: Math.round((roof[x] + floor[x]) / 2), rx: Math.round((b - a) / 2), ry: Math.round((floor[x] - roof[x]) / 2), floorX: x, floorY: fy });
   }
   return { dens, mouths, x0, x1, roof, floor };
+}
+
+/**
+ * A tunnel bored through the rock from (ax, ay) to (bx, by), `r` cells in
+ * radius, wandering a little (Infection's hive tunnel, up under the
+ * fortress's gate).
+ */
+export function boreTunnel(m: Uint8Array, ax: number, ay: number, bx: number, by: number, r: number, seed: number): void {
+  const rng = new Rng(seed ^ 0x7e11);
+  const wig = rng.range(0, 6.28);
+  const steps = Math.ceil(Math.hypot(bx - ax, by - ay) / 3);
+  for (let s = 0; s <= steps; s++) {
+    const f = s / steps;
+    bore(m, ax + (bx - ax) * f, ay + (by - ay) * f + Math.sin(f * 9 + wig) * 10 * Math.sin(f * Math.PI), r);
+  }
 }
