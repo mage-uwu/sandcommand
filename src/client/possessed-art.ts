@@ -227,3 +227,16 @@ export function infectArm(src: HTMLCanvasElement, r: number, strain: number): HT
   c.getContext('2d')!.putImageData(new ImageData(out, w, h), 0, 0);
   return (list[s] = c);
 }
+
+const masks = new WeakMap<HTMLCanvasElement, Uint8Array>();
+
+/** Which cells of a sprite are its own (alpha set): cached per sprite. */
+export function spriteMask(c: HTMLCanvasElement): Uint8Array {
+  let m = masks.get(c);
+  if (m) return m;
+  const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+  m = new Uint8Array(c.width * c.height);
+  for (let i = 0; i < m.length; i++) m[i] = d[i * 4 + 3] > 0 ? 1 : 0;
+  masks.set(c, m);
+  return m;
+}

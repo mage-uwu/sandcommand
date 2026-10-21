@@ -2571,14 +2571,24 @@ wire, so every player sees the same wounds:
   struck and how hard (`R_HIT`). Each client pins a wound there in the
   body's own frame (from its hip, as it faces), so the wound moves, leans
   and turns with the body.
-  - Size depends on the hit: a graze is a speck, a slug a gaping hole. A
-    hit near an old wound opens it wider. A fresh wound is wet and bright
-    for a moment.
-  - A clone shows only as many wounds as its missing health allows, so as a
-    repair kit heals it, the oldest close first. They're gone when it dies.
-    Open wounds drip blood now and then.
-  - The Legion (synthetic) leaks dark oil instead, and the spider droid
-    takes scorched dents with a hot ember in fresh ones. Neither drips.
+  - **Painted into the clone's own sprite** (`src/client/wound-art.ts`):
+    only on its pixels, never floating off it, riding every pose, lean,
+    crouch and walk frame, head, body, arms and legs alike.
+  - Size depends on the hit. A graze or a bullet is a dark hole with a
+    ragged red rim. A harder hit is a tear, the hole longer, raw meat round
+    it. The worst gape wide open, meat and bone showing. A hit near an old
+    wound opens it wider. A fresh wound glistens for a moment.
+  - Blood runs down the body from each one, further the longer it's been
+    open (a dribble, not a stripe), till it runs off the clone. Open wounds
+    drip blood now and then too.
+  - A clone shows only as many wounds as its missing health allows (up to
+    12), so as a repair kit heals it, the oldest close first. They're gone
+    when it dies.
+  - The Legion (synthetic) shows torn plating that leaks coolant, and the
+    spider droid takes scorched dents with a hot ember in fresh ones.
+  - **The possessed's never close.** Every wound they've taken stays open,
+    however fast they heal, and oozes the crab's blue: a long-dead body
+    the coral is still walking around.
 - **Creatures.** Their health is sent as a fraction. Their scars follow
   from how far it has fallen from the most this client has seen of it (so a
   lair beast starting at half strength starts unmarked) and from the

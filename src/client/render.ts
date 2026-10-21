@@ -32,7 +32,8 @@ import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES,
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { drawCoralCrab, drawCrabNestCrystals } from './crab-art.ts';
-import { M as INF_M, infectArm, infectBody } from './possessed-art.ts';
+import { M as INF_M, infectArm, infectBody, spriteMask } from './possessed-art.ts';
+import { FLESH, HIVE, SYNTH, type WoundPx, woundPixels } from './wound-art.ts';
 import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
@@ -2183,6 +2184,25 @@ export class Renderer {
     const sin = Math.sin(a);
     // A point given relative to the hip in the standing pose, posed.
     const posed = (dx: number, dy: number) => [hipX + dx * cos - dy * sin, hipY + dx * sin + dy * cos];
+    // Its wounds, painted into its own sprite (wound-art.ts): as many as its missing health shows;
+    // the possessed's never close (every one they've taken). A droid's are its own (drawWounds, below).
+    let gore: WoundPx[] | null = null;
+    if (!droid && id >= 0 && this.game && (hp < ACTOR_MAX_HP || strain >= 0)) {
+      const shown = this.game.wounds.shown(id, strain >= 0 ? 0 : (hp / ACTOR_MAX_HP) * 100);
+      if (shown.length) {
+        const mask = spriteMask(sprite!);
+        gore = woundPixels(shown, face, strain >= 0 ? HIVE : FACTIONS[faction]?.synthetic ? SYNTH : FLESH, now, (gx, gy) => gx >= 0 && gy >= 0 && gx < 10 && gy < 16 && mask[gy * 10 + gx] === 1);
+      }
+    }
+    /** Paint the wounds' pixels of rows [y0, y1) at (ox, oy) (sprite cell (0, 0) there), rows squashed by `sy`. */
+    const paint = (y0: number, y1: number, ox: number, oy: number, sy = 1) => {
+      if (!gore) return;
+      for (const g of gore) {
+        if (g.y < y0 || g.y >= y1) continue;
+        ctx.fillStyle = g.c;
+        ctx.fillRect(ox + g.x, oy + Math.floor((g.y - y0) * sy), 1, 1);
+      }
+    };
     if (droid) {
       // (Drawn above.)
     } else if (stance === Stance.Prone) {
@@ -2191,17 +2211,20 @@ export class Renderer {
       ctx.rotate(a);
       ctx.drawImage(sprite!, -5.5, -11);
       if (strain >= 0) ctx.drawImage(infectBody(sprite!, left, strain).c, -5.5 - INF_M, -11 - INF_M);
+      paint(0, 16, -5.5, -11);
       ctx.restore();
     } else {
       const legH = stance === Stance.Crouch ? 3 : 5;
       ctx.drawImage(sprite!, 0, 11, 10, 5, ix - 1, iy + ACTOR_H - legH, 10, legH);
       const inf = strain >= 0 ? infectBody(sprite!, left, strain).c : null;
       if (inf) ctx.drawImage(inf, 0, 11 + INF_M, 10 + 2 * INF_M, 5, ix - 1 - INF_M, iy + ACTOR_H - legH, 10 + 2 * INF_M, legH);
+      paint(11, 16, ix - 1, iy + ACTOR_H - legH, legH / 5);
       ctx.save();
       ctx.translate(hipX, hipY);
       ctx.rotate(a);
       ctx.drawImage(sprite!, 0, 0, 10, 11, -5.5, -11, 10, 11);
       if (inf) ctx.drawImage(inf, 0, 0, 10 + 2 * INF_M, 11 + INF_M, -5.5 - INF_M, -11 - INF_M, 10 + 2 * INF_M, 11 + INF_M);
+      paint(0, 11, -5.5, -11);
       ctx.restore();
     }
     // The possessed drool the crab's blue blood, a drop at a time.
@@ -2219,8 +2242,8 @@ export class Renderer {
       }
     }
 
-    // Its wounds, where it was hit (wounds.ts), riding its pose.
-    if (id >= 0 && hp < ACTOR_MAX_HP && this.game) this.drawWounds(ctx, this.game.wounds.shown(id, (hp / ACTOR_MAX_HP) * 100), posed, face, droid, !!FACTIONS[faction]?.synthetic, now);
+    // A droid's wounds, where it was hit (wounds.ts), riding its pose.
+    if (droid && id >= 0 && hp < ACTOR_MAX_HP && this.game) this.drawWounds(ctx, this.game.wounds.shown(id, (hp / ACTOR_MAX_HP) * 100), posed, face, droid, !!FACTIONS[faction]?.synthetic, now);
 
     // A king wears the crown on the head.
     if (!droid && has(parts, Part.Crown)) {

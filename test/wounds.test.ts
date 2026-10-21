@@ -10,7 +10,8 @@ describe('wounds', () => {
     const [w] = b.shown(3, 60);
     expect(b.shown(3, 60).length).toBe(1);
     expect(w.r).toBeGreaterThan(woundSize(20));
-    for (let k = 0; k < 20; k++) b.hit(3, -3 + (k % 7), -8 + k * 0.6, 10, 20 + k);
+    // (Spread out, so none merge.)
+    for (let k = 0; k < 20; k++) b.hit(3, -3 + (k % 4) * 2, -9 + Math.floor(k / 4) * 2, 10, 20 + k);
     expect(b.shown(3, 0).length).toBe(WOUNDS_MAX);
   });
 

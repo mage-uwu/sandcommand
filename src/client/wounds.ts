@@ -27,7 +27,7 @@ export interface Wound {
 }
 
 /** At most this many wounds a clone, and how near (cells) a new hit must land to deepen an old one. */
-export const WOUNDS_MAX = 8;
+export const WOUNDS_MAX = 12;
 const MERGE_R = 1.6;
 
 /** A hit's damage to a wound's size (cells across, about): a graze 0.6, a slug 2.4. */
