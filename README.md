@@ -952,11 +952,17 @@ claws.
   clone within 110 cells wakes it.
 - **It only scurries and lunges.** It runs along the surfaces at you
   (120 cells/s) and leaps at you through the air from further off.
-- **It lodges onto you.** The one it reaches it rides wherever they go,
-  biting (8 every 0.4 s) until one of them is dead. Shoot it off (it's
+- **It lodges onto you.** It clamps onto one limb, the one nearest where
+  it reached you (your head, your body, an arm or a leg), and rides that
+  limb wherever it goes, standing, crouched or prone. It bites every
+  0.4 s, 8 harm each time, and chews into that limb: through its armour
+  first, then the limb itself, which comes off. Then it clamps onto the
+  nearest limb you have left. This goes on until one of you is dead. Shoot it off (it's
   surprisingly durable: 420 hit points) or get into a vehicle.
-- **If it kills you, you're possessed.** You rise again at once, whole
-  and at full health, on the coral's side: every possessed clone is on it
+- **If it kills you, you're possessed.** You visibly die first: blood, the
+  crab's blue and coral burst out of you, and you drop flat and lie there
+  for 1.5 s (nothing you press moves you; "YOU DIED" on screen). Then you
+  rise again, whole and at full health, on the coral's side: every possessed clone is on it
   together, against everyone else, whatever team they were on. The kill
   counts as a death. The crab is inside you now, and shows as a coral hump
   on your back, coral on your limbs, coral-pink eyes and a pink ✺ name tag.

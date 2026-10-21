@@ -252,6 +252,10 @@ export const CRAB_SENSE = 240;
 export const CRAB_LATCH_R = 6;
 export const CRAB_BITE = 8;
 export const CRAB_BITE_CD = 12;
+/** What each bite does to the limb it's clamped on (wounds: it chews through armour, then the limb, which can come off). */
+export const CRAB_WOUND = 9;
+/** Killed by a crab (or the possessed's vomit), a clone lies dead this long (ticks) before it rises possessed. */
+export const POSSESS_RISE = 45;
 /** Folded up as gem crystals: how long it holds still (ticks), how long it wanders between. */
 export const CRAB_DISGUISE_MIN = 30 * 40;
 export const CRAB_DISGUISE_MAX = 30 * 180;
@@ -633,6 +637,8 @@ export interface Beast {
   coilX: number;
   coilY: number;
   coilHurt: number;
+  /** A coral crab lodged on someone: the part of them it's clamped onto (body.ts Part, -1 none). */
+  limb: number;
   /** Its camouflage: which sections of it look like what (the client draws from it). */
   seed: number;
   /** Fractional steps owed by its speed. */
@@ -722,6 +728,7 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     coilX: 0,
     coilY: 0,
     coilHurt: 0,
+    limb: -1,
     seed: (x * 7919 + y * 104729) & 255,
     owed: 0,
     target: -1,

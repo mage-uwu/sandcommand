@@ -1,4 +1,4 @@
-import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_LOCK, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, STANCE_DROP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_LOCK, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, PRONE_TICKS, STANCE_DROP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import { FACTION_SHIFT, STANCE_SHIFT } from '../shared/protocol.ts';
 import { FACTIONS, rollFaction } from '../shared/factions.ts';
 import {
@@ -115,6 +115,7 @@ import {
   type BodyState,
   type Mobility,
   PART_COUNT,
+  PARTS,
   Part,
   DROID_LEGS,
   DroidPart,
@@ -126,6 +127,7 @@ import {
   newStrike,
   partAt,
   partHealth,
+  partsOf,
   resetBody,
   rollClass,
   strike,
@@ -249,7 +251,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BILE, BILE_MAX, BILE_RATE, CLAW, CLAW_CD, CLAW_R, VOMIT_CONE, VOMIT_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
+import { BILE, BILE_MAX, BILE_RATE, CRAB_WOUND, POSSESS_RISE, CLAW, CLAW_CD, CLAW_R, VOMIT_CONE, VOMIT_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
 import { STICKY_FUSE, STICKY_MAX_FLIGHT, STICKY_ON_BEAST, STICKY_ON_CLONE, STICKY_ON_VEHICLE, STICKY_THROW, stickyCore, STICKY_CORE_R } from '../shared/sticky.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, PROJ_STICKY, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
@@ -573,6 +575,8 @@ export class Player {
   clawCd = 0;
   /** Infection: one of the lost expedition, down at the bottom of the hive (fodder for the crabs; comes back there, for free). */
   expedition = false;
+  /** Just possessed: ticks left lying dead before it rises (it can't move or fight till then). */
+  rise = 0;
   /** The tick it was last hurt (the possessed heal only a while after). */
   hurtTick = -1e9;
   /** The crab's blue blood in it (a possessed clone's vomit, BILE_*): harm still to do, eating armour then flesh; and who vomited it. */
@@ -2653,16 +2657,37 @@ export class World {
         bodyPoints(t, b, pts);
         return;
       }
-      pts[0] = q.cx + b.coilX;
-      pts[1] = q.cy + b.coilY;
-      pts[2] = pts[0] - b.side * 2;
-      pts[3] = pts[1] + 1;
+      // Clamped onto one limb of them: where that limb is now (that limb gone, onto the nearest one left).
+      if (b.limb < 0 || !has(q.parts.mask, b.limb)) b.limb = this.nearestLimb(q, pts[0], pts[1]);
+      const at = this.limbAt(q, b.limb, this.pt);
+      // (Facing in, at the body: its claws in the limb, its back to the world.)
+      let ix = q.cx - at.x;
+      let iy = q.cy - at.y;
+      const il = Math.hypot(ix, iy);
+      if (il < 0.5) {
+        ix = this.facingLeft(q) ? 1 : -1;
+        iy = 0;
+      } else {
+        ix /= il;
+        iy /= il;
+      }
+      pts[0] = at.x + ix;
+      pts[1] = at.y + iy;
+      pts[2] = at.x - ix * 2;
+      pts[3] = at.y - iy * 2;
       if (b.coilCd > 0) b.coilCd--;
       else {
         b.coilCd = CRAB_BITE_CD;
         // (Shaking them as it bites.)
         q.body.vx += this.rng.range(-25, 25);
-        this.damage(q, CRAB_BITE, NO_OWNER, W_CRAB);
+        // It chews into that limb: armour first, then the limb itself (that can come off), and the clone bleeds.
+        const res = this.strikeScratch;
+        res.hp = 0;
+        res.detached.length = 0;
+        res.vital = false;
+        harm(q.parts, b.limb, CRAB_WOUND, res);
+        res.hp = Math.max(res.hp, CRAB_BITE);
+        this.applyStrike(q, res, NO_OWNER, W_CRAB, at.x, at.y);
       }
       return;
     }
@@ -2771,8 +2796,7 @@ export class World {
       b.hold = p.id;
       b.flung = 0;
       b.vx = b.vy = 0;
-      b.coilX = Math.max(-3, Math.min(3, pts[0] - p.cx));
-      b.coilY = Math.max(-6, Math.min(4, pts[1] - p.cy));
+      b.limb = this.nearestLimb(p, pts[0], pts[1]);
       b.coilCd = 4;
       break;
     }
@@ -4276,11 +4300,61 @@ export class World {
     p.venom = 0;
     p.coral.fill(0);
     p.clawCd = CLAW_CD;
+    // It drops dead where it stood, and lies there a moment before it rises.
+    p.rise = POSSESS_RISE;
+    p.body.stance = Stance.Prone;
+    p.body.downTicks = PRONE_TICKS;
+    p.body.vx = 0;
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
       if (b && b.kind === BeastKind.CoralCrab && b.hold === p.id) this.killBeast(k);
     }
     this.possessedRev++;
+  }
+
+  /** The parts of a clone a crab can clamp onto: head, body, limbs (a droid's: its own), not armour, a jetpack or a crown. */
+  private limbsOf(p: Player): number[] {
+    const out: number[] = [];
+    partsOf(p.parts.cls).forEach((d, i) => {
+      if (d.armorOf < 0 && i !== Part.Jetpack && i !== Part.Crown && has(p.parts.mask, i)) out.push(i);
+    });
+    return out;
+  }
+
+  /** The limb of `p` nearest (x, y). */
+  private nearestLimb(p: Player, x: number, y: number): number {
+    let best: number = Part.Torso;
+    let bd = Infinity;
+    for (const part of this.limbsOf(p)) {
+      const at = this.limbAt(p, part, this.pt2);
+      const d = Math.hypot(at.x - x, at.y - y);
+      if (d < bd) {
+        bd = d;
+        best = part;
+      }
+    }
+    return best;
+  }
+
+  /** Where part `part` of `p` is (world cells, its middle), as it stands, crouches or lies, facing as it does. */
+  private limbAt(p: Player, part: number, out: { x: number; y: number }): { x: number; y: number } {
+    const d = partsOf(p.parts.cls)[part] ?? PARTS[Part.Torso];
+    const left = this.facingLeft(p);
+    const mx = (d.rx0 + d.rx1 + 1) / 2;
+    const lx = left ? ACTOR_W - mx : mx;
+    const ly = (d.ry0 + d.ry1 + 1) / 2;
+    const st = p.body.stance;
+    const top = p.top;
+    if (st === Stance.Prone && p.tank < 0) {
+      // Lying along the ground, head first the way it faces.
+      const along = (ly * ACTOR_W) / ACTOR_H;
+      out.x = p.body.x + (left ? along : ACTOR_W - along);
+      out.y = top + STANCE_H[st] / 2;
+    } else {
+      out.x = p.body.x + lx;
+      out.y = top + (ly * STANCE_H[st]) / ACTOR_H;
+    }
+    return out;
   }
 
   /** Is this a creature's harm to one of the possessed (which never lands: they're the hive's own)? */
@@ -4308,7 +4382,7 @@ export class World {
       p.body.crawl = true;
       // Healing fast, a moment after the last hurt, unless it's been blown to pieces.
       if (p.hp < ACTOR_MAX_HP && this.tick - p.hurtTick >= POSSESSED_REGEN_DELAY && !inPieces(p.parts.mask)) p.hp = Math.min(ACTOR_MAX_HP, p.hp + POSSESSED_REGEN * DT);
-      if (p.tank >= 0 || p.pilot >= 0) continue;
+      if (p.tank >= 0 || p.pilot >= 0 || p.rise > 0) continue;
       if (p.clawCd > 0) {
         p.clawCd--;
         continue;
@@ -8203,6 +8277,12 @@ export class World {
         p.aimQ = cmd.aim;
         p.invCmd = cmd.inv;
         p.ack = cmd.seq;
+      }
+      // Lying dead, the crab taking hold: no moving, no fighting, flat on the ground till it rises.
+      if (p.rise > 0) {
+        p.rise--;
+        p.buttons = BTN_DOWN;
+        p.body.downTicks = PRONE_TICKS;
       }
       p.firing = false;
       if (p.callCd > 0) p.callCd--;

@@ -36,7 +36,7 @@ import { HIVE_CORALS, type CoralTint, drawAsp, drawAspGem, drawBasilisk, drawBas
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
-import { BEAST_BUILD, BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
+import { BEAST_BUILD, BeastKind, CORAL_LIMBS, POSSESS_RISE } from '../shared/wildlife.ts';
 /** A possessed clone's coral: well grown on every limb. */
 const POSSESSED_CORAL = CORAL_LIMBS.map(() => 0.7);
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
@@ -3365,6 +3365,9 @@ export class Renderer {
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
     }
+    // Just possessed: we died; we lie there, and rise again the crab's.
+    const since = performance.now() - game.possessedAt;
+    if (game.possessedIds.has(game.myId) && since < 3200) this.drawBanner(since < (POSSESS_RISE / TICK_RATE) * 1000 ? 'YOU DIED' : 'REBORN', since < (POSSESS_RISE / TICK_RATE) * 1000 ? 'the coral crab is in you now' : 'possessed · the hive is yours, and you are its', '#ff7aa0', s, W, H);
     // Possessed: the crab has us. We fight on for the coral, against everyone else.
     if (game.possessedIds.has(game.myId)) {
       const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 260);

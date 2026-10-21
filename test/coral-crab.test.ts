@@ -11,7 +11,8 @@ import { Game } from '../src/client/game.ts';
 import { BTN_RIGHT, Stance, newBody, stepBody } from '../src/shared/actor.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { BILE, VOMIT_R } from '../src/shared/wildlife.ts';
+import { BILE, POSSESS_RISE, VOMIT_R } from '../src/shared/wildlife.ts';
+import { BTN_LEFT, PRONE_TICKS } from '../src/shared/actor.ts';
 import { deliverAll } from './helpers.ts';
 
 /** A cave: solid rock, a tunnel (x 880..1260, y 380..440), `n` clones standing on its floor from x 960. */
@@ -117,6 +118,7 @@ describe('the coral crab', () => {
     const [a, b, c] = ps;
     a.team = b.team = c.team = 1 as never;
     hidden(world).damage(a, 500, NO_OWNER, W_CRAB);
+    a.rise = 0; // (risen)
     expect(world.hostile(a, b)).toBe(true);
     expect(world.friendly(a.id, b)).toBe(false);
     expect(world.friendly(b.id, c)).toBe(true);
@@ -207,6 +209,7 @@ describe('the coral crab', () => {
     const { world, ps } = cave(2);
     const [a, b] = ps;
     hidden(world).damage(a, 500, NO_OWNER, W_CRAB);
+    a.rise = 0; // (risen)
     a.body.x = 960;
     b.body.x = 960 + Math.round(VOMIT_R * 0.7);
     a.aimQ = quantizeAim(0);
@@ -224,6 +227,7 @@ describe('the coral crab', () => {
     // Behind them, it misses.
     const { world: w2, ps: q } = cave(2);
     hidden(w2).damage(q[0], 500, NO_OWNER, W_CRAB);
+    q[0].rise = 0;
     q[1].body.x = 960 + Math.round(VOMIT_R * 0.7);
     q[0].aimQ = quantizeAim(Math.PI);
     for (let k = 0; k < 20; k++) w2.step();
@@ -285,5 +289,58 @@ describe('the coral crab', () => {
     expect(p.venom).toBe(0);
     expect(p.coral.every((c) => c === 0)).toBe(true);
     for (const b of world.beasts) if (b) expect(b.target === p.id || b.coil === p.id || b.hold === p.id).toBe(false);
+  });
+
+  it('it clamps onto one limb and rides that limb (not just near them), chewing it: armour, then the limb, which comes off', () => {
+    const { world, ps } = cave();
+    const p = ps[0];
+    p.parts.mask &= ~((1 << Part.Helmet) | (1 << Part.Vest));
+    p.hp = 100;
+    // Low down beside them: it takes a leg.
+    const b = putCrab(world, Math.round(p.body.x + 9), 440);
+    b.hold = p.id;
+    b.coilCd = 999;
+    world.step();
+    expect([Part.LegB, Part.LegF]).toContain(b.limb);
+    // It goes where that leg goes: down by their feet, not up at their chest.
+    expect(world.beastPts[1][1]).toBeGreaterThan(p.cy + 2);
+    p.body.x -= 20;
+    world.step();
+    expect(Math.abs(world.beastPts[1][0] - p.cx)).toBeLessThan(6);
+    expect(world.beastPts[1][1]).toBeGreaterThan(p.cy + 2);
+    // Biting: that leg's wounds mount, till it's off; then it moves to the nearest limb left.
+    const leg = b.limb;
+    b.coilCd = 0;
+    for (let k = 0; k < 30 * 4 && has(p.parts.mask, leg) && p.alive && !p.possessed; k++) {
+      p.hp = 100;
+      world.step();
+    }
+    expect(has(p.parts.mask, leg)).toBe(false);
+    world.step();
+    if (b.hold === p.id) expect(b.limb).not.toBe(leg);
+  });
+
+  it('turned, they drop dead where they stand and lie there a moment (nothing they do moves them), then rise', () => {
+    const { world, ps } = cave();
+    const p = ps[0];
+    hidden(world).damage(p, 9999, NO_OWNER, W_CRAB);
+    expect(p.possessed).toBe(true);
+    expect(p.rise).toBe(POSSESS_RISE);
+    const x0 = p.body.x;
+    let flat = 0;
+    for (let k = 0; k < POSSESS_RISE - 2; k++) {
+      world.input(p.id, { seq: k + 1, buttons: BTN_LEFT, aim: 0, inv: 0 });
+      world.step();
+      if (p.body.stance === Stance.Prone) flat++;
+    }
+    expect(flat).toBeGreaterThan(POSSESS_RISE - 10);
+    expect(Math.abs(p.body.x - x0)).toBeLessThan(1);
+    for (let k = 0; k < 20; k++) {
+      world.input(p.id, { seq: 100 + k, buttons: BTN_LEFT, aim: 0, inv: 0 });
+      world.step();
+    }
+    expect(p.rise).toBe(0);
+    expect(p.body.x).toBeLessThan(x0 - 1);
+    void PRONE_TICKS;
   });
 });

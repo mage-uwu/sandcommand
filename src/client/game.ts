@@ -1,12 +1,12 @@
 import { type Decor, placeDecor } from './decor.ts';
-import { BTN_FIRE, type Body, HIP_X, HIP_Y, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { BTN_DOWN, BTN_FIRE, type Body, HIP_X, HIP_Y, copyBody, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import { WoundBook, beastDamage, beastScars } from './wounds.ts';
 import type { Reader } from '../shared/codec.ts';
 import { ACTOR_H, ACTOR_MAX_HP, ACTOR_W, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, DT, GRAVITY, TICK_RATE, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { type BeastState, type CraftState, type FrameHandler, type KillInfo, type RemoteActor, type RoundState, type SelfCraftState, type SelfState, type SelfTankState, type ShipState, type TankState, type MineState, type GeyserState, type BurnerState, type FootState, type ChargeState, applyFrameRecords } from '../shared/frame.ts';
 import { STICKY_FUSE, stickyBeepAt } from '../shared/sticky.ts';
 import { BURNER_FUSE, BurnerPhase, CLOUD_MS, FOOT_LIFE, beepAt } from '../shared/stoneburner.ts';
-import { BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
+import { BeastKind, CORAL_LIMBS, POSSESS_RISE } from '../shared/wildlife.ts';
 import { ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_RIDERS, SHIP_W, shipPoint, shipSeat } from '../shared/dropship.ts';
 import { TANK_W, type Tank, isDog, isPet, isSpider, newTank, surfSeat, stepTank, tankH, tankW } from '../shared/tank.ts';
 import { FACTIONS } from '../shared/factions.ts';
@@ -550,6 +550,8 @@ export class Game implements FrameHandler {
     // respawned us and will apply it.
     // (Flying our dropship: the controls are the ship's; the clone stands still.)
     if (this.pilot >= 0 || this.rc >= 0) buttons = 0;
+    // (Just possessed: lying dead, flat, as the server holds us, till we rise.)
+    if (performance.now() - this.possessedAt < (POSSESS_RISE / TICK_RATE) * 1000) buttons = BTN_DOWN;
     // (The digger running: its pull, as the server applies it.)
     const pull = this.alive && !this.drive && this.weapon === WeaponId.Digger && (buttons & BTN_FIRE) !== 0 && this.mob.canFire ? dequantizeAim(aimQ) : NaN;
     this.pending.push({ seq: this.seq, buttons, pull });
@@ -1147,6 +1149,8 @@ export class Game implements FrameHandler {
   /** A strike's ejecta: burning chunks thrown high, trailing fire and smoke till they come down (just for show). */
   private readonly ejecta: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
 
+  /** When we were possessed (performance.now ms): we lie dead a moment (POSSESS_RISE), then rise. */
+  possessedAt = -1e9;
   /** Clones a coral crab has: risen again possessed, on the coral's side against everyone else (R_POSSESSED). */
   possessedIds = new Set<number>();
   /** A possessed clone vomits the crab's blood (R_VOMIT): the gout, and its retching. */
@@ -1163,6 +1167,17 @@ export class Game implements FrameHandler {
       if (this.possessedIds.has(id)) continue;
       const name = this.players.get(id)?.name ?? '???';
       const me = id === this.myId;
+      // It dies where it stands, horribly: blood, the crab's blue, coral bursting out of it. It lies there, then rises.
+      const at = me ? { x: this.body.x, y: this.body.y } : this.remoteViews().find((r) => r.id === id);
+      if (at) {
+        const cx = at.x + ACTOR_W / 2;
+        const cy = at.y + ACTOR_H / 2;
+        bloodSplat(this.particles, cx, cy, 46, 170);
+        crabBloodSplat(this.particles, cx, cy - 3, 24, 130);
+        coralBurst(this.particles, cx, cy - 2);
+        this.sfx?.gib(cx, cy, 1.4, false);
+      }
+      if (me) this.possessedAt = now;
       this.feed.push({ text: me ? 'You were possessed by a coral crab' : `${name} was possessed by a coral crab`, color: me ? '#ff6f9a' : '#ff9ab8', at: now, kill: true });
       if (this.feed.length > 6) this.feed.shift();
       if (me) this.shake = Math.max(this.shake, 6);
