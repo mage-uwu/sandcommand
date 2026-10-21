@@ -23,7 +23,7 @@ import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH } from './materials.ts';
  * turns down round it. The body follows the head's trail.
  */
 
-export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5, Spider: 6, Web: 7 } as const;
+export const BeastKind = { Millipede: 0, Asp: 1, Seeder: 2, Nest: 3, Basilisk: 4, Dragon: 5, Spider: 6, Web: 7, CoralCrab: 8 } as const;
 
 /** Body segments, cells of trail between them (so the body's length), hit radius. */
 export const MILLI_SEGS = 15;
@@ -229,6 +229,42 @@ export const CSPIDER_HOME_R = 16;
 export const CSPIDER_CARRY_MAX = 30 * 45;
 export const WEB_R = 7;
 export const WEB_HP = 360;
+
+/**
+ * The **coral crab**: a spiderlike thing about half a cave spider's size,
+ * crusted in coral and gems. At rest it folds up and looks for all the
+ * world like a cluster of gem crystals (CRAB_DISGUISE_*). Prey near, it
+ * scurries (CRAB_HUNT) and lunges at them through the air (a fling), and
+ * the one it reaches it lodges onto (CRAB_LATCH_R) and stays on, biting
+ * (CRAB_BITE every CRAB_BITE_CD ticks), until one of them is dead. The
+ * clone it kills it doesn't leave dead: it gets into them and they rise
+ * again possessed (World.possess: four times as tough, on nobody's side
+ * but the coral's), and a possessed clone killed drops the crab again.
+ * Surprisingly durable (CRAB_HP) for its size.
+ */
+export const CRAB_SEGS = 2;
+export const CRAB_GAP = 2;
+export const CRAB_R = 1.8;
+export const CRAB_HP = 420;
+export const CRAB_CRAWL = 40;
+export const CRAB_HUNT = 120;
+export const CRAB_SENSE = 240;
+export const CRAB_LATCH_R = 6;
+export const CRAB_BITE = 8;
+export const CRAB_BITE_CD = 12;
+/** Folded up as gem crystals: how long it holds still (ticks), how long it wanders between. */
+export const CRAB_DISGUISE_MIN = 30 * 40;
+export const CRAB_DISGUISE_MAX = 30 * 180;
+export const CRAB_WANDER = 30 * 6;
+/** How close a clone comes before a folded crab springs. */
+export const CRAB_TRIGGER = 110;
+/** Of the crawlers that come up, the share that are coral crabs. */
+export const CRAB_SHARE = 0.18;
+/** A possessed clone: this many times as tough as it was (World.possess), and its claws: harm a strike, ticks between strikes, reach (cells). */
+export const POSSESSED_TOUGH = 4;
+export const CLAW = 28;
+export const CLAW_CD = 14;
+export const CLAW_R = 4;
 export const WEB_LIMBS = 24;
 /** Lying in wait (ticks: 10 to 60 s), and wandering between. */
 export const CSPIDER_FREEZE_MIN = 30 * 10;
@@ -509,10 +545,11 @@ export const BEAST_BUILD = [
   { segs: DRAGON_SEGS, gap: DRAGON_GAP, r: DRAGON_R, hp: DRAGON_HP },
   { segs: CSPIDER_SEGS, gap: CSPIDER_GAP, r: CSPIDER_R, hp: CSPIDER_HP },
   { segs: 1, gap: 1, r: WEB_R, hp: WEB_HP },
+  { segs: CRAB_SEGS, gap: CRAB_GAP, r: CRAB_R, hp: CRAB_HP },
 ] as const;
 
 /** Does this kind crawl the cave surfaces (millipede, asp, cave spider)? */
-export const crawler = (kind: number) => kind === BeastKind.Millipede || kind === BeastKind.Asp || kind === BeastKind.Spider;
+export const crawler = (kind: number) => kind === BeastKind.Millipede || kind === BeastKind.Asp || kind === BeastKind.Spider || kind === BeastKind.CoralCrab;
 
 /** Does this kind bore through the rock (no crawl: its head goes where it steers)? */
 export const burrows = (kind: number) => kind === BeastKind.Basilisk || kind === BeastKind.Dragon;

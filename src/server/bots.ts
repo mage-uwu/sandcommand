@@ -387,7 +387,7 @@ export class BotBrain {
       this.target = -1;
       let best = Infinity;
       for (const o of world.players) {
-        if (!o || o === p || !o.alive || (p.team !== Team.None && o.team === p.team)) continue;
+        if (!o || o === p || !o.alive || !world.hostile(p, o)) continue;
         const d = (o.cx - p.cx) ** 2 + (o.cy - p.cy) ** 2;
         if (d < best) {
           best = d;
@@ -395,7 +395,7 @@ export class BotBrain {
         }
       }
       // Regicide (and Siege) assault: the enemy king, wherever he hides (unless someone is right here).
-      const king = world.kingLive && this.assault && p.team !== Team.None ? world.players[world.kings[1 - p.team]] : null;
+      const king = world.kingLive && this.assault && p.team !== Team.None && !p.possessed ? world.players[world.kings[1 - p.team]] : null;
       if (king && king.alive && best > 90 * 90) this.target = king.id;
       tgt = this.target >= 0 ? world.players[this.target] : null;
       if (tgt && tgt.id !== prevTarget) this.holdFire = Math.max(this.holdFire, t + Math.round(this.react * skillOf(p).react));
@@ -478,7 +478,8 @@ export class BotBrain {
     }
 
     // Extraction: the objective comes first (the idol, the surface, the rocket).
-    const nav = world.extractionLive ? this.extractionNav(world, p) : null;
+    // (The possessed have no objective but the living.)
+    const nav = world.extractionLive && !p.possessed ? this.extractionNav(world, p) : null;
     if (nav) {
       goalX = nav.goalX;
       if (nav.pickup) pickup = (t & 1) === 0;
@@ -639,7 +640,8 @@ export class BotBrain {
 
     // Movement: close to fighting range, back off if too close, strafe in between.
     let buttons = 0;
-    const range = RANGE[weapon] ?? 120;
+    // (Possessed: it closes right in, to finish them with its claws.)
+    const range = p.possessed ? 0 : (RANGE[weapon] ?? 120);
     const dx = goalX - p.cx;
     let dir = 0;
     // On the objective unless someone's right in our face (a carrier never stops to brawl).
@@ -798,7 +800,7 @@ export class BotBrain {
         ? healing
         : weapon === WeaponId.Digger
         ? digging
-        : tgt !== null && t >= this.holdFire && this.seeTarget && dist < skillOf(p).range && dist > minRange && (weapon !== WeaponId.Grenade || dist < 220) && !(skillOf(p).pause > 0 && rng.next() < skillOf(p).pause);
+        : tgt !== null && t >= this.holdFire && this.seeTarget && dist < skillOf(p).range && dist > minRange && !(p.possessed && dist < 45) && (weapon !== WeaponId.Grenade || dist < 220) && !(skillOf(p).pause > 0 && rng.next() < skillOf(p).pause);
     if (weapon === WeaponId.Laser) {
       // Laser: hold to charge (longer the further off they are), then let go to fire.
       if (shoot && p.charge < this.laserGoal) buttons |= BTN_FIRE;

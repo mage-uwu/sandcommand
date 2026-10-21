@@ -1146,6 +1146,23 @@ export class Game implements FrameHandler {
   /** A strike's ejecta: burning chunks thrown high, trailing fire and smoke till they come down (just for show). */
   private readonly ejecta: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
 
+  /** Clones a coral crab has: risen again possessed, on the coral's side against everyone else (R_POSSESSED). */
+  possessedIds = new Set<number>();
+  /** Who's possessed now: a feed line for each newly taken (and for us, a jolt). */
+  possessed(ids: number[]): void {
+    const now = performance.now();
+    const next = new Set(ids);
+    for (const id of next) {
+      if (this.possessedIds.has(id)) continue;
+      const name = this.players.get(id)?.name ?? '???';
+      const me = id === this.myId;
+      this.feed.push({ text: me ? 'You were possessed by a coral crab' : `${name} was possessed by a coral crab`, color: me ? '#ff6f9a' : '#ff9ab8', at: now, kill: true });
+      if (this.feed.length > 6) this.feed.shift();
+      if (me) this.shake = Math.max(this.shake, 6);
+    }
+    this.possessedIds = next;
+  }
+
   /** The sticky charges about: each stuck one beeps as its light comes on (any tick of its countdown since we last heard of it). */
   charges(list: ChargeState[]): void {
     for (const c of list) {
@@ -1477,10 +1494,15 @@ export class Game implements FrameHandler {
     else if (v.kind === BeastKind.Seeder) bloodSplat(this.particles, v.cur[0], v.cur[1], 3, 60);
     else if (v.kind === BeastKind.Asp) aspGibs(this.particles, v.cur, v.seed);
     else if (v.kind === BeastKind.Spider) spiderGibs(this.particles, v.cur);
+    // (A coral crab: its gem chips and coral crust in shards, its legs everywhere.)
+    else if (v.kind === BeastKind.CoralCrab) {
+      aspGibs(this.particles, v.cur, v.seed);
+      spiderGibs(this.particles, v.cur);
+    }
     else beastGibs(this.particles, v.cur);
     if (v.kind !== BeastKind.Nest && v.kind !== BeastKind.Web) crabBloodGibs(this.particles, v.cur);
     // Every segment flung off whole (a nest in shards; a seeder's wings torn off it).
-    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Web ? 8 + 2 * Math.min(24, Math.round(v.lift * 255)) : v.kind === BeastKind.Seeder ? 3 : v.kind === BeastKind.Spider ? 10 : v.cur.length >> 1;
+    const n = v.kind === BeastKind.Nest ? 14 : v.kind === BeastKind.Web ? 8 + 2 * Math.min(24, Math.round(v.lift * 255)) : v.kind === BeastKind.Seeder ? 3 : v.kind === BeastKind.Spider ? 10 : v.kind === BeastKind.CoralCrab ? 0 : v.cur.length >> 1;
     for (let i = 0; i < n; i++) {
       const at = Math.min(i, (v.cur.length >> 1) - 1);
       const x = v.cur[at * 2] + (v.kind === BeastKind.Nest || v.kind === BeastKind.Web ? (Math.random() - 0.5) * 10 : 0);

@@ -165,7 +165,7 @@ import {
 } from '../shared/constants.ts';
 import { Collider, DistanceField } from '../shared/field.ts';
 import { Projectiles, pickHeat, segmentBox } from '../shared/kernels.ts';
-import { ActorField, NO_OWNER, PK, Particles, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, W_DRAGON, W_SPIDER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
+import { ActorField, NO_OWNER, PK, Particles, W_CLAW, W_CRAB, W_VENOM, W_ASP, W_COIL, W_SEED, W_BASILISK, W_BLISTER, W_GEYSER, W_CRAFT, W_SHIP, W_TANK, W_TRAP, W_LASER, W_RAM, W_STONEBURNER, W_DRAGON, W_SPIDER, applyCarve, carveExtent, craftFragments, craftPartFragments, dropToSupport, explosionFragments, releaseCarve, spillGold } from '../shared/particles.ts';
 import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH, Mat, digValue } from '../shared/materials.ts';
 import {
   F_ALIVE,
@@ -195,6 +195,7 @@ import {
   R_CORAL,
   R_BURNERS,
   R_CHARGES,
+  R_POSSESSED,
   R_STONEBURN,
   BEAST_SCALE,
   BEAST_SAME,
@@ -247,6 +248,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
+import { CLAW, CLAW_CD, CLAW_R, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
 import { STICKY_FUSE, STICKY_MAX_FLIGHT, STICKY_ON_BEAST, STICKY_ON_CLONE, STICKY_ON_VEHICLE, STICKY_THROW, stickyCore, STICKY_CORE_R } from '../shared/sticky.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, PROJ_STICKY, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
@@ -542,6 +544,8 @@ export class Player {
   burnersSeen = -1;
   /** chargesRev as last sent to this player. */
   chargesSeen = -1;
+  /** possessedRev as last sent to this player. */
+  possessedSeen = -1;
   /** The geysers' state as this client last heard it (World.geysersRev). */
   geysersSeen = -1;
   /** The flora's state as this client last heard it (World.floraRev). */
@@ -557,6 +561,15 @@ export class Player {
   prevButtons = 0;
   respawn = 1;
   firing = false;
+  /**
+   * Possessed by a coral crab (World.possess): risen again after it killed
+   * them, on the coral's side against everyone else, four times as tough,
+   * and alive on with its head or limbs gone; its claws turn whoever they
+   * kill. Killed, it drops the crab. Until it's killed (or the wave ends).
+   */
+  possessed = false;
+  /** Ticks to its claws' next strike (possessed). */
+  clawCd = 0;
   /** Clones of the other side (or anyone, with no sides) killed. */
   kills = 0;
   /** Creatures killed (anything wild but a web). */
@@ -714,6 +727,8 @@ export class World {
   readonly charges: Charge[] = [];
   /** Bumped whenever a charge is thrown, sticks, comes loose or goes off (they're sent while any exist, and once more after). */
   chargesRev = 0;
+  /** Bumped whenever someone is possessed or stops being (R_POSSESSED is sent when it changes). */
+  possessedRev = 0;
   readonly feet: Foot[] = [];
   burnersRev = 0;
   minesRev = 0;
@@ -1036,9 +1051,19 @@ export class World {
 
   /** Teammates can't hurt each other (your own blasts still hurt you). */
   friendly(by: number, victim: Player): boolean {
-    if (victim.team === Team.None || by === victim.id) return false;
+    if (by === victim.id) return false;
     const a = by >= 0 && by < MAX_PLAYERS ? this.players[by] : null;
+    // (The possessed are the coral's: one another's side, and nobody else's, whatever their teams were.)
+    if (a && (a.possessed || victim.possessed)) return a.possessed && victim.possessed;
+    if (victim.team === Team.None) return false;
     return !!a && a.team === victim.team;
+  }
+
+  /** Are `a` and `b` on opposite sides (bots, creatures: who goes for whom)? The possessed against everyone else; else by team. */
+  hostile(a: Player, b: Player): boolean {
+    if (a === b) return false;
+    if (a.possessed || b.possessed) return a.possessed !== b.possessed;
+    return a.team === Team.None || a.team !== b.team;
   }
 
   /**
@@ -1849,6 +1874,7 @@ export class World {
       if (b) {
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
         else if (b.kind === BeastKind.Spider) this.stepSpider(k, b);
+        else if (b.kind === BeastKind.CoralCrab) this.stepCrab(k, b);
         else if (b.kind === BeastKind.Web) this.holdOn(k, b);
         else if (b.kind === BeastKind.Seeder) this.stepSeeder(k, b);
         else if (b.kind === BeastKind.Nest) this.stepNest(k, b);
@@ -1893,7 +1919,14 @@ export class World {
       const kind = missing ?? (roll < aspShare ? BeastKind.Asp : roll < aspShare + (1 - aspShare) * CSPIDER_SHARE ? BeastKind.Spider : BeastKind.Millipede);
       if (kind === BeastKind.Spider && this.beasts.filter((o) => o?.kind === BeastKind.Web).length < (this.lair ? LAIR_PACKS : PACKS)) return this.spawnPack(x, y);
       // (Enough packs about: a millipede instead.)
-      const b = newBeast(t, kind === BeastKind.Spider ? BeastKind.Millipede : kind, x, y, rng.next() < 0.5 ? -1 : 1);
+      // (Now and then, in place of whatever it was: a coral crab, folded up as gem crystals.)
+      const crab = missing === undefined && hash2(this.tick, x, 0xc0ab) / 4294967296 < CRAB_SHARE;
+      const b = newBeast(t, crab ? BeastKind.CoralCrab : kind === BeastKind.Spider ? BeastKind.Millipede : kind, x, y, rng.next() < 0.5 ? -1 : 1);
+      if (crab) {
+        b.gem = true;
+        b.frozen = CRAB_DISGUISE_MIN + rng.int(CRAB_DISGUISE_MAX - CRAB_DISGUISE_MIN);
+        b.seed = rng.int(256);
+      }
       b.turnAt = this.tick + 60;
       this.beasts[slot] = b;
       bodyPoints(t, b, this.beastPts[slot]);
@@ -1993,10 +2026,12 @@ export class World {
     const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
     if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
     // (Lying in wait, it sees further: a line on anyone in that reach wakes it.)
-    let best = b.kind === BeastKind.Seeder ? SEEDER_SENSE : b.kind === BeastKind.Nest ? NEST_SENSE : b.kind === BeastKind.Asp ? ASP_SENSE : b.kind === BeastKind.Spider ? (b.frozen > 0 ? CSPIDER_SENSE_FROZEN : CSPIDER_SENSE) : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
+    let best = b.kind === BeastKind.CoralCrab ? CRAB_SENSE : b.kind === BeastKind.Seeder ? SEEDER_SENSE : b.kind === BeastKind.Nest ? NEST_SENSE : b.kind === BeastKind.Asp ? ASP_SENSE : b.kind === BeastKind.Spider ? (b.frozen > 0 ? CSPIDER_SENSE_FROZEN : CSPIDER_SENSE) : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
     let id = -1;
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
+      // (A coral crab leaves the possessed be: they're the coral's own.)
+      if (b.kind === BeastKind.CoralCrab && p.possessed) continue;
       const d = Math.hypot(p.cx - hx, p.cy - hy);
       if (d < best && this.lineClear(hx, hy, p.cx, p.cy)) {
         best = d;
@@ -2418,6 +2453,156 @@ export class World {
         b.lunge = 0;
         break;
       }
+    }
+  }
+
+  /**
+   * One tick of a coral crab (wildlife.ts CRAB_*). At rest it's folded up
+   * as gem crystals; a clone near enough (and not one of the possessed),
+   * it springs: it scurries along the surfaces at them, lunges through the
+   * air from further off, and the one it reaches it lodges onto and rides,
+   * biting, until one of them is dead (the bite that kills possesses them:
+   * World.damage). Off them (they climbed into a vehicle), it drops.
+   */
+  private stepCrab(k: number, b: Beast): void {
+    const t = this.terrain;
+    const rng = this.beastRng;
+    const pts = this.beastPts[k];
+    // Lodged on someone: it goes where they go, biting.
+    if (b.hold >= 0) {
+      const q = this.players[b.hold];
+      if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0 || q.possessed) {
+        b.hold = -1;
+        b.x = Math.round(pts[0]);
+        b.y = Math.round(pts[1]);
+        b.attached = false;
+        b.vy = 0;
+        b.trail.length = 0;
+        pushTrail(b);
+        bodyPoints(t, b, pts);
+        return;
+      }
+      pts[0] = q.cx + b.coilX;
+      pts[1] = q.cy + b.coilY;
+      pts[2] = pts[0] - b.side * 2;
+      pts[3] = pts[1] + 1;
+      if (b.coilCd > 0) b.coilCd--;
+      else {
+        b.coilCd = CRAB_BITE_CD;
+        // (Shaking them as it bites.)
+        q.body.vx += this.rng.range(-25, 25);
+        this.damage(q, CRAB_BITE, NO_OWNER, W_CRAB);
+      }
+      return;
+    }
+    const hx = pts.length ? pts[0] : b.x;
+    const hy = pts.length ? pts[1] : b.y;
+    if ((this.tick + k) % 6 === 0) {
+      const before = b.target;
+      b.target = this.beastTarget(b, hx, hy);
+      if (b.target >= 0 && before < 0) b.turnAt = this.tick;
+    }
+    let tgt = b.target >= 0 ? this.players[b.target] : null;
+    if (tgt && (!tgt.alive || tgt.tank >= 0 || tgt.possessed)) {
+      tgt = null;
+      b.target = -1;
+    }
+    const dist = tgt ? Math.hypot(tgt.cx - hx, tgt.cy - hy) : Infinity;
+    // Folded up as gem crystals: it holds still until someone comes near (or its time is up).
+    if (b.gem) {
+      if (tgt && dist < CRAB_TRIGGER) {
+        b.gem = false;
+        b.frozen = 0;
+        b.turnAt = this.tick;
+      } else if (--b.frozen <= 0) {
+        b.gem = false;
+        b.frozen = 0;
+      }
+      bodyPoints(t, b, pts);
+      return;
+    }
+    const pace = sprintTick(b, !!tgt, rng.next());
+    // The lunge: through the air at them, from further off than it can just scurry to.
+    if (tgt && b.attached && b.flung === 0 && b.flingCd === 0 && dist > 20 && dist < FLING_MAX && rng.next() < 0.2 && this.lineClear(hx, hy, tgt.cx, tgt.cy)) {
+      b.fx = b.x + 0.5;
+      b.fy = b.y + 0.5;
+      fling(b, b.fx, b.fy, tgt.cx, tgt.cy, 1.4);
+      b.flingCd = 45;
+      b.attached = false;
+    }
+    // Nothing about: wander a while, then fold up as gems again (on a floor).
+    if (!tgt && b.attached && --b.wander <= 0 && onFloor(t, b)) {
+      b.gem = true;
+      b.frozen = CRAB_DISGUISE_MIN + rng.int(CRAB_DISGUISE_MAX - CRAB_DISGUISE_MIN);
+      b.wander = CRAB_WANDER + rng.int(CRAB_WANDER);
+      bodyPoints(t, b, pts);
+      return;
+    }
+    if (b.flung > 0) {
+      flingStep(t, b, DT);
+      if (b.y >= WORLD_H - 14) {
+        this.killBeast(k);
+        return;
+      }
+    } else if (!b.attached) {
+      const y0 = b.y;
+      fallStep(t, b, DT, GRAVITY);
+      for (let y = y0 + 1; y <= b.y; y++) {
+        const yy = b.y;
+        b.y = y;
+        pushTrail(b);
+        b.y = yy;
+      }
+      if (b.y >= WORLD_H - 14) {
+        this.killBeast(k);
+        return;
+      }
+    } else {
+      if (this.tick >= b.turnAt) {
+        if (tgt) {
+          const ahead = this.probeCrawl(b, false, tgt.cx, tgt.cy);
+          const back = this.probeCrawl(b, true, tgt.cx, tgt.cy);
+          if (back < ahead - 4) turnRound(b);
+          b.turnAt = this.tick + 8;
+        } else {
+          if (rng.next() < 0.3) turnRound(b);
+          b.turnAt = this.tick + 60 + rng.int(120);
+        }
+      }
+      if (Math.abs(b.x - b.lastX) + Math.abs(b.y - b.lastY) > 4) {
+        b.lastX = b.x;
+        b.lastY = b.y;
+        b.still = 0;
+      } else if (++b.still > 45) {
+        turnRound(b);
+        b.still = 0;
+      }
+      b.owed += (tgt ? CRAB_HUNT * pace : CRAB_CRAWL) * DT;
+      while (b.owed >= 1 && b.attached) {
+        b.owed--;
+        crawlStep(t, b);
+        pushTrail(b);
+        if (tgt) resetLoop(b);
+        else if (loopWatch(t, b)) {
+          b.attached = false;
+          b.vy = 30;
+          break;
+        }
+        if (tgt && Math.hypot(tgt.cx - b.x, tgt.cy - b.y) < CRAB_LATCH_R) break;
+      }
+    }
+    bodyPoints(t, b, pts);
+    // The one it reaches (scurrying or mid-lunge), it lodges onto.
+    for (const p of this.players) {
+      if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || p.possessed || this.shielded(p)) continue;
+      if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > CRAB_LATCH_R + 3) continue;
+      b.hold = p.id;
+      b.flung = 0;
+      b.vx = b.vy = 0;
+      b.coilX = Math.max(-3, Math.min(3, pts[0] - p.cx));
+      b.coilY = Math.max(-6, Math.min(4, pts[1] - p.cy));
+      b.coilCd = 4;
+      break;
     }
   }
 
@@ -3890,6 +4075,66 @@ export class World {
   }
 
   /**
+   * A clone a coral crab (or a possessed clone's claws) just killed rises
+   * again possessed: whole once more (every limb back), at full health,
+   * four times as tough, on the coral's side against everyone else. The
+   * crab that did it is in it now (gone from the world till it's killed).
+   * It counts as a death, and a kill for the clone whose claws did it.
+   */
+  private possess(p: Player, by: number): void {
+    p.possessed = true;
+    p.deaths++;
+    const killer = by < MAX_PLAYERS ? this.players[by] : null;
+    if (killer && killer !== p) killer.kills++;
+    resetBody(p.parts, p.parts.cls, p.parts.faction);
+    p.parts.tough *= POSSESSED_TOUGH;
+    mobility(p.parts.mask, p.mob, p.parts.cls);
+    p.body.legs = p.mob.legs;
+    p.body.jet = p.mob.jet;
+    p.hp = ACTOR_MAX_HP;
+    p.venom = 0;
+    p.coral.fill(0);
+    p.clawCd = CLAW_CD;
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const b = this.beasts[k];
+      if (b && b.kind === BeastKind.CoralCrab && b.hold === p.id) this.killBeast(k);
+    }
+    this.possessedRev++;
+  }
+
+  /** A coral crab crawls out at (x, y) (out of a possessed clone killed), angry at whoever did it. */
+  private dropCrab(x: number, y: number, by: number): void {
+    const slot = this.beasts.indexOf(null);
+    if (slot < 0) return;
+    const b = newBeast(this.terrain, BeastKind.CoralCrab, Math.round(x), Math.round(y), this.rng.next() < 0.5 ? -1 : 1);
+    b.attached = false;
+    b.seed = this.rng.int(256);
+    b.turnAt = this.tick;
+    if (by < MAX_PLAYERS && this.players[by]) b.hurtBy = by;
+    this.beasts[slot] = b;
+    bodyPoints(this.terrain, b, this.beastPts[slot]);
+  }
+
+  /** The possessed: their claws strike whoever (not possessed) they're up against. */
+  private stepPossessed(): void {
+    for (const p of this.players) {
+      if (!p || !p.alive || !p.possessed || p.tank >= 0 || p.pilot >= 0) continue;
+      if (p.clawCd > 0) {
+        p.clawCd--;
+        continue;
+      }
+      for (const q of this.players) {
+        if (!q || !q.alive || q.possessed || q.tank >= 0 || this.shielded(q)) continue;
+        if (Math.abs(q.cx - p.cx) > ACTOR_W + CLAW_R || Math.abs(q.cy - p.cy) > ACTOR_H * 0.7) continue;
+        this.damage(q, CLAW, p.id, W_CLAW);
+        q.body.vx += Math.sign(q.cx - p.cx || 1) * 60;
+        p.clawCd = CLAW_CD;
+        break;
+      }
+    }
+  }
+
+  /**
    * The strike lands at (x, y): the crater (the hardest rock too, near the
    * middle), the heat and the blast (certain death close in; out to
    * STONE_HEAT_R, falling off, and much less behind solid ground), every
@@ -4783,10 +5028,12 @@ export class World {
    * if a vital part went.
    */
   private applyStrike(p: Player, res: StrikeResult, attacker: number, weapon: number, hx: number, hy: number): void {
+    // (The possessed live on with their head or body blown away: only their health running out ends them.)
+    const vital = res.vital && !p.possessed;
     if (res.detached.length) {
       const b = p.body;
       for (const part of res.detached) {
-        if (part === Part.Torso && res.vital) continue; // the whole clone gibs instead
+        if (part === Part.Torso && vital) continue; // the whole clone gibs instead
         const w = this.tmp.reset();
         w.u8(R_DETACH);
         w.u8(p.id);
@@ -4805,7 +5052,7 @@ export class World {
       b.legs = p.mob.legs;
       b.jet = p.mob.jet;
     }
-    this.damage(p, res.hp, attacker, weapon, false, res.vital);
+    this.damage(p, res.hp, attacker, weapon, false, vital);
   }
 
   /**
@@ -4831,9 +5078,21 @@ export class World {
       this.hits.push({ bytes: w.finish(), id: 0, x: victim.cx, y: victim.cy });
     }
     if (victim.hp > 0 && !fatal) return;
+    // Killed by a coral crab's bite or a possessed clone's claws: it doesn't stay dead. It rises possessed.
+    if ((weapon === W_CRAB || weapon === W_CLAW) && !victim.possessed) {
+      this.possess(victim, attacker);
+      return;
+    }
     victim.alive = false;
     victim.hp = 0;
     victim.respawn = RESPAWN_TICKS;
+    // Possessed, killed: the crab in it crawls out.
+    const wasPossessed = victim.possessed;
+    if (wasPossessed) {
+      victim.possessed = false;
+      this.possessedRev++;
+      this.dropCrab(victim.cx, victim.cy, attacker);
+    }
     // Dead with the nest in it (stung, and not yet over it): the nest takes the corpse.
     if (victim.coral.some((c) => c > 0) || weapon === W_SEED) this.corpseNest(victim);
     victim.coral.fill(0);
@@ -4864,7 +5123,7 @@ export class World {
     const killer = this.players[attacker];
     if (killer && killer !== victim) {
       // (One of our own: no kill, a point off.)
-      if (killer.team !== Team.None && killer.team === victim.team) killer.teamKills++;
+      if (killer.team !== Team.None && killer.team === victim.team && !killer.possessed && !wasPossessed) killer.teamKills++;
       else {
         killer.kills++;
         killer.waveKills++;
@@ -5779,6 +6038,10 @@ export class World {
     b.fuel = 100;
     p.venom = 0;
     p.coral.fill(0);
+    if (p.possessed) {
+      p.possessed = false;
+      this.possessedRev++;
+    }
     // Every clone rolls a class (scout, medium or heavy) and the mercenary
     // vendor that supplied it (Guild-Tech, Rust Nomads, Synth Legion).
     resetBody(p.parts, rollClass(this.rng.next()), rollFaction(this.rng.next()));
@@ -7795,6 +8058,7 @@ export class World {
     this.stepMines();
     this.stepBurners();
     this.stepCharges();
+    this.stepPossessed();
     this.stepEvac();
     this.rebuildGrid();
     // Bring the distance field up to date with this tick's terrain edits (only
@@ -8071,6 +8335,13 @@ export class World {
           w.u16(clampU16(f.y + Y_BIAS));
           w.u16(Math.min(FOOT_FLARE - 1, f.life) | (f.flaredAt === this.tick ? FOOT_FLARE : 0));
         }
+      }
+      if (p.possessedSeen !== this.possessedRev) {
+        p.possessedSeen = this.possessedRev;
+        const ids = this.players.filter((q): q is Player => !!q && q.possessed).map((q) => q.id);
+        w.u8(R_POSSESSED);
+        w.u8(ids.length);
+        for (const id of ids) w.u8(id);
       }
       if (this.charges.length || p.chargesSeen !== this.chargesRev) {
         p.chargesSeen = this.chargesRev;

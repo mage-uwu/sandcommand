@@ -31,11 +31,14 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
+import { drawCoralCrab, drawPossessedMark } from './crab-art.ts';
 import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
 import { BEAST_BUILD, BeastKind, CORAL_LIMBS } from '../shared/wildlife.ts';
+/** A possessed clone's coral: well grown on every limb. */
+const POSSESSED_CORAL = CORAL_LIMBS.map(() => 0.7);
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -444,7 +447,10 @@ export class Renderer {
       else if (v.kind === BeastKind.Web) drawWebNest(ctx, game.terrain, pts[0], pts[1], v.seed, Math.round(v.lift * 255), now);
       else if (v.kind === BeastKind.Seeder) drawSeeder(ctx, pts, v.seed, now);
       else if (v.kind === BeastKind.Nest) drawNest(ctx, game.terrain, pts[0], pts[1], v.seed, v.hp, now);
-      else if (v.kind === BeastKind.Asp) {
+      else if (v.kind === BeastKind.CoralCrab) {
+        if (v.gem) drawAspGem(ctx, game.terrain, gemOf, pts, v.seed, now);
+        else drawCoralCrab(ctx, game.terrain, pts, v.seed, lift, v.coiled, now);
+      } else if (v.kind === BeastKind.Asp) {
         if (v.gem) drawAspGem(ctx, game.terrain, gemOf, pts, v.seed, now);
         else drawAsp(ctx, game.terrain, pts, v.seed, lift, now);
       } else drawMillipede(ctx, game.terrain, this.groundColor, pts, v.seed, lift, v.frozen, now);
@@ -562,6 +568,11 @@ export class Renderer {
       const ox = part === Part.LegF ? -out : out;
       drawCoralGrowth(ctx, ix + rx0, iy + ry0, ix + rx1, iy + ry1, ox, g, seed, now);
     }
+  }
+  /** A possessed clone: coral all over its limbs, the crab on its back, its eyes glowing coral. */
+  private drawPossessed(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, id: number, now: number): void {
+    this.drawCoral(ctx, x, y, aim, stance, parts, POSSESSED_CORAL, id, now);
+    if (stance !== Stance.Prone) drawPossessedMark(ctx, x, y + STANCE_DROP[stance], ACTOR_W, Math.cos(aim) < 0, id, now);
   }
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
   private chunkImage = new ImageData(CHUNK, CHUNK);
@@ -1078,6 +1089,7 @@ export class Renderer {
       this.drawActor(ctx, v.x, v.y, aimR, this.fireFlags(game, v.flags, v.weapon, v.id, now), info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id, v.hp);
       const coral = game.coralIn.get(v.id);
       if (coral) this.drawCoral(ctx, v.x, v.y, aimR, v.stance, v.parts, coral, v.id, now);
+      if (game.possessedIds.has(v.id)) this.drawPossessed(ctx, v.x, v.y, aimR, v.stance, v.parts, v.id, now);
       // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
       if (v.weapon === WeaponId.Laser && v.flags & F_FIRING) {
         const sh = shoulderAt(v.x, v.y, v.stance, Math.cos(aimR) < 0, this.shPt);
@@ -1109,6 +1121,7 @@ export class Renderer {
       game.myLeft = Math.cos(myAim) < 0;
       this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId, game.hp);
       if (game.myCoral.length) this.drawCoral(ctx, selfX, selfY, myAim, b.stance, game.parts, game.myCoral, game.myId, now);
+      if (game.possessedIds.has(game.myId)) this.drawPossessed(ctx, selfX, selfY, myAim, b.stance, game.parts, game.myId, now);
       if (game.laserCharge > 0) {
         const m = WEAPONS[WeaponId.Laser].muzzle;
         this.drawLaserCharge(ctx, mySh.x + Math.cos(myAim) * m, mySh.y + Math.sin(myAim) * m, game.laserCharge / LASER_MAX, now);
@@ -1579,10 +1592,12 @@ export class Renderer {
       const info = game.players.get(v.id);
       const sx = offX + (v.x + ACTOR_W / 2) * z;
       const sy = offY + v.y * z - 8 * dpr;
-      const tag = game.isKing(v.id) ? `♛ ${info?.name ?? '?'}` : (info?.name ?? '?');
+      const taken = game.possessedIds.has(v.id);
+      const tag = taken ? `✺ ${info?.name ?? '?'}` : game.isKing(v.id) ? `♛ ${info?.name ?? '?'}` : (info?.name ?? '?');
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillText(tag, sx + dpr, sy + dpr);
-      ctx.fillStyle = info?.color ?? '#ccc';
+      // (The possessed in the coral's pink, whoever's side they were on.)
+      ctx.fillStyle = taken ? '#ff7aa0' : (info?.color ?? '#ccc');
       ctx.fillText(tag, sx, sy);
       // A human (not a bot): a tiny star over their name.
       if (info && !info.bot) drawStar(ctx, sx, sy - 11 * dpr, 3.2 * dpr);
@@ -3343,6 +3358,12 @@ export class Renderer {
       g.addColorStop(1, `rgba(120,0,20,${Math.min(0.4, 0.1 + venom / 300) * pulse})`);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
+    }
+    // Possessed: the crab has us. We fight on for the coral, against everyone else.
+    if (game.possessedIds.has(game.myId)) {
+      const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 260);
+      ctx.fillStyle = `rgba(255,110,150,${pulse})`;
+      ctx.fillText('POSSESSED · claws out: get close and finish them', 14 * s, 166 * s);
     }
     // A seeder's nest growing in our limbs: which, and how far along (full grown, it bursts out, or withers).
     const coral = game.myCoral;

@@ -943,6 +943,33 @@ droid's (`src/client/spider-art.ts`).
 - About two in five of the crawlers that aren't asps are cave spiders (a
   pack counts as two crawlers).
 
+**The coral crab** is the horror of the caves. It's a squat, spiderlike
+thing about half a cave spider's size. Its shell is crusted in pink coral
+and studded with gem chips, it has eight thin jointed legs and two hooked
+claws.
+- **At rest it's a gem cluster.** Folded up on a floor (for 40 seconds to
+  three minutes), it is drawn exactly as a GEMM crystal deposit is. A
+  clone within 110 cells wakes it.
+- **It only scurries and lunges.** It runs along the surfaces at you
+  (120 cells/s) and leaps at you through the air from further off.
+- **It lodges onto you.** The one it reaches it rides wherever they go,
+  biting (8 every 0.4 s) until one of them is dead. Shoot it off (it's
+  surprisingly durable: 420 hit points) or get into a vehicle.
+- **If it kills you, you're possessed.** You rise again at once, whole
+  and at full health, on the coral's side: every possessed clone is on it
+  together, against everyone else, whatever team they were on. The kill
+  counts as a death. The crab is inside you now, and shows as a coral hump
+  on your back, coral on your limbs, coral-pink eyes and a pink ✺ name tag.
+  - **Four times as tough**, and you live on with your head or body blown
+    away: only your health running out ends you.
+  - **You keep your guns**, but your claws are what spreads it. Touch
+    someone who isn't possessed and you claw them (28 every half second,
+    and a shove). A clone killed by claws rises possessed too. Possessed
+    bots close in to finish the fight with their claws rather than shoot.
+  - **Killed, a possessed clone still drops a crab.** It crawls out of
+    the body, angry at whoever did it.
+- About one in five crawlers is a coral crab.
+
 **Seeders** are small fliers, each about the size of a clone's head: a
 raven's glossy black head and pale beak, a wasp's black-and-gold striped
 abdomen with its sting, and a butterfly's painted wings (black rims, an

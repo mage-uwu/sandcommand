@@ -139,6 +139,8 @@ export const GIB_INORGANIC = 0x80;
 /** Owner byte for particles nobody in particular caused. */
 export const NO_OWNER = 255;
 /** Kill-feed weapon codes for particle damage (projectile kinds use 0..2). */
+export const W_CLAW = 234; // a possessed clone's claws
+export const W_CRAB = 235; // a coral crab's bite
 export const W_SPIDER = 236; // a cave spider's bite
 export const W_DRAGON = 237; // a dragon's jaws and its battering body
 export const W_STONEBURNER = 238; // the Stoneburner's strike: its flash, blast and molten core
