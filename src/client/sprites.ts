@@ -456,6 +456,22 @@ function evacGrid(open: boolean): Grid {
   }
   for (let y = H - 4; y < H; y++) for (let x = 6 - (y - H + 4); x < 12 + (y - H + 4); x++) g[y][x] = 'D';
   g[0][8] = g[0][9] = 'R'; // beacon
+  // Ceramic heat-shield tiles over the nose cone (a checker of tile and grout), and on the fins' tips.
+  for (let y = 1; y < 10; y++) {
+    for (let x = 0; x < W; x++) {
+      if (g[y][x] !== 'W' && g[y][x] !== 'w' && g[y][x] !== 'v') continue;
+      // (Tiles three cells square, grout between; in shade on the right; a few scorched by re-entry.)
+      const grout = y % 3 === 0 || x % 3 === 0;
+      const scorched = ((x * 7 + y * 13) % 11 === 0) && !grout;
+      g[y][x] = scorched ? 'q' : x >= 11 ? (grout ? 'v' : 'd') : grout ? 'c' : 'C';
+    }
+  }
+  for (let y = H - 5; y < H - 2; y++) {
+    if (g[y][0] === 'r') g[y][0] = 'C';
+    if (g[y][1] === 'r') g[y][1] = 'C';
+    if (g[y][W - 1] === 'r') g[y][W - 1] = 'C';
+    if (g[y][W - 2] === 'r') g[y][W - 2] = 'C';
+  }
   // Rust bleeding down the plating from the bands and the rivet seams (not over the hatch or the windows).
   const streaks: [number, number, number][] = [
     [3, 14, 6],
@@ -490,69 +506,56 @@ const EVAC_PAL: Record<string, number> = {
   R: 0xff3020,
   o: 0xb0602a,
   p: 0x6a3418,
+  C: 0xddd6c4, // ceramic tile
+  c: 0xbcb4a2, // ceramic, the grout between tiles
+  d: 0x948c7c, // ceramic in shade
+  q: 0x5a4c3e, // ceramic scorched
 };
 
 /** A king's crown as worn (5x3, sits on the head's top row): gold spikes, a band, a red jewel. */
 export const CROWN: Grid = ['Y.Y.Y', 'YYYYY', 'yYrYy'];
 
 // Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin), centred on
-// the rocket's centre of mass. Soviet-era surplus gone to rust: drab olive
-// plating worn through at the edges, a rusty red nose, rivet lines, a red
-// star, rust bleeding down from the seams, sooted fins, a scorched nozzle;
-// its passenger's team band round it (grey when empty).
+// the rocket's centre of mass. The extraction rocket's design in little:
+// Soviet surplus, its nose cone and heat-shield ring tiled in pale ceramic,
+// a red beacon on top, drab plating lit from the left, dark red bands, a
+// red star, rust bleeding down it, rusty fins with ceramic tips, a scorched
+// nozzle; its passenger's team band round it (grey when empty).
 const CRAFT_SPRITE_W = 14;
 const CRAFT_SPRITE_H = 28;
 const CRAFT: Grid = [
   '......KK......',
-  '.....KrRK.....',
-  '.....KRoK.....',
-  '....KLHHhK....',
-  '....KLHWhK....',
-  '...KLHHHHhK...',
-  '...KLVVHHhK...',
-  '...KLVvHRhK...',
-  '...KLHHHRhK...',
+  '.....KRRK.....',
+  '.....KCdK.....',
+  '....KCCcdK....',
+  '....KcCCdK....',
+  '...KCCcCqdK...',
+  '...KYYYYYyK...',
+  '...KWWwwovK...',
+  '...KWBwwBvK...',
   '...KTTTTTTK...',
   '...KttttttK...',
-  '...KWHHHHWK...',
-  '...KLHHSHhK...',
-  '...KLSSSSSK...',
-  '...KLHSSShK...',
-  '...KLHSHShK...',
-  '...KLHRohhK...',
-  '...KWHHHHWK...',
-  '...KTTTTTTK...',
-  '..KKLHHRHhKK..',
-  '.KgKLHHrohKgK.',
-  '.KgKWHHHHWKgK.',
-  'KgGKLHRHHhKGgK',
-  'KGGKKhRrhKKGGK',
-  'KrK.KDDDDK.KrK',
+  '...KWWwwwvK...',
+  '...KWWwSwvK...',
+  '...KWSSSSSK...',
+  '...KWwSSSvK...',
+  '...KWwSwSvK...',
+  '...KWWwowvK...',
+  '...KWWwpwvK...',
+  '...KYYYYYyK...',
+  '..KKCCcCCdKK..',
+  '.KrKcCqcCdKrK.',
+  '.KrKWWwwwvKrK.',
+  'KrrKWWwowvKrrK',
+  'KrrKKwwwvKKrrK',
+  'KCK.KDDDDK.KCK',
   'KK..KDMMDK..KK',
   '....KDDDDK....',
   '.....KKKK.....',
 ];
-/** The drop rocket's colours: worn Soviet drab, rust, a red star; `team` on its band. */
+/** The drop rocket's colours: the extraction rocket's (EVAC_PAL), its passenger's `team` on the band. */
 function craftPalette(team: number): Record<string, number> {
-  return {
-    K: 0x15120f, // outline
-    L: 0x878c5e, // drab plating, worn edge
-    H: 0x5b6240, // drab plating
-    h: 0x3c4129, // drab, shaded
-    W: 0xb4aa8c, // rivet
-    V: 0x5e8a8c, // porthole
-    v: 0x223c40, // porthole, dark
-    R: 0x9a4a22, // rust
-    r: 0x5e2a14, // rust, dark
-    o: 0xc06a2c, // rust, fresh
-    S: 0xc4261a, // red star
-    T: team,
-    t: shade(team, 0.62),
-    G: 0x3f3e30, // fins, sooted
-    g: 0x5e5a44, // fins, worn
-    D: 0x2a2420, // nozzle
-    M: 0x7a2e12, // nozzle, scorched hot
-  };
+  return { ...EVAC_PAL, S: 0xc4261a, T: team, t: shade(team, 0.62), M: 0x7a2e12 };
 }
 
 function shade(rgb: number, k: number): number {

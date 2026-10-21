@@ -2756,12 +2756,17 @@ the same seed. Explosive and high-overkill deaths scatter harder.
 
 Every rocket is gritty Soviet-era surplus in pixel art, drab olive gone to
 rust:
-- **The drop rocket** (`CRAFT` in `src/client/sprites.ts`) has worn plating
-  with rivet lines, a rusty red nose and a red star. Rust bleeds down from
-  its seams, its fins are sooted and its nozzle scorched. Its passenger's
-  team colour runs round it in a band (grey when it's empty).
-- **The extraction rocket** has faded drab plating, dark red bands, rust
-  running down it from the bands and seams, and warm-lit portholes.
+- **The extraction rocket** has faded drab plating lit from the left, dark
+  red bands, rust running down it from the bands and seams, and warm-lit
+  portholes. Its nose cone is tiled in pale **ceramic** heat-shield tiles,
+  three cells square with grout lines between, in shade on its right side,
+  and a few scorched dark by re-entry. Its fins have ceramic tips.
+- **The drop rocket** (`CRAFT` in `src/client/sprites.ts`) is the same
+  design in little, in the same colours. It has a ceramic nose cone and a
+  ceramic heat-shield ring above its fins, a red beacon on top, dark red
+  bands, portholes, a red star, rust streaks, rusty fins with ceramic tips
+  and a scorched nozzle. Its passenger's team colour runs round it in a
+  band (grey when it's empty).
 - **In flight** (`src/client/rocket-art.ts`), the rockets are tiny grids
   drawn a cell at a time and turned with their heading, a sputtering flame
   out the tail:
