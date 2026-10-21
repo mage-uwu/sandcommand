@@ -388,7 +388,8 @@ export class BotBrain {
       let best = Infinity;
       for (const o of world.players) {
         if (!o || o === p || !o.alive || !world.hostile(p, o)) continue;
-        const d = (o.cx - p.cx) ** 2 + (o.cy - p.cy) ** 2;
+        // (The possessed are one mind: whoever any of the hive can see, they all go for.)
+        const d = ((o.cx - p.cx) ** 2 + (o.cy - p.cy) ** 2) * (p.possessed && world.hiveSees(o.id) ? 0.1 : 1);
         if (d < best) {
           best = d;
           this.target = o.id;

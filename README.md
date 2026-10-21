@@ -962,12 +962,22 @@ claws.
   on your back, coral on your limbs, coral-pink eyes and a pink ✺ name tag.
   - **Four times as tough**, and you live on with your head or body blown
     away: only your health running out ends you.
+  - **You heal fast:** a second after the last hit, back to full at 50
+    health a second. Not once you're in pieces, though: with three of
+    head, body, arms and legs gone, you don't heal at all.
   - **You keep your guns**, but your claws are what spreads it. Touch
     someone who isn't possessed and you claw them (28 every half second,
     and a shove). A clone killed by claws rises possessed too. Possessed
     bots close in to finish the fight with their claws rather than shoot.
   - **Killed, a possessed clone still drops a crab.** It crawls out of
     the body, angry at whoever did it.
+- **One mind.** Every coral crab and every possessed clone shares one
+  view of the world. Whoever any of them can see (within 260 cells), they
+  all know about at once. Crabs come for you from up to 600 cells away,
+  waking from their gem rest to do it. Possessed bots go for the ones the
+  hive has seen first, and a possessed player sees the hive's sightings
+  marked on screen (the same brackets and edge arrows as a dropship's
+  spotting).
 - About one in five crawlers is a coral crab.
 
 **Seeders** are small fliers, each about the size of a clone's head: a

@@ -265,6 +265,22 @@ export const POSSESSED_TOUGH = 4;
 export const CLAW = 28;
 export const CLAW_CD = 14;
 export const CLAW_R = 4;
+/**
+ * The hive: every coral crab and every possessed clone is one mind. What any
+ * of them sees (in sight, within HIVE_SIGHT cells) they all know at once, and
+ * crabs come for it from up to CRAB_HIVE_REACH away (waking from their gem
+ * rest to do it).
+ */
+export const HIVE_SIGHT = 260;
+export const CRAB_HIVE_REACH = 600;
+/**
+ * The possessed heal fast: POSSESSED_REGEN health a second, from
+ * POSSESSED_REGEN_DELAY ticks after they were last hurt, back to full;
+ * unless they're in pieces (POSSESSED_PIECES of head, body and limbs gone).
+ */
+export const POSSESSED_REGEN = 50;
+export const POSSESSED_REGEN_DELAY = 30;
+export const POSSESSED_PIECES = 3;
 export const WEB_LIMBS = 24;
 /** Lying in wait (ticks: 10 to 60 s), and wandering between. */
 export const CSPIDER_FREEZE_MIN = 30 * 10;

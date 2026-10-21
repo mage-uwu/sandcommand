@@ -4,7 +4,7 @@ import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, ACTOR_MAX_HP } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
 import { NO_OWNER, W_CLAW, W_CRAB } from '../src/shared/particles.ts';
-import { BEAST_BUILD, BeastKind, CRAB_HP, CSPIDER_R, POSSESSED_TOUGH, bodyPoints, crawler, newBeast } from '../src/shared/wildlife.ts';
+import { BEAST_BUILD, BeastKind, CRAB_HP, CRAB_HIVE_REACH, CRAB_TRIGGER, CSPIDER_R, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, bodyPoints, crawler, newBeast } from '../src/shared/wildlife.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
 import { deliverAll } from './helpers.ts';
@@ -152,5 +152,49 @@ describe('the coral crab', () => {
     pump();
     expect([...game.possessedIds]).toEqual([ps[1].id]);
     expect(game.feed.some((f) => f.text.includes('possessed by a coral crab'))).toBe(true);
+  });
+
+  it('one mind: what a possessed clone sees, the crabs know, and a crab far off wakes from its gem rest and comes', () => {
+    const { world, ps } = cave(2);
+    const [host, prey] = ps;
+    hidden(world).damage(host, 500, NO_OWNER, W_CRAB);
+    host.body.x = 1100;
+    prey.body.x = 1180;
+    // A crab at rest down the tunnel: too far to sense the prey itself, in the hive's reach.
+    const b = putCrab(world, 900, 440);
+    b.gem = true;
+    b.frozen = 1e6;
+    const d = Math.abs(world.beastPts[1][0] - prey.cx);
+    expect(d).toBeGreaterThan(CRAB_TRIGGER);
+    expect(d).toBeLessThan(CRAB_HIVE_REACH);
+    for (let k = 0; k < 12; k++) {
+      host.body.x = 1100;
+      prey.body.x = 1180;
+      world.step();
+    }
+    expect(world.hiveSees(prey.id)).toBe(true);
+    expect(world.hiveSees(host.id)).toBe(false);
+    expect(b.gem).toBe(false);
+    expect(b.target).toBe(prey.id);
+  });
+
+  it('the possessed heal back to full fast, a moment after the last hurt; blown to pieces, they no longer do', () => {
+    const { world, ps } = cave();
+    const p = ps[0];
+    hidden(world).damage(p, 500, NO_OWNER, W_CRAB);
+    hidden(world).damage(p, 300, NO_OWNER, 0);
+    const low = p.hp;
+    expect(low).toBeLessThan(ACTOR_MAX_HP * 0.5);
+    for (let k = 0; k < POSSESSED_REGEN_DELAY - 2; k++) world.step();
+    expect(p.hp).toBe(low);
+    for (let k = 0; k < 30 * 3; k++) world.step();
+    expect(p.hp).toBe(ACTOR_MAX_HP);
+    // In pieces: arms and a leg gone.
+    p.parts.mask &= ~((1 << Part.GunArm) | (1 << Part.OffArm) | (1 << Part.LegB));
+    hidden(world).damage(p, 300, NO_OWNER, 0);
+    const torn = p.hp;
+    for (let k = 0; k < 30 * 4; k++) world.step();
+    // (Not healing: if anything, bleeding from its stumps.)
+    expect(p.hp).toBeLessThanOrEqual(torn);
   });
 });

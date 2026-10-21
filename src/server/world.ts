@@ -248,7 +248,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { CLAW, CLAW_CD, CLAW_R, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
+import { CLAW, CLAW_CD, CLAW_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
 import { STICKY_FUSE, STICKY_MAX_FLIGHT, STICKY_ON_BEAST, STICKY_ON_CLONE, STICKY_ON_VEHICLE, STICKY_THROW, stickyCore, STICKY_CORE_R } from '../shared/sticky.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, PROJ_STICKY, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
@@ -570,6 +570,8 @@ export class Player {
   possessed = false;
   /** Ticks to its claws' next strike (possessed). */
   clawCd = 0;
+  /** The tick it was last hurt (the possessed heal only a while after). */
+  hurtTick = -1e9;
   /** Clones of the other side (or anyone, with no sides) killed. */
   kills = 0;
   /** Creatures killed (anything wild but a web). */
@@ -660,6 +662,8 @@ export class World {
   readonly ships: (Ship | null)[] = new Array(MAX_SHIPS).fill(null);
   /** Enemies spotted from the air, per side (spotKey): clone id -> the tick the sighting goes stale. */
   readonly spots = new Map<number, Map<number, number>>();
+  /** Scratch: the hive's eyes this sweep (x, y pairs). */
+  private readonly hiveEyes: number[] = [];
   /** Drop tanks into each wave (round rooms; sandbox rooms only on request). */
   readonly tankDrops: boolean;
   private readonly tankMz = { x: 0, y: 0, a: 0 };
@@ -2038,6 +2042,22 @@ export class World {
         id = p.id;
       }
     }
+    // A coral crab with nobody in sight: whoever the hive knows of, nearest, from further off.
+    if (id < 0 && b.kind === BeastKind.CoralCrab) {
+      const seen = this.spots.get(HIVE_KEY);
+      if (seen) {
+        best = CRAB_HIVE_REACH;
+        for (const [pid, until] of seen) {
+          const p = this.players[pid];
+          if (until <= this.tick || !p || !p.alive || p.tank >= 0 || p.pilot >= 0 || p.possessed) continue;
+          const d = Math.hypot(p.cx - hx, p.cy - hy);
+          if (d < best) {
+            best = d;
+            id = p.id;
+          }
+        }
+      }
+    }
     return id;
   }
 
@@ -2510,7 +2530,8 @@ export class World {
     const dist = tgt ? Math.hypot(tgt.cx - hx, tgt.cy - hy) : Infinity;
     // Folded up as gem crystals: it holds still until someone comes near (or its time is up).
     if (b.gem) {
-      if (tgt && dist < CRAB_TRIGGER) {
+      // (Near, or one the hive knows of: the whole swarm stirs.)
+      if (tgt && (dist < CRAB_TRIGGER || this.hiveSees(tgt.id))) {
         b.gem = false;
         b.frozen = 0;
         b.turnAt = this.tick;
@@ -4118,7 +4139,10 @@ export class World {
   /** The possessed: their claws strike whoever (not possessed) they're up against. */
   private stepPossessed(): void {
     for (const p of this.players) {
-      if (!p || !p.alive || !p.possessed || p.tank >= 0 || p.pilot >= 0) continue;
+      if (!p || !p.alive || !p.possessed) continue;
+      // Healing fast, a moment after the last hurt, unless it's been blown to pieces.
+      if (p.hp < ACTOR_MAX_HP && this.tick - p.hurtTick >= POSSESSED_REGEN_DELAY && !inPieces(p.parts.mask)) p.hp = Math.min(ACTOR_MAX_HP, p.hp + POSSESSED_REGEN * DT);
+      if (p.tank >= 0 || p.pilot >= 0) continue;
       if (p.clawCd > 0) {
         p.clawCd--;
         continue;
@@ -5062,6 +5086,7 @@ export class World {
   private damage(victim: Player, amount: number, attacker: number, weapon: number, quiet = false, fatal = false): void {
     if (!victim.alive || (amount <= 0 && !fatal)) return;
     amount /= victim.parts.tough; // (a humanoid clone: HUMANOID_TOUGH)
+    victim.hurtTick = this.tick;
     const overkill = Math.max(0, amount - victim.hp) + (fatal ? 40 : 0);
     victim.hp -= amount;
     if (attacker !== victim.id || victim.lastHitBy === 255) {
@@ -7412,7 +7437,40 @@ export class World {
         m.set(o.id, this.tick + SPOT_TICKS);
       }
     }
+    this.hiveSpotting();
     for (const [, m] of this.spots) for (const [id, until] of m) if (until <= this.tick || !this.players[id]?.alive) m.delete(id);
+  }
+
+  /**
+   * The hive's eyes, every few ticks (with the dropships'): each coral crab
+   * and each possessed clone; whoever (not one of them) any of them can see
+   * within HIVE_SIGHT, they all know about (spots under HIVE_KEY).
+   */
+  private hiveSpotting(): void {
+    const eyes = this.hiveEyes;
+    eyes.length = 0;
+    for (const p of this.players) if (p && p.alive && p.possessed) eyes.push(p.cx, p.cy - 4);
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const b = this.beasts[k];
+      if (b && b.kind === BeastKind.CoralCrab && this.beastPts[k].length) eyes.push(this.beastPts[k][0], this.beastPts[k][1] - 2);
+    }
+    if (!eyes.length) return;
+    let m = this.spots.get(HIVE_KEY);
+    for (const o of this.players) {
+      if (!o || !o.alive || o.possessed) continue;
+      for (let i = 0; i < eyes.length; i += 2) {
+        if (Math.abs(o.cx - eyes[i]) > HIVE_SIGHT || Math.abs(o.cy - eyes[i + 1]) > HIVE_SIGHT) continue;
+        if (Math.hypot(o.cx - eyes[i], o.cy - eyes[i + 1]) > HIVE_SIGHT || !this.clearLine(eyes[i], eyes[i + 1], o.cx, o.cy)) continue;
+        if (!m) this.spots.set(HIVE_KEY, (m = new Map()));
+        m.set(o.id, this.tick + SPOT_TICKS);
+        break;
+      }
+    }
+  }
+
+  /** Does the hive (the coral crabs and the possessed) know where clone `id` is? */
+  hiveSees(id: number): boolean {
+    return (this.spots.get(HIVE_KEY)?.get(id) ?? 0) > this.tick;
   }
 
   /** Terrain-free line of sight (3-cell steps). */
@@ -8679,7 +8737,8 @@ export class World {
       }
 
       // What our side's dropships have spotted (a few times a second).
-      const seen = (this.tick + p.id) % 3 === 0 ? this.spots.get(this.spotKey(p.team, p.id)) : undefined;
+      // (The possessed: what the hive sees.)
+      const seen = (this.tick + p.id) % 3 === 0 ? this.spots.get(p.possessed ? HIVE_KEY : this.spotKey(p.team, p.id)) : undefined;
       if (seen && seen.size > 0) {
         w.u8(R_SPOTTED);
         const at = w.pos;
@@ -9038,3 +9097,10 @@ function clampU16(v: number): number {
 function clampI16(v: number): number {
   return Math.max(-32768, Math.min(32767, Math.round(v)));
 }
+
+/** The hive's sightings (World.spots): its own key, apart from any side's (spotKey). */
+const HIVE_KEY = 999;
+/** The body parts a possessed clone can be blown apart into. */
+const BODY_PIECES = [Part.Head, Part.Torso, Part.GunArm, Part.OffArm, Part.LegB, Part.LegF];
+/** Is a possessed clone with body `mask` blown to pieces (too much of it gone to heal)? */
+const inPieces = (mask: number) => BODY_PIECES.filter((part) => !has(mask, part)).length >= POSSESSED_PIECES;
