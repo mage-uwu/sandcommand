@@ -93,11 +93,15 @@ describe('new guns', () => {
     expect(Array.from(world.projectiles.kind.subarray(0, world.projectiles.n)).includes(ProjKind.Bomblet)).toBe(false);
   });
 
-  it('Gatling: spins up before it fires; a hundred rounds; heavier than the rifle, wilder', () => {
+  it('Gatling: spins up before it fires; a hundred rounds; each lighter than the rifle\'s, but far more of them, wilder', () => {
     const def = WEAPONS[WeaponId.Gatling];
     expect(def.clip).toBe(100);
     expect(def.spread).toBeGreaterThan(WEAPONS[WeaponId.Rifle].spread * 2);
-    expect(PROJ[ProjKind.Heavy].damage).toBeGreaterThan(PROJ[ProjKind.Bullet].damage);
+    // (Strong from its volume and its magazine, not from any one round.)
+    expect(PROJ[ProjKind.Heavy].damage).toBeLessThan(PROJ[ProjKind.Bullet].damage);
+    const rifle = WEAPONS[WeaponId.Rifle];
+    expect(def.rpm * PROJ[ProjKind.Heavy].damage).toBeGreaterThan(rifle.rpm * PROJ[ProjKind.Bullet].damage * 1.5);
+    expect(def.clip! * PROJ[ProjKind.Heavy].damage).toBeGreaterThan(rifle.clip! * PROJ[ProjKind.Bullet].damage * 2);
     const { world, p } = arena();
     const kinds = watch(world, p);
     hold(world, p, BTN_FIRE, WeaponId.Gatling, def.spinUp! - 2);

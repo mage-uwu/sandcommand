@@ -2851,9 +2851,11 @@ Four heavier guns are in the spawn pool too:
   bounce about and pop on a 1.7 s fuse, each a third of a hand grenade
   (splash 30 against 90).
 - **Gatling:** the barrels spin up for half a second before it fires (and
-  spin down when you let go). Then it pours out 100 heavy rounds (24
-  wounds each, against the rifle's 19), loose (spread 0.08 against 0.035),
-  with steady recoil.
+  spin down when you let go). Then it pours out 100 rounds, loose (spread
+  0.08 against 0.035), with steady recoil. Each round is lighter than a
+  rifle's (14 wounds against 19, and no better at getting through armour);
+  its strength is the volume, 1100 rounds a minute, and the size of the
+  magazine.
 - **Laser:** hold the trigger to charge, up to 8 s (a ring round the
   crosshair fills, and the muzzle glows); let go to fire. The beam is
   instant and **goes straight through every soldier in its way at full

@@ -112,8 +112,8 @@ export const PROJ: readonly ProjDef[] = [
   { gravity: 0.25, life: 11, damage: 15, mass: 1, sharp: 0.9, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 0.3 },
   // Grenade-launcher bomblet: bounces about, pops on a short fuse; a third of a hand grenade.
   { gravity: 1, life: 50, damage: 0, mass: 0.4, sharp: 0.1, carveR: 13, coreR: 5, splashR: 26, splashDamage: 30, debris: 22, bounce: 0.5, ballistic: false },
-  // Gatling round: heavier than a rifle round, hits harder.
-  { gravity: 0.12, life: 40, damage: 24, mass: 0.7, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.3 },
+  // Gatling round: lighter than a rifle round, one at a time. The gun's strength is the sheer volume of them.
+  { gravity: 0.12, life: 40, damage: 14, mass: 0.5, sharp: 0.85, carveR: 2, coreR: 0, splashR: 0, splashDamage: 0, debris: 2, bounce: 0, ballistic: true, knock: 1.0 },
   // AT missile: slow off the tube, then it burns up to cruise and homes on the nearest hot enemy vehicle.
   { gravity: 0, life: 150, damage: 120, mass: 6, sharp: 0.6, carveR: 20, coreR: 9, splashR: 36, splashDamage: 110, debris: 56, bounce: 0, ballistic: false, seek: 2.4, cruise: 430, antiArmor: 0.46 },
   // Light rifle round: a full-power cartridge. Through a vest and well into the torso: 30 a layer (the rifle's 19).
@@ -201,7 +201,7 @@ export const WeaponId = {
   Shotgun: 9,
   /** Grenade launcher: six small bouncing bomblets lobbed on an arc. */
   GrenadeLauncher: 10,
-  /** Gatling: spins up, then a hundred heavy rounds, hard-hitting but wild. */
+  /** Gatling: spins up, then a hundred rounds, each lighter than a rifle's, but a storm of them. */
   Gatling: 11,
   /** Laser: hold to charge (up to 8 s), release to fire a beam through every soldier in its way. */
   Laser: 12,
