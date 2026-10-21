@@ -2178,15 +2178,15 @@ export class World {
   /** Who a creature goes for: whoever hurt it (not too far off), else the nearest clone it can see. */
   private beastTarget(b: Beast, hx: number, hy: number): number {
     const hurt = b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
-    if (hurt && hurt.alive && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
+    if (hurt && hurt.alive && !hurt.possessed && hurt.tank < 0 && Math.hypot(hurt.cx - hx, hurt.cy - hy) < MILLI_SENSE * 1.8) return hurt.id;
     // (Lying in wait, it sees further: a line on anyone in that reach wakes it.)
     let best = b.kind === BeastKind.CoralCrab ? CRAB_SENSE : b.kind === BeastKind.Seeder ? SEEDER_SENSE : b.kind === BeastKind.Nest ? NEST_SENSE : b.kind === BeastKind.Asp ? ASP_SENSE : b.kind === BeastKind.Spider ? (b.frozen > 0 ? CSPIDER_SENSE_FROZEN : CSPIDER_SENSE) : b.frozen > 0 ? MILLI_SENSE_FROZEN : MILLI_SENSE;
     let id = -1;
     for (const p of this.players) {
       if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
       // (A coral crab leaves the possessed be: they're the coral's own.)
-      // (In Infection the whole hive is one: none of its creatures go for the possessed.)
-      if (p.possessed && (b.kind === BeastKind.CoralCrab || this.infectionLive)) continue;
+      // (The possessed are the hive's own: no creature ever goes for them.)
+      if (p.possessed) continue;
       const d = Math.hypot(p.cx - hx, p.cy - hy);
       if (d < best && this.lineClear(hx, hy, p.cx, p.cy)) {
         best = d;
@@ -2376,7 +2376,7 @@ export class World {
     // Its head on a clone: coil round them.
     if (b.coilCd === 0 && b.rear === 0) {
       for (const p of this.players) {
-        if (!p || !p.alive || p.tank >= 0 || this.shielded(p) || p.surf >= 0 || p.surfShip >= 0) continue;
+        if (!p || !p.alive || p.tank >= 0 || p.possessed || this.shielded(p) || p.surf >= 0 || p.surfShip >= 0) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > MILLI_COIL_R + 3) continue;
         b.coil = p.id;
         b.coilT = 0;
@@ -2397,7 +2397,7 @@ export class World {
    */
   private coilTick(k: number, b: Beast): void {
     const v = this.players[b.coil];
-    if (!v || !v.alive || v.tank >= 0) {
+    if (!v || !v.alive || v.tank >= 0 || v.possessed) {
       this.uncoil(b);
       return;
     }
@@ -2452,7 +2452,7 @@ export class World {
     const t = this.terrain;
     const pts = this.beastPts[k];
     const v = this.players[b.hold];
-    if (!v || !v.alive || v.tank >= 0 || v.pilot >= 0) {
+    if (!v || !v.alive || v.tank >= 0 || v.pilot >= 0 || v.possessed) {
       b.hold = -1;
       b.coilCd = BASILISK_BITE_CD;
       return;
@@ -2615,7 +2615,7 @@ export class World {
     // The bite, for whoever its head is on.
     if (b.coilCd === 0) {
       for (const p of this.players) {
-        if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
+        if (!p || !p.alive || p.tank >= 0 || p.possessed || this.shielded(p)) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > ASP_BITE_R + 4) continue;
         this.damage(p, ASP_BITE, NO_OWNER, W_ASP);
         if (p.alive) p.venom = Math.min(VENOM_MAX, p.venom + ASP_BITE_VENOM);
@@ -2921,7 +2921,7 @@ export class World {
     // The bite, for whoever its head is on.
     if (b.coilCd === 0 && b.carry === 0) {
       for (const p of this.players) {
-        if (!p || !p.alive || p.tank >= 0 || this.shielded(p)) continue;
+        if (!p || !p.alive || p.tank >= 0 || p.possessed || this.shielded(p)) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > CSPIDER_BITE_R + 4) continue;
         const torn = this.spiderBite(p, pts[0], pts[1]);
         // A limb torn off: it takes it, home to the web (if it has one).
@@ -2972,7 +2972,7 @@ export class World {
       b.coilCd = CSPIDER_BITE_CD * 3;
       b.lift = 0;
     };
-    if (!v || !v.alive || v.tank >= 0 || v.pilot >= 0) {
+    if (!v || !v.alive || v.tank >= 0 || v.pilot >= 0 || v.possessed) {
       done();
       return;
     }
@@ -3030,6 +3030,7 @@ export class World {
    * it tore off (-1: none).
    */
   private spiderBite(p: Player, jx: number, jy: number): number {
+    if (p.possessed) return -1; // (the hive's own)
     const res = this.strikeScratch;
     res.hp = 0;
     res.detached.length = 0;
@@ -3085,7 +3086,7 @@ export class World {
     let best: { x: number; y: number } | null = null;
     let bestD = hear;
     for (const p of this.players) {
-      if (!p || !p.alive || p.pilot >= 0) continue;
+      if (!p || !p.alive || p.pilot >= 0 || p.possessed) continue;
       const tk = p.tank >= 0 ? this.tanks[p.tank] : null;
       const x = tk ? tk.x + tankW(tk) / 2 : p.cx;
       const y = tk ? tankCoreY(tk) : p.cy;
@@ -3275,7 +3276,7 @@ export class World {
   /** Has anything come near enough a sleeping basilisk to wake it? */
   private basiliskDisturbed(b: Beast, pts: number[]): boolean {
     for (const p of this.players) {
-      if (!p || !p.alive || p.pilot >= 0) continue;
+      if (!p || !p.alive || p.pilot >= 0 || p.possessed) continue;
       const sc = wyrmScale(b.kind);
       if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) < BASILISK_WAKE * sc && this.lineClear(pts[0], pts[1], p.cx, p.cy)) return true;
       if (nearestPoint(pts, p.cx, p.cy).d < BASILISK_TOUCH * sc) return true;
@@ -3288,7 +3289,7 @@ export class World {
     let best: { x: number; y: number } | null = null;
     let bestD = Infinity;
     for (const p of this.players) {
-      if (!p || !p.alive || p.pilot >= 0) continue;
+      if (!p || !p.alive || p.pilot >= 0 || p.possessed) continue;
       const tk = p.tank >= 0 ? this.tanks[p.tank] : null;
       const x = tk ? tk.x + tankW(tk) / 2 : p.cx;
       const y = tk ? tankCoreY(tk) : p.cy;
@@ -3452,7 +3453,7 @@ export class World {
       const reach = (BASILISK_R + BASILISK_JAWS) * sc;
       const jaws = b.kind === BeastKind.Dragon ? W_DRAGON : W_BASILISK;
       for (const p of this.players) {
-        if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0) continue;
+        if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || p.possessed) continue;
         if (Math.hypot(p.cx - pts[0], p.cy - pts[1]) > reach) continue;
         // Its jaws close on them: it has them.
         this.damage(p, BASILISK_BITE * (1 + (sc - 1) * 0.25), NO_OWNER, jaws);
@@ -3478,7 +3479,7 @@ export class World {
     if (b.frenzy > 0 && Math.hypot(b.vx, b.vy) > 10) {
       const r = BASILISK_R * sc + 2;
       for (const p of this.players) {
-        if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || this.tick < this.basBodyAt[p.id]) continue;
+        if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || p.possessed || this.tick < this.basBodyAt[p.id]) continue;
         // (Its head is its jaws' business; from the second segment back.)
         const { d, i } = nearestPoint(pts, p.cx, p.cy);
         if (i < 1 || d > r) continue;
@@ -3696,7 +3697,7 @@ export class World {
     // The sting, for whoever it's on.
     if (b.coilCd > 0) return;
     for (const p of this.players) {
-      if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || this.shielded(p)) continue;
+      if (!p || !p.alive || p.tank >= 0 || p.pilot >= 0 || p.possessed || this.shielded(p)) continue;
       const bx = p.body.x;
       const by = p.top;
       const h = p.body.y + ACTOR_H - p.top;
@@ -3747,6 +3748,7 @@ export class World {
 
   /** A seeder's sting: a little harm, and coral sown in one of the clone's limbs (not a droid's: metal). */
   private sting(p: Player, b: Beast): void {
+    if (p.possessed) return; // (the hive's own)
     this.damage(p, SEEDER_STING, NO_OWNER, W_SEED);
     if (!p.alive || p.parts.cls === ClassId.Droid) return;
     const limbs = CORAL_LIMBS.map((part, i) => i).filter((i) => has(p.parts.mask, CORAL_LIMBS[i]));
@@ -4279,6 +4281,11 @@ export class World {
       if (b && b.kind === BeastKind.CoralCrab && b.hold === p.id) this.killBeast(k);
     }
     this.possessedRev++;
+  }
+
+  /** Is this a creature's harm to one of the possessed (which never lands: they're the hive's own)? */
+  private wildHarm(p: Player, attacker: number, weapon: number): boolean {
+    return p.possessed && attacker === NO_OWNER && WILD_WEAPONS.has(weapon);
   }
 
   /** A coral crab crawls out at (x, y) (out of a possessed clone killed), angry at whoever did it. */
@@ -5237,6 +5244,7 @@ export class World {
    * if a vital part went.
    */
   private applyStrike(p: Player, res: StrikeResult, attacker: number, weapon: number, hx: number, hy: number): void {
+    if (this.wildHarm(p, attacker, weapon)) return;
     // (The possessed live on with their head or body blown away: only their health running out ends them.)
     const vital = res.vital && !p.possessed;
     if (res.detached.length) {
@@ -5270,6 +5278,7 @@ export class World {
    */
   private damage(victim: Player, amount: number, attacker: number, weapon: number, quiet = false, fatal = false): void {
     if (!victim.alive || (amount <= 0 && !fatal)) return;
+    if (this.wildHarm(victim, attacker, weapon)) return;
     amount /= victim.parts.tough; // (a humanoid clone: HUMANOID_TOUGH)
     victim.hurtTick = this.tick;
     const overkill = Math.max(0, amount - victim.hp) + (fatal ? 40 : 0);
@@ -5434,7 +5443,9 @@ export class World {
       res.hp = 0;
       res.detached.length = 0;
       res.vital = false;
-      if (!this.friendly(owner, v)) {
+      // (A creature's spit never touches the possessed.)
+      const spared = this.wildHarm(v, owner, kind);
+      if (!this.friendly(owner, v) && !spared) {
         strike(v.parts, part, energy, def.damage, res);
         // A heavy solid shot: the shock wrenches every part, so limbs come off.
         if (def.shatter) for (let q = 0; q < PART_COUNT; q++) if (q !== part && shareOf(v.parts.cls)[q] > 0 && has(v.parts.mask, q)) harm(v.parts, q, def.shatter * shareOf(v.parts.cls)[q], res);
@@ -5444,7 +5455,7 @@ export class World {
       v.body.vy += rvy * knock;
       this.applyStrike(v, res, owner, kind, x, y);
       // Venom: into the blood, to burn on.
-      if (kind === ProjKind.Venom && v.alive) v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
+      if (kind === ProjKind.Venom && v.alive && !spared) v.venom = Math.min(VENOM_MAX, v.venom + VENOM_DOSE);
     }
     if (actor < 0) {
       // Into a door: as into a tank's hull (a round that can't punch through barely scratches it; a shaped charge takes a share of the whole).
@@ -5463,7 +5474,7 @@ export class World {
       for (let n = 0; n < 9; n++) {
         const a = -Math.PI * this.rng.next();
         const sp = 60 + this.rng.next() * 200;
-        this.grains.spawn(PK.Flame, x + this.rng.range(-4, 4), y + this.rng.range(-4, 2), Math.cos(a) * sp, Math.sin(a) * sp, 20 + this.rng.int(30), 0, 0, NO_OWNER);
+        this.grains.spawn(PK.Flame, x + this.rng.range(-4, 4), y + this.rng.range(-4, 2), Math.cos(a) * sp, Math.sin(a) * sp, 20 + this.rng.int(30), 0, 0, WILD_OWNER);
       }
       for (let n = 0; n < 4; n++) this.grains.spawn(PK.Blood, x, y, this.rng.range(-120, 120), this.rng.range(-160, 20), 40, 0, 0, NO_OWNER);
     }
@@ -8257,6 +8268,7 @@ export class World {
       if (headless(p.parts.mask, p.parts.cls)) this.damage(p, DROID_HEADLESS_BLEED * DT, p.lastHitBy, p.lastWeapon, true);
       if (!p.alive) continue;
       // Venom burns on in the blood, a little each tick.
+      if (p.possessed) p.venom = 0;
       if (p.venom > 0) {
         const v = Math.min(p.venom, VENOM_RATE);
         p.venom -= v;
@@ -8399,14 +8411,17 @@ export class World {
     // Resolve every particle impact against the part of the body it struck.
     for (let h = 0; h < actors.hitN; h++) {
       const hid = actors.id[actors.hitSlot[h]];
+      // (A dragon's flames are no one's; but the possessed they never burn.)
+      const wildFire = actors.hitOwner[h] === WILD_OWNER;
+      const owner = wildFire ? NO_OWNER : actors.hitOwner[h];
       if (hid >= SHIP_ID_BASE) {
         const sh = this.ships[hid - SHIP_ID_BASE];
-        if (sh) this.hitShip(hid - SHIP_ID_BASE, sh.x + actors.hitLx[h], sh.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        if (sh) this.hitShip(hid - SHIP_ID_BASE, sh.x + actors.hitLx[h], sh.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], owner);
         continue;
       }
       if (hid >= TANK_ID_BASE) {
         const t = this.tanks[hid - TANK_ID_BASE];
-        if (t) this.hitTank(hid - TANK_ID_BASE, t.x + actors.hitLx[h], t.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        if (t) this.hitTank(hid - TANK_ID_BASE, t.x + actors.hitLx[h], t.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], owner);
         continue;
       }
       if (hid >= CRAFT_ID_BASE) {
@@ -8414,12 +8429,12 @@ export class World {
         if (!c) continue;
         // Hit points are relative to the box the rocket was entered with.
         const e = craftHalfExtents(c.a, this.ext);
-        this.hitCraft(hid - CRAFT_ID_BASE, c.x - e.x + actors.hitLx[h], c.y - e.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], actors.hitOwner[h]);
+        this.hitCraft(hid - CRAFT_ID_BASE, c.x - e.x + actors.hitLx[h], c.y - e.y + actors.hitLy[h], 0, 0, actors.hitEnergy[h], actors.hitWound[h] + actors.hitBurn[h], owner);
         continue;
       }
       const p = this.players[hid];
-      if (!p || !p.alive) continue;
-      const by = actors.hitOwner[h] === NO_OWNER ? p.id : actors.hitOwner[h];
+      if (!p || !p.alive || (wildFire && p.possessed)) continue;
+      const by = owner === NO_OWNER ? p.id : owner;
       if (this.friendly(by, p)) continue;
       const self = by === p.id ? 0.5 : 1; // your own fragments hurt less
       const part = this.partHit(p, actors.hitLx[h], actors.hitLy[h]);
@@ -9330,3 +9345,12 @@ const HIVE_KEY = 999;
 const BODY_PIECES = [Part.Head, Part.Torso, Part.GunArm, Part.OffArm, Part.LegB, Part.LegF];
 /** Is a possessed clone with body `mask` blown to pieces (too much of it gone to heal)? */
 const inPieces = (mask: number) => BODY_PIECES.filter((part) => !has(mask, part)).length >= POSSESSED_PIECES;
+
+/**
+ * Wildlife's harm, of every kind: bites, coils, stings, jaws, venom, a
+ * dragon's burning blood (WILD_OWNER marks its flames). The possessed are
+ * the hive's: no creature ever harms them (World.wildHarm).
+ */
+const WILD_WEAPONS = new Set<number>([W_COIL, W_ASP, W_SPIDER, W_SEED, W_BASILISK, W_DRAGON, W_CRAB, W_VENOM, ProjKind.Venom, ProjKind.FireSpit]);
+/** The owner a dragon's flames carry (as no one's, but known for wildlife's). */
+const WILD_OWNER = 254;

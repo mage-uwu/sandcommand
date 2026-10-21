@@ -984,6 +984,10 @@ claws.
   - **Multicoloured coral.** The coral crusting a possessed clone grows
     pink, teal and emerald, like the GEMMs, a different colour on each
     limb, and so does the hump on its back.
+  - **No creature ever harms you**, in any mode. Nothing wild targets you,
+    bites, coils, stings, spits venom on you or burns you with a dragon's
+    fire; one holding a clone that turns lets go. Every wildlife harm is
+    checked at the source and again in `World.damage` (`wildHarm`).
   - **Killed, a possessed clone still drops a crab.** It crawls out of
     the body, angry at whoever did it.
 - **One mind.** Every coral crab and every possessed clone shares one
@@ -1541,8 +1545,7 @@ minutes and you win, all of you, the fallen too.
 - **The hive's nests.** In each other chamber, a crab nest (a coral nest
   gone to crystal, gem shards jutting from it) broods two crabs every 20
   seconds, up to 24 about. Each hangs beside a wasps' nest, with
-  millipedes on the floor under it. In Infection none of the hive's
-  creatures go for the possessed.
+  millipedes on the floor under it.
 
 **How it plays.** The possessed (one mind; see possession) make for the
 fortress through the tunnel and the chutes, and every defender they claw

@@ -3,7 +3,8 @@ import { ClassId, Part, has, newStrike, resetBody } from '../src/shared/body.ts'
 import { Reader } from '../src/shared/codec.ts';
 import { ACTOR_H, ACTOR_MAX_HP } from '../src/shared/constants.ts';
 import { Mat } from '../src/shared/materials.ts';
-import { NO_OWNER, W_CLAW, W_CRAB } from '../src/shared/particles.ts';
+import { NO_OWNER, W_ASP, W_BASILISK, W_CLAW, W_COIL, W_CRAB, W_DRAGON, W_SEED, W_SPIDER, W_VENOM } from '../src/shared/particles.ts';
+import { ProjKind } from '../src/shared/weapons.ts';
 import { BEAST_BUILD, BeastKind, CRAB_HP, CRAB_HIVE_REACH, CRAB_TRIGGER, CSPIDER_R, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, bodyPoints, crawler, newBeast } from '../src/shared/wildlife.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
@@ -259,5 +260,30 @@ describe('the coral crab', () => {
     const dragger = run(false);
     expect(crawler.stance).toBe(Stance.Prone);
     expect(crawler.x - 100).toBeGreaterThan((dragger.x - 100) * 2.5);
+  });
+
+  it('wildlife never harms the possessed, ever: not a bite, a coil, a sting, venom or a dragon\'s fire, in any mode', () => {
+    const { world, ps } = cave();
+    const p = ps[0];
+    hidden(world).damage(p, 500, NO_OWNER, W_CRAB);
+    expect(p.possessed).toBe(true);
+    // Every creature's harm, straight at them: none of it lands.
+    for (const w of [W_COIL, W_ASP, W_SPIDER, W_SEED, W_BASILISK, W_DRAGON, W_VENOM, ProjKind.Venom, ProjKind.FireSpit]) hidden(world).damage(p, 9999, NO_OWNER, w);
+    expect(p.alive).toBe(true);
+    expect(p.hp).toBe(ACTOR_MAX_HP);
+    // And the creatures themselves, all about them, awake: they let them be.
+    for (const [k, kind] of [BeastKind.Millipede, BeastKind.Asp, BeastKind.Spider].entries()) {
+      const b = newBeast(world.terrain, kind, 980 + k * 30, 440, -1);
+      world.beasts[2 + k] = b;
+      bodyPoints(world.terrain, b, world.beastPts[2 + k]);
+    }
+    for (let k = 0; k < 30 * 10; k++) {
+      p.body.x = 960;
+      world.step();
+    }
+    expect(p.hp).toBe(ACTOR_MAX_HP);
+    expect(p.venom).toBe(0);
+    expect(p.coral.every((c) => c === 0)).toBe(true);
+    for (const b of world.beasts) if (b) expect(b.target === p.id || b.coil === p.id || b.hold === p.id).toBe(false);
   });
 });
