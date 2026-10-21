@@ -456,61 +456,104 @@ function evacGrid(open: boolean): Grid {
   }
   for (let y = H - 4; y < H; y++) for (let x = 6 - (y - H + 4); x < 12 + (y - H + 4); x++) g[y][x] = 'D';
   g[0][8] = g[0][9] = 'R'; // beacon
+  // Rust bleeding down the plating from the bands and the rivet seams (not over the hatch or the windows).
+  const streaks: [number, number, number][] = [
+    [3, 14, 6],
+    [11, 14, 4],
+    [14, 18, 9],
+    [4, 32, 3],
+    [13, 32, 3],
+    [10, 4, 5],
+  ];
+  for (const [sx, y0, n] of streaks) {
+    for (let y = y0; y < y0 + n && y < H - 4; y++) {
+      const ch = g[y][sx];
+      if (ch === 'W' || ch === 'w' || ch === 'v') g[y][sx] = y - y0 < 2 ? 'o' : 'p';
+    }
+  }
   return g.map((r) => r.join(''));
 }
+/** The extraction rocket: Soviet surplus, faded drab plating, red bands gone dark, rust running down it, warm-lit portholes. */
 const EVAC_PAL: Record<string, number> = {
-  K: 0x16181c,
-  W: 0xf4f6f8,
-  w: 0xd2d8de,
-  v: 0xa4acb6,
-  Y: 0xf0c040,
-  y: 0xa07c20,
-  B: 0x23405e,
-  b: 0x8ad0ff,
-  L: 0xffe9a0,
-  l: 0xffc860,
-  r: 0xc8402c,
-  D: 0x3a3f46,
+  K: 0x15120f,
+  W: 0x9a9c7a,
+  w: 0x74785a,
+  v: 0x52563e,
+  Y: 0xa8301c,
+  y: 0x5e1a10,
+  B: 0x1c2a2e,
+  b: 0xd8a860,
+  L: 0xffe2a0,
+  l: 0xffc060,
+  r: 0x7a3a1a,
+  D: 0x2a2420,
   R: 0xff3020,
+  o: 0xb0602a,
+  p: 0x6a3418,
 };
 
 /** A king's crown as worn (5x3, sits on the head's top row): gold spikes, a band, a red jewel. */
 export const CROWN: Grid = ['Y.Y.Y', 'YYYYY', 'yYrYy'];
 
 // Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin), centred on
-// the rocket's centre of mass.
+// the rocket's centre of mass. Soviet-era surplus gone to rust: drab olive
+// plating worn through at the edges, a rusty red nose, rivet lines, a red
+// star, rust bleeding down from the seams, sooted fins, a scorched nozzle;
+// its passenger's team band round it (grey when empty).
 const CRAFT_SPRITE_W = 14;
 const CRAFT_SPRITE_H = 28;
 const CRAFT: Grid = [
   '......KK......',
-  '.....KLLK.....',
-  '.....KLHK.....',
-  '....KLHHHK....',
-  '....KLHHHK....',
-  '...KLHHHHHK...',
-  '...KLHVVHHK...',
-  '...KLHVvHHK...',
-  '...KLHHHHHK...',
+  '.....KrRK.....',
+  '.....KRoK.....',
+  '....KLHHhK....',
+  '....KLHWhK....',
+  '...KLHHHHhK...',
+  '...KLVVHHhK...',
+  '...KLVvHRhK...',
+  '...KLHHHRhK...',
   '...KTTTTTTK...',
   '...KttttttK...',
-  '...KLHHHHHK...',
-  '...KLHHHHHK...',
-  '...KLHGGHHK...',
-  '...KLHGGHHK...',
-  '...KLHGGHHK...',
-  '...KLHHHHHK...',
-  '...KLHHHHHK...',
+  '...KWHHHHWK...',
+  '...KLHHSHhK...',
+  '...KLSSSSSK...',
+  '...KLHSSShK...',
+  '...KLHSHShK...',
+  '...KLHRohhK...',
+  '...KWHHHHWK...',
   '...KTTTTTTK...',
-  '..KKLHHHHHKK..',
-  '.KGKLHHHHHKGK.',
-  '.KGKLHHHHHKGK.',
-  'KGGKLHHHHHKGGK',
-  'KGGKKHHHHKKGGK',
-  'KGK.KDDDDK.KGK',
+  '..KKLHHRHhKK..',
+  '.KgKLHHrohKgK.',
+  '.KgKWHHHHWKgK.',
+  'KgGKLHRHHhKGgK',
+  'KGGKKhRrhKKGGK',
+  'KrK.KDDDDK.KrK',
   'KK..KDMMDK..KK',
   '....KDDDDK....',
   '.....KKKK.....',
 ];
+/** The drop rocket's colours: worn Soviet drab, rust, a red star; `team` on its band. */
+function craftPalette(team: number): Record<string, number> {
+  return {
+    K: 0x15120f, // outline
+    L: 0x878c5e, // drab plating, worn edge
+    H: 0x5b6240, // drab plating
+    h: 0x3c4129, // drab, shaded
+    W: 0xb4aa8c, // rivet
+    V: 0x5e8a8c, // porthole
+    v: 0x223c40, // porthole, dark
+    R: 0x9a4a22, // rust
+    r: 0x5e2a14, // rust, dark
+    o: 0xc06a2c, // rust, fresh
+    S: 0xc4261a, // red star
+    T: team,
+    t: shade(team, 0.62),
+    G: 0x3f3e30, // fins, sooted
+    g: 0x5e5a44, // fins, worn
+    D: 0x2a2420, // nozzle
+    M: 0x7a2e12, // nozzle, scorched hot
+  };
+}
 
 function shade(rgb: number, k: number): number {
   const r = Math.min(255, Math.round(((rgb >> 16) & 255) * k));
@@ -912,7 +955,7 @@ export class SpriteCache {
       const grid = CRAFT.map((row, sy) =>
         [...row].map((ch, sx) => (craftPartAt(parts, sx + 0.5 - CRAFT_SPRITE_W / 2, sy + 0.5 - CRAFT_SPRITE_H / 2) === craftPartAt(ALL_CRAFT_PARTS, sx + 0.5 - CRAFT_SPRITE_W / 2, sy + 0.5 - CRAFT_SPRITE_H / 2) ? ch : '.')).join(''),
       );
-      g = bakeRotatedGrid(grid, this.pal(team), (step / ANGLE_STEPS) * Math.PI * 2, CRAFT_SPRITE_W / 2, CRAFT_SPRITE_H / 2);
+      g = bakeRotatedGrid(grid, craftPalette(team), (step / ANGLE_STEPS) * Math.PI * 2, CRAFT_SPRITE_W / 2, CRAFT_SPRITE_H / 2);
       this.crafts.set(key, g);
     }
     return g;

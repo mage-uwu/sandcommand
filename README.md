@@ -2752,6 +2752,23 @@ first past 300,000 cells. Gibs are cosmetic, but the GEMMs a clone spills are re
 seed and deposits it as terrain, and every client throws the same shower from
 the same seed. Explosive and high-overkill deaths scatter harder.
 
+### Rockets
+
+Every rocket is gritty Soviet-era surplus in pixel art, drab olive gone to
+rust:
+- **The drop rocket** (`CRAFT` in `src/client/sprites.ts`) has worn plating
+  with rivet lines, a rusty red nose and a red star. Rust bleeds down from
+  its seams, its fins are sooted and its nozzle scorched. Its passenger's
+  team colour runs round it in a band (grey when it's empty).
+- **The extraction rocket** has faded drab plating, dark red bands, rust
+  running down it from the bands and seams, and warm-lit portholes.
+- **In flight** (`src/client/rocket-art.ts`), the rockets are tiny grids
+  drawn a cell at a time and turned with their heading, a sputtering flame
+  out the tail:
+  - the bazooka's rocket: a fat rusty-red warhead on a drab tube;
+  - the AT missile: a rusting, finned body, its seeker blinking red;
+  - the tarantula's missile: slim, with a yellow nose band.
+
 ### Weapons
 
 Every weapon is one row of `WEAPONS` in `src/shared/weapons.ts`, and that

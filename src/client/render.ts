@@ -24,6 +24,7 @@ import { ClassId, DROID_LEGS, DROID_PARTS, DroidPart, PARTS, Part, has } from '.
 import { CRAFT_H, CRAFT_HP, CraftPart } from '../shared/craft.ts';
 import { CLOUD_MS } from '../shared/stoneburner.ts';
 import { stickyBlink } from '../shared/sticky.ts';
+import { drawDart, drawMissile, drawRocket } from './rocket-art.ts';
 import { drawBeacons, drawFeet, drawStoneFlash } from './stoneburner-art.ts';
 import { StoneCloud, drawCloudWash, drawShock } from './stone-cloud.ts';
 import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } from '../shared/actor.ts';
@@ -1260,20 +1261,11 @@ export class Renderer {
         ctx.drawImage(this.sprites.shipEngine(), -5, -6);
         ctx.restore();
       } else if (k === 14) {
-        // AT missile: an olive body with a red seeker head and fins, a flame out the back.
+        // AT missile: a drab, rusting finned body, its seeker head blinking red, a flame out the back (rocket-art.ts).
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(p.ang[i] || Math.atan2(p.vy[i], p.vx[i]));
-        const len = 3 + ((now / 29 + i) % 3);
-        ctx.fillStyle = '#ff8a24';
-        ctx.fillRect(-5 - len, -1, len, 2);
-        ctx.fillStyle = '#fffbe0';
-        ctx.fillRect(-5 - len + 1, -0.5, len - 1, 1);
-        ctx.fillStyle = '#3c4628';
-        ctx.fillRect(-5, -1.5, 8, 3);
-        ctx.fillRect(-5, -2.5, 2, 5);
-        ctx.fillStyle = (now / 90) % 2 < 1 ? '#ff3030' : '#a01010';
-        ctx.fillRect(3, -1, 2, 2);
+        drawMissile(ctx, now, i);
         ctx.restore();
       } else if (k === ProjKind.FireSpit) {
         // A dragon's spit: a glob of burning blood, a dark red heart in a halo of flame.
@@ -1317,23 +1309,11 @@ export class Renderer {
         ctx.fillStyle = age < 0.5 ? '#e8ffff' : '#8ae8ff';
         ctx.fillRect(x - r / 2, y - r / 2, r, r);
       } else if (k === ProjKind.SpiderMissile) {
-        // Tarantula missile: a slim grey dart, a yellow nose band, a flame out the back.
+        // Tarantula missile: slim and drab, rust coming through, a yellow nose band, a flame out the back (rocket-art.ts).
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(Math.atan2(p.vy[i], p.vx[i]));
-        const len = 2 + ((now / 27 + i) % 3);
-        ctx.fillStyle = '#ff8a24';
-        ctx.fillRect(-4 - len, -0.75, len, 1.5);
-        ctx.fillStyle = '#fffbe0';
-        ctx.fillRect(-4 - len + 1, -0.35, len - 1, 0.7);
-        ctx.fillStyle = '#8a9096';
-        ctx.fillRect(-4, -1, 6, 2);
-        ctx.fillStyle = '#4d5359';
-        ctx.fillRect(-4, -1.8, 1.5, 3.6);
-        ctx.fillStyle = '#d8b030';
-        ctx.fillRect(1, -1, 1, 2);
-        ctx.fillStyle = '#30353a';
-        ctx.fillRect(2, -0.6, 1, 1.2);
+        drawDart(ctx, now, i);
         ctx.restore();
       } else if (k === 7) {
         // Dropship bomb: a dark finned casing, nose down, a red band.
@@ -1384,8 +1364,12 @@ export class Renderer {
         ctx.lineTo(x - (p.vx[i] / sp) * len, y - (p.vy[i] / sp) * len);
         ctx.stroke();
       } else if (k === 1) {
-        ctx.fillStyle = '#d8d8d8';
-        ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+        // Bazooka rocket: a fat rusty-red warhead on a drab tube, finned, a flame out the back (rocket-art.ts).
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.atan2(p.vy[i], p.vx[i]));
+        drawRocket(ctx, now, i);
+        ctx.restore();
       } else {
         ctx.fillStyle = '#4a5a32';
         ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
