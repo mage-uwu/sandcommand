@@ -31,14 +31,13 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { drawCoralCrab, drawCrabNestCrystals, drawPossessedMark } from './crab-art.ts';
-import { HIVE_CORALS, type CoralTint, drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
+import { drawCoralCrab, drawCrabNestCrystals } from './crab-art.ts';
+import { M as INF_M, infectArm, infectBody } from './possessed-art.ts';
+import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
 import { BEAST_BUILD, BeastKind, CORAL_LIMBS, POSSESS_RISE } from '../shared/wildlife.ts';
-/** A possessed clone's coral: well grown on every limb. */
-const POSSESSED_CORAL = CORAL_LIMBS.map(() => 0.7);
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -537,7 +536,7 @@ export class Renderer {
    * grown each): tufts out of each leg, the off arm, and the gun arm along
    * from the shoulder; lying down, all of it along the body.
    */
-  private drawCoral(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, levels: readonly number[], id: number, now: number, hive = false): void {
+  private drawCoral(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, levels: readonly number[], id: number, now: number): void {
     const left = Math.cos(aim) < 0;
     const ix = Math.round(x);
     const iy = Math.round(y);
@@ -547,17 +546,15 @@ export class Renderer {
       const part = CORAL_LIMBS[i];
       if (g <= 0 || !has(parts, part)) continue;
       const seed = id * 31 + i * 7;
-      // (A crab's coral on the possessed: each limb's its own, pink, teal or emerald.)
-      const tint: CoralTint | undefined = hive ? HIVE_CORALS[(id + i) % HIVE_CORALS.length] : undefined;
       if (stance === Stance.Prone) {
-        drawCoralGrowth(ctx, ix + 1 + i * 2, iy + ACTOR_H - 3, ix + 2 + i * 2, iy + ACTOR_H - 2, out, g, seed, now, tint);
+        drawCoralGrowth(ctx, ix + 1 + i * 2, iy + ACTOR_H - 3, ix + 2 + i * 2, iy + ACTOR_H - 2, out, g, seed, now);
         continue;
       }
       if (part === Part.GunArm) {
         const sh = shoulderAt(x, y, stance, left, this.shPt);
         const ex = Math.round(sh.x + Math.cos(aim) * 2.5);
         const ey = Math.round(sh.y + Math.sin(aim) * 2.5);
-        drawCoralGrowth(ctx, Math.min(ex, Math.round(sh.x)), Math.min(ey, Math.round(sh.y)), Math.max(ex, Math.round(sh.x)), Math.max(ey, Math.round(sh.y)), left ? -1 : 1, g, seed, now, tint);
+        drawCoralGrowth(ctx, Math.min(ex, Math.round(sh.x)), Math.min(ey, Math.round(sh.y)), Math.max(ex, Math.round(sh.x)), Math.max(ey, Math.round(sh.y)), left ? -1 : 1, g, seed, now);
         continue;
       }
       const d = PARTS[part];
@@ -572,13 +569,8 @@ export class Renderer {
         ry1 = ACTOR_H - 1;
       }
       const ox = part === Part.LegF ? -out : out;
-      drawCoralGrowth(ctx, ix + rx0, iy + ry0, ix + rx1, iy + ry1, ox, g, seed, now, tint);
+      drawCoralGrowth(ctx, ix + rx0, iy + ry0, ix + rx1, iy + ry1, ox, g, seed, now);
     }
-  }
-  /** A possessed clone: coral all over its limbs, the crab on its back, its eyes glowing coral. */
-  private drawPossessed(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, id: number, now: number): void {
-    this.drawCoral(ctx, x, y, aim, stance, parts, POSSESSED_CORAL, id, now, true);
-    if (stance !== Stance.Prone) drawPossessedMark(ctx, x, y + STANCE_DROP[stance], ACTOR_W, Math.cos(aim) < 0, id, now);
   }
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);
   private chunkImage = new ImageData(CHUNK, CHUNK);
@@ -1092,10 +1084,9 @@ export class Renderer {
       const info = game.players.get(v.id);
       const aimR = dequantizeAim(v.aim);
       const lean = this.pose(v.id, v.stance, Math.cos(aimR) < 0, v.vx, v.vy, (v.flags & F_GROUND) !== 0, (v.flags & F_JET) !== 0, now);
-      this.drawActor(ctx, v.x, v.y, aimR, this.fireFlags(game, v.flags, v.weapon, v.id, now), info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id, v.hp);
+      this.drawActor(ctx, v.x, v.y, aimR, this.fireFlags(game, v.flags, v.weapon, v.id, now), info?.rgb ?? 0xcccccc, v.weapon, v.moving, now, v.parts, v.stance, lean, v.faction, game.kickOf(v.id, now), v.id, v.hp, game.possessedIds.has(v.id) ? v.id % 3 : -1);
       const coral = game.coralIn.get(v.id);
       if (coral) this.drawCoral(ctx, v.x, v.y, aimR, v.stance, v.parts, coral, v.id, now);
-      if (game.possessedIds.has(v.id)) this.drawPossessed(ctx, v.x, v.y, aimR, v.stance, v.parts, v.id, now);
       // Someone charging a laser: their muzzle glows (we can't see how full, so it pulses).
       if (v.weapon === WeaponId.Laser && v.flags & F_FIRING) {
         const sh = shoulderAt(v.x, v.y, v.stance, Math.cos(aimR) < 0, this.shPt);
@@ -1125,9 +1116,8 @@ export class Renderer {
         (b.cls << F_CLASS_SHIFT);
       const lean = this.pose(-1, b.stance, Math.cos(myAim) < 0, b.vx, b.vy, b.onGround, b.jetting, now);
       game.myLeft = Math.cos(myAim) < 0;
-      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId, game.hp);
+      this.drawActor(ctx, selfX, selfY, myAim, flags, game.players.get(game.myId)?.rgb ?? 0xffffff, game.weapon, !riding && Math.abs(b.vx) > 5, now, game.parts, b.stance, lean, b.faction, game.kickOf(game.myId, now), game.myId, game.hp, game.possessedIds.has(game.myId) ? game.myId % 3 : -1);
       if (game.myCoral.length) this.drawCoral(ctx, selfX, selfY, myAim, b.stance, game.parts, game.myCoral, game.myId, now);
-      if (game.possessedIds.has(game.myId)) this.drawPossessed(ctx, selfX, selfY, myAim, b.stance, game.parts, game.myId, now);
       if (game.laserCharge > 0) {
         const m = WEAPONS[WeaponId.Laser].muzzle;
         this.drawLaserCharge(ctx, mySh.x + Math.cos(myAim) * m, mySh.y + Math.sin(myAim) * m, game.laserCharge / LASER_MAX, now);
@@ -2165,7 +2155,11 @@ export class Renderer {
     id = -1,
     /** Its health (0..ACTOR_MAX_HP): how many of its wounds show. */
     hp = ACTOR_MAX_HP,
+    /** Possessed: the coral's strain grown over it (possessed-art.ts), -1 not. */
+    strain = -1,
   ): void {
+    // (The possessed twitch: now and then a jerk, a cell aside.)
+    if (strain >= 0 && ((Math.imul(id * 7 + Math.floor(now / 110), 2654435761) >>> 0) % 100) < 9) x += (Math.floor(now / 110) & 1) * 2 - 1;
     const left = Math.cos(aim) < 0;
     const face = left ? -1 : 1;
     const ix = Math.round(x);
@@ -2196,15 +2190,33 @@ export class Renderer {
       ctx.translate(hipX, hipY);
       ctx.rotate(a);
       ctx.drawImage(sprite!, -5.5, -11);
+      if (strain >= 0) ctx.drawImage(infectBody(sprite!, left, strain).c, -5.5 - INF_M, -11 - INF_M);
       ctx.restore();
     } else {
       const legH = stance === Stance.Crouch ? 3 : 5;
       ctx.drawImage(sprite!, 0, 11, 10, 5, ix - 1, iy + ACTOR_H - legH, 10, legH);
+      const inf = strain >= 0 ? infectBody(sprite!, left, strain).c : null;
+      if (inf) ctx.drawImage(inf, 0, 11 + INF_M, 10 + 2 * INF_M, 5, ix - 1 - INF_M, iy + ACTOR_H - legH, 10 + 2 * INF_M, legH);
       ctx.save();
       ctx.translate(hipX, hipY);
       ctx.rotate(a);
       ctx.drawImage(sprite!, 0, 0, 10, 11, -5.5, -11, 10, 11);
+      if (inf) ctx.drawImage(inf, 0, 0, 10 + 2 * INF_M, 11 + INF_M, -5.5 - INF_M, -11 - INF_M, 10 + 2 * INF_M, 11 + INF_M);
       ctx.restore();
+    }
+    // The possessed drool the crab's blue blood, a drop at a time.
+    if (strain >= 0 && !droid) {
+      const mouth = infectBody(sprite!, left, strain).mouth;
+      if (mouth) {
+        const [mx, my] = posed(mouth.x - 5, mouth.y - 10.5);
+        const ph = (now / 90 + id * 13) % 10;
+        if (ph < 7) {
+          ctx.fillStyle = '#18c8ff';
+          ctx.fillRect(Math.round(mx), Math.round(my) + 1 + Math.floor(ph / 2), 1, 1);
+          ctx.fillStyle = '#0b4f78';
+          ctx.fillRect(Math.round(mx), Math.round(my) + 1, 1, 1);
+        }
+      }
     }
 
     // Its wounds, where it was hit (wounds.ts), riding its pose.
@@ -2259,6 +2271,7 @@ export class Renderer {
       const down = 1.05 + Math.sin(now / 90) * 0.12;
       const g = this.sprites.gun(weapon, left ? Math.PI - down : down);
       ctx.drawImage(g.c, sx - g.r, sy - g.r);
+      if (strain >= 0) ctx.drawImage(infectArm(g.c, g.r, strain), sx - g.r, sy - g.r);
       return;
     }
     if (weapon === WeaponId.RepairKit) {
@@ -2284,6 +2297,7 @@ export class Renderer {
     const lift = kick * 0.18 * (left ? 1 : -1);
     const g = this.sprites.gun(weapon, aim + lift);
     ctx.drawImage(g.c, Math.round(sx - g.r - Math.cos(aim) * back), Math.round(sy - g.r - Math.sin(aim) * back));
+    if (strain >= 0) ctx.drawImage(infectArm(g.c, g.r, strain), Math.round(sx - g.r - Math.cos(aim) * back), Math.round(sy - g.r - Math.sin(aim) * back));
     if (flags & F_FIRING && WEAPONS[weapon]?.proj !== PROJ_BUILD) {
       // Flash at the weapon's muzzle offset (where the server spawns its shots).
       const m = (WEAPONS[weapon]?.muzzle ?? 8) + 1;

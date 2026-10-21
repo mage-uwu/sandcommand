@@ -964,8 +964,8 @@ claws.
   for 1.5 s (nothing you press moves you; "YOU DIED" on screen). Then you
   rise again, whole and at full health, on the coral's side: every possessed clone is on it
   together, against everyone else, whatever team they were on. The kill
-  counts as a death. The crab is inside you now, and shows as a coral hump
-  on your back, coral on your limbs, coral-pink eyes and a pink ✺ name tag.
+  counts as a death. The crab is inside you now, and you look it (see "The
+  look" below), with a pink ✺ name tag.
   - **Four times as tough**, and you live on with your head or body blown
     away: only your health running out ends you.
   - **You heal fast:** a second after the last hit, back to full at 50
@@ -987,9 +987,21 @@ claws.
     off drops flat and scuttles along on its belly at most of a run's
     speed. An ordinary legless clone barely drags itself. Shared physics
     (`Body.crawl`), so your own crawl is predicted.
-  - **Multicoloured coral.** The coral crusting a possessed clone grows
-    pink, teal and emerald, like the GEMMs, a different colour on each
-    limb, and so does the hump on its back.
+  - **The look: a corpse the coral is growing through.** No new sprite: the
+    clone's own sprite, read pixel by pixel, gets an infected copy laid over
+    it, fitted exactly to its shape (`possessed-art.ts`), in one coral strain
+    per clone (pink, teal or emerald, like the GEMMs):
+    - its colours drained to a dead grey-violet, rotting in dark patches;
+    - coral crusting outward from where the crab went in (the back of the
+      shoulder, the pack, the back of the head, the back leg), dark at its
+      ragged edges, flecked bright, with dark veins running on past it;
+    - the crab's legs clutching round its back and chest;
+    - coral spines grown out past its outline, dead dark stalks with live
+      tips (off the back of the head, the shoulder and the pack);
+    - a sunken socket with a coral glow for an eye, a black mouth drooling
+      the crab's blue blood a drop at a time;
+    - its gun arm drained and crusted to the hand;
+    - now and then it twitches, a jerk a cell aside.
   - **No creature ever harms you**, in any mode. Nothing wild targets you,
     bites, coils, stings, spits venom on you or burns you with a dragon's
     fire; one holding a clone that turns lets go. Every wildlife harm is

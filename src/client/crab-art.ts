@@ -164,44 +164,6 @@ export function drawCoralCrab(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
 }
 
 /**
- * A clone possessed: the crab in it, showing on its back (a coral hump,
- * gem-chipped, legs gripping round), and its eyes gone a coral-pink glow.
- * (x, y) is the clone's box's top left; `left` which way it faces.
- */
-export function drawPossessedMark(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, left: boolean, id: number, now: number): void {
-  const ix = Math.round(x);
-  const iy = Math.round(y);
-  // On its back: away from the way it faces.
-  const bx = left ? ix + w - 2 : ix + 1;
-  const back = left ? 1 : -1;
-  const C = CORALS[id % CORALS.length];
-  ctx.fillStyle = LEG;
-  const twitch = Math.floor(now / 70 + id) % 3 === 0 ? 1 : 0;
-  dot(ctx, bx - back, iy + 4 + twitch);
-  dot(ctx, bx - back * 2, iy + 6);
-  dot(ctx, bx + back * 2, iy + 3);
-  dot(ctx, bx + back * 2, iy + 7 - twitch);
-  ctx.fillStyle = C[0];
-  dot(ctx, bx, iy + 6);
-  dot(ctx, bx + back, iy + 6);
-  ctx.fillStyle = C[1];
-  dot(ctx, bx, iy + 5);
-  dot(ctx, bx + back, iy + 5);
-  dot(ctx, bx, iy + 4);
-  ctx.fillStyle = C[2];
-  dot(ctx, bx + back, iy + 4);
-  dot(ctx, bx, iy + 3);
-  ctx.fillStyle = C[3];
-  dot(ctx, bx + back, iy + 2);
-  const [lit] = CHIPS[id % 3];
-  ctx.fillStyle = Math.floor(now / 110 + id * 7) % 19 === 0 ? '#ffffff' : lit;
-  dot(ctx, bx + back, iy + 3);
-  // Its eyes: a coral glow, pulsing.
-  ctx.fillStyle = Math.sin(now / 180 + id) > 0 ? '#ff5a8a' : '#ff9ab8';
-  dot(ctx, left ? ix + 1 : ix + w - 2, iy + 1);
-}
-
-/**
  * A crab nest (Infection's hive): a coral nest (drawn first, drawNest) gone
  * to crystal, gem shards jutting out all over its papery coral, and at its
  * mouth, now and then, a crab's leg feeling its way out.

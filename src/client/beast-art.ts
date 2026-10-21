@@ -634,12 +634,6 @@ export interface CoralTint {
 }
 /** The seeders' nest coral: pink. */
 export const PINK_CORAL: CoralTint = { crust: ['#2a0818', '#e44a82', '#ff8aa8'], bands: ['#ff6a9c', '#e44a82', '#ff8aa8'], fleck: '#ffc0d4', rim: '#3a0c22', cell: '#2a0818' };
-/** The coral a crab grows over the possessed: pink, teal and emerald, like the GEMMs. */
-export const HIVE_CORALS: readonly CoralTint[] = [
-  PINK_CORAL,
-  { crust: ['#06201e', '#1aa898', '#5ae0cc'], bands: ['#2ccab4', '#1aa898', '#6ef0dc'], fleck: '#c8fff4', rim: '#082a28', cell: '#041a18' },
-  { crust: ['#0a2010', '#1e9a48', '#5ad87a'], bands: ['#34c060', '#1e9a48', '#76ea90'], fleck: '#d0ffd8', rim: '#0c2a14', cell: '#06180a' },
-];
 
 export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, ox: number, grown: number, seed: number, now: number, tint: CoralTint = PINK_CORAL): void {
   // The limb crusting over with it (more of it, the further along).
