@@ -944,8 +944,8 @@ droid's (`src/client/spider-art.ts`).
   pack counts as two crawlers).
 
 **The coral crab** is the horror of the caves. It's a squat, spiderlike
-thing about half a cave spider's size. Its shell is crusted in pink coral
-and studded with gem chips, it has eight thin jointed legs and two hooked
+thing about half a cave spider's size. Its shell is crusted in coral, in
+patches of pink, teal and emerald (each crab its own), and studded with gem chips, it has eight thin jointed legs and two hooked
 claws.
 - **At rest it's a gem cluster.** Folded up on a floor (for 40 seconds to
   three minutes), it is drawn exactly as a GEMM crystal deposit is. A
@@ -965,10 +965,25 @@ claws.
   - **You heal fast:** a second after the last hit, back to full at 50
     health a second. Not once you're in pieces, though: with three of
     head, body, arms and legs gone, you don't heal at all.
-  - **You keep your guns**, but your claws are what spreads it. Touch
-    someone who isn't possessed and you claw them (28 every half second,
-    and a shove). A clone killed by claws rises possessed too. Possessed
-    bots close in to finish the fight with their claws rather than shoot.
+  - **You keep your guns**, but your melee is what spreads it: you vomit
+    the crab's blue blood. It's a gout out ahead of you (22 cells, in a
+    cone where you face) that splashes everyone in it who isn't
+    possessed, and claws whoever is pressed against you. It does 28 at
+    once (every half second), shoves them, and leaves **bile** in them:
+    40 more harm (up to 90), burning on at 16 a second.
+    - **Corrosive:** the bile eats through armour first (helmet, vest),
+      then flesh.
+    - **Infectious:** a clone killed by the vomit or the bile rises
+      possessed too.
+    - Possessed bots close in to finish the fight this way rather than
+      shoot.
+  - **Legless, they crawl at you.** A possessed clone with both legs blown
+    off drops flat and scuttles along on its belly at most of a run's
+    speed. An ordinary legless clone barely drags itself. Shared physics
+    (`Body.crawl`), so your own crawl is predicted.
+  - **Multicoloured coral.** The coral crusting a possessed clone grows
+    pink, teal and emerald, like the GEMMs, a different colour on each
+    limb, and so does the hump on its back.
   - **Killed, a possessed clone still drops a crab.** It crawls out of
     the body, angry at whoever did it.
 - **One mind.** Every coral crab and every possessed clone shares one

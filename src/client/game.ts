@@ -28,7 +28,7 @@ import type { Dungeon } from '../shared/dungeon.ts';
 import { LASER_MAX, BLAST_IMPULSE, PROJ, PROJ_BUILD, ProjKind, SHOULDER_X, SHOULDER_Y, WEAPONS, WeaponId, projName, weaponOfProj } from '../shared/weapons.ts';
 import { type BuildBlocker, canBuild, pieceOf } from '../shared/build.ts';
 import { type GroundItem, NO_WEAPON, PICKUP_R, invByte, stepItem } from '../shared/items.ts';
-import { coreFlare, dragonBreathGout, crabBloodGibs, crabBloodSplat, stonePlume, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
+import { bileVomit, coreFlare, dragonBreathGout, crabBloodGibs, crabBloodSplat, stonePlume, fireSpitBurst, fireSpitTrail, moltenCore, stoneburnBlast, droidHit, droidPartOff, droidSocket, droidWreck, smokeTrail, plasmaTrail, bloodSplat, gooSplat, aspGibs, ichorSplat, spiderGibs, ASP_GOO, bulletImpact, craftDebris, craftExhaust, craftPartOff, engineExhaust, heavyMuzzle, materialize, digDust, explosion, gibBurst, jetExhaust, droidJets, limbOff, muzzle, laserHit, rocketTrail, spiderJets, vaporPuff, shipDownwash, slugImpact, slugTrail, stumpDrip, tankDebris, tankJets, tankPartOff, blisterBurst, floraGibs, beastGibs, coralBurst, coralSpores, venomDrip, venomSplash, venomTrail } from './effects.ts';
 import { floraColors } from './flora-palette.ts';
 import { ALL_PARTS, ClassId, type Mobility, PART_COUNT, Part, has, headless, mobility } from '../shared/body.ts';
 import { cleanChat, inert } from '../shared/text.ts';
@@ -916,6 +916,7 @@ export class Game implements FrameHandler {
     mobility(s.parts, this.mob, classOfFlags(s.flags));
     b.legs = this.mob.legs;
     b.jet = this.mob.jet;
+    b.crawl = this.possessedIds.has(this.myId);
     b.cls = classOfFlags(s.flags);
     b.stance = s.stance;
     b.downTicks = s.downTicks;
@@ -1148,6 +1149,12 @@ export class Game implements FrameHandler {
 
   /** Clones a coral crab has: risen again possessed, on the coral's side against everyone else (R_POSSESSED). */
   possessedIds = new Set<number>();
+  /** A possessed clone vomits the crab's blood (R_VOMIT): the gout, and its retching. */
+  vomit(_id: number, x: number, y: number, aim: number): void {
+    bileVomit(this.particles, x, y, aim);
+    this.sfx?.hiss(x, y, true);
+  }
+
   /** Who's possessed now: a feed line for each newly taken (and for us, a jolt). */
   possessed(ids: number[]): void {
     const now = performance.now();

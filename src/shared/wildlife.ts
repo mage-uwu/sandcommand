@@ -266,6 +266,19 @@ export const CLAW = 28;
 export const CLAW_CD = 14;
 export const CLAW_R = 4;
 /**
+ * Their melee is a vomit of the crab's blue blood: a gout out ahead of them
+ * (VOMIT_R cells, within VOMIT_CONE radians of where they face), harming
+ * everyone (not possessed) in it at once (CLAW) and leaving BILE more in
+ * them, burning on at BILE_RATE a second. It's corrosive: it eats through
+ * armour first (a helmet, a vest), then flesh; and it's infectious: whoever
+ * it kills rises possessed.
+ */
+export const VOMIT_R = 22;
+export const VOMIT_CONE = 0.75;
+export const BILE = 40;
+export const BILE_MAX = 90;
+export const BILE_RATE = 16;
+/**
  * The hive: every coral crab and every possessed clone is one mind. What any
  * of them sees (in sight, within HIVE_SIGHT cells) they all know at once, and
  * crabs come for it from up to CRAB_HIVE_REACH away (waking from their gem

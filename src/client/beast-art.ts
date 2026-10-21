@@ -624,13 +624,30 @@ export function drawCritterGib(ctx: CanvasRenderingContext2D, x: number, y: numb
  * with dark cells, the limb crusting over with it as it spreads. Well
  * grown, a mouth opens at its tip and glows, and something stirs in it.
  */
-export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, ox: number, grown: number, seed: number, now: number): void {
+/** A coral growth's colours: its crust (dark, mid, light), bands (three), a fleck, its rim, its cells. */
+export interface CoralTint {
+  crust: readonly [string, string, string];
+  bands: readonly [string, string, string];
+  fleck: string;
+  rim: string;
+  cell: string;
+}
+/** The seeders' nest coral: pink. */
+export const PINK_CORAL: CoralTint = { crust: ['#2a0818', '#e44a82', '#ff8aa8'], bands: ['#ff6a9c', '#e44a82', '#ff8aa8'], fleck: '#ffc0d4', rim: '#3a0c22', cell: '#2a0818' };
+/** The coral a crab grows over the possessed: pink, teal and emerald, like the GEMMs. */
+export const HIVE_CORALS: readonly CoralTint[] = [
+  PINK_CORAL,
+  { crust: ['#06201e', '#1aa898', '#5ae0cc'], bands: ['#2ccab4', '#1aa898', '#6ef0dc'], fleck: '#c8fff4', rim: '#082a28', cell: '#041a18' },
+  { crust: ['#0a2010', '#1e9a48', '#5ad87a'], bands: ['#34c060', '#1e9a48', '#76ea90'], fleck: '#d0ffd8', rim: '#0c2a14', cell: '#06180a' },
+];
+
+export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, ox: number, grown: number, seed: number, now: number, tint: CoralTint = PINK_CORAL): void {
   // The limb crusting over with it (more of it, the further along).
   if (grown > 0.3) {
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         if (hsh(x - x0, y - y0, seed) > (grown - 0.3) * 1.4) continue;
-        ctx.fillStyle = hsh(x - x0, y - y0, seed + 1) > 0.8 ? '#2a0818' : hsh(x - x0, y - y0, seed + 2) > 0.5 ? '#e44a82' : '#ff8aa8';
+        ctx.fillStyle = hsh(x - x0, y - y0, seed + 1) > 0.8 ? tint.crust[0] : hsh(x - x0, y - y0, seed + 2) > 0.5 ? tint.crust[1] : tint.crust[2];
         ctx.fillRect(x, y, 1, 1);
       }
     }
@@ -664,13 +681,13 @@ export function drawCoralGrowth(ctx: CanvasRenderingContext2D, x0: number, y0: n
       const edge = R > 2 && (Math.abs(b) > w - 1 / R || a > 1 + lump - 1 / R);
       const h = hsh(px, py, seed);
       let c: string;
-      if (edge) c = '#3a0c22';
+      if (edge) c = tint.rim;
       else {
         const band = Math.floor((a * R + 8 + Math.sin(b * R * 0.9 + seed) * 0.8) / 1.6) % 3;
-        c = band === 0 ? '#ff6a9c' : band === 1 ? '#e44a82' : '#ff8aa8';
-        if (h > 0.92) c = '#ffc0d4';
+        c = tint.bands[band];
+        if (h > 0.92) c = tint.fleck;
         // Its cells.
-        if (hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 7) > 0.84 && h > 0.35) c = '#2a0818';
+        if (hsh(Math.floor(px / 2), Math.floor(py / 2), seed + 7) > 0.84 && h > 0.35) c = tint.cell;
         // Its mouth, once it's grown: glowing from within, something stirring.
         if (grown > 0.55 && a > 0.55 && Math.abs(b) < 0.35) c = h > 0.5 ? (glow > 0.5 ? '#ffd060' : '#ff9a40') : '#401020';
       }

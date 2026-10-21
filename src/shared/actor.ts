@@ -88,6 +88,8 @@ export interface Body {
   burdened?: boolean;
   /** A climber (the spider droid) clinging to a wall this tick: -1 on its left, 1 on its right, 0 not. */
   cling?: number;
+  /** Possessed (a coral crab in it): with no legs left it doesn't stop, it crawls at you, flat and fast (CRAWL_RUN). */
+  crawl?: boolean;
 }
 
 /** A climber's (the droid's) climb up a wall it's pushing against (cells/s), and the steps it takes in its stride. */
@@ -120,6 +122,7 @@ export function copyBody(dst: Body, src: Body): void {
   dst.stance = src.stance;
   dst.downTicks = src.downTicks;
   dst.cling = src.cling;
+  dst.crawl = src.crawl;
 }
 
 /**
@@ -137,6 +140,8 @@ const DROID_GLIDE_BURN = 16; // fuel a second
 /** Run speed and jump strength by legs attached (0, 1, 2). */
 const LEG_SPEED = [0.25, 0.55, 1];
 const LEG_JUMP = [0, 0.7, 1];
+/** A possessed clone with no legs, crawling (Body.crawl): its run speed, all told (most of a run, flat on its belly: it scuttles). */
+export const CRAWL_RUN = 0.7;
 
 /** Does the hitbox at (x, y), `h` tall from the feet up, overlap terrain? */
 function collides(t: Terrain, x: number, y: number, h = ACTOR_H): boolean {
@@ -167,7 +172,9 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number, pull 
   // (A droid never crouches or lies down: it's the shape it is.)
   const down = (buttons & BTN_DOWN) !== 0 && !base.climb;
   b.downTicks = down ? Math.min(PRONE_TICKS, b.downTicks + 1) : 0;
-  const want: number = !down ? Stance.Stand : b.onGround && b.downTicks >= PRONE_TICKS ? Stance.Prone : Stance.Crouch;
+  // (Possessed and legless: flat on the ground, always.)
+  const crawling = !!b.crawl && b.legs === 0;
+  const want: number = crawling ? (b.onGround ? Stance.Prone : Stance.Crouch) : !down ? Stance.Stand : b.onGround && b.downTicks >= PRONE_TICKS ? Stance.Prone : Stance.Crouch;
   if (want > b.stance) b.stance = want;
   else {
     while (b.stance > want && !collides(t, b.x, b.y, STANCE_H[b.stance - 1])) b.stance--;
@@ -197,7 +204,8 @@ export function stepBody(b: Body, buttons: number, t: Terrain, dt: number, pull 
   const gliding = !!base.climb && !b.jet && !b.onGround && (buttons & BTN_UP) !== 0 && b.vy > 0 && b.legs > 0 && b.fuel > 0 && !(b.cling ?? 0);
   if ((dir !== 0 || b.onGround) && !dashing) {
     const accel = (b.onGround ? ACTOR_GROUND_ACCEL : ACTOR_AIR_ACCEL) * dt;
-    const dv = dir * ACTOR_RUN_SPEED * LEG_SPEED[b.legs] * cls.run * STANCE_RUN[b.stance] * (gliding ? DROID_GLIDE_RUN : 1) - b.vx;
+    const legs = crawling ? CRAWL_RUN : LEG_SPEED[b.legs] * STANCE_RUN[b.stance];
+    const dv = dir * ACTOR_RUN_SPEED * legs * cls.run * (gliding ? DROID_GLIDE_RUN : 1) - b.vx;
     b.vx += dv > accel ? accel : dv < -accel ? -accel : dv;
   }
 

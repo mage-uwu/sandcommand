@@ -32,7 +32,7 @@ import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES,
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
 import { drawCoralCrab, drawCrabNestCrystals, drawPossessedMark } from './crab-art.ts';
-import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
+import { HIVE_CORALS, type CoralTint, drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
@@ -537,7 +537,7 @@ export class Renderer {
    * grown each): tufts out of each leg, the off arm, and the gun arm along
    * from the shoulder; lying down, all of it along the body.
    */
-  private drawCoral(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, levels: readonly number[], id: number, now: number): void {
+  private drawCoral(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, levels: readonly number[], id: number, now: number, hive = false): void {
     const left = Math.cos(aim) < 0;
     const ix = Math.round(x);
     const iy = Math.round(y);
@@ -547,15 +547,17 @@ export class Renderer {
       const part = CORAL_LIMBS[i];
       if (g <= 0 || !has(parts, part)) continue;
       const seed = id * 31 + i * 7;
+      // (A crab's coral on the possessed: each limb's its own, pink, teal or emerald.)
+      const tint: CoralTint | undefined = hive ? HIVE_CORALS[(id + i) % HIVE_CORALS.length] : undefined;
       if (stance === Stance.Prone) {
-        drawCoralGrowth(ctx, ix + 1 + i * 2, iy + ACTOR_H - 3, ix + 2 + i * 2, iy + ACTOR_H - 2, out, g, seed, now);
+        drawCoralGrowth(ctx, ix + 1 + i * 2, iy + ACTOR_H - 3, ix + 2 + i * 2, iy + ACTOR_H - 2, out, g, seed, now, tint);
         continue;
       }
       if (part === Part.GunArm) {
         const sh = shoulderAt(x, y, stance, left, this.shPt);
         const ex = Math.round(sh.x + Math.cos(aim) * 2.5);
         const ey = Math.round(sh.y + Math.sin(aim) * 2.5);
-        drawCoralGrowth(ctx, Math.min(ex, Math.round(sh.x)), Math.min(ey, Math.round(sh.y)), Math.max(ex, Math.round(sh.x)), Math.max(ey, Math.round(sh.y)), left ? -1 : 1, g, seed, now);
+        drawCoralGrowth(ctx, Math.min(ex, Math.round(sh.x)), Math.min(ey, Math.round(sh.y)), Math.max(ex, Math.round(sh.x)), Math.max(ey, Math.round(sh.y)), left ? -1 : 1, g, seed, now, tint);
         continue;
       }
       const d = PARTS[part];
@@ -570,12 +572,12 @@ export class Renderer {
         ry1 = ACTOR_H - 1;
       }
       const ox = part === Part.LegF ? -out : out;
-      drawCoralGrowth(ctx, ix + rx0, iy + ry0, ix + rx1, iy + ry1, ox, g, seed, now);
+      drawCoralGrowth(ctx, ix + rx0, iy + ry0, ix + rx1, iy + ry1, ox, g, seed, now, tint);
     }
   }
   /** A possessed clone: coral all over its limbs, the crab on its back, its eyes glowing coral. */
   private drawPossessed(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, stance: number, parts: number, id: number, now: number): void {
-    this.drawCoral(ctx, x, y, aim, stance, parts, POSSESSED_CORAL, id, now);
+    this.drawCoral(ctx, x, y, aim, stance, parts, POSSESSED_CORAL, id, now, true);
     if (stance !== Stance.Prone) drawPossessedMark(ctx, x, y + STANCE_DROP[stance], ACTOR_W, Math.cos(aim) < 0, id, now);
   }
   private chunkCanvas: (HTMLCanvasElement | null)[] = new Array(CHUNK_COUNT).fill(null);

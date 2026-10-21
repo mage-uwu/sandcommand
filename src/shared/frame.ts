@@ -45,6 +45,7 @@ import {
   R_STONEBURN,
   R_CHARGES,
   R_POSSESSED,
+  R_VOMIT,
   BEAST_SCALE,
   BEAST_SAME,
   GameMode,
@@ -362,6 +363,8 @@ export interface FrameHandler {
   charges(list: ChargeState[]): void;
   /** Who's possessed by a coral crab (R_POSSESSED): the whole list, when it changes. */
   possessed(ids: number[]): void;
+  /** A possessed clone `id` vomits from (x, y), aimed `aim` radians (R_VOMIT). */
+  vomit(id: number, x: number, y: number, aim: number): void;
   /** The map's geysers and their state (R_GEYSERS). */
   geysers(list: GeyserState[]): void;
   /** Geyser `i` blows (R_GEYSER_BLOW): mirror its burst from `seed`. */
@@ -603,6 +606,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         const list: GeyserState[] = [];
         for (let i = 0; i < n; i++) list.push({ x: r.u16(), y: r.u16() - Y_BIAS, flags: r.u8() });
         h.geysers(list);
+        break;
+      }
+      case R_VOMIT: {
+        const id = r.u8();
+        const x = r.u16();
+        const y = r.u16() - Y_BIAS;
+        h.vomit(id, x, y, (r.u8() / 256) * Math.PI * 2);
         break;
       }
       case R_GEYSER_BLOW: {
@@ -1018,6 +1028,7 @@ export const nullHandler: FrameHandler = {
   burners() {},
   charges() {},
   possessed() {},
+  vomit() {},
   stoneBurn() {},
   geysers() {},
   geyserBlow() {},

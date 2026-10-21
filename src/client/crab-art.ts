@@ -4,7 +4,7 @@ import { openWay } from '../shared/wildlife.ts';
 /**
  * The coral crab, in pixels (one terrain cell to a pixel): a squat,
  * spiderlike thing about half a cave spider's size, its shell crusted over
- * in coral (pink, salmon, bone) and studded with gem chips that glint like
+ * in patches of coral (pink, teal and emerald, like the GEMMs) and studded with gem chips that glint like
  * the GEMM crystals it passes for at rest (drawn then by drawAspGem). Eight
  * thin jointed legs scurry under it; two hooked claws reach out front. On
  * a clone (`latched`) it's pressed tight, legs clamped round, claws working.
@@ -19,6 +19,8 @@ const hsh = (a: number, b: number, c = 0) => {
 
 /** Its coral crust: dark, mid, light, tip. */
 const CORAL = ['#5a1a2c', '#c0405a', '#ff7a8a', '#ffd0c0'];
+/** The hive's corals (dark, mid, light, tip): pink, teal and emerald, like the GEMMs. */
+const CORALS = [CORAL, ['#08302c', '#1aa898', '#5ae0cc', '#c8fff4'], ['#0c2e14', '#1e9a48', '#5ad87a', '#d0ffd8']];
 /** Its gem chips (pink, turquoise, emerald), each a lit face and a dark one. */
 const CHIPS = [
   ['#ff9ad8', '#a0306a'],
@@ -109,13 +111,14 @@ export function drawCoralCrab(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
     dot(ctx, x2, y2);
   }
 
-  // The shell: a low dome, crusted in coral, lit along its top.
+  // The shell: a low dome, crusted in coral, lit along its top; the coral in patches of pink, teal and emerald.
   for (let f = -3; f <= 3; f++) {
     const hgt = f === -3 || f === 3 ? 2 : f === -2 || f === 2 ? 3 : 4;
     for (let u = -1; u < hgt; u++) {
       const top = u === hgt - 1;
       const n = hsh(seed, f + 7, u);
-      ctx.fillStyle = top ? (n < 0.3 ? CORAL[3] : CORAL[2]) : u <= 0 ? CORAL[0] : n < 0.5 ? CORAL[1] : CORAL[2];
+      const C = CORALS[Math.floor(hsh(seed, (f + 3) >> 1, (u + 1) >> 1) * 3)];
+      ctx.fillStyle = top ? (n < 0.3 ? C[3] : C[2]) : u <= 0 ? C[0] : n < 0.5 ? C[1] : C[2];
       const [x, y] = at(f, u);
       dot(ctx, x, y);
     }
@@ -125,12 +128,13 @@ export function drawCoralCrab(ctx: CanvasRenderingContext2D, t: Terrain, pts: re
   for (let k = 0; k < knobs; k++) {
     const f = -2.5 + hsh(seed, k, 11) * 5;
     const tall = 1 + Math.floor(hsh(seed, k, 12) * 2);
-    ctx.fillStyle = CORAL[1];
+    const pc = CORALS[Math.floor(hsh(seed, k, 13) * 3)];
+    ctx.fillStyle = pc[1];
     for (let u = 4; u < 4 + tall; u++) {
       const [x, y] = at(f, u);
       dot(ctx, x, y);
     }
-    ctx.fillStyle = CORAL[3];
+    ctx.fillStyle = pc[3];
     const [x, y] = at(f, 4 + tall);
     dot(ctx, x, y);
   }
@@ -170,23 +174,24 @@ export function drawPossessedMark(ctx: CanvasRenderingContext2D, x: number, y: n
   // On its back: away from the way it faces.
   const bx = left ? ix + w - 2 : ix + 1;
   const back = left ? 1 : -1;
+  const C = CORALS[id % CORALS.length];
   ctx.fillStyle = LEG;
   const twitch = Math.floor(now / 70 + id) % 3 === 0 ? 1 : 0;
   dot(ctx, bx - back, iy + 4 + twitch);
   dot(ctx, bx - back * 2, iy + 6);
   dot(ctx, bx + back * 2, iy + 3);
   dot(ctx, bx + back * 2, iy + 7 - twitch);
-  ctx.fillStyle = CORAL[0];
+  ctx.fillStyle = C[0];
   dot(ctx, bx, iy + 6);
   dot(ctx, bx + back, iy + 6);
-  ctx.fillStyle = CORAL[1];
+  ctx.fillStyle = C[1];
   dot(ctx, bx, iy + 5);
   dot(ctx, bx + back, iy + 5);
   dot(ctx, bx, iy + 4);
-  ctx.fillStyle = CORAL[2];
+  ctx.fillStyle = C[2];
   dot(ctx, bx + back, iy + 4);
   dot(ctx, bx, iy + 3);
-  ctx.fillStyle = CORAL[3];
+  ctx.fillStyle = C[3];
   dot(ctx, bx + back, iy + 2);
   const [lit] = CHIPS[id % 3];
   ctx.fillStyle = Math.floor(now / 110 + id * 7) % 19 === 0 ? '#ffffff' : lit;

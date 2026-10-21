@@ -7,6 +7,10 @@ import { NO_OWNER, W_CLAW, W_CRAB } from '../src/shared/particles.ts';
 import { BEAST_BUILD, BeastKind, CRAB_HP, CRAB_HIVE_REACH, CRAB_TRIGGER, CSPIDER_R, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, bodyPoints, crawler, newBeast } from '../src/shared/wildlife.ts';
 import { type Player, World } from '../src/server/world.ts';
 import { Game } from '../src/client/game.ts';
+import { BTN_RIGHT, Stance, newBody, stepBody } from '../src/shared/actor.ts';
+import { quantizeAim } from '../src/shared/protocol.ts';
+import { Terrain } from '../src/shared/terrain.ts';
+import { BILE, VOMIT_R } from '../src/shared/wildlife.ts';
 import { deliverAll } from './helpers.ts';
 
 /** A cave: solid rock, a tunnel (x 880..1260, y 380..440), `n` clones standing on its floor from x 960. */
@@ -196,5 +200,64 @@ describe('the coral crab', () => {
     for (let k = 0; k < 30 * 4; k++) world.step();
     // (Not healing: if anything, bleeding from its stumps.)
     expect(p.hp).toBeLessThanOrEqual(torn);
+  });
+
+  it('their melee is a vomit of blue blood: it reaches whoever is in front of them, out of claws\' reach, and leaves corrosive bile in them', () => {
+    const { world, ps } = cave(2);
+    const [a, b] = ps;
+    hidden(world).damage(a, 500, NO_OWNER, W_CRAB);
+    a.body.x = 960;
+    b.body.x = 960 + Math.round(VOMIT_R * 0.7);
+    a.aimQ = quantizeAim(0);
+    const hp = b.hp;
+    const worn = () => b.parts.wounds.reduce((x, y) => x + y, 0);
+    for (let k = 0; k < 20 && b.bile === 0; k++) world.step();
+    expect(b.bile).toBeGreaterThan(0);
+    expect(b.bile).toBeLessThanOrEqual(BILE);
+    expect(b.hp).toBeLessThan(hp);
+    // (It eats on in them, armour and flesh.)
+    const w0 = worn();
+    b.body.x = 1200;
+    for (let k = 0; k < 30; k++) world.step();
+    expect(worn()).toBeGreaterThan(w0);
+    // Behind them, it misses.
+    const { world: w2, ps: q } = cave(2);
+    hidden(w2).damage(q[0], 500, NO_OWNER, W_CRAB);
+    q[1].body.x = 960 + Math.round(VOMIT_R * 0.7);
+    q[0].aimQ = quantizeAim(Math.PI);
+    for (let k = 0; k < 20; k++) w2.step();
+    expect(q[1].bile).toBe(0);
+  });
+
+  it('the bile is infectious: whoever it finishes off rises possessed', () => {
+    const { world, ps } = cave(2);
+    const [a, b] = ps;
+    hidden(world).damage(a, 500, NO_OWNER, W_CRAB);
+    b.body.x = 1200;
+    // (Its armour already eaten away: the bile is in the flesh.)
+    b.parts.mask &= ~((1 << Part.Helmet) | (1 << Part.Vest));
+    b.hp = 3;
+    b.bile = 80;
+    b.bileBy = a.id;
+    for (let k = 0; k < 30 * 6 && !b.possessed; k++) world.step();
+    expect(b.possessed).toBe(true);
+    expect(b.alive).toBe(true);
+  });
+
+  it('legless and possessed, they crawl at you: flat, and far faster than a clone dragging itself', () => {
+    const t = new Terrain();
+    for (let y = 0; y < 1024; y++) for (let x = 0; x < 4096; x++) t.set(x, y, y >= 500 ? Mat.Rock : Mat.Air);
+    const run = (crawl: boolean) => {
+      const b = newBody(100, 500 - ACTOR_H);
+      b.legs = 0;
+      b.crawl = crawl;
+      b.onGround = true;
+      for (let k = 0; k < 60; k++) stepBody(b, BTN_RIGHT, t, 1 / 30);
+      return b;
+    };
+    const crawler = run(true);
+    const dragger = run(false);
+    expect(crawler.stance).toBe(Stance.Prone);
+    expect(crawler.x - 100).toBeGreaterThan((dragger.x - 100) * 2.5);
   });
 });

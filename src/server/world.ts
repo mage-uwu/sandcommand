@@ -1,4 +1,4 @@
-import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_LOCK, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
+import { type Body, BTN_DOWN, BTN_FIRE, BTN_LEFT, BTN_LOCK, BTN_RELOAD, BTN_RIGHT, BTN_SCOPE, BTN_UP, STANCE_DROP, STANCE_H, Stance, newBody, shoulderAt, stepBody } from '../shared/actor.ts';
 import { FACTION_SHIFT, STANCE_SHIFT } from '../shared/protocol.ts';
 import { FACTIONS, rollFaction } from '../shared/factions.ts';
 import {
@@ -196,6 +196,7 @@ import {
   R_BURNERS,
   R_CHARGES,
   R_POSSESSED,
+  R_VOMIT,
   R_STONEBURN,
   BEAST_SCALE,
   BEAST_SAME,
@@ -248,7 +249,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { CLAW, CLAW_CD, CLAW_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
+import { BILE, BILE_MAX, BILE_RATE, CLAW, CLAW_CD, CLAW_R, VOMIT_CONE, VOMIT_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
 import { STICKY_FUSE, STICKY_MAX_FLIGHT, STICKY_ON_BEAST, STICKY_ON_CLONE, STICKY_ON_VEHICLE, STICKY_THROW, stickyCore, STICKY_CORE_R } from '../shared/sticky.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, PROJ_STICKY, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
@@ -574,6 +575,9 @@ export class Player {
   expedition = false;
   /** The tick it was last hurt (the possessed heal only a while after). */
   hurtTick = -1e9;
+  /** The crab's blue blood in it (a possessed clone's vomit, BILE_*): harm still to do, eating armour then flesh; and who vomited it. */
+  bile = 0;
+  bileBy = 255;
   /** Clones of the other side (or anyone, with no sides) killed. */
   kills = 0;
   /** Creatures killed (anything wild but a web). */
@@ -4294,6 +4298,7 @@ export class World {
   private stepPossessed(): void {
     for (const p of this.players) {
       if (!p || !p.alive || !p.possessed) continue;
+      p.body.crawl = true;
       // Healing fast, a moment after the last hurt, unless it's been blown to pieces.
       if (p.hp < ACTOR_MAX_HP && this.tick - p.hurtTick >= POSSESSED_REGEN_DELAY && !inPieces(p.parts.mask)) p.hp = Math.min(ACTOR_MAX_HP, p.hp + POSSESSED_REGEN * DT);
       if (p.tank >= 0 || p.pilot >= 0) continue;
@@ -4301,13 +4306,37 @@ export class World {
         p.clawCd--;
         continue;
       }
+      // Its melee: it vomits the crab's blue blood over whoever's in front of it (and claws whoever's against it).
+      const aim = dequantizeAim(p.aimQ);
+      const mx = p.cx + Math.cos(aim) * 3;
+      const my = p.body.y + 3 + STANCE_DROP[p.body.stance];
+      const hit = (q: Player) => {
+        if (Math.abs(q.cx - p.cx) <= ACTOR_W + CLAW_R && Math.abs(q.cy - p.cy) <= ACTOR_H * 0.7) return true;
+        const dx = q.cx - mx;
+        const dy = q.cy - my;
+        const d = Math.hypot(dx, dy);
+        if (d > VOMIT_R + ACTOR_W / 2) return false;
+        let off = Math.abs(Math.atan2(dy, dx) - aim);
+        if (off > Math.PI) off = Math.PI * 2 - off;
+        return off < VOMIT_CONE && this.clearLine(mx, my, q.cx, q.cy);
+      };
+      let spewed = false;
       for (const q of this.players) {
-        if (!q || !q.alive || q.possessed || q.tank >= 0 || this.shielded(q)) continue;
-        if (Math.abs(q.cx - p.cx) > ACTOR_W + CLAW_R || Math.abs(q.cy - p.cy) > ACTOR_H * 0.7) continue;
+        if (!q || !q.alive || q.possessed || q.tank >= 0 || this.shielded(q) || !hit(q)) continue;
+        if (!spewed) {
+          spewed = true;
+          p.clawCd = CLAW_CD;
+          const w = this.broadcast;
+          w.u8(R_VOMIT);
+          w.u8(p.id);
+          w.u16(clampU16(mx));
+          w.u16(clampU16(my + Y_BIAS));
+          w.u8(p.aimQ >> 8);
+        }
+        q.bile = Math.min(BILE_MAX, q.bile + BILE);
+        q.bileBy = p.id;
         this.damage(q, CLAW, p.id, W_CLAW);
         q.body.vx += Math.sign(q.cx - p.cx || 1) * 60;
-        p.clawCd = CLAW_CD;
-        break;
       }
     }
   }
@@ -6225,7 +6254,9 @@ export class World {
     b.vx = vx;
     b.vy = vy;
     b.fuel = 100;
+    b.crawl = false;
     p.venom = 0;
+    p.bile = 0;
     p.coral.fill(0);
     if (p.possessed) {
       p.possessed = false;
@@ -8230,6 +8261,18 @@ export class World {
         const v = Math.min(p.venom, VENOM_RATE);
         p.venom -= v;
         this.damage(p, v, NO_OWNER, W_VENOM, true);
+        if (!p.alive) continue;
+      }
+      // The crab's blood eats in: through the armour first, then the flesh (alternately at the head and the body).
+      if (p.bile > 0) {
+        const v = Math.min(p.bile, BILE_RATE * DT);
+        p.bile -= v;
+        const res = this.strikeScratch;
+        res.hp = 0;
+        res.detached.length = 0;
+        res.vital = false;
+        harm(p.parts, (this.tick >> 3) % 3 === 0 && has(p.parts.mask, Part.Head) ? Part.Head : Part.Torso, v, res);
+        this.applyStrike(p, res, p.bileBy, W_CLAW, p.cx, p.cy);
         if (!p.alive) continue;
       }
       if (this.coralTick(p) && !p.alive) continue;

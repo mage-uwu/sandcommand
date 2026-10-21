@@ -661,6 +661,23 @@ export function crabBloodSplat(p: Particles, x: number, y: number, count: number
     p.spawn(PK.Blood, x, y, Math.cos(a) * s, Math.sin(a) * s - speed * 0.3, 60, 0, crabShade());
   }
 }
+/**
+ * A possessed clone's vomit: a gout of the crab's blue blood out of its
+ * mouth at (x, y), along `aim` (fanned over the vomit's cone), heavy drops
+ * and gobbets that splash down where they land.
+ */
+export function bileVomit(p: Particles, x: number, y: number, aim: number): void {
+  for (let k = 0; k < 46; k++) {
+    const a = aim + (Math.random() - 0.5) * 1.3;
+    const s = 90 + Math.random() * 190;
+    p.spawn(PK.Blood, x, y, Math.cos(a) * s, Math.sin(a) * s - 30, 70, 0, crabShade());
+  }
+  for (let k = 0; k < 5; k++) {
+    const a = aim + (Math.random() - 0.5) * 0.9;
+    const s = 80 + Math.random() * 120;
+    p.spawn(PK.Gib, x, y, Math.cos(a) * s, Math.sin(a) * s - 40, rnd(200, 360), GIB_SAC | GIB_INORGANIC, Math.random() < 0.5 ? CRAB_BLUE[1] : CRAB_BLUE[2]);
+  }
+}
 /** An animal killed: gobbets of its blue blood off its whole body, and a great spatter. */
 export function crabBloodGibs(p: Particles, pts: readonly number[]): void {
   for (let i = 0; i < pts.length; i += 2) {
