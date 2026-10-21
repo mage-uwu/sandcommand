@@ -59,6 +59,16 @@ const GOLD_SEAM = 8;
 const PROSPECT_CHANCE = 0.15;
 /** Hard cells (sampled every other row) over a seam that make it not worth the dig. */
 const GOLD_HARD = 3;
+/**
+ * The gold scan is the costliest thing a bot thinks about: at most this many
+ * bots in the room rescan in any one tick (the rest keep what they had and
+ * try again next tick), and each looks closely at no more than
+ * GOLD_CANDIDATES of the ore cells it finds.
+ */
+const GOLD_SCANS_PER_TICK = 2;
+const GOLD_CANDIDATES = 40;
+/** The scans made this tick (World.tick), across every bot in the room. */
+const goldScans = new WeakMap<World, { tick: number; n: number }>();
 /** Ticks of digging with nothing to show for it before a seam is given up. */
 const GOLD_STALL = 120;
 /**
@@ -241,12 +251,19 @@ export class BotBrain {
   private findGold(world: World, p: Player): { x: number; y: number } | null {
     const t = world.tick;
     const g = this.gold;
-    if (g && oreWorth(world.terrain.get(g.x, g.y)) > 0 && t - this.goldScanAt < 150) return g;
-    if (g === null && t - this.goldScanAt < 45) return null;
+    // (Each its own rhythm, so they don't all rescan in step.)
+    const jitter = this.phase * 2;
+    if (g && oreWorth(world.terrain.get(g.x, g.y)) > 0 && t - this.goldScanAt < 150 + jitter) return g;
+    if (g === null && t - this.goldScanAt < 45 + jitter) return null;
+    let budget = goldScans.get(world);
+    if (!budget || budget.tick !== t) goldScans.set(world, (budget = { tick: t, n: 0 }));
+    if (budget.n >= GOLD_SCANS_PER_TICK) return g && oreWorth(world.terrain.get(g.x, g.y)) > 0 ? g : null;
+    budget.n++;
     this.goldScanAt = t;
     this.gold = null;
     const ter = world.terrain;
     let best = Infinity;
+    let looked = 0;
     const x0 = Math.floor(p.cx) - GOLD_SCAN_W;
     const y0 = Math.floor(p.cy) - 30;
     for (let y = y0; y < y0 + GOLD_SCAN_H; y += 3) {
@@ -254,6 +271,7 @@ export class BotBrain {
         if (oreWorth(ter.get(x, y)) === 0 || this.badGold.some((b) => Math.abs(b.x - x) < 14 && Math.abs(b.y - y) < 14)) continue;
         const d = Math.abs(x - p.cx) + Math.max(0, y - p.cy) * 1.3 + Math.max(0, p.cy - y) * 3;
         if (d >= best) continue;
+        if (++looked > GOLD_CANDIDATES) return this.gold;
         // A seam, not a speck: enough gold around it to be worth the dig (a rare earth crystal, small as it is, always is).
         let n = 0;
         for (let yy = y - 4; yy <= y + 4; yy += 2) for (let xx = x - 4; xx <= x + 4; xx += 2) n += oreWorth(ter.get(xx, yy));
@@ -985,8 +1003,9 @@ export class BotBrain {
       }
     }
     const stale = !this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2;
-    // (The planning is shared out: a few searches a tick across all the bots; the rest keep to their old paths a moment longer.)
-    if (stale && (navBudget(world) || !this.path)) {
+    // (The planning is shared out: a few searches a tick across all the bots; the rest keep to their old
+    // paths a moment longer, or with none yet, head straight for it till their turn comes.)
+    if (stale && navBudget(world)) {
       this.path = findPath(world.terrain, at.cx, feet, tx, ty, veh ? 6000 : undefined, this.avoid, body);
       this.pathAt = t + (this.phase % 15); // (staggered: the bots don't all plan on one tick)
       this.pathIdx = 0;
