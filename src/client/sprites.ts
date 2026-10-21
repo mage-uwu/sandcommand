@@ -489,7 +489,7 @@ function evacGrid(open: boolean): Grid {
   }
   return g.map((r) => r.join(''));
 }
-/** The extraction rocket: Soviet surplus, faded drab plating, red bands gone dark, rust running down it, warm-lit portholes. */
+/** The extraction rocket: military surplus, faded drab plating, red bands gone dark, rust running down it, warm-lit portholes. */
 const EVAC_PAL: Record<string, number> = {
   K: 0x15120f,
   W: 0x9a9c7a,
@@ -517,10 +517,12 @@ export const CROWN: Grid = ['Y.Y.Y', 'YYYYY', 'yYrYy'];
 
 // Drop rocket, 14x28 (the 12x26 hull box plus a one-cell margin), centred on
 // the rocket's centre of mass. The extraction rocket's design in little:
-// Soviet surplus, its nose cone and heat-shield ring tiled in pale ceramic,
-// a red beacon on top, drab plating lit from the left, dark red bands, a
-// red star, rust bleeding down it, rusty fins with ceramic tips, a scorched
-// nozzle; its passenger's team band round it (grey when empty).
+// surplus gone to rust, its nose cone and heat-shield ring tiled in pale
+// ceramic, a red beacon on top, drab plating lit from the left, dark red
+// bands, rust bleeding down it, rusty fins with ceramic tips, a scorched
+// nozzle. Its passenger's colours: a band round it, and for its logo a
+// Regicide fortress banner (a swallowtail pennant with a pale diamond, on
+// its rod), both grey when it's empty.
 const CRAFT_SPRITE_W = 14;
 const CRAFT_SPRITE_H = 28;
 const CRAFT: Grid = [
@@ -535,13 +537,13 @@ const CRAFT: Grid = [
   '...KWBwwBvK...',
   '...KTTTTTTK...',
   '...KttttttK...',
-  '...KWWwwwvK...',
-  '...KWWwSwvK...',
-  '...KWSSSSSK...',
-  '...KWwSSSvK...',
-  '...KWwSwSvK...',
-  '...KWWwowvK...',
-  '...KWWwpwvK...',
+  '...KWkkkkkK...',
+  '...KWTTtTTK...',
+  '...KWTTPTTK...',
+  '...KWTPtPTK...',
+  '...KWTTPTTK...',
+  '...KWTTtTTK...',
+  '...KWTwpwTK...',
   '...KYYYYYyK...',
   '..KKCCcCCdKK..',
   '.KrKcCqcCdKrK.',
@@ -553,9 +555,9 @@ const CRAFT: Grid = [
   '....KDDDDK....',
   '.....KKKK.....',
 ];
-/** The drop rocket's colours: the extraction rocket's (EVAC_PAL), its passenger's `team` on the band. */
+/** The drop rocket's colours: the extraction rocket's (EVAC_PAL), its passenger's `team` on the band and the banner. */
 function craftPalette(team: number): Record<string, number> {
-  return { ...EVAC_PAL, S: 0xc4261a, T: team, t: shade(team, 0.62), M: 0x7a2e12 };
+  return { ...EVAC_PAL, T: team, t: shade(team, 0.62), k: 0x3a3028, P: 0xe8e0c8, M: 0x7a2e12 };
 }
 
 function shade(rgb: number, k: number): number {

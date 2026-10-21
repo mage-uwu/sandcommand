@@ -1,5 +1,5 @@
 /**
- * The rockets in flight, as gritty Soviet-era pixel art: drab olive tubes
+ * The rockets in flight, as gritty, rusting pixel art: drab olive tubes
  * gone to rust, chipped paint, a red warhead, a scorched tail. Tiny grids
  * drawn a cell at a time in the rocket's own frame (nose along +x, centred
  * on the rocket), so they turn with it and stay in the game's pixels.

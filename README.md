@@ -2754,8 +2754,8 @@ the same seed. Explosive and high-overkill deaths scatter harder.
 
 ### Rockets
 
-Every rocket is gritty Soviet-era surplus in pixel art, drab olive gone to
-rust:
+Every rocket is gritty, rusting military surplus in pixel art, drab olive
+gone to rust:
 - **The extraction rocket** has faded drab plating lit from the left, dark
   red bands, rust running down it from the bands and seams, and warm-lit
   portholes. Its nose cone is tiled in pale **ceramic** heat-shield tiles,
@@ -2764,9 +2764,11 @@ rust:
 - **The drop rocket** (`CRAFT` in `src/client/sprites.ts`) is the same
   design in little, in the same colours. It has a ceramic nose cone and a
   ceramic heat-shield ring above its fins, a red beacon on top, dark red
-  bands, portholes, a red star, rust streaks, rusty fins with ceramic tips
-  and a scorched nozzle. Its passenger's team colour runs round it in a
-  band (grey when it's empty).
+  bands, portholes, rust streaks, rusty fins with ceramic tips and a
+  scorched nozzle. Its passenger's team colour runs round it in a band,
+  and its logo is a **Regicide fortress banner** in that colour: a
+  swallowtail pennant on its rod with a pale diamond (both grey when it's
+  empty).
 - **In flight** (`src/client/rocket-art.ts`), the rockets are tiny grids
   drawn a cell at a time and turned with their heading, a sputtering flame
   out the tail:
