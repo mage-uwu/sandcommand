@@ -966,8 +966,10 @@ claws.
   together, against everyone else, whatever team they were on. The kill
   counts as a death. The crab is inside you now, and you look it (see "The
   look" below), with a pink ✺ name tag.
-  - **Four times as tough**, and you live on with your head or body blown
-    away: only your health running out ends you.
+  - **Half as tough again** as a clone (1.5 times), and you live on with
+    your head or body blown away: only your health running out ends you.
+    It's the healing that keeps you coming; enough fire still shoots you
+    to pieces.
   - **You heal fast:** a second after the last hit, back to full at 50
     health a second. Not once you're in pieces, though: with three of
     head, body, arms and legs gone, you don't heal at all.

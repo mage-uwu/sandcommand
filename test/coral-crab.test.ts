@@ -73,7 +73,7 @@ describe('the coral crab', () => {
     expect(Math.abs(world.beastPts[1][0] - ps[0].cx)).toBeLessThan(6);
   });
 
-  it('it bites till they drop, and they rise again possessed: whole, at full health, four times as tough, the crab gone into them', () => {
+  it('it bites till they drop, and they rise again possessed: whole, at full health, half as tough again, the crab gone into them', () => {
     const { world, ps } = cave();
     const p = ps[0];
     const b = putCrab(world, 970, 440);
@@ -104,10 +104,11 @@ describe('the coral crab', () => {
     hidden(world).applyStrike(p, res, NO_OWNER, 0, p.cx, p.cy - 6);
     expect(p.alive).toBe(true);
     expect(has(p.parts.mask, Part.Head)).toBe(false);
-    // (Four times as tough: what would kill a clone outright, it shrugs off.)
-    hidden(world).damage(p, 500, NO_OWNER, 0);
+    // (Half as tough again: what would just kill a clone outright, it lives through.)
+    const clone = p.parts.tough / POSSESSED_TOUGH;
+    hidden(world).damage(p, ACTOR_MAX_HP * clone * 1.2, NO_OWNER, 0);
     expect(p.alive).toBe(true);
-    hidden(world).damage(p, 5000, NO_OWNER, 0);
+    hidden(world).damage(p, ACTOR_MAX_HP * clone * 1.2, NO_OWNER, 0);
     expect(p.alive).toBe(false);
     expect(p.possessed).toBe(false);
     expect(world.beasts.some((x) => x?.kind === BeastKind.CoralCrab)).toBe(true);
@@ -189,7 +190,7 @@ describe('the coral crab', () => {
     const { world, ps } = cave();
     const p = ps[0];
     hidden(world).damage(p, 500, NO_OWNER, W_CRAB);
-    hidden(world).damage(p, 300, NO_OWNER, 0);
+    hidden(world).damage(p, ACTOR_MAX_HP * 0.7 * p.parts.tough, NO_OWNER, 0);
     const low = p.hp;
     expect(low).toBeLessThan(ACTOR_MAX_HP * 0.5);
     for (let k = 0; k < POSSESSED_REGEN_DELAY - 2; k++) world.step();
@@ -198,7 +199,7 @@ describe('the coral crab', () => {
     expect(p.hp).toBe(ACTOR_MAX_HP);
     // In pieces: arms and a leg gone.
     p.parts.mask &= ~((1 << Part.GunArm) | (1 << Part.OffArm) | (1 << Part.LegB));
-    hidden(world).damage(p, 300, NO_OWNER, 0);
+    hidden(world).damage(p, ACTOR_MAX_HP * 0.7 * p.parts.tough, NO_OWNER, 0);
     const torn = p.hp;
     for (let k = 0; k < 30 * 4; k++) world.step();
     // (Not healing: if anything, bleeding from its stumps.)

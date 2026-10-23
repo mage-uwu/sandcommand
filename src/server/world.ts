@@ -566,7 +566,7 @@ export class Player {
   firing = false;
   /**
    * Possessed by a coral crab (World.possess): risen again after it killed
-   * them, on the coral's side against everyone else, four times as tough,
+   * them, on the coral's side against everyone else, half as tough again,
    * and alive on with its head or limbs gone; its claws turn whoever they
    * kill. Killed, it drops the crab. Until it's killed (or the wave ends).
    */
@@ -4282,7 +4282,7 @@ export class World {
   /**
    * A clone a coral crab (or a possessed clone's claws) just killed rises
    * again possessed: whole once more (every limb back), at full health,
-   * four times as tough, on the coral's side against everyone else. The
+   * half as tough again, on the coral's side against everyone else. The
    * crab that did it is in it now (gone from the world till it's killed).
    * It counts as a death, and a kill for the clone whose claws did it.
    */

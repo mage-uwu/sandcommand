@@ -238,7 +238,7 @@ export const WEB_HP = 360;
  * the one it reaches it lodges onto (CRAB_LATCH_R) and stays on, biting
  * (CRAB_BITE every CRAB_BITE_CD ticks), until one of them is dead. The
  * clone it kills it doesn't leave dead: it gets into them and they rise
- * again possessed (World.possess: four times as tough, on nobody's side
+ * again possessed (World.possess: half as tough again, on nobody's side
  * but the coral's), and a possessed clone killed drops the crab again.
  * Surprisingly durable (CRAB_HP) for its size.
  */
@@ -265,7 +265,7 @@ export const CRAB_TRIGGER = 110;
 /** Of the crawlers that come up, the share that are coral crabs. */
 export const CRAB_SHARE = 0.18;
 /** A possessed clone: this many times as tough as it was (World.possess), and its claws: harm a strike, ticks between strikes, reach (cells). */
-export const POSSESSED_TOUGH = 4;
+export const POSSESSED_TOUGH = 1.5;
 export const CLAW = 28;
 export const CLAW_CD = 14;
 export const CLAW_R = 4;
