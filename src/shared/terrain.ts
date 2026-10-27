@@ -37,6 +37,8 @@ export class Terrain {
   readonly loose = new Uint32Array(WORDS_PER_ROW * WORLD_H);
   /** Set when a chunk changes; the renderer clears it. */
   readonly dirty = new Uint8Array(CHUNK_COUNT);
+  /** Per chunk: set when cells change; the bots' route planner (nav.ts) clears it as it re-reads the chunk. */
+  readonly navDirty = new Uint8Array(CHUNK_COUNT).fill(1);
   /** Per 16x16 tile: set when cells change; the distance field clears it. */
   readonly fieldDirty = new Uint8Array(TILES_X * TILES_Y);
   /** Scratch: cells removed by the last carve, by material. */
@@ -73,7 +75,9 @@ export class Terrain {
     else this.fixed[wi] &= ~bit;
     if (MAT_LOOSE[m]) this.loose[wi] |= bit;
     else this.loose[wi] &= ~bit;
-    this.dirty[(y >> CHUNK_SHIFT) * CHUNKS_X + (x >> CHUNK_SHIFT)] = 1;
+    const ci = (y >> CHUNK_SHIFT) * CHUNKS_X + (x >> CHUNK_SHIFT);
+    this.dirty[ci] = 1;
+    this.navDirty[ci] = 1;
     this.fieldDirty[(y >> TILE_SHIFT) * TILES_X + (x >> TILE_SHIFT)] = 1;
   }
 
@@ -429,6 +433,7 @@ export class Terrain {
   markDirtyRect(x0: number, y0: number, x1: number, y1: number): void {
     forChunksInRect(x0, y0, x1, y1, (ci) => {
       this.dirty[ci] = 1;
+      this.navDirty[ci] = 1;
     });
     const tx0 = Math.max(0, x0 >> TILE_SHIFT);
     const ty0 = Math.max(0, y0 >> TILE_SHIFT);
@@ -489,6 +494,7 @@ export class Terrain {
   rebuildAllPlanes(): void {
     this.rebuildPlanes(0, 0, WORLD_W - 1, WORLD_H - 1);
     this.dirty.fill(1);
+    this.navDirty.fill(1);
     this.fieldDirty.fill(1);
   }
 

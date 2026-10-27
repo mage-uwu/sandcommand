@@ -2817,10 +2817,49 @@ teleporting players, late joiners, leavers, and constant destruction in and
 out of view.
 
 **Entities use interest management too.** Clones inside your view (plus a
-margin) are sent every tick as 14-byte quantized records. Clones outside it
-are sent as 3-byte radar blips every 15 ticks. Each actor record, op and
-projectile event is **encoded once per tick and fanned out** to every
-interested client as a byte copy.
+margin) are sent as quantized records; clones outside it as 3-byte radar
+blips every 15 ticks. Each actor record, vehicle record, op and projectile
+event is **encoded once per tick and fanned out** to every interested
+client as a byte copy. Inside the view, what each client is sent is tiered:
+
+- **Near the camera** (within 280 x 180 cells, on anyone's screen at any
+  zoom the game picks), every clone every tick. **Further out** in the
+  interest rect, every other tick, with a 1-byte `HELD` entry between
+  (still there, nothing new). The client interpolates 3 ticks behind, so
+  the gap never shows.
+- **Short records.** A clone's record is 16 bytes, but its health, weapon,
+  body and stance seldom change. While they're as the client last had them
+  (the server tracks, per client, what it last sent of each clone), it's
+  sent its motion alone: 12 bytes, flagged `SHORT`.
+- **Vehicles** in or near view, every tick; out of view (they still matter
+  for the radar), every 3rd tick, `HELD` between. Your own (driven,
+  remote-driven or ridden) always every tick.
+
+Together these cut what each client receives by about a quarter (measured
+with 64 clients, every mode: Siege 36.6 to 26.0 KB/s, Infection 29.1 to
+20.8, PvP 23.6 to 17.3, Regicide 38.1 to 28.6, Extermination 39.4 to 32.2).
+`test/net-tiering.test.ts` checks that a client still has every clone in
+view, its health, weapon and body never more than a tick behind.
+
+**Server tick time** (64 clients, all sent frames; a tick has 33 ms) was
+profiled by mode and the hot spots fixed. Worst ticks came down from 21 to
+36 ms to 12 to 17 ms:
+
+- **The bots' route planner** (`nav.ts`) keeps every node's class (open,
+  diggable, rock: 64 cells read each) between searches, re-reading only the
+  chunks changed since (`Terrain.navDirty`): classifying fell from 7.5% of
+  the server's time to 1.4%.
+- **Vehicle routes** (each node checks the whole vehicle's footprint) are
+  searched greedily (a slightly longer route, far fewer nodes, at most
+  3500) and count as two of the tick's searches.
+- **Per-client work done once a tick**: the counts left on each side,
+  PvP's leader, every vehicle's riders and record.
+- **Bots' gold scans and path searches** are shared out across ticks (at
+  most two of each a tick).
+
+**Client rendering** with a crowd: a clone's wounds are baked into a small
+canvas of its own when they change (not painted pixel by pixel every
+frame): 60 wounded clones draw in about 2 ms a frame, possessed or not.
 
 ### Latency hiding
 

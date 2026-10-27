@@ -34,6 +34,20 @@ import { ParticleLayer } from './particle-layer.ts';
 import { drawCoralCrab, drawCrabNestCrystals } from './crab-art.ts';
 import { M as INF_M, infectArm, infectBody, spriteMask } from './possessed-art.ts';
 import { FLESH, HIVE, SYNTH, type WoundPx, woundPixels } from './wound-art.ts';
+
+/** Paint wound pixels (wound-art.ts) into a sprite-sized canvas, over clear. */
+function bakePixels(c: HTMLCanvasElement, px: readonly WoundPx[]): void {
+  const img = new ImageData(c.width, c.height);
+  for (const p of px) {
+    const i = (p.y * c.width + p.x) * 4;
+    const v = parseInt(p.c.slice(1), 16);
+    img.data[i] = v >> 16;
+    img.data[i + 1] = (v >> 8) & 255;
+    img.data[i + 2] = v & 255;
+    img.data[i + 3] = 255;
+  }
+  c.getContext('2d')!.putImageData(img, 0, 0);
+}
 import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, drawCritterGib, drawMillipede, drawNest, drawSeeder, drawSegmentGib } from './beast-art.ts';
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
@@ -2137,6 +2151,9 @@ export class Renderer {
     }
   }
 
+  /** Each clone's wound pixels as last worked out (drawActor), and what they were worked out for. */
+  private readonly goreCache = new Map<number, { sprite: HTMLCanvasElement; n: number; lastAt: number; lastR: number; tone: unknown; at: number; c: HTMLCanvasElement }>();
+
   private drawActor(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -2186,22 +2203,32 @@ export class Renderer {
     const posed = (dx: number, dy: number) => [hipX + dx * cos - dy * sin, hipY + dx * sin + dy * cos];
     // Its wounds, painted into its own sprite (wound-art.ts): as many as its missing health shows;
     // the possessed's never close (every one they've taken). A droid's are its own (drawWounds, below).
-    let gore: WoundPx[] | null = null;
+    let gore: HTMLCanvasElement | null = null;
     if (!droid && id >= 0 && this.game && (hp < ACTOR_MAX_HP || strain >= 0)) {
       const shown = this.game.wounds.shown(id, strain >= 0 ? 0 : (hp / ACTOR_MAX_HP) * 100);
       if (shown.length) {
-        const mask = spriteMask(sprite!);
-        gore = woundPixels(shown, face, strain >= 0 ? HIVE : FACTIONS[faction]?.synthetic ? SYNTH : FLESH, now, (gx, gy) => gx >= 0 && gy >= 0 && gx < 10 && gy < 16 && mask[gy * 10 + gx] === 1);
+        // (Worked out again only when something about them changes: the sprite, the wounds, the tone, or a quarter second on.)
+        const tone = strain >= 0 ? HIVE : FACTIONS[faction]?.synthetic ? SYNTH : FLESH;
+        const at = Math.floor(now / 250);
+        const last = shown[shown.length - 1];
+        const c = this.goreCache.get(id);
+        if (c && c.sprite === sprite && c.n === shown.length && c.lastAt === last.at && c.lastR === last.r && c.tone === tone && c.at === at) gore = c.c;
+        else {
+          // (Baked into a little canvas of its own, the sprite's size: drawn as the sprite is, in two copies, not pixel by pixel.)
+          const mask = spriteMask(sprite!);
+          const px = woundPixels(shown, face, tone, now, (gx, gy) => gx >= 0 && gy >= 0 && gx < 10 && gy < 16 && mask[gy * 10 + gx] === 1);
+          const canvas = c?.c ?? document.createElement('canvas');
+          canvas.width = 10;
+          canvas.height = 16;
+          bakePixels(canvas, px);
+          this.goreCache.set(id, { sprite: sprite!, n: shown.length, lastAt: last.at, lastR: last.r, tone, at, c: canvas });
+          gore = canvas;
+        }
       }
     }
     /** Paint the wounds' pixels of rows [y0, y1) at (ox, oy) (sprite cell (0, 0) there), rows squashed by `sy`. */
     const paint = (y0: number, y1: number, ox: number, oy: number, sy = 1) => {
-      if (!gore) return;
-      for (const g of gore) {
-        if (g.y < y0 || g.y >= y1) continue;
-        ctx.fillStyle = g.c;
-        ctx.fillRect(ox + g.x, oy + Math.floor((g.y - y0) * sy), 1, 1);
-      }
+      if (gore) ctx.drawImage(gore, 0, y0, 10, y1 - y0, ox, oy, 10, (y1 - y0) * sy);
     };
     if (droid) {
       // (Drawn above.)

@@ -1,4 +1,4 @@
-import { WORLD_H, WORLD_W } from '../shared/constants.ts';
+import { CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, WORLD_H, WORLD_W } from '../shared/constants.ts';
 import { MAT_ADAMANT, MAT_FIXED, MAT_TOUGH, Mat } from '../shared/materials.ts';
 import type { Terrain } from '../shared/terrain.ts';
 
@@ -37,9 +37,33 @@ const HANG_MAX = 14;
 /** The cost of a node near where a bot got stuck on its last plan (findPath's `avoid`). */
 const AVOID_COST = 40;
 
+/**
+ * Each terrain's node classes, kept search to search (classifying a node
+ * reads its 64 cells; the ground seldom changes): a node is re-read only
+ * once the chunk it's in has changed (Terrain.navDirty).
+ */
+const classes = new WeakMap<Terrain, { cls: Uint8Array; ok: Uint8Array }>();
+/** Nodes a chunk spans, each way. */
+const CHUNK_NODES = (1 << CHUNK_SHIFT) / NAV_CELL;
+let cls: Uint8Array = new Uint8Array(0);
+let clsOk: Uint8Array = new Uint8Array(0);
+/** Point the class cache at `t`'s, first forgetting the nodes of every chunk changed since. */
+function useClasses(t: Terrain): void {
+  let c = classes.get(t);
+  if (!c) classes.set(t, (c = { cls: new Uint8Array(GW * GH), ok: new Uint8Array(GW * GH) }));
+  cls = c.cls;
+  clsOk = c.ok;
+  const dirty = t.navDirty;
+  for (let ci = 0; ci < CHUNK_COUNT; ci++) {
+    if (!dirty[ci]) continue;
+    dirty[ci] = 0;
+    const nx0 = (ci % CHUNKS_X) * CHUNK_NODES;
+    const ny0 = Math.floor(ci / CHUNKS_X) * CHUNK_NODES;
+    for (let ny = ny0; ny < ny0 + CHUNK_NODES; ny++) clsOk.fill(0, ny * GW + nx0, ny * GW + nx0 + CHUNK_NODES);
+  }
+}
+
 // Scratch, reused search to search (a stamp marks what's this search's).
-const cls = new Uint8Array(GW * GH);
-const clsStamp = new Uint16Array(GW * GH);
 const hangOf = new Uint8Array(GW * GH);
 const hangStamp = new Uint16Array(GW * GH);
 const g = new Float32Array(GW * GH);
@@ -93,7 +117,7 @@ function pop(): number {
 function classify(t: Terrain, gx: number, gy: number): number {
   if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) return ROCK;
   const id = gy * GW + gx;
-  if (clsStamp[id] === stamp) return cls[id];
+  if (clsOk[id]) return cls[id];
   let c = OPEN;
   const m = t.mat;
   for (let y = gy * NAV_CELL; y < (gy + 1) * NAV_CELL && c !== ROCK; y++) {
@@ -109,7 +133,7 @@ function classify(t: Terrain, gx: number, gy: number): number {
     }
   }
   cls[id] = c;
-  clsStamp[id] = stamp;
+  clsOk[id] = 1;
   return c;
 }
 
@@ -158,9 +182,9 @@ export interface NavBody {
 export const CLONE_BODY: NavBody = { w: 1, h: 2, dig: DIG_COST, climb: CLIMB_COST, hang: HANG_COST };
 
 export function findPath(t: Terrain, sx: number, sy: number, tx: number, ty: number, maxExpand = 2500, avoid?: { x: number; y: number; r: number }, body: NavBody = CLONE_BODY): NavPath {
+  useClasses(t);
   stamp = (stamp + 1) & 0xffff;
   if (stamp === 0) {
-    clsStamp.fill(0);
     hangStamp.fill(0);
     seen.fill(0);
     closed.fill(0);

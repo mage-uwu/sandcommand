@@ -154,7 +154,7 @@ import {
   ENTITY_INTEREST_MARGIN,
   FALL_DAMAGE_SPEED,
   GRAVITY,
-  FAR_UPDATE_INTERVAL,
+  FAR_UPDATE_INTERVAL, ACTOR_NEAR_HALF_W, ACTOR_NEAR_HALF_H, HELD, SHORT, TANK_FAR_INTERVAL,
   MAX_PLAYERS,
   POS_SCALE,
   RESPAWN_TICKS,
@@ -549,6 +549,9 @@ export class Player {
   chargesSeen = -1;
   /** possessedRev as last sent to this player. */
   possessedSeen = -1;
+  /** Replication, by actor id: the tick each was last in this player's frame (held or not), and the static part (hp, weapon, body) last sent of it. */
+  readonly actorIn = new Int32Array(MAX_PLAYERS).fill(-1);
+  readonly actorStatic = new Int32Array(MAX_PLAYERS).fill(-1);
   /** The geysers' state as this client last heard it (World.geysersRev). */
   geysersSeen = -1;
   /** The flora's state as this client last heard it (World.floraRev). */
@@ -4953,6 +4956,8 @@ export class World {
     for (let k = 0; k < MAX_TANKS; k++) if (this.tanks[k]?.owner === id) this.destroyTank(k, 255);
     this.players[id] = null;
     this.pendingRoster.delete(id);
+    // (Whoever takes the slot next is new to every client: sent in full first.)
+    for (const o of this.players) if (o) o.actorIn[id] = -1;
     // An empty rocket flies itself home.
     for (const c of this.crafts) {
       if (c && c.passenger === id) {
@@ -8611,12 +8616,59 @@ export class World {
     }
   }
 
+  /** Every vehicle's R_TANKS record, encoded once a tick (by slot; `riders` by slot too). */
+  private encodeTanks(riders: Player[][]): (Uint8Array | null)[] {
+    const out: (Uint8Array | null)[] = [];
+    for (let k = 0; k < MAX_TANKS; k++) {
+      const t = this.tanks[k];
+      if (!t) {
+        out.push(null);
+        continue;
+      }
+      const w = this.tmp.reset();
+      w.u8(k);
+      w.u16(clampU16(t.x * POS_SCALE));
+      w.u16(clampU16((t.y + Y_BIAS) * POS_SCALE));
+      w.i16(clampI16(t.vx * VEL_SCALE));
+      w.i16(clampI16(t.vy * VEL_SCALE));
+      w.u16(quantizeAim(t.aim));
+      w.u8(Math.round(t.a * 100) & 255); // tilt, centiradians (signed)
+      const remote = t.pilot !== 255 && this.players[t.pilot]?.rc === k;
+      w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0) | (isDog(t) ? 64 : 0) | (remote ? 128 : 0));
+      w.u8(t.parts);
+      w.u16(Math.max(0, Math.ceil(t.hp)));
+      w.u8(t.pilot);
+      w.u8(t.owner);
+      w.u8(t.kind);
+      // Its riders (tank surfing), each id | seat << 8: clients draw them on their seats.
+      const rs = riders[k] ?? [];
+      w.u8(rs.length);
+      for (const o of rs) w.u16(o.id | (o.seat << 8));
+      out.push(w.finish());
+    }
+    return out;
+  }
+
   private replicate(): void {
     this.encodeActors();
     const actorBytes = this.actorRecords.buf;
     const ACTOR_REC = 16; // bytes per encoded actor, see encodeActors()
     const broadcast = this.broadcast.finish();
     this.encodeBeasts();
+    // What's the same for every client, worked out once a tick (not once a client):
+    // how many are left (and on each side), PvP's leader, every vehicle's riders and record.
+    const left = this.remaining();
+    const leftOf = [Team.Red, Team.Green, Team.Blue, Team.Gold].map((t) => this.remaining(t));
+    let lead: Player | null = null;
+    if (this.waveMode === GameMode.Pvp) for (const o of this.players) if (o && o.inWave && (!lead || o.waveKills > lead.waveKills || (o.waveKills === lead.waveKills && o.waveDeaths < lead.waveDeaths))) lead = o;
+    const tankRiders: Player[][] = [];
+    const shipRiders: Player[][] = [];
+    for (const o of this.players) {
+      if (!o || !o.alive) continue;
+      if (o.surf >= 0) (tankRiders[o.surf] ??= []).push(o);
+      if (o.surfShip >= 0) (shipRiders[o.surfShip] ??= []).push(o);
+    }
+    const tankRecs = this.encodeTanks(tankRiders);
     const sendScores = this.tick % TICKS_PER_SCORE === 0;
     let scores: Uint8Array | null = null;
     if (sendScores) {
@@ -8739,22 +8791,20 @@ export class World {
         w.u16(this.wave);
         w.u16(Math.min(65535, this.phaseTimer));
         w.u8(this.winner);
-        w.u8(this.remaining());
+        w.u8(left);
         // 0 not in this wave, 1 in it (alive, riding in, or waiting for a rocket), 2 out.
         w.u8(!p.inWave ? 0 : this.inPlay(p) ? 1 : 2);
         w.u8(this.waveMode);
-        w.u8(this.remaining(Team.Red));
-        w.u8(this.remaining(Team.Green));
+        w.u8(leftOf[0]);
+        w.u8(leftOf[1]);
         w.u8(this.kings[0]);
         w.u8(this.kings[1]);
-        w.u8(this.remaining(Team.Blue));
-        w.u8(this.remaining(Team.Gold));
+        w.u8(leftOf[2]);
+        w.u8(leftOf[3]);
         if (this.waveMode === GameMode.Siege) w.u16(this.siegeLives);
         if (this.waveMode === GameMode.Infection) w.u16(this.infectionLives);
         if (this.waveMode === GameMode.Pvp) {
           // PvP: who leads (and on how many kills), and our own kills and deaths this wave.
-          let lead: Player | null = null;
-          for (const o of this.players) if (o && o.inWave && (!lead || o.waveKills > lead.waveKills || (o.waveKills === lead.waveKills && o.waveDeaths < lead.waveDeaths))) lead = o;
           w.u8(lead ? lead.id : 255);
           w.u8(Math.min(255, lead ? lead.waveKills : 0));
           w.u8(Math.min(255, p.waveKills));
@@ -8890,7 +8940,21 @@ export class World {
         const off = rec++ * ACTOR_REC;
         if (o === p) continue;
         if (o.cx >= vx0 && o.cx <= vx1 && o.cy >= vy0 && o.cy <= vy1) {
-          w.bytes(actorBytes.subarray(off, off + ACTOR_REC));
+          // (Near the camera, every tick; further out in the rect, every other tick, held between.)
+          // Its motion alone when the rest (hp, weapon, body and stance) is as this client last had it.
+          const known = p.actorIn[o.id] === this.tick - 1;
+          if (known && !(Math.abs(o.cx - p.camX) <= ACTOR_NEAR_HALF_W && Math.abs(o.cy - p.camY) <= ACTOR_NEAR_HALF_H) && ((this.tick + o.id) & 1) !== 0) w.u8(o.id | HELD);
+          else {
+            const stat = (actorBytes[off + 12] << 24) | (actorBytes[off + 13] << 16) | (actorBytes[off + 14] << 8) | actorBytes[off + 15];
+            if (known && p.actorStatic[o.id] === stat) {
+              w.u8(o.id | SHORT);
+              w.bytes(actorBytes.subarray(off + 1, off + 12));
+            } else {
+              w.bytes(actorBytes.subarray(off, off + ACTOR_REC));
+              p.actorStatic[o.id] = stat;
+            }
+          }
+          p.actorIn[o.id] = this.tick;
           near++;
         } else if (sendFar && o.alive) {
           far.push(o);
@@ -8955,6 +9019,7 @@ export class World {
       if (nCraft > 0) w.buf[craftAt] = nCraft;
 
       // Tanks: only a handful, so every one of them, every frame (they matter from afar).
+      // (Out of view, every TANK_FAR_INTERVAL ticks, held between: they matter from afar, but not at full rate.)
       let nTank = 0;
       for (const t of this.tanks) if (t) nTank++;
       if (nTank > 0) {
@@ -8963,24 +9028,11 @@ export class World {
         for (let k = 0; k < MAX_TANKS; k++) {
           const t = this.tanks[k];
           if (!t) continue;
-          w.u8(k);
-          w.u16(clampU16(t.x * POS_SCALE));
-          w.u16(clampU16((t.y + Y_BIAS) * POS_SCALE));
-          w.i16(clampI16(t.vx * VEL_SCALE));
-          w.i16(clampI16(t.vy * VEL_SCALE));
-          w.u16(quantizeAim(t.aim));
-          w.u8(Math.round(t.a * 100) & 255); // tilt, centiradians (signed)
-          const remote = t.pilot !== 255 && this.players[t.pilot]?.rc === k;
-          w.u8((t.chute ? 1 : 0) | (t.faceLeft ? 2 : 0) | (t.jetting ? 4 : 0) | (t.firedSmg ? 8 : 0) | (t.firedCannon ? 16 : 0) | (t.onGround ? 32 : 0) | (isDog(t) ? 64 : 0) | (remote ? 128 : 0));
-          w.u8(t.parts);
-          w.u16(Math.max(0, Math.ceil(t.hp)));
-          w.u8(t.pilot);
-          w.u8(t.owner);
-          w.u8(t.kind);
-          // Its riders (tank surfing), each id | seat << 8: clients draw them on their seats.
-          const riders = this.ridersOf(k);
-          w.u8(riders.length);
-          for (const o of riders) w.u16(o.id | (o.seat << 8));
+          const cx = t.x + tankW(t) / 2;
+          const cy = t.y + tankH(t) / 2;
+          const inView = cx >= vx0 - 120 && cx <= vx1 + 120 && cy >= vy0 - 120 && cy <= vy1 + 120;
+          if (inView || (this.tick + k) % TANK_FAR_INTERVAL === 0 || p.tank === k || p.rc === k || p.surf === k) w.bytes(tankRecs[k]!);
+          else w.u8(k | HELD);
         }
       }
 
@@ -9040,7 +9092,7 @@ export class World {
           w.u8((sh.doors > 0 ? 1 : 0) | (sh.fired[0] ? 2 : 0) | (sh.fired[1] ? 4 : 0) | (sh.leaving ? 8 : 0) | ((sh.mission & 3) << 4) | (sh.pilot !== 255 ? 64 : 0) | ((sh.mission >> 2) << 7));
           for (let e = 0; e < 4; e++) w.u8(Math.round(sh.thrust[e] * 255));
           // Its riders, as a tank's: each id | seat << 8.
-          const riders = this.shipRidersOf(k);
+          const riders = shipRiders[k] ?? [];
           w.u8(riders.length);
           for (const o of riders) w.u16(o.id | (o.seat << 8));
         }

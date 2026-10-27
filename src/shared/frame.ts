@@ -6,7 +6,7 @@ import { TANK_PARTS, TARANTULA_SCALE, TankKind, WATCHDOG_SCALE, MOLE_SCALE } fro
 import { applyCarve } from './particles.ts';
 import { applyBuild } from './build.ts';
 import type { GroundItem } from './items.ts';
-import { BLIP_X, BLIP_Y, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, MAX_PLAYERS } from './constants.ts';
+import { BLIP_X, BLIP_Y, CHUNK, CHUNK_COUNT, CHUNK_SHIFT, CHUNKS_X, HELD, MAX_PLAYERS, SHORT } from './constants.ts';
 import {
   R_ACTORS,
   R_BLIPS,
@@ -140,6 +140,8 @@ export interface RemoteActor {
   parts: number;
   stance: number; // actor.ts Stance
   faction: number; // factions.ts: this clone's vendor
+  /** A short record (SHORT): hp, weapon, parts, stance and faction aren't in it; they're as last sent. */
+  short?: boolean;
 }
 
 export interface KillInfo {
@@ -323,7 +325,8 @@ export interface RoundState {
 /** Callbacks for everything in a server frame except terrain, which is applied directly. */
 export interface FrameHandler {
   self(s: SelfState): void;
-  actors(list: RemoteActor[]): void;
+  /** The actors in view (R_ACTORS), and those still there but sent no new state this tick (`held`: keep them as they are). */
+  actors(list: RemoteActor[], held: readonly number[]): void;
   blips(list: { id: number; x: number; y: number }[]): void;
   /** Enemies our side's dropships can see, and where. */
   spotted(list: { id: number; x: number; y: number }[]): void;
@@ -397,7 +400,8 @@ export interface FrameHandler {
   /** Drop rocket `slot` blew apart at (x, y); `seed` reproduces its fragments. */
   craftBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   /** Every tank this frame. */
-  tanks(list: TankState[]): void;
+  /** The vehicles (R_TANKS), and those still there but sent no new state this tick (`held`). */
+  tanks(list: TankState[], held: readonly number[]): void;
   selfTank(s: SelfTankState): void;
   tankPart(slot: number, part: number, x: number, y: number, vx: number, vy: number, seed: number): void;
   tankBoom(slot: number, x: number, y: number, vx: number, vy: number, seed: number): void;
@@ -461,9 +465,19 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       case R_ACTORS: {
         const n = r.u8();
         const list: RemoteActor[] = [];
+        const held: number[] = [];
         for (let i = 0; i < n; i++) {
+          const id = r.u8();
+          if (id & HELD) {
+            held.push(id & ~HELD);
+            continue;
+          }
+          if (id & SHORT) {
+            list.push({ id: id & ~SHORT, x: r.u16() / 16, y: r.u16() / 16 - Y_BIAS, vx: r.i16() / 8, vy: r.i16() / 8, aim: r.u16(), flags: r.u8(), hp: 0, weapon: 0, parts: 0, stance: 0, faction: 0, short: true });
+            continue;
+          }
           list.push({
-            id: r.u8(),
+            id,
             x: r.u16() / 16,
             y: r.u16() / 16 - Y_BIAS,
             vx: r.i16() / 8,
@@ -481,7 +495,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           a.faction = (a.parts >> FACTION_SHIFT) & 3;
           a.parts &= PARTS_MASK;
         }
-        h.actors(list);
+        h.actors(list, held);
         break;
       }
       case R_SPOTTED: {
@@ -885,8 +899,13 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
       case R_TANKS: {
         const n = r.u8();
         const list: TankState[] = [];
+        const held: number[] = [];
         for (let i = 0; i < n; i++) {
           const slot = r.u8();
+          if (slot & HELD) {
+            held.push(slot & ~HELD);
+            continue;
+          }
           const x = r.u16() / 16;
           const y = r.u16() / 16 - Y_BIAS;
           const vx = r.i16() / 8;
@@ -921,7 +940,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
           for (let n = r.u8(); n > 0; n--) v.riders.push(r.u16());
           v.s = v.kind === TankKind.Tarantula ? TARANTULA_SCALE : v.kind === TankKind.Watchdog ? WATCHDOG_SCALE : v.kind === TankKind.Mole ? MOLE_SCALE : 1;
         }
-        h.tanks(list);
+        h.tanks(list, held);
         break;
       }
       case R_TANK_SELF: {

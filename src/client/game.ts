@@ -1584,12 +1584,23 @@ export class Game implements FrameHandler {
     return this.shipViews().find((v) => v.slot === this.pilot) ?? null;
   }
 
-  actors(list: RemoteActor[]): void {
-    const seen = new Set<number>();
+  actors(list: RemoteActor[], held: readonly number[] = []): void {
+    // (Held: still there, nothing new this tick; their snapshots carry on as they are.)
+    const seen = new Set<number>(held);
     for (const a of list) {
       seen.add(a.id);
       let s = this.snaps.get(a.id);
+      // (A short record: its health, weapon, body and stance are as last sent. One we never had a full record of, we can't place yet.)
+      const last = s?.[s.length - 1];
+      if (a.short && !last) continue;
       if (!s) this.snaps.set(a.id, (s = []));
+      if (a.short && last) {
+        a.hp = last.hp;
+        a.weapon = last.weapon;
+        a.parts = last.parts;
+        a.stance = last.stance;
+        a.faction = last.faction;
+      }
       s.push({ tick: this.frameTick, x: a.x, y: a.y, vx: a.vx, vy: a.vy, aim: a.aim, flags: a.flags, hp: a.hp, weapon: a.weapon, parts: a.parts, stance: a.stance, faction: a.faction });
       if (s.length > 12) s.shift();
       if (!(a.flags & F_ALIVE)) this.wounds.clear(a.id);
@@ -2282,9 +2293,14 @@ export class Game implements FrameHandler {
     this.shake = Math.max(this.shake, Math.max(0, 1 - d / 500) * 12);
   }
 
-  tanks(list: TankState[]): void {
-    const seen = new Set<number>();
+  tanks(list: TankState[], held: readonly number[] = []): void {
+    const seen = new Set<number>(held);
     this.tankPilots.clear();
+    // (A held vehicle keeps its pilot as last sent.)
+    for (const slot of held) {
+      const last = this.tankSnaps.get(slot)?.at(-1);
+      if (last && last.pilot !== 255 && !last.remote) this.tankPilots.add(last.pilot);
+    }
     for (const t of list) {
       seen.add(t.slot);
       if (t.pilot !== 255 && !t.remote) this.tankPilots.add(t.pilot);

@@ -33,6 +33,24 @@ export const CHUNK_INTEREST_MARGIN = 128;
 export const ENTITY_INTEREST_MARGIN = 96;
 // Players outside the AOI are sent as low-rate "radar blips" every N ticks.
 export const FAR_UPDATE_INTERVAL = 15;
+/**
+ * Inside the interest rect, near the camera (on anyone's screen, at any
+ * zoom the game picks: about 480 cells across): every actor every tick.
+ * Further out in it, every other tick, a one-byte HELD entry between (the
+ * client interpolates 3 ticks behind, so the gap never shows).
+ */
+export const ACTOR_NEAR_HALF_W = 280;
+export const ACTOR_NEAR_HALF_H = 180;
+/** Vehicles out of view (outside the interest rect) are sent every this many ticks, HELD between. */
+export const TANK_FAR_INTERVAL = 3;
+/** An actor's id byte (or a vehicle's slot byte) with this bit set: still there, no new state this tick. */
+export const HELD = 0x80;
+/**
+ * An actor's id byte with this bit set: a short record, its motion only (no
+ * health, weapon, or body and stance): those are as the client last had
+ * them. Sent while they haven't changed, to a client that has the actor.
+ */
+export const SHORT = 0x40;
 // Budget for terrain chunk snapshots per client per tick (bytes).
 export const CHUNK_BYTES_PER_TICK = 24 * 1024;
 

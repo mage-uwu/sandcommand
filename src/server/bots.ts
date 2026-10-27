@@ -1005,8 +1005,9 @@ export class BotBrain {
     const stale = !this.path || t - this.pathAt > 45 || Math.hypot(tx - this.pathTo.x, ty - this.pathTo.y) > 96 || this.pathIdx >= this.path.pts.length - 2;
     // (The planning is shared out: a few searches a tick across all the bots; the rest keep to their old
     // paths a moment longer, or with none yet, head straight for it till their turn comes.)
-    if (stale && navBudget(world)) {
-      this.path = findPath(world.terrain, at.cx, feet, tx, ty, veh ? 6000 : undefined, this.avoid, body);
+    // (A vehicle's search costs two of the tick's searches.)
+    if (stale && navBudget(world) && (!veh || navBudget(world))) {
+      this.path = findPath(world.terrain, at.cx, feet, tx, ty, veh ? 3500 : undefined, this.avoid, body);
       this.pathAt = t + (this.phase % 15); // (staggered: the bots don't all plan on one tick)
       this.pathIdx = 0;
       this.pathTo = { x: tx, y: ty };
@@ -1210,7 +1211,8 @@ export class BotBrain {
 
 /** A vehicle's body for the path planner: its size in nodes; shelling through soft ground dear (a mole burns through it cheaply), jets dearer than a jetpack. */
 function vehicleBody(k: Tank): NavBody {
-  return { w: Math.ceil(tankW(k) / NAV_CELL), h: Math.ceil(tankH(k) / NAV_CELL), dig: isMole(k) ? 3 : 10, climb: 2, hang: 0.7, fall: true };
+  // (Greedy: each node it weighs checks its whole footprint, so it searches far fewer, for a route a little longer than the best.)
+  return { w: Math.ceil(tankW(k) / NAV_CELL), h: Math.ceil(tankH(k) / NAV_CELL), dig: isMole(k) ? 3 : 10, climb: 2, hang: 0.7, fall: true, greed: 1.4 };
 }
 
 /** Is the straight line between two points free of terrain? (2-cell steps) */
