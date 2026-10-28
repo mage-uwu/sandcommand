@@ -251,7 +251,7 @@ import {
 } from '../shared/protocol.ts';
 import { Rng, hash2 } from '../shared/rng.ts';
 import { Terrain, forChunksInRect } from '../shared/terrain.ts';
-import { BILE, BILE_MAX, BILE_RATE, CRAB_WOUND, POSSESS_RISE, CLAW, CLAW_CD, CLAW_R, VOMIT_CONE, VOMIT_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
+import { BILE, BILE_MAX, BILE_RATE, CRAB_BEAST_BITE, INFECTED_HARM, INFECTED_TOUGH, infectable, CRAB_WOUND, POSSESS_RISE, CLAW, CLAW_CD, CLAW_R, VOMIT_CONE, VOMIT_R, CRAB_HIVE_REACH, HIVE_SIGHT, POSSESSED_PIECES, POSSESSED_REGEN, POSSESSED_REGEN_DELAY, POSSESSED_TOUGH, CRAB_BITE, CRAB_BITE_CD, CRAB_CRAWL, CRAB_DISGUISE_MAX, CRAB_DISGUISE_MIN, CRAB_HUNT, CRAB_LATCH_R, CRAB_SENSE, CRAB_SHARE, CRAB_TRIGGER, CRAB_WANDER } from '../shared/wildlife.ts';
 import { STICKY_FUSE, STICKY_MAX_FLIGHT, STICKY_ON_BEAST, STICKY_ON_CLONE, STICKY_ON_VEHICLE, STICKY_THROW, stickyCore, STICKY_CORE_R } from '../shared/sticky.ts';
 import { BURNER_FUSE, BURNER_STICK_R, BURNER_STRIKE, BURNER_THROW, BurnerPhase, FOOT_FLARE, FOOT_LIFE, SLUDGE_SEAR_EVERY, SLUDGE_SEAR_R, flareChance, flareHarm, flareReach, sludgeSear, SLUDGE_BITE, SLUDGE_BLOBS, SLUDGE_R, STONE_CORE_R, STONE_COVER, STONE_CRATER_R, STONE_HARM, STONE_HARM_R, STONE_HEAT_R, STONE_KILL_R, STONE_NO_COVER, STONE_PUSH, STONE_PUSH_R } from '../shared/stoneburner.ts';
 import { LASER_MAX, LASER_MIN, PROJ_LASER, laserEnergy, laserWidth, laserWound, PROJ_IDOL, BLAST_IMPULSE, DIGGER_CORE, DIGGER_CORE_DROID, DIGGER_R, DIGGER_R_DROID, DIGGER_REACH, PROJ, PROJ_BUILD, PROJ_DIG, PROJ_RADIO, PROJ_REPAIR, PROJ_MINE, PROJ_BURNER, PROJ_STICKY, ProjKind, REGROW_TICKS, HEAL_R, HEAL_SPREAD, MEND_TICKS, REPAIR_HP, REPAIR_WOUND, WeaponId, SHOULDER_X, SHOULDER_Y, WEAPONS, fireInterval, lockReach, muzzlePoint } from '../shared/weapons.ts';
@@ -675,6 +675,8 @@ export class World {
   readonly ships: (Ship | null)[] = new Array(MAX_SHIPS).fill(null);
   /** Enemies spotted from the air, per side (spotKey): clone id -> the tick the sighting goes stale. */
   readonly spots = new Map<number, Map<number, number>>();
+  /** While an infected creature acts (stepBeasts): what its harm to a clone is multiplied by. */
+  private wildMul = 1;
   /** Scratch: the hive's eyes this sweep (x, y pairs). */
   private readonly hiveEyes: number[] = [];
   /** Drop tanks into each wave (round rooms; sandbox rooms only on request). */
@@ -2033,6 +2035,8 @@ export class World {
         this.beastHead[k * 2 + 1] = pts[1];
       }
       if (b) {
+        // (Infected: whatever it does to a clone, it does twice as hard: damage() reads this.)
+        this.wildMul = b.infected ? INFECTED_HARM : 1;
         if (b.kind === BeastKind.Asp) this.stepAsp(k, b);
         else if (b.kind === BeastKind.Spider) this.stepSpider(k, b);
         else if (b.kind === BeastKind.CoralCrab) this.stepCrab(k, b);
@@ -2043,6 +2047,7 @@ export class World {
         else this.stepMillipede(k, b);
       }
     }
+    this.wildMul = 1;
     this.sendVenom();
     this.sendCoral();
   }
@@ -2201,7 +2206,7 @@ export class World {
       }
     }
     // A coral crab with nobody in sight: whoever the hive knows of, nearest, from further off.
-    if (id < 0 && b.kind === BeastKind.CoralCrab) {
+    if (id < 0 && (b.kind === BeastKind.CoralCrab || b.infected)) {
       const seen = this.spots.get(HIVE_KEY);
       if (seen) {
         best = CRAB_HIVE_REACH;
@@ -2646,20 +2651,40 @@ export class World {
     const t = this.terrain;
     const rng = this.beastRng;
     const pts = this.beastPts[k];
+    /** Off whoever (or whatever) it was on: it drops where it is. */
+    const letGo = () => {
+      b.hold = -1;
+      b.holdOn = null;
+      b.x = Math.round(pts[0]);
+      b.y = Math.round(pts[1]);
+      b.attached = false;
+      b.vy = 0;
+      b.trail.length = 0;
+      pushTrail(b);
+      bodyPoints(t, b, pts);
+    };
+    // Clamped onto a creature: it rides that segment of it, biting, till the bite that would kill it infects it.
+    if (b.holdOn) {
+      const v = b.holdOn;
+      const vk = this.beasts.indexOf(v);
+      if (vk < 0 || v.infected) return letGo();
+      const vp = this.beastPts[vk];
+      const seg = Math.max(0, Math.min(b.limb, (vp.length >> 1) - 1));
+      pts[0] = vp[seg * 2] + b.coilX;
+      pts[1] = vp[seg * 2 + 1] + b.coilY;
+      pts[2] = pts[0] - b.side * 2;
+      pts[3] = pts[1] + 1;
+      if (b.coilCd > 0) b.coilCd--;
+      else {
+        b.coilCd = CRAB_BITE_CD;
+        this.hurtBeast(vk, CRAB_BEAST_BITE, NO_OWNER, true);
+      }
+      return;
+    }
     // Lodged on someone: it goes where they go, biting.
     if (b.hold >= 0) {
       const q = this.players[b.hold];
-      if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0 || q.possessed) {
-        b.hold = -1;
-        b.x = Math.round(pts[0]);
-        b.y = Math.round(pts[1]);
-        b.attached = false;
-        b.vy = 0;
-        b.trail.length = 0;
-        pushTrail(b);
-        bodyPoints(t, b, pts);
-        return;
-      }
+      if (!q || !q.alive || q.tank >= 0 || q.pilot >= 0 || q.possessed) return letGo();
       // Clamped onto one limb of them: where that limb is now (that limb gone, onto the nearest one left).
       if (b.limb < 0 || !has(q.parts.mask, b.limb)) b.limb = this.nearestLimb(q, pts[0], pts[1]);
       const at = this.limbAt(q, b.limb, this.pt);
@@ -2701,16 +2726,23 @@ export class World {
       b.target = this.beastTarget(b, hx, hy);
       if (b.target >= 0 && before < 0) b.turnAt = this.tick;
     }
-    let tgt = b.target >= 0 ? this.players[b.target] : null;
-    if (tgt && (!tgt.alive || tgt.tank >= 0 || tgt.possessed)) {
-      tgt = null;
+    let player = b.target >= 0 ? this.players[b.target] : null;
+    if (player && (!player.alive || player.tank >= 0 || player.possessed)) {
+      player = null;
       b.target = -1;
     }
+    // Nobody about to go for: a creature to infect, the nearest it can see.
+    if (player || b.gem) b.preyOn = null;
+    else if ((this.tick + k) % 6 === 0) b.preyOn = this.crabPrey(hx, hy);
+    const prey = b.preyOn && !b.preyOn.infected && this.beasts.includes(b.preyOn) ? b.preyOn : null;
+    const preyPts = prey ? this.beastPts[this.beasts.indexOf(prey)] : null;
+    // Where it's going (a clone, or a creature's head).
+    const tgt = player ? { cx: player.cx, cy: player.cy } : preyPts ? { cx: preyPts[0], cy: preyPts[1] } : null;
     const dist = tgt ? Math.hypot(tgt.cx - hx, tgt.cy - hy) : Infinity;
     // Folded up as gem crystals: it holds still until someone comes near (or its time is up).
     if (b.gem) {
       // (Near, or one the hive knows of: the whole swarm stirs.)
-      if (tgt && (dist < CRAB_TRIGGER || this.hiveSees(tgt.id))) {
+      if (player && (dist < CRAB_TRIGGER || this.hiveSees(player.id))) {
         b.gem = false;
         b.frozen = 0;
         b.turnAt = this.tick;
@@ -2803,6 +2835,60 @@ export class World {
       b.coilCd = 4;
       break;
     }
+    // Or the creature it was after: onto the segment of it it reached.
+    if (b.hold < 0 && prey && preyPts) {
+      const reach = CRAB_LATCH_R + BEAST_BUILD[prey.kind].r * wyrmScale(prey.kind) + 2;
+      for (let i = 0; i < preyPts.length >> 1; i++) {
+        const dx = pts[0] - preyPts[i * 2];
+        const dy = pts[1] - preyPts[i * 2 + 1];
+        if (Math.hypot(dx, dy) > reach) continue;
+        b.holdOn = prey;
+        b.limb = i;
+        const r = BEAST_BUILD[prey.kind].r * wyrmScale(prey.kind);
+        b.coilX = Math.max(-r, Math.min(r, dx));
+        b.coilY = Math.max(-r - 1, Math.min(r, dy));
+        b.flung = 0;
+        b.vx = b.vy = 0;
+        b.coilCd = 4;
+        break;
+      }
+    }
+  }
+
+  /** The creature nearest (x, y) a coral crab can see that it could infect (within CRAB_SENSE). */
+  private crabPrey(x: number, y: number): Beast | null {
+    let best: Beast | null = null;
+    let bd = CRAB_SENSE;
+    for (let k = 0; k < MAX_BEASTS; k++) {
+      const o = this.beasts[k];
+      if (!o || o.infected || !infectable(o.kind)) continue;
+      const op = this.beastPts[k];
+      if (!op.length) continue;
+      const d = Math.hypot(op[0] - x, op[1] - y);
+      if (d < bd && this.lineClear(x, y, op[0], op[1])) {
+        bd = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * A creature infected (a coral crab's kill, or the possessed's vomit): it
+   * lives on, the hive's, twice as strong; the crab that did it is in it now.
+   */
+  private infectBeast(k: number, b: Beast): void {
+    b.infected = true;
+    b.hp = BEAST_BUILD[b.kind].hp * (wyrm(b.kind) && this.lair ? LAIR_HP : 1) * INFECTED_TOUGH;
+    b.frozen = 0;
+    b.gem = false;
+    b.hurtBy = -1;
+    b.target = -1;
+    for (let j = 0; j < MAX_BEASTS; j++) {
+      const o = this.beasts[j];
+      if (o && o.kind === BeastKind.CoralCrab && o.holdOn === b) this.killBeast(j);
+    }
+    void k;
   }
 
   /**
@@ -3932,7 +4018,7 @@ export class World {
   }
 
   /** A creature hurt: it turns on whoever did it; at no health left it dies. */
-  hurtBeast(k: number, dmg: number, by: number): void {
+  hurtBeast(k: number, dmg: number, by: number, infect = false): void {
     const b = this.beasts[k];
     if (!b || dmg <= 0) return;
     // A dragon takes no harm from what nobody did: sand and debris, the ground, its own burning
@@ -3957,7 +4043,16 @@ export class World {
       b.coilCd = CSPIDER_BITE_CD * 2;
     }
     if (b.hp > 0) return;
+    // The blow that would kill it, a crab's (or the possessed's vomit): it doesn't die. It's the hive's now.
+    if (infect && !b.infected && infectable(b.kind)) {
+      this.infectBeast(k, b);
+      return;
+    }
+    const headX = this.beastPts[k][0] ?? b.x;
+    const headY = this.beastPts[k][1] ?? b.y;
     this.killBeast(k);
+    // Infected, killed: the crab in it crawls out.
+    if (b.infected) this.dropCrab(headX, headY, by);
     // Credit: whoever dealt the last blow, else whoever last hurt it (shot, then finished by a fall of rock).
     if (b.kind !== BeastKind.Web) {
       const credit = by < MAX_PLAYERS && this.players[by] ? this.players[by] : b.hurtBy >= 0 ? this.players[b.hurtBy] : null;
@@ -4421,6 +4516,30 @@ export class World {
         q.bileBy = p.id;
         this.damage(q, CLAW, p.id, W_CLAW);
         q.body.vx += Math.sign(q.cx - p.cx || 1) * 60;
+      }
+      // And any creature in front of it not yet the hive's: the vomit that would kill it infects it.
+      for (let k = 0; k < MAX_BEASTS; k++) {
+        const o = this.beasts[k];
+        if (!o || o.infected || !infectable(o.kind)) continue;
+        const op = this.beastPts[k];
+        if (!op.length) continue;
+        const dx = op[0] - mx;
+        const dy = op[1] - my;
+        if (Math.hypot(dx, dy) > VOMIT_R + BEAST_BUILD[o.kind].r * wyrmScale(o.kind)) continue;
+        let off = Math.abs(Math.atan2(dy, dx) - aim);
+        if (off > Math.PI) off = Math.PI * 2 - off;
+        if (off >= VOMIT_CONE || !this.clearLine(mx, my, op[0], op[1])) continue;
+        if (!spewed) {
+          spewed = true;
+          p.clawCd = CLAW_CD;
+          const w = this.broadcast;
+          w.u8(R_VOMIT);
+          w.u8(p.id);
+          w.u16(clampU16(mx));
+          w.u16(clampU16(my + Y_BIAS));
+          w.u8(p.aimQ >> 8);
+        }
+        this.hurtBeast(k, CLAW + BILE, p.id, true);
       }
     }
   }
@@ -5358,6 +5477,7 @@ export class World {
   private damage(victim: Player, amount: number, attacker: number, weapon: number, quiet = false, fatal = false): void {
     if (!victim.alive || (amount <= 0 && !fatal)) return;
     if (this.wildHarm(victim, attacker, weapon)) return;
+    if (attacker === NO_OWNER && WILD_WEAPONS.has(weapon)) amount *= this.wildMul;
     amount /= victim.parts.tough; // (a humanoid clone: HUMANOID_TOUGH)
     victim.hurtTick = this.tick;
     const overkill = Math.max(0, amount - victim.hp) + (fatal ? 40 : 0);
@@ -7737,7 +7857,7 @@ export class World {
     for (const p of this.players) if (p && p.alive && p.possessed) eyes.push(p.cx, p.cy - 4);
     for (let k = 0; k < MAX_BEASTS; k++) {
       const b = this.beasts[k];
-      if (b && b.kind === BeastKind.CoralCrab && this.beastPts[k].length) eyes.push(this.beastPts[k][0], this.beastPts[k][1] - 2);
+      if (b && (b.kind === BeastKind.CoralCrab || b.infected) && this.beastPts[k].length) eyes.push(this.beastPts[k][0], this.beastPts[k][1] - 2);
     }
     if (!eyes.length) return;
     let m = this.spots.get(HIVE_KEY);
@@ -8599,7 +8719,7 @@ export class World {
       w.u8(b.seed);
       w.u8(Math.max(0, Math.min(255, Math.round((b.hp / BEAST_BUILD[b.kind].hp) * 255))));
       w.u8(Math.round(b.lift * 255));
-      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 || b.hold >= 0 ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0) | (b.carry > 0 ? 32 : 0));
+      w.u8((b.attached ? 1 : 0) | (b.frozen > 0 ? 2 : 0) | (b.coil >= 0 || b.hold >= 0 || b.holdOn ? 4 : 0) | (b.gem ? 8 : 0) | (b.frenzy > 0 ? 16 : 0) | (b.carry > 0 ? 32 : 0) | (b.infected ? 64 : 0));
       w.u16(clampU16(pts[0] * POS_SCALE));
       w.u16(clampU16((pts[1] + Y_BIAS) * POS_SCALE));
       for (let i = 2; i < pts.length; i += 2) {

@@ -31,7 +31,7 @@ import { BTN_FIRE, HIP_X, HIP_Y, STANCE_DROP, STANCE_LEAN, Stance, shoulderAt } 
 import { BAY_AT, ENGINE_NOZZLE_Y, ENGINE_X, SHIP_H, SHIP_HP, SHIP_MISSION_NAMES, SHIP_W, ShipPart, TURRET_AT, hasShipPart } from '../shared/dropship.ts';
 import { CANNON_INTERVAL, CANNON_PIVOT, SMG_LEN, SMG_PIVOT, TANK_H, TANK_HP, TANK_PARTS, tankSink, tankW, tankH, tankMaxHp, isDog, TANK_MAX_FUEL, TANK_PART_HP, TANK_W, TankPart, cannonAngle, hasTankPart, gunPivotY, isPet, isSpider, SPIDER_LASER_PIVOT, SPIDER_RACK_PIVOT, TARANTULA_SCALE, isMole, MOLE_SCALE, MOLE_PLASMA_PIVOT, MOLE_PLASMA_LEN, MOLE_SMG_PIVOT } from '../shared/tank.ts';
 import { ParticleLayer } from './particle-layer.ts';
-import { drawCoralCrab, drawCrabNestCrystals } from './crab-art.ts';
+import { drawCoralCrab, drawCrabNestCrystals, drawInfection } from './crab-art.ts';
 import { M as INF_M, infectArm, infectBody, spriteMask } from './possessed-art.ts';
 import { FLESH, HIVE, SYNTH, type WoundPx, woundPixels } from './wound-art.ts';
 
@@ -52,7 +52,7 @@ import { drawAsp, drawAspGem, drawBasilisk, drawBasiliskGib, drawCoralGrowth, dr
 import { drawDragon, drawDragonGib } from './dragon-art.ts';
 import { knownPlayers, objective } from './objectives.ts';
 import { drawCaveSpider, drawSpiderGib, drawWebGib, drawWebNest } from './spider-art.ts';
-import { BEAST_BUILD, BeastKind, CORAL_LIMBS, POSSESS_RISE } from '../shared/wildlife.ts';
+import { BEAST_BUILD, BeastKind, CORAL_LIMBS, POSSESS_RISE, wyrmScale } from '../shared/wildlife.ts';
 import { backWallColor, dripColor, structColor, frostColor, grassBlade, noise, soilColor, cementColor, oldConcreteColor, pourColor, rustColor } from './texture.ts';
 import { drawRelics } from './relic-art.ts';
 import { drawBackwall } from './backwall.ts';
@@ -472,6 +472,8 @@ export class Renderer {
         if (v.gem) drawAspGem(ctx, game.terrain, gemOf, pts, v.seed, now);
         else drawAsp(ctx, game.terrain, pts, v.seed, lift, now);
       } else drawMillipede(ctx, game.terrain, this.groundColor, pts, v.seed, lift, v.frozen, now);
+      // Infected: the hive's coral grown over it.
+      if (v.infected) drawInfection(ctx, pts, v.seed, BEAST_BUILD[v.kind].r * (v.kind === BeastKind.Basilisk ? wyrmScale(v.kind) : 1), now);
       // Its wounds (wounds.ts): how hurt it is, as everyone sees it.
       if (!v.gem && v.kind !== BeastKind.Web && v.kind !== BeastKind.Nest && v.kind !== BeastKind.Seeder) this.drawScars(ctx, v.kind, pts, v.seed, beastDamage(v.hp, v.top), now);
     }

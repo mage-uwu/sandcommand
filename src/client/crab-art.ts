@@ -199,3 +199,50 @@ export function drawCrabNestCrystals(ctx: CanvasRenderingContext2D, t: Terrain, 
     dot(ctx, mx + open.x * 3 - open.y * w, my + open.y * 3 + open.x * w);
   }
 }
+
+/**
+ * A creature infected by the coral (drawn over it, from its body points; `r`
+ * its body's radius): the hive's crust on every segment in one strain or
+ * another (pink, teal, emerald), a spine of it out of every other segment,
+ * dead stalk to live tip, its eye a coral glow and the crab's blue blood
+ * drooling from its jaws.
+ */
+export function drawInfection(ctx: CanvasRenderingContext2D, pts: readonly number[], seed: number, r: number, now: number): void {
+  const n = pts.length >> 1;
+  for (let i = 0; i < n; i++) {
+    const x = pts[i * 2];
+    const y = pts[i * 2 + 1];
+    const C = CORALS[(seed + i * 7) % CORALS.length];
+    // Crust, clumped over the segment.
+    const count = 2 + Math.floor(r * 1.2);
+    for (let j = 0; j < count; j++) {
+      const a = hsh(seed, i, j) * Math.PI * 2;
+      const d = hsh(seed, i, j + 40) * r * 0.8;
+      const h = hsh(seed, i, j + 80);
+      ctx.fillStyle = h < 0.35 ? C[0] : h < 0.75 ? C[1] : h < 0.93 ? C[2] : C[3];
+      dot(ctx, x + Math.cos(a) * d, y + Math.sin(a) * d);
+    }
+    // A spine out of its back (every other segment): dead stalk, live tip.
+    if (i % 2 === 1) {
+      const len = 2 + Math.floor(hsh(seed, i, 7) * (2 + r * 0.5));
+      const lean = hsh(seed, i, 8) < 0.5 ? -1 : 1;
+      for (let k = 1; k <= len; k++) {
+        ctx.fillStyle = k === len ? C[3] : k === len - 1 ? C[2] : '#341c28';
+        dot(ctx, x + (k > len / 2 ? lean : 0), y - r + 1 - k);
+      }
+    }
+  }
+  if (!n) return;
+  // Its eye: a coral glow, pulsing. Its jaws: drooling blue.
+  const hx = pts[0];
+  const hy = pts[1];
+  ctx.fillStyle = Math.sin(now / 180 + seed) > 0 ? '#ff5a8a' : '#ffd0e0';
+  dot(ctx, hx, hy - Math.max(1, r * 0.5));
+  const ph = (now / 90 + seed * 13) % 10;
+  if (ph < 7) {
+    ctx.fillStyle = '#0b4f78';
+    dot(ctx, hx, hy + Math.max(1, r * 0.6));
+    ctx.fillStyle = '#18c8ff';
+    dot(ctx, hx, hy + Math.max(1, r * 0.6) + 1 + Math.floor(ph / 2));
+  }
+}

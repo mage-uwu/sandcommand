@@ -782,7 +782,8 @@ export class BotBrain {
     const air = this.air;
     // Wildlife coming at it, nearer than whoever it's fighting: that first (any gun will do).
     const armed = !digging && !healing && !calling && !!def && (def.proj >= 0 || weapon === WeaponId.Laser) && weapon !== WeaponId.Mine;
-    if (!armed || air) this.beast = null;
+    // (The possessed leave the wildlife be: none of it ever goes for them, and the infected are the hive's own.)
+    if (!armed || air || p.possessed) this.beast = null;
     else if ((t + this.phase) % 5 === 0) this.beast = this.beastTarget(world, sx, sy, tgt && this.seeTarget ? dist : Infinity);
     const beast = this.beast;
     if (beast && def && !air) {

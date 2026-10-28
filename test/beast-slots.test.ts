@@ -15,6 +15,7 @@ const beast = (slot: number, kind: number, seed: number, x: number, same = false
   gem: false,
   frenzy: false,
   carry: false,
+  infected: false,
   pts: Array.from({ length: 20 }, (_, i) => (i & 1 ? 500 : x - (i >> 1) * 3)),
   same,
 });

@@ -90,6 +90,8 @@ export interface BeastState {
   frenzy: boolean;
   /** A cave spider carrying a torn-off limb home in its jaws. */
   carry: boolean;
+  /** Infected by the coral (the hive's: twice as strong). */
+  infected: boolean;
   pts: number[];
   /** Just as last sent (R_BEASTS BEAST_SAME): nothing else here is filled in. */
   same?: boolean;
@@ -652,7 +654,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
         for (let i = 0; i < n; i++) {
           const slot = r.u8();
           if (slot & BEAST_SAME) {
-            list.push({ slot: slot & ~BEAST_SAME, kind: 0, seed: 0, hp: 0, lift: 0, attached: false, frozen: false, coiled: false, gem: false, frenzy: false, carry: false, pts: [], same: true });
+            list.push({ slot: slot & ~BEAST_SAME, kind: 0, seed: 0, hp: 0, lift: 0, attached: false, frozen: false, coiled: false, gem: false, frenzy: false, carry: false, infected: false, pts: [], same: true });
             continue;
           }
           const kind = r.u8();
@@ -669,7 +671,7 @@ export function applyFrameRecords(r: Reader, terrain: Terrain, h: FrameHandler):
             y += ((r.u8() << 24) >> 24) / BEAST_SCALE;
             pts.push(x, y);
           }
-          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, gem: (f & 8) !== 0, frenzy: (f & 16) !== 0, carry: (f & 32) !== 0, pts });
+          list.push({ slot, kind, seed, hp, lift, attached, frozen: (f & 2) !== 0, coiled: (f & 4) !== 0, gem: (f & 8) !== 0, frenzy: (f & 16) !== 0, carry: (f & 32) !== 0, infected: (f & 64) !== 0, pts });
         }
         h.beasts(list);
         break;

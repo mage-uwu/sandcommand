@@ -1017,6 +1017,20 @@ claws.
   hive has seen first, and a possessed player sees the hive's sightings
   marked on screen (the same brackets and edge arrows as a dropship's
   spotting).
+- **Wildlife gets infected too.** A crab with no clone in sight to go
+  for hunts a creature instead: any that crawls (millipede, gem asp, cave
+  spider, basilisk; not a dragon, a seeder, a nest or a web). It clamps
+  onto whichever segment it reaches, rides it and bites (30 every 0.4 s).
+  The bite that would kill it infects it instead, and so does the
+  possessed's vomit (it splashes creatures in front of them too).
+  - **Twice as strong:** double its health, and double the harm it does
+    to a clone.
+  - **The hive's:** it never goes for the possessed (no creature does),
+    crabs and possessed bots leave it be, it sees for the hive and hunts
+    whoever the hive knows of.
+  - **The look:** coral crust on every segment (pink, teal, emerald),
+    spines out of its back, its eye a coral glow, drooling blue.
+  - **Killed, it drops a crab**, as a possessed clone does.
 - About one in five crawlers is a coral crab.
 
 **Seeders** are small fliers, each about the size of a clone's head: a

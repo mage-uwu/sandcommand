@@ -233,6 +233,8 @@ export interface BeastView {
   frenzy: boolean;
   /** A cave spider carrying a torn-off limb home. */
   carry: boolean;
+  /** Infected by the coral: the hive's (crusted, spined, glowing; twice as strong). */
+  infected: boolean;
   /** Its body points as last sent, and the frame before. */
   prev: number[];
   cur: number[];
@@ -1451,6 +1453,13 @@ export class Game implements FrameHandler {
         }
         v.frenzy = b.frenzy;
         v.carry = b.carry;
+        // Just infected: it convulses, the coral bursting out of it.
+        if (b.infected && !v.infected) {
+          coralBurst(this.particles, b.pts[0], b.pts[1]);
+          crabBloodSplat(this.particles, b.pts[0], b.pts[1], 20, 120);
+          this.sfx?.hiss(b.pts[0], b.pts[1], true);
+        }
+        v.infected = b.infected;
         pushBeastSnap(v, this.frameTick);
       } else {
         // A brood out of its nest: the buzz of it (once for the lot).
@@ -1460,7 +1469,7 @@ export class Game implements FrameHandler {
         }
         // (Another creature in its slot now: the one before is gone (its death, if it died, follows).)
         if (v && (v.kind !== b.kind || v.seed !== b.seed)) this.beastsGone.set(b.slot, v);
-        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, top: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, carry: b.carry, prev: b.pts, cur: b.pts, snaps: [] };
+        const nv: BeastView = { kind: b.kind, seed: b.seed, hp: b.hp, top: b.hp, lift: b.lift, prevLift: b.lift, attached: b.attached, frozen: b.frozen, coiled: b.coiled, gem: b.gem, frenzy: b.frenzy, carry: b.carry, infected: b.infected, prev: b.pts, cur: b.pts, snaps: [] };
         pushBeastSnap(nv, this.frameTick);
         this.beastViews.set(b.slot, nv);
       }

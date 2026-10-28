@@ -298,6 +298,21 @@ export const CRAB_HIVE_REACH = 600;
 export const POSSESSED_REGEN = 50;
 export const POSSESSED_REGEN_DELAY = 30;
 export const POSSESSED_PIECES = 3;
+/**
+ * Wildlife infected: a coral crab with no clone to go for hunts a creature
+ * instead (any that crawls: millipede, asp, cave spider, basilisk; not a
+ * dragon, nor a flier, a nest or a web), clamps onto one of its segments
+ * and bites (CRAB_BEAST_BITE). The bite that would kill it (or the
+ * possessed's vomit that would) infects it: it lives on, the hive's, with
+ * INFECTED_TOUGH times its health and dealing INFECTED_HARM times the harm.
+ * It sees for the hive and hunts what the hive knows of; killed, it drops a
+ * crab.
+ */
+export const INFECTED_TOUGH = 2;
+export const INFECTED_HARM = 2;
+export const CRAB_BEAST_BITE = 30;
+/** Can a creature of this kind be infected? */
+export const infectable = (kind: number) => kind === BeastKind.Millipede || kind === BeastKind.Asp || kind === BeastKind.Spider || kind === BeastKind.Basilisk;
 export const WEB_LIMBS = 24;
 /** Lying in wait (ticks: 10 to 60 s), and wandering between. */
 export const CSPIDER_FREEZE_MIN = 30 * 10;
@@ -637,8 +652,13 @@ export interface Beast {
   coilX: number;
   coilY: number;
   coilHurt: number;
-  /** A coral crab lodged on someone: the part of them it's clamped onto (body.ts Part, -1 none). */
+  /** A coral crab lodged on someone: the part of them it's clamped onto (body.ts Part, -1 none); on a creature, its segment. */
   limb: number;
+  /** Infected (a coral crab's kill, or the possessed's vomit): the hive's now, twice as strong (INFECTED_*). */
+  infected: boolean;
+  /** A coral crab: the creature it's clamped onto (server only), and the one it's hunting with nobody else about. */
+  holdOn: Beast | null;
+  preyOn: Beast | null;
   /** Its camouflage: which sections of it look like what (the client draws from it). */
   seed: number;
   /** Fractional steps owed by its speed. */
@@ -729,6 +749,9 @@ export function newBeast(t: Terrain, kind: number, x: number, y: number, dir: nu
     coilY: 0,
     coilHurt: 0,
     limb: -1,
+    infected: false,
+    holdOn: null,
+    preyOn: null,
     seed: (x * 7919 + y * 104729) & 255,
     owed: 0,
     target: -1,

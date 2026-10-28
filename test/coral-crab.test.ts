@@ -11,7 +11,7 @@ import { Game } from '../src/client/game.ts';
 import { BTN_RIGHT, Stance, newBody, stepBody } from '../src/shared/actor.ts';
 import { quantizeAim } from '../src/shared/protocol.ts';
 import { Terrain } from '../src/shared/terrain.ts';
-import { BILE, POSSESS_RISE, VOMIT_R } from '../src/shared/wildlife.ts';
+import { BILE, INFECTED_HARM, INFECTED_TOUGH, POSSESS_RISE, VOMIT_R } from '../src/shared/wildlife.ts';
 import { BTN_LEFT, PRONE_TICKS } from '../src/shared/actor.ts';
 import { deliverAll } from './helpers.ts';
 
@@ -343,5 +343,71 @@ describe('the coral crab', () => {
     expect(p.rise).toBe(0);
     expect(p.body.x).toBeLessThan(x0 - 1);
     void PRONE_TICKS;
+  });
+});
+
+describe('wildlife infected', () => {
+  /** A millipede lying still on the tunnel floor at x, in slot 2. */
+  const putMillipede = (world: World, x: number) => {
+    const m = newBeast(world.terrain, BeastKind.Millipede, x, 440, -1);
+    m.frozen = 1e6;
+    world.beasts[2] = m;
+    bodyPoints(world.terrain, m, world.beastPts[2]);
+    return m;
+  };
+  /** The clone out of the way: walled up in the rock, out of any crab's sight. */
+  const away = (p: Player) => {
+    p.body.x = 1330;
+    p.body.y = 441 - ACTOR_H;
+  };
+
+  it('with no clone to go for, a crab goes for a creature: clamps onto it, bites, and the bite that would kill it infects it (twice as tough, the crab gone into it)', () => {
+    const { world, ps } = cave();
+    away(ps[0]);
+    const m = putMillipede(world, 1150);
+    const crab = putCrab(world, 1060, 440);
+    let rode = false;
+    for (let k = 0; k < 30 * 40 && !m.infected; k++) {
+      world.step();
+      away(ps[0]);
+      if (crab.holdOn === m) rode = true;
+    }
+    expect(rode).toBe(true);
+    expect(m.infected).toBe(true);
+    expect(world.beasts.includes(m)).toBe(true);
+    expect(m.hp).toBe(BEAST_BUILD[BeastKind.Millipede].hp * INFECTED_TOUGH);
+    expect(world.beasts.includes(crab)).toBe(false);
+  });
+
+  it("an infected creature's harm to a clone is doubled", () => {
+    const { world, ps } = cave();
+    const p = ps[0];
+    (world as unknown as { wildMul: number }).wildMul = INFECTED_HARM;
+    hidden(world).damage(p, 10, NO_OWNER, W_ASP);
+    const lost = 100 - p.hp;
+    (world as unknown as { wildMul: number }).wildMul = 1;
+    p.hp = 100;
+    hidden(world).damage(p, 10, NO_OWNER, W_ASP);
+    expect(lost).toBeCloseTo((100 - p.hp) * INFECTED_HARM);
+  });
+
+  it("the possessed's vomit infects a creature too; killed, an infected one drops a crab", () => {
+    const { world, ps } = cave();
+    const p = ps[0];
+    hidden(world).damage(p, 9999, NO_OWNER, W_CRAB);
+    p.rise = 0;
+    const m = putMillipede(world, 975);
+    m.hp = 5;
+    p.aimQ = quantizeAim(0);
+    for (let k = 0; k < 20 && !m.infected; k++) {
+      p.body.x = 960;
+      world.step();
+    }
+    expect(m.infected).toBe(true);
+    // (The hive's: it never goes for the possessed, and no crab goes for it.)
+    expect(m.target).not.toBe(p.id);
+    world.hurtBeast(2, 1e6, NO_OWNER);
+    expect(world.beasts[2]).toBeNull();
+    expect(world.beasts.some((b) => b?.kind === BeastKind.CoralCrab)).toBe(true);
   });
 });
