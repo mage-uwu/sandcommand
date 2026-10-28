@@ -306,8 +306,8 @@ aim line show the snap. Teammates are ignored, and so are tools aimed at
 the ground or at friends (digger, materializer, radio, repair kit).
 **V** turns it off or on for the mouse, and the choice is remembered.
 
-**The death card.** Dead, everything you need is on one card under the
-FRAGGED title:
+**The death card.** Dead, everything you need is on one card near the top
+of the screen (no title over it: who killed you says it):
 - **Who killed you:** their name in their colour, their score so far, and
   the weapon in a tag. If no clone did it, the cause instead ("Devoured by
   a dragon", "Crushed by falling rock · Rex brought it down").

@@ -2105,7 +2105,7 @@ export class Game implements FrameHandler {
   deathCause = '';
   /** Who killed us last, and with what (the death card), when it was another clone's own hand; else null. */
   deathBy: { id: number; weapon: string } | null = null;
-  /** Died since we last came down (and not yet back): the banner says FRAGGED, not LOADING OUT. */
+  /** Died since we last came down (and not yet back): the death card shows, not LOADING OUT. */
   fragged = false;
 
   /** Our career record, across sessions (kept in this browser). */

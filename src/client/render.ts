@@ -3718,7 +3718,7 @@ export class Renderer {
         ctx.fillStyle = status.length > 1 || ride.hp < 70 ? '#ff9060' : '#a0ffa0';
         ctx.fillText(status.join('   '), W / 2, 84 * s);
       } else if (game.myCraft()) this.drawBanner('INBOUND', 'drop rocket on its way', '#ffd34a', s, W, H);
-      else this.drawDeath(game, { title: 'FRAGGED', color: '#ff4d3d', status: secs > 0 ? 'new clone in' : 'launching drop rocket', secs: secs > 0 ? secs : null, watching: null, touch: input.touch, teams: 0 }, s, W, H);
+      else this.drawDeath(game, { color: '#ff4d3d', status: secs > 0 ? 'new clone in' : 'launching drop rocket', secs: secs > 0 ? secs : null, watching: null, touch: input.touch, teams: 0 }, s, W, H);
     }
 
     // Dead, or between rounds: our K/D and the leaderboard.
@@ -4051,7 +4051,7 @@ export class Renderer {
       if (!game.alive && !game.ride && !game.myCraft()) {
         const watching = game.spectate !== 255 ? game.spectate : null;
         const sides = rs.phase === Phase.Live && TEAMS_IN_MODE[rs.mode] >= 2 && !game.isKing(game.myId) ? TEAMS_IN_MODE[rs.mode] : 0;
-        const dead = (status: string, secs: number | null) => this.drawDeath(game, { title: 'FRAGGED', color: '#ff4d3d', status, secs, watching, touch, teams: sides }, s, W, H);
+        const dead = (status: string, secs: number | null) => this.drawDeath(game, { color: '#ff4d3d', status, secs, watching, touch, teams: sides }, s, W, H);
         const spectating = watching !== null ? `spectating ${name(watching)} · ${touch ? 'tap' : 'click'} for next` : 'spectating';
         if (rs.out) dead('out for this wave', null);
         else if (rs.inWave && !game.fragged) {
@@ -4473,8 +4473,9 @@ export class Renderer {
   }
 
   /**
-   * The death card: the screen's edges stained red, the title, and under it
-   * one card with everything a dead clone needs, in order: who killed us
+   * The death card: the screen's edges stained red, and one card with
+   * everything a dead clone needs (no title over it: who killed us says it),
+   * in order: who killed us
    * (their name in their colour, their score, the weapon in a tag) or what
    * did; the way back (redeploying, the time left, a bar filling toward
    * it; or out for the wave); where we stand (our place and numbers, and the
@@ -4482,10 +4483,10 @@ export class Renderer {
    * the sides, to switch to one (a click or tap, or C); and along its foot,
    * who we're watching and how to watch the next.
    */
-  private drawDeath(game: Game, d: { title: string; color: string; status: string; secs: number | null; watching: number | null; touch: boolean; teams: number }, s: number, W: number, H: number): void {
+  private drawDeath(game: Game, d: { color: string; status: string; secs: number | null; watching: number | null; touch: boolean; teams: number }, s: number, W: number, H: number): void {
     const ctx = this.ctx;
     this.deathShown = true;
-    const ease = this.easeIn(d.title + '·death');
+    const ease = this.easeIn('death');
     const now = performance.now();
     ctx.save();
     // The edges of the view, stained red, breathing.
@@ -4496,11 +4497,10 @@ export class Renderer {
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = ease;
-    const top = H * 0.07;
-    const titleBottom = this.drawTitle(d.title, d.color, top, ease, s, W);
     const cw = Math.min(460 * s, W * 0.94);
     const cx = (W - cw) / 2;
-    const cy = titleBottom + 12 * s;
+    // (Up where a title would be, sliding in as it fades in.)
+    const cy = H * 0.1 - (1 - ease) * 12 * s;
     const pad = 16 * s;
     const iw = cw - pad * 2;
     const ix = cx + pad;
