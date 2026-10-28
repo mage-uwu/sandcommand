@@ -3995,7 +3995,7 @@ export class Renderer {
         let color = '#ffd34a';
         if (idol && idol.holder !== 255) {
           const team = game.teamOf[idol.holder] ?? Team.None;
-          line = idol.holder === game.myId ? 'YOU HAVE THE IDOL · get it to the surface' : `IDOL: carried by ${name(idol.holder)}${team !== Team.None ? ' (' + TEAM_NAMES[team] + ')' : ''}`;
+          line = idol.holder === game.myId ? 'YOU HAVE THE IDOL' : `IDOL: carried by ${name(idol.holder)}${team !== Team.None ? ' (' + TEAM_NAMES[team] + ')' : ''}`;
           color = team !== Team.None ? teamCss(team) : color;
         } else if (idol && game.dungeon && Math.hypot(idol.x - game.dungeon.idol.x, idol.y - game.dungeon.idol.y) > 12) line = 'IDOL: dropped!';
         if (evac?.state === Evac.Inbound) line += evac.eta > 0 ? ` · EXTRACTION IN ${Math.ceil(evac.eta / TICK_RATE)}s` : ' · EXTRACTION LANDING';
@@ -4007,16 +4007,12 @@ export class Renderer {
         const lives = rs.lives ?? 0;
         const taken = game.possessedIds.size;
         parts.push({ t: `${lives} RESPAWNS`, c: lives <= 15 ? '#ff8070' : '#ffd34a' }, gap, { t: `${taken} POSSESSED`, c: taken > 0 ? '#ff7aa0' : '#9aa4ad' });
-        extra = game.possessedIds.has(game.myId)
-          ? { t: 'POSSESSED · you are the hive now · take the fortress', c: '#ff7aa0' }
-          : { t: 'SURVIVE · hold the fortress against the possessed until the clock runs out', c: '#c8d0d8' };
       } else if (exterm) {
         modeName = 'EXTERMINATION';
         const lair = rs.lair;
         const left = lair?.beasts.length ?? 0;
         const awake = lair?.beasts.filter((b) => b.awake).length ?? 0;
         parts.push({ t: `BEASTS ${left}/${lair?.total ?? 4}`, c: left <= 1 ? '#80ff80' : '#ffd34a' }, gap, { t: `${awake} AWAKE`, c: awake > 0 ? '#ff8070' : '#9aa4ad' });
-        extra = { t: awake > 0 ? 'KILL THEM · they hear you, and hunt you through the cave' : 'down the chutes into the lair · wake them, then kill them', c: awake > 0 ? '#ff8070' : '#c8d0d8' };
       } else if (pvp) {
         modeName = 'PVP';
         const st = rs.pvp;
@@ -4031,7 +4027,6 @@ export class Renderer {
         const who = id === game.myId ? 'YOU' : (game.players.get(id)?.name ?? '?').replace(/^BOT /, '');
         const lives = rs.lives ?? 0;
         parts.push({ t: `♛ ${who}${game.myTeam === Team.Red && id !== game.myId ? ' (yours)' : ''}`, c: teamCss(Team.Red) }, { t: '  v  ', c: '#999' }, { t: `GREEN ${lives} LIVES`, c: lives <= 30 ? '#ff8070' : teamCss(Team.Green) });
-        extra = { t: game.myTeam === Team.Red ? 'DEFEND · keep the king alive until the clock runs out' : game.myTeam === Team.Green ? 'ATTACK · cross the gap, break in, kill the king' : 'SIEGE', c: game.myTeam === Team.Green ? teamCss(Team.Green) : teamCss(Team.Red) };
         if (game.alive && game.isKing(game.myId) && secs > 20 * 60 - 5) big('YOU ARE KING', 'hold the vault · twenty minutes · if you fall, the fortress falls', teamCss(Team.Red));
       } else if (regicide) {
         modeName = 'REGICIDE';
